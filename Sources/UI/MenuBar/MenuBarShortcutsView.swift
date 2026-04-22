@@ -10,7 +10,8 @@ final class MenuBarShortcutsView: NSView {
     var onStartMeeting: (() -> Void)?
     var onImportAudioFile: (() -> Void)?
 
-    private let dictationRow = PrimaryActionRowView()
+    private let pushToTalkRow = PrimaryActionRowView()
+    private let handsFreeRow = PrimaryActionRowView()
     private let meetingRow = PrimaryActionRowView()
     private let importButton = MenuOutlineButton(
         title: "Transcribe file",
@@ -34,7 +35,8 @@ final class MenuBarShortcutsView: NSView {
     private var canImportAudioFiles = true
 
     private enum RecordingTarget {
-        case dictation
+        case pushToTalk
+        case handsFree
         case meeting
     }
 
@@ -63,12 +65,20 @@ final class MenuBarShortcutsView: NSView {
     }
 
     private func setupViews() {
-        dictationRow.onPrimaryAction = { [weak self] in
+        pushToTalkRow.onPrimaryAction = { [weak self] in
             guard let self, self.currentDictationState.isEnabled, self.recordingTarget == nil else { return }
             self.onStartDictation?()
         }
-        dictationRow.onEditShortcut = { [weak self] in
-            self?.startRecording(.dictation)
+        pushToTalkRow.onEditShortcut = { [weak self] in
+            self?.startRecording(.pushToTalk)
+        }
+
+        handsFreeRow.onPrimaryAction = { [weak self] in
+            guard let self, self.currentDictationState.isEnabled, self.recordingTarget == nil else { return }
+            self.onStartDictation?()
+        }
+        handsFreeRow.onEditShortcut = { [weak self] in
+            self?.startRecording(.handsFree)
         }
 
         meetingRow.onPrimaryAction = { [weak self] in
@@ -91,16 +101,23 @@ final class MenuBarShortcutsView: NSView {
         resetButton.action = #selector(resetShortcuts)
         addSubview(resetButton)
 
-        addSubview(dictationRow)
+        addSubview(pushToTalkRow)
+        addSubview(handsFreeRow)
         addSubview(meetingRow)
     }
 
     override func layout() {
         super.layout()
-        dictationRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: MenuTokens.actionRowHeight)
-        meetingRow.frame = NSRect(
+        pushToTalkRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: MenuTokens.actionRowHeight)
+        handsFreeRow.frame = NSRect(
             x: 0,
             y: MenuTokens.actionRowHeight + 6,
+            width: bounds.width,
+            height: MenuTokens.actionRowHeight
+        )
+        meetingRow.frame = NSRect(
+            x: 0,
+            y: (MenuTokens.actionRowHeight + 6) * 2,
             width: bounds.width,
             height: MenuTokens.actionRowHeight
         )
@@ -125,7 +142,8 @@ final class MenuBarShortcutsView: NSView {
     }
 
     func update(
-        dictationKey: String,
+        pushToTalkKey: String,
+        handsFreeKey: String,
         meetingKey: String,
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
@@ -139,14 +157,25 @@ final class MenuBarShortcutsView: NSView {
         resetHintLabel.alphaValue = 1.0
         resetHintLabel.stringValue = "Edit triggers or import audio"
 
-        dictationRow.update(
+        pushToTalkRow.update(
             symbolName: "mic.fill",
-            title: "Dictation",
-            subtitle: recordingTarget == .dictation
+            title: "Push to Talk",
+            subtitle: recordingTarget == .pushToTalk
                 ? "Press key…"
                 : dictationState.subtitle,
-            key: recordingTarget == .dictation ? "Any key" : dictationKey,
-            isEditing: recordingTarget == .dictation,
+            key: recordingTarget == .pushToTalk ? "Any key" : pushToTalkKey,
+            isEditing: recordingTarget == .pushToTalk,
+            isEnabled: dictationState.isEnabled
+        )
+
+        handsFreeRow.update(
+            symbolName: "mic.badge.plus",
+            title: "Hands-Free",
+            subtitle: recordingTarget == .handsFree
+                ? "Press key…"
+                : "Tap to start or stop dictation",
+            key: recordingTarget == .handsFree ? "Any key" : handsFreeKey,
+            isEditing: recordingTarget == .handsFree,
             isEnabled: dictationState.isEnabled
         )
 
@@ -171,32 +200,19 @@ final class MenuBarShortcutsView: NSView {
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            if target == .meeting, event.keyCode == UInt16(kVK_Escape) {
+            if event.keyCode == UInt16(kVK_Escape) {
                 self.stopRecording()
                 self.refreshFromPreferences()
                 return nil
             }
 
-            if target == .dictation {
-                self.pendingDictationModifier = nil
-                self.pendingDictationModifierKeyCode = nil
-                let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(
-                    keyCode: UInt32(event.keyCode),
-                    modifierFlags: event.modifierFlags
-                )
-                PhysicalDictationTriggerPreferences.save(candidate)
-                self.stopRecording()
-                self.refreshFromPreferences()
-                return nil
-            }
-
-            let candidate = HotkeyBinding(
+            self.pendingDictationModifier = nil
+            self.pendingDictationModifierKeyCode = nil
+            let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(
                 keyCode: UInt32(event.keyCode),
-                modifiers: HotkeyPreferences.carbonModifiers(from: event.modifierFlags)
+                modifierFlags: event.modifierFlags
             )
-            guard HotkeyPreferences.isValid(candidate) else { return nil }
-
-            HotkeyPreferences.save(meeting: candidate)
+            self.save(candidate, for: target)
 
             self.stopRecording()
             self.refreshFromPreferences()
@@ -205,10 +221,6 @@ final class MenuBarShortcutsView: NSView {
 
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self else { return event }
-            guard target == .dictation else {
-                return event
-            }
-
             let keyCode = UInt32(event.keyCode)
             let modifiers = PhysicalDictationTriggerPreferences.modifiers(from: event.modifierFlags)
 
@@ -217,7 +229,7 @@ final class MenuBarShortcutsView: NSView {
                 modifierFlags: event.modifierFlags
             ) {
                 if keyCode == UInt32(kVK_CapsLock) {
-                    PhysicalDictationTriggerPreferences.save(candidate)
+                    self.save(candidate, for: target)
                     self.stopRecording()
                     self.refreshFromPreferences()
                     return nil
@@ -231,7 +243,7 @@ final class MenuBarShortcutsView: NSView {
             if let pending = self.pendingDictationModifier,
                self.pendingDictationModifierKeyCode == keyCode,
                PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(pending, keyCode: keyCode, modifiers: modifiers) {
-                PhysicalDictationTriggerPreferences.save(pending)
+                self.save(pending, for: target)
                 self.stopRecording()
                 self.refreshFromPreferences()
                 return nil
@@ -262,8 +274,9 @@ final class MenuBarShortcutsView: NSView {
 
     private func refreshFromPreferences() {
         update(
-            dictationKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.binding()),
-            meetingKey: HotkeyPreferences.displayString(for: HotkeyPreferences.meetingBinding()),
+            pushToTalkKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding()),
+            handsFreeKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.handsFreeBinding()),
+            meetingKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding()),
             dictationState: currentDictationState,
             meetingState: currentMeetingState,
             canImportAudioFiles: canImportAudioFiles
@@ -271,13 +284,24 @@ final class MenuBarShortcutsView: NSView {
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.actionRowHeight * 2 + MenuTokens.secondaryButtonSize * 2 + 20
+        MenuTokens.actionRowHeight * 3 + MenuTokens.secondaryButtonSize * 2 + 26
     }
 
     @objc private func resetShortcuts() {
         HotkeyPreferences.resetToDefaults()
-        PhysicalDictationTriggerPreferences.resetToDefault()
+        PhysicalDictationTriggerPreferences.resetToDefaults()
         refreshFromPreferences()
+    }
+
+    private func save(_ binding: PhysicalDictationTriggerBinding, for target: RecordingTarget) {
+        switch target {
+        case .pushToTalk:
+            PhysicalDictationTriggerPreferences.savePushToTalk(binding)
+        case .handsFree:
+            PhysicalDictationTriggerPreferences.saveHandsFree(binding)
+        case .meeting:
+            PhysicalDictationTriggerPreferences.saveMeeting(binding)
+        }
     }
 
     @objc private func importAudioFile() {

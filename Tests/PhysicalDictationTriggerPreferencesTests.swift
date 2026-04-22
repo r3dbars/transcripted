@@ -4,19 +4,39 @@ import CoreGraphics
 import Foundation
 
 func testPhysicalDictationTriggerPreferences() {
-    runSuite("PhysicalDictationTriggerPreferences defaults to right Option") {
+    runSuite("PhysicalDictationTriggerPreferences defaults to Fn, Right Option, and Option M") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
-            PhysicalDictationTriggerPreferences.binding(userDefaults: defaults),
-            PhysicalDictationTriggerPreferences.defaultBinding,
-            "fresh installs should keep the existing right Option dictation trigger"
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "fresh installs should use Fn for push-to-talk"
         )
         assertEqual(
-            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultBinding),
+            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            "fresh installs should use Right Option for hands-free"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "fresh installs should use Option M for meetings"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
+            "Fn",
+            "push-to-talk default should display as Fn"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
             "Right ⌥",
-            "default trigger should display as right Option"
+            "hands-free default should display as Right Option"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
+            "⌥M",
+            "meeting default should display as Option M"
         )
     }
 
@@ -27,11 +47,82 @@ func testPhysicalDictationTriggerPreferences() {
         let fn = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
         PhysicalDictationTriggerPreferences.save(fn, userDefaults: defaults)
 
-        assertEqual(PhysicalDictationTriggerPreferences.binding(userDefaults: defaults), fn, "Fn should persist as a bare physical key")
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults), fn, "Fn should persist as a bare physical key")
         assertEqual(PhysicalDictationTriggerPreferences.displayString(for: fn), "Fn", "Fn should have a readable display name")
     }
 
-    runSuite("PhysicalDictationTriggerPreferences migrates legacy shortcut when right Option is disabled") {
+    runSuite("PhysicalDictationTriggerPreferences decodes macOS Fn actions") {
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: nil),
+            .notConfigured,
+            "missing AppleFnUsageType should be treated as not configured"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 0),
+            .doNothing,
+            "AppleFnUsageType 0 should mean Do Nothing"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 1),
+            .changeInputSource,
+            "AppleFnUsageType 1 should mean Change Input Source"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 2),
+            .showEmojiAndSymbols,
+            "AppleFnUsageType 2 should mean Emoji & Symbols"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 3),
+            .startDictation,
+            "AppleFnUsageType 3 should mean Start Dictation"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: 99),
+            .unknown(99),
+            "unknown values should still be preserved for diagnostics"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences warns when bare Fn conflicts with macOS") {
+        let fn = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+        let fnSpace = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_Space),
+            modifiers: PhysicalDictationTriggerModifiers.function
+        )
+        let rightOption = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fn,
+                systemAction: .doNothing
+            ),
+            "bare Fn should be safe when macOS leaves Fn alone"
+        )
+        assertNotNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fn,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "bare Fn should warn when macOS opens emoji with the same key"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: fnSpace,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "Fn chords should not warn like bare Fn"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                for: rightOption,
+                systemAction: .showEmojiAndSymbols
+            ),
+            "non-Fn physical triggers should not warn about Fn settings"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences migrates legacy hands-free shortcut when right Option is disabled") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -41,13 +132,34 @@ func testPhysicalDictationTriggerPreferences() {
             userDefaults: defaults
         )
 
-        let migrated = PhysicalDictationTriggerPreferences.binding(userDefaults: defaults)
+        let migrated = PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults)
 
         assertEqual(migrated.keyCode, UInt32(kVK_Space), "disabled right Option should fall back to the old dictation shortcut key")
         assertEqual(
             migrated.modifiers,
             PhysicalDictationTriggerModifiers.option,
             "legacy Carbon Option should migrate to the physical trigger modifier mask"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences preserves legacy push-to-talk physical shortcut") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
+        defaults.set(Int(capsLock.keyCode), forKey: "dictationTrigger-keyCode")
+        defaults.set(Int(capsLock.modifiers), forKey: "dictationTrigger-modifiers")
+        HotkeyPreferences.setDictationShortcutMode(.pushToTalk, userDefaults: defaults)
+
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            capsLock,
+            "existing push-to-talk users should keep their saved physical key"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            "hands-free should move to the new default when the saved key belonged to push-to-talk"
         )
     }
 

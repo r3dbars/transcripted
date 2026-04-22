@@ -1,12 +1,13 @@
 // HotkeyRecorderAppKitView.swift
-// Compact two-row keyboard shortcut recorder — pure AppKit
+// Compact keyboard shortcut recorder — pure AppKit
 
 import AppKit
 import Carbon
 
 @MainActor
 final class HotkeyRecorderAppKitView: NSView {
-    private var dictationRow: ShortcutRecorderRow!
+    private var pushToTalkRow: ShortcutRecorderRow!
+    private var handsFreeRow: ShortcutRecorderRow!
     private var meetingRow: ShortcutRecorderRow!
     private let resetButton = NSButton(title: "Reset to Defaults", target: nil, action: nil)
 
@@ -17,25 +18,40 @@ final class HotkeyRecorderAppKitView: NSView {
     private var pendingDictationModifierKeyCode: UInt32?
 
     enum RecordingTarget {
-        case dictation
+        case pushToTalk
+        case handsFree
         case meeting
     }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
 
-        dictationRow = ShortcutRecorderRow(label: "Dictation") { [weak self] in self?.startRecording(.dictation) }
+        pushToTalkRow = ShortcutRecorderRow(label: "Push to Talk") { [weak self] in self?.startRecording(.pushToTalk) }
             resetAction: { [weak self] in
                 self?.stopRecording()
-                PhysicalDictationTriggerPreferences.resetToDefault()
+                PhysicalDictationTriggerPreferences.savePushToTalk(
+                    PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+                )
                 self?.refreshDisplay()
             }
-        addSubview(dictationRow)
+        addSubview(pushToTalkRow)
+
+        handsFreeRow = ShortcutRecorderRow(label: "Hands-Free") { [weak self] in self?.startRecording(.handsFree) }
+            resetAction: { [weak self] in
+                self?.stopRecording()
+                PhysicalDictationTriggerPreferences.saveHandsFree(
+                    PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
+                )
+                self?.refreshDisplay()
+            }
+        addSubview(handsFreeRow)
 
         meetingRow = ShortcutRecorderRow(label: "Meetings") { [weak self] in self?.startRecording(.meeting) }
             resetAction: { [weak self] in
                 self?.stopRecording()
-                HotkeyPreferences.save(meeting: HotkeyPreferences.defaultMeeting)
+                PhysicalDictationTriggerPreferences.saveMeeting(
+                    PhysicalDictationTriggerPreferences.defaultMeetingBinding
+                )
                 self?.refreshDisplay()
             }
         addSubview(meetingRow)
@@ -57,8 +73,9 @@ final class HotkeyRecorderAppKitView: NSView {
     override func layout() {
         super.layout()
         let rowH: CGFloat = 28
-        dictationRow.frame = NSRect(x: 0, y: bounds.height - rowH, width: bounds.width, height: rowH)
-        meetingRow.frame = NSRect(x: 0, y: bounds.height - rowH * 2 - 4, width: bounds.width, height: rowH)
+        pushToTalkRow.frame = NSRect(x: 0, y: bounds.height - rowH, width: bounds.width, height: rowH)
+        handsFreeRow.frame = NSRect(x: 0, y: bounds.height - rowH * 2 - 4, width: bounds.width, height: rowH)
+        meetingRow.frame = NSRect(x: 0, y: bounds.height - rowH * 3 - 8, width: bounds.width, height: rowH)
         let resetSize = resetButton.fittingSize
         resetButton.frame = NSRect(x: (bounds.width - resetSize.width) / 2, y: 0, width: resetSize.width, height: resetSize.height)
     }
@@ -69,17 +86,23 @@ final class HotkeyRecorderAppKitView: NSView {
     }
 
     func refreshDisplay() {
-        let dictBinding = PhysicalDictationTriggerPreferences.binding()
-        let meetingBinding = HotkeyPreferences.meetingBinding()
-        dictationRow.update(
-            displayText: recordingTarget == .dictation ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: dictBinding),
-            isRecording: recordingTarget == .dictation,
-            isDefault: dictBinding == PhysicalDictationTriggerPreferences.defaultBinding
+        let pushToTalkBinding = PhysicalDictationTriggerPreferences.pushToTalkBinding()
+        let handsFreeBinding = PhysicalDictationTriggerPreferences.handsFreeBinding()
+        let meetingBinding = PhysicalDictationTriggerPreferences.meetingBinding()
+        pushToTalkRow.update(
+            displayText: recordingTarget == .pushToTalk ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding),
+            isRecording: recordingTarget == .pushToTalk,
+            isDefault: pushToTalkBinding == PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+        )
+        handsFreeRow.update(
+            displayText: recordingTarget == .handsFree ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: handsFreeBinding),
+            isRecording: recordingTarget == .handsFree,
+            isDefault: handsFreeBinding == PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
         )
         meetingRow.update(
-            displayText: recordingTarget == .meeting ? "Press shortcut..." : HotkeyPreferences.displayString(for: meetingBinding),
+            displayText: recordingTarget == .meeting ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: meetingBinding),
             isRecording: recordingTarget == .meeting,
-            isDefault: meetingBinding == HotkeyPreferences.defaultMeeting
+            isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding
         )
     }
 
@@ -92,31 +115,19 @@ final class HotkeyRecorderAppKitView: NSView {
             guard let self = self else { return event }
             let code = event.keyCode
 
-            if target == .meeting, code == UInt16(kVK_Escape) {
+            if code == UInt16(kVK_Escape) {
                 self.stopRecording()
                 self.refreshDisplay()
                 return nil
             }
 
-            if target == .dictation {
-                self.pendingDictationModifier = nil
-                self.pendingDictationModifierKeyCode = nil
-                let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(
-                    keyCode: UInt32(code),
-                    modifierFlags: event.modifierFlags
-                )
-                PhysicalDictationTriggerPreferences.save(candidate)
-                self.stopRecording()
-                self.refreshDisplay()
-                return nil
-            }
-
-            let carbonMods = HotkeyPreferences.carbonModifiers(from: event.modifierFlags)
-            let candidate = HotkeyBinding(keyCode: UInt32(code), modifiers: carbonMods)
-
-            guard HotkeyPreferences.isValid(candidate) else { return nil }
-
-            HotkeyPreferences.save(meeting: candidate)
+            self.pendingDictationModifier = nil
+            self.pendingDictationModifierKeyCode = nil
+            let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(
+                keyCode: UInt32(code),
+                modifierFlags: event.modifierFlags
+            )
+            self.save(candidate, for: target)
             self.stopRecording()
             self.refreshDisplay()
             return nil
@@ -124,10 +135,6 @@ final class HotkeyRecorderAppKitView: NSView {
 
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             guard let self = self else { return event }
-            guard target == .dictation else {
-                return event
-            }
-
             let keyCode = UInt32(event.keyCode)
             let modifiers = PhysicalDictationTriggerPreferences.modifiers(from: event.modifierFlags)
 
@@ -136,7 +143,7 @@ final class HotkeyRecorderAppKitView: NSView {
                 modifierFlags: event.modifierFlags
             ) {
                 if keyCode == UInt32(kVK_CapsLock) {
-                    PhysicalDictationTriggerPreferences.save(candidate)
+                    self.save(candidate, for: target)
                     self.stopRecording()
                     self.refreshDisplay()
                     return nil
@@ -150,7 +157,7 @@ final class HotkeyRecorderAppKitView: NSView {
             if let pending = self.pendingDictationModifier,
                self.pendingDictationModifierKeyCode == keyCode,
                PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(pending, keyCode: keyCode, modifiers: modifiers) {
-                PhysicalDictationTriggerPreferences.save(pending)
+                self.save(pending, for: target)
                 self.stopRecording()
                 self.refreshDisplay()
                 return nil
@@ -174,14 +181,25 @@ final class HotkeyRecorderAppKitView: NSView {
         pendingDictationModifierKeyCode = nil
     }
 
+    private func save(_ binding: PhysicalDictationTriggerBinding, for target: RecordingTarget) {
+        switch target {
+        case .pushToTalk:
+            PhysicalDictationTriggerPreferences.savePushToTalk(binding)
+        case .handsFree:
+            PhysicalDictationTriggerPreferences.saveHandsFree(binding)
+        case .meeting:
+            PhysicalDictationTriggerPreferences.saveMeeting(binding)
+        }
+    }
+
     @objc private func resetAll() {
         stopRecording()
         HotkeyPreferences.resetToDefaults()
-        PhysicalDictationTriggerPreferences.resetToDefault()
+        PhysicalDictationTriggerPreferences.resetToDefaults()
         refreshDisplay()
     }
 
-    var intrinsicHeight: CGFloat { 76 }
+    var intrinsicHeight: CGFloat { 108 }
 }
 
 // MARK: - Single Shortcut Row
@@ -229,7 +247,7 @@ private final class ShortcutRecorderRow: NSView {
 
     override func layout() {
         super.layout()
-        let labelW: CGFloat = 60
+        let labelW: CGFloat = 82
         nameLabel.frame = NSRect(x: 0, y: (bounds.height - 16) / 2, width: labelW, height: 16)
         let btnW: CGFloat = 110
         shortcutButton.frame = NSRect(x: labelW + 8, y: (bounds.height - 24) / 2, width: btnW, height: 24)

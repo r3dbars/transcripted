@@ -35,15 +35,13 @@ class FloatingOverlayController {
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
     var dictationShortcutHint: String {
-        let trigger = PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.binding()
+        let pushToTalk = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
-        switch HotkeyPreferences.dictationShortcutMode() {
-        case .pushToTalk:
-            return "Hold \(trigger)"
-        case .handsFree:
-            return trigger
-        }
+        let handsFree = PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        )
+        return "\(pushToTalk) / \(handsFree)"
     }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)

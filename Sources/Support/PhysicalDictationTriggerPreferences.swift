@@ -24,31 +24,179 @@ enum PhysicalDictationTriggerModifiers {
     static let all: UInt32 = command | shift | option | control | function | capsLock
 }
 
+enum FunctionKeySystemAction: Equatable {
+    case notConfigured
+    case doNothing
+    case changeInputSource
+    case showEmojiAndSymbols
+    case startDictation
+    case unknown(Int)
+
+    var title: String {
+        switch self {
+        case .notConfigured:
+            return "the macOS default"
+        case .doNothing:
+            return "Do Nothing"
+        case .changeInputSource:
+            return "Change Input Source"
+        case .showEmojiAndSymbols:
+            return "Emoji & Symbols"
+        case .startDictation:
+            return "Start Dictation"
+        case .unknown:
+            return "another system action"
+        }
+    }
+
+    var conflictsWithBareFunctionKey: Bool {
+        switch self {
+        case .doNothing, .notConfigured:
+            return false
+        case .changeInputSource, .showEmojiAndSymbols, .startDictation, .unknown:
+            return true
+        }
+    }
+}
+
 enum PhysicalDictationTriggerPreferences {
-    static let defaultBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+    static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+    static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
+        keyCode: UInt32(kVK_ANSI_M),
+        modifiers: PhysicalDictationTriggerModifiers.option
+    )
+    static let defaultBinding = defaultPushToTalkBinding
 
     private static let keyCodeKey = "dictationTrigger-keyCode"
     private static let modifiersKey = "dictationTrigger-modifiers"
+    private static let pushToTalkKeyCodeKey = "dictationPushToTalkTrigger-keyCode"
+    private static let pushToTalkModifiersKey = "dictationPushToTalkTrigger-modifiers"
+    private static let handsFreeKeyCodeKey = "dictationHandsFreeTrigger-keyCode"
+    private static let handsFreeModifiersKey = "dictationHandsFreeTrigger-modifiers"
+    private static let meetingKeyCodeKey = "meetingTrigger-keyCode"
+    private static let meetingModifiersKey = "meetingTrigger-modifiers"
+    private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
+    private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
 
     static func binding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        guard userDefaults.object(forKey: keyCodeKey) != nil else {
-            return migratedBinding(userDefaults: userDefaults)
-        }
+        pushToTalkBinding(userDefaults: userDefaults)
+    }
 
-        return PhysicalDictationTriggerBinding(
-            keyCode: UInt32(userDefaults.integer(forKey: keyCodeKey)),
-            modifiers: UInt32(userDefaults.integer(forKey: modifiersKey)) & PhysicalDictationTriggerModifiers.all
-        )
+    static func pushToTalkBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
+        storedBinding(
+            keyCodeKey: pushToTalkKeyCodeKey,
+            modifiersKey: pushToTalkModifiersKey,
+            userDefaults: userDefaults
+        ) ?? migratedPushToTalkBinding(userDefaults: userDefaults)
+    }
+
+    static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
+        storedBinding(
+            keyCodeKey: handsFreeKeyCodeKey,
+            modifiersKey: handsFreeModifiersKey,
+            userDefaults: userDefaults
+        ) ?? migratedHandsFreeBinding(userDefaults: userDefaults)
+    }
+
+    static func meetingBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
+        storedBinding(
+            keyCodeKey: meetingKeyCodeKey,
+            modifiersKey: meetingModifiersKey,
+            userDefaults: userDefaults
+        ) ?? migratedMeetingBinding(userDefaults: userDefaults)
     }
 
     static func save(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
+        savePushToTalk(binding, userDefaults: userDefaults)
+    }
+
+    static func savePushToTalk(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
+        saveBinding(
+            binding,
+            keyCodeKey: pushToTalkKeyCodeKey,
+            modifiersKey: pushToTalkModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    static func saveHandsFree(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
+        saveBinding(
+            binding,
+            keyCodeKey: handsFreeKeyCodeKey,
+            modifiersKey: handsFreeModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    static func saveMeeting(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
+        saveBinding(
+            binding,
+            keyCodeKey: meetingKeyCodeKey,
+            modifiersKey: meetingModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    private static func saveBinding(
+        _ binding: PhysicalDictationTriggerBinding,
+        keyCodeKey: String,
+        modifiersKey: String,
+        userDefaults: UserDefaults
+    ) {
         userDefaults.set(Int(binding.keyCode), forKey: keyCodeKey)
         userDefaults.set(Int(binding.modifiers), forKey: modifiersKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
     static func resetToDefault(userDefaults: UserDefaults = .standard) {
-        save(defaultBinding, userDefaults: userDefaults)
+        resetToDefaults(userDefaults: userDefaults)
+    }
+
+    static func resetToDefaults(userDefaults: UserDefaults = .standard) {
+        savePushToTalk(defaultPushToTalkBinding, userDefaults: userDefaults)
+        saveHandsFree(defaultHandsFreeBinding, userDefaults: userDefaults)
+        saveMeeting(defaultMeetingBinding, userDefaults: userDefaults)
+    }
+
+    static func functionKeySystemAction() -> FunctionKeySystemAction {
+        let value = CFPreferencesCopyAppValue(functionKeyUsageKey, functionKeyUsageDomain)
+        if let number = value as? NSNumber {
+            return functionKeySystemAction(rawValue: number.intValue)
+        }
+        if let string = value as? String, let rawValue = Int(string) {
+            return functionKeySystemAction(rawValue: rawValue)
+        }
+        return .notConfigured
+    }
+
+    static func functionKeySystemAction(rawValue: Int?) -> FunctionKeySystemAction {
+        guard let rawValue else { return .notConfigured }
+        switch rawValue {
+        case 0:
+            return .doNothing
+        case 1:
+            return .changeInputSource
+        case 2:
+            return .showEmojiAndSymbols
+        case 3:
+            return .startDictation
+        default:
+            return .unknown(rawValue)
+        }
+    }
+
+    static func functionKeyConflictWarning(
+        for binding: PhysicalDictationTriggerBinding = PhysicalDictationTriggerPreferences.binding(),
+        systemAction: FunctionKeySystemAction = PhysicalDictationTriggerPreferences.functionKeySystemAction()
+    ) -> String? {
+        guard binding.keyCode == UInt32(kVK_Function),
+              binding.modifiers == 0,
+              systemAction.conflictsWithBareFunctionKey else {
+            return nil
+        }
+
+        return "Fn is also set to \(systemAction.title) in macOS. Set Keyboard > Press Fn/Globe key to Do Nothing."
     }
 
     static func displayString(for binding: PhysicalDictationTriggerBinding) -> String {
@@ -306,11 +454,73 @@ enum PhysicalDictationTriggerPreferences {
         }
     }
 
-    private static func migratedBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
-        if HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults) {
-            return defaultBinding
+    private static func storedBinding(
+        keyCodeKey: String,
+        modifiersKey: String,
+        userDefaults: UserDefaults
+    ) -> PhysicalDictationTriggerBinding? {
+        guard userDefaults.object(forKey: keyCodeKey) != nil else { return nil }
+
+        return PhysicalDictationTriggerBinding(
+            keyCode: UInt32(userDefaults.integer(forKey: keyCodeKey)),
+            modifiers: UInt32(userDefaults.integer(forKey: modifiersKey)) & PhysicalDictationTriggerModifiers.all
+        )
+    }
+
+    private static func migratedPushToTalkBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
+        guard HotkeyPreferences.dictationShortcutMode(userDefaults: userDefaults) == .pushToTalk else {
+            return defaultPushToTalkBinding
         }
 
+        if userDefaults.object(forKey: keyCodeKey) != nil {
+            return legacyDictationBinding(userDefaults: userDefaults)
+        }
+
+        return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
+            ? defaultPushToTalkBinding
+            : legacyCarbonDictationBinding(userDefaults: userDefaults)
+    }
+
+    private static func migratedHandsFreeBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
+        guard HotkeyPreferences.dictationShortcutMode(userDefaults: userDefaults) == .handsFree else {
+            return defaultHandsFreeBinding
+        }
+
+        if userDefaults.object(forKey: keyCodeKey) != nil {
+            return legacyDictationBinding(userDefaults: userDefaults)
+        }
+
+        return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
+            ? defaultHandsFreeBinding
+            : legacyCarbonDictationBinding(userDefaults: userDefaults)
+    }
+
+    private static func migratedMeetingBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
+        guard HotkeyPreferences.hasSavedMeetingBinding(userDefaults: userDefaults) else {
+            return defaultMeetingBinding
+        }
+
+        let oldBinding = HotkeyPreferences.meetingBinding(userDefaults: userDefaults)
+        return PhysicalDictationTriggerBinding(
+            keyCode: oldBinding.keyCode,
+            modifiers: modifiers(fromCarbon: oldBinding.modifiers)
+        )
+    }
+
+    private static func legacyDictationBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
+        guard userDefaults.object(forKey: keyCodeKey) != nil else {
+            return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
+                ? defaultPushToTalkBinding
+                : legacyCarbonDictationBinding(userDefaults: userDefaults)
+        }
+
+        return PhysicalDictationTriggerBinding(
+            keyCode: UInt32(userDefaults.integer(forKey: keyCodeKey)),
+            modifiers: UInt32(userDefaults.integer(forKey: modifiersKey)) & PhysicalDictationTriggerModifiers.all
+        )
+    }
+
+    private static func legacyCarbonDictationBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
         let oldBinding = HotkeyPreferences.dictationBinding(userDefaults: userDefaults)
         return PhysicalDictationTriggerBinding(
             keyCode: oldBinding.keyCode,
