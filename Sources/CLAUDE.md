@@ -14,7 +14,8 @@ Important entry points:
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
-- `Support/HotkeyPreferences.swift` — persisted hotkey settings used by capture routing
+- `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode plus legacy hotkey migration helpers
+- `Support/PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier bindings used by capture routing for push-to-talk, hands-free dictation, and meeting shortcuts
 - `Support/CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements applied to final dictation and meeting transcript text
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
@@ -35,7 +36,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, and recorded-audio buffering helpers
-- `Support/` — app-wide path, storage, permission, hotkey, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
+- `Support/` — app-wide path, storage, permission metadata, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 
