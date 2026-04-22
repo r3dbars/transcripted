@@ -502,6 +502,7 @@ class DictationSessionController: ObservableObject {
                         "trigger": currentDictationTrigger.rawValue,
                     ]
                 )
+                NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
@@ -592,6 +593,9 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        if currentDictationTrigger == .onboarding {
+            NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
+        }
         AnalyticsReporter.track(
             "dictation_cancelled",
             properties: [

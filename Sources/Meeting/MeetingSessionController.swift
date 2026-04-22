@@ -31,6 +31,7 @@ final class MeetingSessionController: ObservableObject {
     enum StartTrigger: String {
         case hotkey = "hotkey"
         case menu = "menu"
+        case onboarding = "onboarding"
         case detectedPrompt = "detected_prompt"
         case fileImport = "file_import"
         case unknown = "unknown"
@@ -44,6 +45,7 @@ final class MeetingSessionController: ObservableObject {
 
     enum RecordingCancelReason: String {
         case discardButton = "discard_button"
+        case onboardingDryRun = "onboarding_dry_run"
         case unknown = "unknown"
     }
 

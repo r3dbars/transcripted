@@ -1,6 +1,47 @@
 import Foundation
 
 func testAnalyticsEventPolicy() {
+    runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
+        let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")
+        let permissionClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_permission_cta_clicked")
+        let permissionChanged = AnalyticsEventPolicy.policy(forEvent: "onboarding_permission_status_changed")
+        let firstSaved = AnalyticsEventPolicy.policy(forEvent: "onboarding_first_dictation_saved")
+        let meetingDryRun = AnalyticsEventPolicy.policy(forEvent: "onboarding_meeting_dry_run_clicked")
+        let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
+        let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
+
+        assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
+        assertEqual(stepViewed?.allowedProperties.contains("step_id"), true, "step views should preserve funnel step")
+        assertEqual(permissionClicked?.allowedProperties.contains("permission_kind"), true, "permission clicks should preserve the clicked permission")
+        assertEqual(permissionChanged?.allowedProperties.contains("to_status"), true, "permission status changes should preserve the new status")
+        assertEqual(firstSaved?.allowedProperties.contains("word_count_bucket"), true, "first saved dictation should keep coarse word count")
+        assertEqual(meetingDryRun?.allowedProperties.contains("meeting_recording_ready"), true, "meeting dry runs should keep setup readiness")
+        assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
+        assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "meeting_recording_ready": "true",
+                "permission_kind": "system_recording",
+                "step_id": "meeting_setup",
+            ],
+            allowedKeys: [
+                "meeting_recording_ready",
+                "permission_kind",
+                "step_id",
+            ]
+        )
+        assertEqual(sanitized["meeting_recording_ready"], "true", "meeting_recording_ready should avoid the audio-key sanitizer drop")
+        assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
+        assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {
+        let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        assertEqual(dictationCompleted?.allowedProperties.contains("auto_send"), true, "dictation completion should allow the existing auto_send property")
+    }
+
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")

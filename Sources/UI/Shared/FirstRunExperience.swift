@@ -34,7 +34,178 @@ struct MenuBarPrimaryActionState: Equatable {
     let subtitle: String
 }
 
+enum FirstRunOnboardingStep: Int, CaseIterable, Identifiable, Equatable {
+    case hero
+    case value
+    case dictationSetup
+    case testDictation
+    case dictationResult
+    case meetingsIntro
+    case meetingSetup
+    case agentPayoff
+
+    var id: Int { rawValue }
+
+    var progressTitle: String {
+        switch self {
+        case .hero:
+            return "Welcome"
+        case .value:
+            return "What it does"
+        case .dictationSetup:
+            return "Dictation setup"
+        case .testDictation:
+            return "First dictation"
+        case .dictationResult:
+            return "Result"
+        case .meetingsIntro:
+            return "Meetings"
+        case .meetingSetup:
+            return "Meeting setup"
+        case .agentPayoff:
+            return "Agent"
+        }
+    }
+
+    var screenTitle: String {
+        switch self {
+        case .hero:
+            return "Speak and get clean local Markdown your agents can use."
+        case .value:
+            return "What Transcripted does"
+        case .dictationSetup:
+            return "Set up dictation"
+        case .testDictation:
+            return "Try your first dictation"
+        case .dictationResult:
+            return "Here's your first dictation"
+        case .meetingsIntro:
+            return "Transcripted also records meetings"
+        case .meetingSetup:
+            return "Set up meeting recording"
+        case .agentPayoff:
+            return "Use your audio context with an agent"
+        }
+    }
+}
+
+struct FirstRunOnboardingActionState: Equatable {
+    let primaryTitle: String
+    let secondaryTitle: String?
+    let detail: String
+    let isPrimaryEnabled: Bool
+}
+
+struct FirstRunOnboardingCopy {
+    static let heroDetail = "Dictations and meetings become private Markdown files on this Mac, ready for search, notes, and agent context."
+    static let valueFooter = "Your spoken context is saved as clean local Markdown."
+    static let dictationPrompt = "Say one sentence you want saved for later."
+    static let savedAsMarkdown = "Saved as local Markdown"
+    static let agentDictationNote = "Your dictations can be searched later to understand what you're thinking and working on."
+    static let meetingsDetail = "Record conversations into notes, then keep them alongside your dictations."
+    static let agentDetail = "Dictations and meetings become local Markdown files your agent can search, summarize, and reference."
+}
+
 enum FirstRunExperience {
+    static func onboardingSteps() -> [FirstRunOnboardingStep] {
+        FirstRunOnboardingStep.allCases
+    }
+
+    static func nextStep(after step: FirstRunOnboardingStep) -> FirstRunOnboardingStep? {
+        FirstRunOnboardingStep(rawValue: step.rawValue + 1)
+    }
+
+    static func previousStep(before step: FirstRunOnboardingStep) -> FirstRunOnboardingStep? {
+        FirstRunOnboardingStep(rawValue: step.rawValue - 1)
+    }
+
+    static func hasRequiredDictationSetup(
+        microphoneGranted: Bool,
+        accessibilityGranted: Bool
+    ) -> Bool {
+        microphoneGranted && accessibilityGranted
+    }
+
+    static func onboardingAction(
+        for step: FirstRunOnboardingStep,
+        microphoneGranted: Bool,
+        accessibilityGranted: Bool,
+        hasFirstDictation: Bool
+    ) -> FirstRunOnboardingActionState {
+        switch step {
+        case .hero:
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Continue",
+                secondaryTitle: nil,
+                detail: FirstRunOnboardingCopy.heroDetail,
+                isPrimaryEnabled: true
+            )
+        case .value:
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Continue",
+                secondaryTitle: nil,
+                detail: FirstRunOnboardingCopy.valueFooter,
+                isPrimaryEnabled: true
+            )
+        case .dictationSetup:
+            let ready = hasRequiredDictationSetup(
+                microphoneGranted: microphoneGranted,
+                accessibilityGranted: accessibilityGranted
+            )
+            return FirstRunOnboardingActionState(
+                primaryTitle: ready ? "Continue" : "Turn on Microphone and Paste-back",
+                secondaryTitle: nil,
+                detail: ready
+                    ? "Dictation is ready. Next, try one short capture."
+                    : "Microphone lets Transcripted listen. Paste-back lets it put the result where you were typing.",
+                isPrimaryEnabled: ready
+            )
+        case .testDictation:
+            let ready = hasRequiredDictationSetup(
+                microphoneGranted: microphoneGranted,
+                accessibilityGranted: accessibilityGranted
+            )
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Start Dictation",
+                secondaryTitle: nil,
+                detail: ready
+                    ? "Transcripted will listen, paste back, and save a local Markdown copy."
+                    : "Finish dictation setup first so this test can paste back.",
+                isPrimaryEnabled: ready
+            )
+        case .dictationResult:
+            return FirstRunOnboardingActionState(
+                primaryTitle: hasFirstDictation ? "Continue" : "Try Again",
+                secondaryTitle: nil,
+                detail: hasFirstDictation
+                    ? "This is the first useful moment: spoken work became a saved dictation."
+                    : "No dictation has been saved yet. Try again with one clear sentence.",
+                isPrimaryEnabled: true
+            )
+        case .meetingsIntro:
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Set up meetings",
+                secondaryTitle: "Skip for now",
+                detail: FirstRunOnboardingCopy.meetingsDetail,
+                isPrimaryEnabled: true
+            )
+        case .meetingSetup:
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Continue",
+                secondaryTitle: "Skip for now",
+                detail: "System Audio Recording captures the other side of calls. Calendar stays optional.",
+                isPrimaryEnabled: true
+            )
+        case .agentPayoff:
+            return FirstRunOnboardingActionState(
+                primaryTitle: "Open Transcripted",
+                secondaryTitle: nil,
+                detail: FirstRunOnboardingCopy.agentDetail,
+                isPrimaryEnabled: true
+            )
+        }
+    }
+
     static func onboardingRequiredPermissions() -> [TranscriptedPermissionKind] {
         [.microphone, .accessibility]
     }

@@ -231,7 +231,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             sttRouter: appState.sttRouter,
             canStartDictation: hasPasteTarget,
             onStartDictation: { [weak self] in
-                self?.finishOnboardingAndStartDictation()
+                self?.startOnboardingDictationTest()
+            },
+            onStopDictation: { [weak self] in
+                self?.stopOnboardingDictationTest()
+            },
+            onStartMeetingDryRun: { [weak self] in
+                guard let self else { return false }
+                return await self.startOnboardingMeetingDryRun()
+            },
+            onStopMeetingDryRun: { [weak self] in
+                guard let self else { return false }
+                return await self.stopOnboardingMeetingDryRun()
+            },
+            onOpenAgentSettings: { [weak self] in
+                self?.showSettingsWindow(page: .connectAgent)
             },
             onComplete: { [weak self] in
                 self?.finishOnboarding()
@@ -268,6 +282,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         closePopover()
         sourceApp?.activate(options: [])
         sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
+    }
+
+    private func startOnboardingDictationTest() {
+        let sourceApp = resolvedSourceApp()
+        sourceApp?.activate(options: [])
+        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
+    }
+
+    private func stopOnboardingDictationTest() {
+        sessionController.stopDictationAndPaste(trigger: .onboarding)
+    }
+
+    private func startOnboardingMeetingDryRun() async -> Bool {
+        await appState.meetingSession.startRecording(trigger: .onboarding)
+    }
+
+    private func stopOnboardingMeetingDryRun() async -> Bool {
+        guard case .recording = appState.meetingSession.state else { return false }
+        await appState.meetingSession.cancelRecording(reason: .onboardingDryRun)
+        return true
     }
 
     private func showMainPopover(relativeTo button: NSStatusBarButton, popover: NSPopover) {

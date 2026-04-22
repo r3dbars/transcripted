@@ -13,12 +13,122 @@ struct AnalyticsEventPolicy: Equatable {
             name: "app_launched",
             allowedProperties: []
         ),
+        "onboarding_shown": .init(
+            name: "onboarding_shown",
+            allowedProperties: [
+                "analytics_available",
+                "crash_reporting_available",
+                "entrypoint",
+                "has_target",
+                "meeting_recording_ready",
+                "mic_status",
+                "model_state",
+                "pasteback_status",
+            ]
+        ),
+        "onboarding_step_viewed": .init(
+            name: "onboarding_step_viewed",
+            allowedProperties: [
+                "model_state",
+                "step_id",
+                "step_index",
+            ]
+        ),
+        "onboarding_permission_cta_clicked": .init(
+            name: "onboarding_permission_cta_clicked",
+            allowedProperties: [
+                "permission_kind",
+                "prior_status",
+                "required",
+                "step_id",
+            ]
+        ),
+        "onboarding_permission_status_changed": .init(
+            name: "onboarding_permission_status_changed",
+            allowedProperties: [
+                "from_status",
+                "permission_kind",
+                "step_id",
+                "to_status",
+            ]
+        ),
+        "onboarding_model_state_changed": .init(
+            name: "onboarding_model_state_changed",
+            allowedProperties: [
+                "from_status",
+                "step_id",
+                "to_status",
+            ]
+        ),
+        "onboarding_primary_cta_clicked": .init(
+            name: "onboarding_primary_cta_clicked",
+            allowedProperties: [
+                "cta",
+                "model_state",
+                "step_id",
+            ]
+        ),
+        "onboarding_first_dictation_started": .init(
+            name: "onboarding_first_dictation_started",
+            allowedProperties: [
+                "model_state",
+                "step_id",
+            ]
+        ),
+        "onboarding_first_dictation_saved": .init(
+            name: "onboarding_first_dictation_saved",
+            allowedProperties: [
+                "delivery",
+                "step_id",
+                "word_count_bucket",
+            ]
+        ),
+        "onboarding_first_dictation_stop_clicked": .init(
+            name: "onboarding_first_dictation_stop_clicked",
+            allowedProperties: [
+                "step_id",
+            ]
+        ),
+        "onboarding_first_dictation_empty": .init(
+            name: "onboarding_first_dictation_empty",
+            allowedProperties: [
+                "step_id",
+            ]
+        ),
+        "onboarding_meeting_dry_run_clicked": .init(
+            name: "onboarding_meeting_dry_run_clicked",
+            allowedProperties: [
+                "meeting_recording_ready",
+                "step_id",
+            ]
+        ),
+        "onboarding_agent_cta_clicked": .init(
+            name: "onboarding_agent_cta_clicked",
+            allowedProperties: [
+                "agent_cta",
+                "step_id",
+            ]
+        ),
+        "onboarding_reporting_toggle_changed": .init(
+            name: "onboarding_reporting_toggle_changed",
+            allowedProperties: [
+                "available",
+                "enabled",
+                "reporting_kind",
+                "step_id",
+            ]
+        ),
         "onboarding_completed": .init(
             name: "onboarding_completed",
             allowedProperties: [
                 "anonymous_usage_enabled",
+                "calendar_status",
+                "completion_path",
                 "crash_reporting_enabled",
-                "system_audio_recording_enabled",
+                "first_dictation_saved",
+                "meeting_recording_ready",
+                "model_state",
+                "step_id",
             ]
         ),
         "dictation_started": .init(
@@ -30,6 +140,7 @@ struct AnalyticsEventPolicy: Equatable {
         "dictation_completed": .init(
             name: "dictation_completed",
             allowedProperties: [
+                "auto_send",
                 "delivery",
                 "duration_bucket",
                 "trigger",

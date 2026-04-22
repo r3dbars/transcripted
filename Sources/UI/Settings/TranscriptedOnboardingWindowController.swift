@@ -19,7 +19,7 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
                 width: MenuTokens.onboardingWindowWidth,
                 height: MenuTokens.onboardingWindowHeight
             ),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -28,10 +28,10 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: MenuTokens.onboardingWindowWidth, height: 700)
         window.contentViewController = hostingController
         window.center()
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
 
         super.init(window: window)
     }
