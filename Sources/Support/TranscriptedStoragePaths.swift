@@ -13,11 +13,11 @@ enum TranscriptedStoragePreferences {
         if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !customPath.isEmpty {
-            let candidate = URL(fileURLWithPath: customPath, isDirectory: true).standardizedFileURL
-            // Security: reject tampered preferences that redirect captures outside the
-            // app-managed Library root or the legacy ~/Documents/Transcripted tree.
-            if isAllowedCaptureLibraryURL(candidate, fileManager: fileManager) {
-                return candidate
+            let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
+            // Security: reject tampered preferences that target traversal or system
+            // roots while preserving the user's ability to choose their own library.
+            if isSafeCaptureLibraryURL(candidate) {
+                return candidate.standardizedFileURL
             }
         }
 
@@ -26,50 +26,32 @@ enum TranscriptedStoragePreferences {
 
     static func setCaptureLibraryURL(
         _ url: URL?,
-        userDefaults: UserDefaults = .standard,
-        fileManager: FileManager = .default
+        userDefaults: UserDefaults = .standard
     ) {
         if let url {
-            let candidate = url.standardizedFileURL
-            // Security: only persist capture-library locations that stay inside the
-            // approved Transcripted roots, so UI selection cannot redirect writes to
-            // arbitrary folders elsewhere on disk.
-            guard isAllowedCaptureLibraryURL(candidate, fileManager: fileManager) else {
+            // Security: keep unsafe roots out of preferences while preserving custom
+            // capture-library locations chosen in Settings.
+            guard isSafeCaptureLibraryURL(url) else {
                 userDefaults.removeObject(forKey: captureLibraryLocationKey)
                 return
             }
+            let candidate = url.standardizedFileURL
             userDefaults.set(candidate.path, forKey: captureLibraryLocationKey)
         } else {
             userDefaults.removeObject(forKey: captureLibraryLocationKey)
         }
     }
 
-    static func isAllowedCaptureLibraryURL(
-        _ url: URL,
-        fileManager: FileManager = .default
-    ) -> Bool {
+    static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
+        if url.pathComponents.contains("..") {
+            return false
+        }
+
         let candidate = url.standardizedFileURL.resolvingSymlinksInPath()
-        let documentsRoot = fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent("Transcripted", isDirectory: true)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        let libraryRoot = fileManager.transcriptedDefaultCaptureLibraryDir
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-
-        return candidate == documentsRoot
-            || candidate.isDescendant(of: documentsRoot)
-            || candidate == libraryRoot
-            || candidate.isDescendant(of: libraryRoot)
-    }
-}
-
-private extension URL {
-    func isDescendant(of directory: URL) -> Bool {
-        let candidatePath = standardizedFileURL.path
-        let directoryPath = directory.standardizedFileURL.path
-        return candidatePath.hasPrefix(directoryPath + "/")
+        let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+        return !forbiddenPrefixes.contains { prefix in
+            candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
+        }
     }
 }
 

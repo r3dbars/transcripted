@@ -66,16 +66,14 @@ func testTranscriptedStoragePaths() {
         )
     }
 
-    runSuite("Transcripted capture library helpers — allowed custom folders stay owner-only") {
+    runSuite("Transcripted capture library helpers — custom capture folders stay owner-only") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
         let customRoot = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent("Transcripted", isDirectory: true)
-            .appendingPathComponent("SecurityTests", isDirectory: true)
+            .appendingPathComponent("TranscriptedStoragePathsTests-custom-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: customRoot) }
 
         TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
@@ -87,7 +85,7 @@ func testTranscriptedStoragePaths() {
         assertEqual(
             captureLibrary,
             customRoot.standardizedFileURL,
-            "allowed custom capture-library preference should drive the app-facing storage roots"
+            "custom capture-library preference should drive the app-facing storage roots"
         )
         assertEqual(
             meetings,
@@ -113,22 +111,20 @@ func testTranscriptedStoragePaths() {
         }
     }
 
-    runSuite("Transcripted capture library helpers — reject capture folders outside approved roots") {
+    runSuite("Transcripted capture library helpers — reject unsafe capture folders") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let disallowedRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptedStoragePathsTests-disallowed-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: disallowedRoot) }
+        let disallowedRoot = URL(fileURLWithPath: "/System/Library/Transcripted", isDirectory: true)
 
         TranscriptedStoragePreferences.setCaptureLibraryURL(disallowedRoot)
 
         assertEqual(
             UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
             nil,
-            "disallowed capture-library paths should not be persisted"
+            "unsafe capture-library paths should not be persisted"
         )
         assertEqual(
             FileManager.default.transcriptedCaptureLibraryDir,
