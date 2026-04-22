@@ -235,9 +235,8 @@ class FloatingOverlayController {
                 x: rect.midX - panelSize.width / 2,
                 y: rect.midY - panelSize.height / 2
             )
-        } else if let rect = targetRect, let screen = NSScreen.main {
-            let screenHeight = screen.frame.height
-            let flippedY = screenHeight - rect.origin.y
+        } else if let rect = targetRect, let screen = currentScreen {
+            let flippedY = screen.frame.maxY - rect.origin.y
             origin = NSPoint(
                 x: rect.midX - panelSize.width / 2,
                 y: flippedY + 12
