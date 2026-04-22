@@ -21,7 +21,7 @@ func testAnalyticsPayloadSanitizer() {
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
-                "failure_kind": "Saved to /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl by person@example.com",
+                "failure_kind": "Saved to /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl by person@example.com on Redbarss-MacBook-Pro.local",
             ],
             allowedKeys: ["failure_kind"]
         )
@@ -30,8 +30,25 @@ func testAnalyticsPayloadSanitizer() {
         assertFalse(value.contains("/Users/redbars/"), "user paths should be redacted")
         assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "app support paths should be fully redacted")
         assertFalse(value.contains("person@example.com"), "emails should be redacted")
+        assertFalse(value.contains("Redbarss-MacBook-Pro.local"), "local hostnames should be redacted")
         assertTrue(value.contains("[redacted-path]"), "path marker should remain")
         assertTrue(value.contains("[redacted-email]"), "email marker should remain")
+        assertTrue(value.contains("[redacted-host]"), "host marker should remain")
+    }
+
+    runSuite("AnalyticsPayloadSanitizer drops authorization-like keys even if allowlisted") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "authorization_header": "Bearer abc123",
+                "bearer_source": "settings",
+                "duration_bucket": "10_29s",
+            ],
+            allowedKeys: ["authorization_header", "bearer_source", "duration_bucket"]
+        )
+
+        assertNil(sanitized["authorization_header"], "authorization headers should never become analytics properties")
+        assertNil(sanitized["bearer_source"], "bearer-like properties should never become analytics properties")
+        assertEqual(sanitized["duration_bucket"], "10_29s", "unrelated coarse properties should remain")
     }
 
     runSuite("AnalyticsPayloadSanitizer redacts raw URLs and common secret values") {
