@@ -53,6 +53,15 @@ enum TranscriptedConstants {
     /// neither the success nor error publisher has fired.
     static let meetingStartTimeout: UInt64 = 5_000_000_000  // 5 seconds
 
+    /// Timeout for waiting on meeting capture file-close callbacks after stop.
+    /// The bridge falls back to the best URLs it has instead of leaving the UI
+    /// stuck forever if CoreAudio cleanup never calls completion.
+    static let meetingStopTimeout: UInt64 = 30_000_000_000  // 30 seconds
+
+    /// Max time wake recovery should wait for background model warmup.
+    /// Hotkey recovery must finish even if a model load stalls after sleep.
+    static let wakeRuntimeReadinessTimeout: TimeInterval = 30.0
+
     /// Debounce window for coalescing rapid audio config change notifications (e.g. BT reconnect bursts)
     static let audioConfigChangeDebounceDelay: UInt64 = 250_000_000  // 250ms
 

@@ -43,6 +43,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Fulfilled when Core's Audio reports recording completed. Cleared each
     /// time `startRecording` runs so back-to-back sessions do not leak state.
     private var completionContinuation: CheckedContinuation<(micURL: URL?, systemURL: URL?), Never>?
+    private var completionAttemptID: UUID?
+    private var completionTimeoutTask: Task<Void, Never>?
     private var startContinuation: CheckedContinuation<Bool, Never>?
     private var startAttemptID: UUID?
     private var startTimeoutTask: Task<Void, Never>?
@@ -54,6 +56,10 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     deinit {
+        startTimeoutTask?.cancel()
+        startContinuation?.resume(returning: false)
+        completionTimeoutTask?.cancel()
+        completionContinuation?.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
         // Combine cancellables auto-release. Audio's own deinit tears down CoreAudio.
     }
 
@@ -64,6 +70,9 @@ final class MeetingCaptureBridge: ObservableObject {
     func startRecording() async -> Bool {
         if let continuation = completionContinuation {
             completionContinuation = nil
+            completionAttemptID = nil
+            completionTimeoutTask?.cancel()
+            completionTimeoutTask = nil
             continuation.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
         }
         if audio.isRecording { return true }
@@ -108,8 +117,33 @@ final class MeetingCaptureBridge: ObservableObject {
         }
 
         return await withCheckedContinuation { continuation in
+            completionTimeoutTask?.cancel()
+            let attemptID = UUID()
+            completionAttemptID = attemptID
             self.completionContinuation = continuation
             self.audio.stop()
+
+            completionTimeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStopTimeout)
+                guard let self,
+                      self.completionAttemptID == attemptID,
+                      let continuation = self.completionContinuation else { return }
+
+                self.completionContinuation = nil
+                self.completionAttemptID = nil
+                self.completionTimeoutTask = nil
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "recording_stop_timeout",
+                    message: "Meeting recording stop timed out while waiting for audio files to close",
+                    context: [
+                        "mic_file_available": "\(self.audio.micAudioFileURL != nil)",
+                        "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
+                    ]
+                )
+                continuation.resume(returning: (self.audio.micAudioFileURL, self.audio.systemAudioFileURL))
+            }
         }
     }
 
@@ -190,6 +224,9 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard let self else { return }
                 let continuation = self.completionContinuation
                 self.completionContinuation = nil
+                self.completionAttemptID = nil
+                self.completionTimeoutTask?.cancel()
+                self.completionTimeoutTask = nil
                 continuation?.resume(returning: (micURL, systemURL))
             }
         }

@@ -148,7 +148,28 @@ class TranscriptedAppState: ObservableObject {
 
     private func waitForRuntimeReadiness() async {
         startRuntimeReadinessIfNeeded()
-        await runtimeReadinessTask?.value
+        guard let runtimeReadinessTask else { return }
+
+        do {
+            try await TranscriptedConstants.withTimeout(
+                seconds: TranscriptedConstants.wakeRuntimeReadinessTimeout
+            ) {
+                await runtimeReadinessTask.value
+            }
+        } catch {
+            logger.log("WAKE | runtime readiness wait timed out")
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "app",
+                event: "wake_runtime_readiness_timeout",
+                message: "Wake recovery timed out waiting for runtime readiness",
+                context: [
+                    "timeout_s": String(format: "%.1f", TranscriptedConstants.wakeRuntimeReadinessTimeout),
+                    "stt_model_loaded": "\(sttRouter.isModelLoaded)",
+                    "meeting_state": meetingStateSummary,
+                ]
+            )
+        }
     }
 
     private var meetingStateSummary: String {

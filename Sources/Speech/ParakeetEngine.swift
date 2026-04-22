@@ -1869,15 +1869,82 @@ class ParakeetEngine: ObservableObject {
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
             print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(corrected.prefix(80))...\"")
 
-            isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
-
             if trimmed.isEmpty {
+                let analysis = DictationAudioRecovery.analyze(
+                    samples: resampled,
+                    sampleRate: TranscriptedConstants.parakeetSampleRate
+                )
+                var emptyContext = ["samples": "\(nativeCount)"]
+                emptyContext.merge(analysis.context) { current, _ in current }
+
+                if let retrySamples = DictationAudioRecovery.retrySamples(
+                    from: resampled,
+                    sampleRate: TranscriptedConstants.parakeetSampleRate,
+                    analysis: analysis
+                ) {
+                    let retryStarted = CFAbsoluteTimeGetCurrent()
+                    EventReporter.shared.capture(
+                        level: .info,
+                        engine: "parakeet",
+                        event: "dictation_empty_retry_started",
+                        message: "Retrying empty dictation with focused audio",
+                        context: emptyContext.merging([
+                            "retry_samples": "\(retrySamples.count)",
+                            "retry_audio_duration_s": String(format: "%.2f", Double(retrySamples.count) / TranscriptedConstants.parakeetSampleRate),
+                        ]) { current, _ in current }
+                    )
+
+                    do {
+                        let retryResult = try await manager.transcribe(retrySamples, source: .microphone)
+                        let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
+                        let retryTrimmed = retryResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let retryCorrected = CustomDictionaryTextProcessor.apply(to: retryTrimmed)
+                        if !retryTrimmed.isEmpty {
+                            let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
+                            let retryDuration = Double(retrySamples.count) / TranscriptedConstants.parakeetSampleRate
+                            let retryRtf = retryDuration > 0 ? retryElapsed / retryDuration : 0
+                            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "transcription_recovered",
+                                message: "Recovered empty dictation on retry",
+                                context: emptyContext.merging([
+                                    "elapsed_s": String(format: "%.3f", totalElapsed),
+                                    "retry_elapsed_s": String(format: "%.3f", retryElapsed),
+                                    "retry_audio_duration_s": String(format: "%.2f", retryDuration),
+                                    "retry_rtf": String(format: "%.3f", retryRtf),
+                                    "retry_samples": "\(retrySamples.count)",
+                                    "chars": "\(retryCorrected.count)",
+                                    "input_samples": "\(nativeCount)",
+                                ]) { current, _ in current })
+                            isTranscribing = false
+                            sampleBuffer.removeAll(keepingCapacity: true)
+                            return retryCorrected
+                        }
+
+                        emptyContext["retry_empty"] = "true"
+                        emptyContext["retry_elapsed_s"] = String(format: "%.3f", retryElapsed)
+                        emptyContext["retry_samples"] = "\(retrySamples.count)"
+                    } catch {
+                        emptyContext["retry_error"] = error.localizedDescription
+                    }
+                } else if !analysis.hasUsableSpeechSignal {
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "dictation_audio_silent",
+                        message: "Dictation audio did not contain enough speech-like signal",
+                        context: emptyContext
+                    )
+                }
+
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
                     message: "Parakeet returned no text after \(String(format: "%.1f", elapsed))s inference",
-                    context: ["samples": "\(nativeCount)"])
+                    context: emptyContext)
+                isTranscribing = false
+                sampleBuffer.removeAll(keepingCapacity: true)
                 return nil
             }
+
+            isTranscribing = false
+            sampleBuffer.removeAll(keepingCapacity: true)
 
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "transcription_complete",
                 message: "Transcribed in \(String(format: "%.2f", elapsed))s",
