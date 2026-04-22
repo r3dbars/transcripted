@@ -71,6 +71,26 @@ final class CoreStoragePathsTests: XCTestCase {
         XCTAssertNotNil(result.errorMessage)
     }
 
+    func testRecordingValidatorRejectsPathsOutsideApprovedRoots() {
+        let outsidePath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedOutsideRoot", isDirectory: true)
+        let result = RecordingValidator.validateSavePath(outsidePath)
+        XCTAssertFalse(result.isValid)
+        XCTAssertEqual(
+            result.errorMessage,
+            "Save path must stay inside ~/Documents/Transcripted or ~/Library/Application Support/Transcripted/captures"
+        )
+    }
+
+    func testRecordingValidatorAllowsDocumentsTranscriptedSubdirectory() {
+        let allowedPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("Exports", isDirectory: true)
+        let result = RecordingValidator.validateSavePath(allowedPath)
+        XCTAssertTrue(result.isValid)
+    }
+
     func testRecordingValidatorDiskSpaceProbeFallsBackToExistingParent() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("RecordingValidatorTests-\(UUID().uuidString)", isDirectory: true)

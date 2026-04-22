@@ -133,7 +133,8 @@ public enum RecordingValidator {
     private static let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
 
     /// Validates a custom save path is safe to use.
-    /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.
+    /// Resolves symlinks and rejects paths containing `..` traversals, targeting system directories,
+    /// or escaping the approved Transcripted storage roots.
     /// - Parameter url: The candidate save directory URL
     /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
     public static func validateSavePath(_ url: URL) -> ValidationResult {
@@ -148,7 +149,7 @@ public enum RecordingValidator {
 
         // Resolve symlinks so that a symlink pointing at e.g. /System cannot bypass
         // the forbidden-prefix check below.
-        let resolved = url.resolvingSymlinksInPath()
+        let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedPath = resolved.path
 
         // Reject system directories
@@ -156,6 +157,29 @@ public enum RecordingValidator {
             if resolvedPath.hasPrefix(prefix) {
                 return .failure("Cannot save transcripts to system directory: \(prefix)")
             }
+        }
+
+        let fileManager = FileManager.default
+        let documentsRoot = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let libraryRoot = CoreStoragePaths.default.transcripts
+            .deletingLastPathComponent()
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        // Security: keep capture-library writes confined to the Transcripted-managed
+        // Library root or the legacy ~/Documents/Transcripted export root. Without
+        // this check, a tampered preference could redirect transcript writes and
+        // permission probes into unrelated folders elsewhere on disk.
+        let isAllowed = resolved == documentsRoot
+            || resolved.isDescendant(of: documentsRoot)
+            || resolved == libraryRoot
+            || resolved.isDescendant(of: libraryRoot)
+        guard isAllowed else {
+            return .failure("Save path must stay inside ~/Documents/Transcripted or ~/Library/Application Support/Transcripted/captures")
         }
 
         return .success
@@ -181,5 +205,13 @@ public enum RecordingValidator {
         }
 
         return .success
+    }
+}
+
+private extension URL {
+    func isDescendant(of directory: URL) -> Bool {
+        let candidatePath = standardizedFileURL.path
+        let directoryPath = directory.standardizedFileURL.path
+        return candidatePath.hasPrefix(directoryPath + "/")
     }
 }

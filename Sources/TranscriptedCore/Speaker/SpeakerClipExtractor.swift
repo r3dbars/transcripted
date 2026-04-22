@@ -208,9 +208,14 @@ public enum SpeakerClipExtractor {
         channel: UtteranceChannel
     ) throws -> URL {
 
-        let tempDir = NSTemporaryDirectory()
+        let tempDir = defaultClipsDirectory
+        // Security: keep temporary speaker clips inside Transcripted's owner-only
+        // app tmp directory instead of the process-wide temp folder, so sensitive
+        // voice samples do not spill into a broader shared scratch location.
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tempDir.path)
         let clipFilename = "speaker_\(channel.rawValue)_\(speakerId)_\(UUID().uuidString.prefix(8)).wav"
-        let clipURL = URL(fileURLWithPath: tempDir).appendingPathComponent(clipFilename)
+        let clipURL = tempDir.appendingPathComponent(clipFilename)
 
         // Output format: mono 48kHz (native quality for playback)
         guard let outputFormat = AVAudioFormat(
