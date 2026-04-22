@@ -357,19 +357,13 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     /// Populate saved transcript metadata from the file's YAML frontmatter.
-    /// Reads only the first 2 KB to avoid blocking the main thread on large transcript files.
+    /// Reads the YAML frontmatter in bounded chunks so larger metadata blocks
+    /// (many speakers, gap events, etc.) still parse without reading the whole file.
     func populateSavedMetadata(from url: URL) {
         lastSavedTranscriptURL = url
         let name = url.deletingPathExtension().lastPathComponent
         lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
-        let headerData = handle.readData(ofLength: 2048)
-        try? handle.close()
-        guard let raw = String(data: headerData, encoding: .utf8),
-              raw.hasPrefix("---"),
-              let endRange = raw.range(of: "\n---\n", range: raw.index(raw.startIndex, offsetBy: 3)..<raw.endIndex)
-        else { return }
-        let yaml = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        guard let yaml = readYAMLFrontmatter(from: url) else { return }
         var speakers = 0
         for line in yaml.components(separatedBy: "\n") {
             let parts = line.split(separator: ":", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -382,6 +376,29 @@ public class TranscriptionTaskManager: ObservableObject {
             }
         }
         lastSavedSpeakerCount = speakers
+    }
+
+    private func readYAMLFrontmatter(from url: URL, chunkSize: Int = 2048, maxBytes: Int = 64 * 1024) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var data = Data()
+        let closingMarker = Data("\n---\n".utf8)
+
+        while data.count < maxBytes {
+            let remaining = maxBytes - data.count
+            let chunk = handle.readData(ofLength: min(chunkSize, remaining))
+            guard !chunk.isEmpty else { break }
+            data.append(chunk)
+
+            if data.starts(with: Data("---".utf8)),
+               let endRange = data.range(of: closingMarker, in: 3..<data.count),
+               let raw = String(data: data[..<endRange.lowerBound], encoding: .utf8) {
+                return String(raw.dropFirst(4))
+            }
+        }
+
+        return nil
     }
 
     func scheduleStatusReset(delay: TimeInterval = 3) {
