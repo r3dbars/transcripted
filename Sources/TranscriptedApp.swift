@@ -135,6 +135,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             button.action = #selector(togglePopover)
             button.target = self
         }
+        installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
         let pop = NSPopover()
@@ -195,6 +196,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         } else {
             showMainPopover(relativeTo: button, popover: popover)
         }
+    }
+
+    @objc private func openSettingsFromAppMenu(_ sender: Any?) {
+        closePopover()
+        showSettingsWindow()
+    }
+
+    private func installSettingsMenuHandler() {
+        guard let appMenu = NSApp.mainMenu?.item(withTitle: "Transcripted")?.submenu,
+              let settingsItem = appMenu.items.first(where: { $0.title.hasPrefix("Settings") }) else {
+            return
+        }
+
+        settingsItem.target = self
+        settingsItem.action = #selector(openSettingsFromAppMenu(_:))
     }
 
     private func closePopover() {
