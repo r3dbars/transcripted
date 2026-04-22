@@ -19,28 +19,24 @@ func testAgentConnectionGuide() {
         )
     }
 
-    runSuite("AgentConnectionGuide.starterPrompt — explains the two good setup paths") {
+    runSuite("AgentConnectionGuide.starterPrompt — is specific to local coding agents") {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
         assertTrue(
-            prompt.contains("If Transcripted direct tools are connected, use them."),
-            "prompt should prefer direct tools when available"
+            prompt.contains("You are a local coding agent with filesystem access."),
+            "prompt should name the expected local coding-agent context"
         )
         assertTrue(
-            prompt.contains("If this is a local coding agent, read the Transcripted folders below."),
-            "prompt should make local coding agents use the saved folders"
+            prompt.contains("reading these Markdown folders directly"),
+            "prompt should tell local agents to use folder access directly"
         )
         assertTrue(
-            prompt.contains("Install for Claude Desktop"),
-            "prompt should route Claude Desktop users to the in-app installer"
+            !prompt.contains("Install for Claude Desktop"),
+            "local agent prompt should not route users through Claude Desktop setup"
         )
         assertTrue(
-            prompt.contains("web chat or Cowork session, treat it as fallback only"),
-            "prompt should not sell web chats as a first-class full-library path"
-        )
-        assertTrue(
-            prompt.contains("Check any folders I granted in this chat before declaring Transcripted empty."),
-            "prompt should prefer user-granted folders before declaring Transcripted empty"
+            !prompt.contains("web chat") && !prompt.contains("Cowork"),
+            "local agent prompt should not include web/Cowork routing"
         )
         assertTrue(
             prompt.contains("Treat the Markdown files as the source of truth."),
@@ -51,8 +47,12 @@ func testAgentConnectionGuide() {
             "prompt should force exact dates for relative-date work"
         )
         assertTrue(
-            prompt.contains("If you cannot read anything, tell me the one next step I need to take."),
-            "prompt should give one clear next step when blocked"
+            prompt.contains("If you cannot read a folder, tell me exactly which folder failed"),
+            "prompt should name the exact folder failure when blocked"
+        )
+        assertTrue(
+            prompt.contains("Do not tell me to set up Claude Desktop or MCP unless I ask about Claude Desktop specifically."),
+            "prompt should keep local-agent flow separate from Claude Desktop setup"
         )
         assertTrue(
             prompt.contains("Meetings: \(AgentConnectionGuide.meetingsFolder.path)"),

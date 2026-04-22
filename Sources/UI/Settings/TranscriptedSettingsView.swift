@@ -1546,7 +1546,7 @@ private struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Claude Desktop gets direct tools. Local agents get one prompt."
+                summary: "Pick one."
             )
 
             agentActionSection
@@ -1564,7 +1564,7 @@ private struct AgentConnectionSettingsPage: View {
 
             SettingsSection(
                 title: "Details",
-                detail: "Only needed when something is not working."
+                detail: "Advanced setup."
             ) {
                 DisclosureGroup("Show setup details", isExpanded: $showAdvancedAgentSetup) {
                     VStack(alignment: .leading, spacing: 14) {
@@ -1642,22 +1642,11 @@ private struct AgentConnectionSettingsPage: View {
 
     private var agentActionSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Choose Your App")
-                    .font(.headline)
-
-                Text("Pick one. No JSON, no Terminal, no source build.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             HStack(spacing: 12) {
                 AgentConnectActionButton(
                     symbolName: claudeDesktopActionSymbol,
-                    eyebrow: "Claude Desktop",
                     title: claudeDesktopActionTitle,
-                    detail: "Best full-library experience. Installs Transcripted direct tools.",
+                    subtitle: "Claude Desktop",
                     statusText: claudeDesktopStatusText,
                     statusSymbolName: claudeDesktopStatusSymbol,
                     tint: claudeDesktopStatusTint,
@@ -1668,10 +1657,9 @@ private struct AgentConnectionSettingsPage: View {
 
                 AgentConnectActionButton(
                     symbolName: copiedLocalAgentPrompt ? "checkmark" : "chevron.left.forwardslash.chevron.right",
-                    eyebrow: "Local Coding Agents",
                     title: copiedLocalAgentPrompt ? "Copied" : "Copy for Agent",
-                    detail: "Claude Code, Codex, Cursor, Windsurf, Zed, Cline, Continue, OpenCode, and OpenClaw.",
-                    statusText: "For agents running on this Mac",
+                    subtitle: "Codex, Claude Code, Cursor",
+                    statusText: "Local files",
                     statusSymbolName: "folder",
                     tint: Color(nsColor: .systemBlue),
                     isEnabled: true
@@ -1729,16 +1717,16 @@ private struct AgentConnectionSettingsPage: View {
 
     private var claudeDesktopStatusText: String {
         if !claudeDesktopStatus.bundledBinaryExists {
-            return "Direct tools missing from this build"
+            return "Missing"
         }
 
         switch claudeDesktopStatus.state {
         case .installed:
-            return "Installed. Restart Claude if needed"
+            return "Installed"
         case .notInstalled:
-            return "One click, then restart Claude Desktop"
+            return "Not installed"
         case .needsRepair:
-            return "Needs repair"
+            return "Repair"
         }
     }
 
@@ -1845,9 +1833,8 @@ private struct AgentConnectionSettingsPage: View {
 
 private struct AgentConnectActionButton: View {
     let symbolName: String
-    let eyebrow: String
     let title: String
-    let detail: String
+    let subtitle: String
     let statusText: String
     let statusSymbolName: String
     let tint: Color
@@ -1869,22 +1856,18 @@ private struct AgentConnectActionButton: View {
                             .stroke(tint.opacity(0.18), lineWidth: 1)
                     )
 
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(eyebrow.uppercased())
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
+                VStack(alignment: .leading, spacing: 8) {
                     Text(title)
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.88)
 
-                    Text(detail)
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
 
                     Label(statusText, systemImage: statusSymbolName)
                         .font(.caption.weight(.semibold))
@@ -1902,7 +1885,7 @@ private struct AgentConnectActionButton: View {
                     .background(tint.opacity(isEnabled ? 0.11 : 0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 142, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovered && isEnabled ? 0.95 : 0.78))
@@ -2018,12 +2001,12 @@ private struct ClaudeDesktopSelfTestResultView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(
-                "Ready. Found \(result.selfTest.meetingFileCount) meeting files and \(result.selfTest.dictationFileCount) dictation files.",
+                "Ready. Restart Claude.",
                 systemImage: "checkmark.circle.fill"
             )
             .foregroundStyle(.green)
 
-            Text("Restart Claude Desktop to use Transcripted direct tools.")
+            Text("\(result.selfTest.meetingFileCount) meetings, \(result.selfTest.dictationFileCount) dictation files found.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
