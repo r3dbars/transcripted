@@ -27,6 +27,29 @@ enum MeetingImportedAudioPreparer {
             )
         }
 
+        let sourceAttributes: [FileAttributeKey: Any]
+        do {
+            sourceAttributes = try fileManager.attributesOfItem(atPath: resolvedSourceURL.path)
+        } catch {
+            throw NSError(
+                domain: "MeetingImportedAudioPreparer",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Transcripted couldn't inspect that audio file."
+                ]
+            )
+        }
+
+        guard sourceAttributes[.type] as? FileAttributeType == .typeRegular else {
+            throw NSError(
+                domain: "MeetingImportedAudioPreparer",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Select an audio file, not a folder or package."
+                ]
+            )
+        }
+
         let destinationURL = uniqueScratchURL(
             for: resolvedSourceURL,
             in: scratchDirectory,
@@ -37,6 +60,7 @@ enum MeetingImportedAudioPreparer {
             try fileManager.copyItem(at: resolvedSourceURL, to: destinationURL)
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
         } catch {
+            try? fileManager.removeItem(at: destinationURL)
             throw NSError(
                 domain: "MeetingImportedAudioPreparer",
                 code: 2,

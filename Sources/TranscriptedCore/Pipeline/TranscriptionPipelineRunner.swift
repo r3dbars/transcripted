@@ -141,7 +141,7 @@ extension TranscriptionTaskManager {
                 similarity: entry.similarity
             )
             speakerMappings[key] = mapping
-            speakerSources[entry.speakerId] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
+            speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
 
             if autoAcceptedIds.contains(entry.speakerId),
                let name = entry.profile.displayName {
