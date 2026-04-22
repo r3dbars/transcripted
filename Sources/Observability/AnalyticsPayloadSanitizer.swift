@@ -4,6 +4,8 @@ enum AnalyticsPayloadSanitizer {
     private static let maxValueLength = 80
     private static let sensitiveKeyFragments = [
         "audio",
+        "authorization",
+        "bearer",
         "bundle",
         "credential",
         "dsn",
@@ -49,6 +51,7 @@ enum AnalyticsPayloadSanitizer {
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
     )
     private static let emailRegex = makeRegex(#"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
+    private static let localHostnameRegex = makeRegex(#"\b[a-zA-Z0-9._-]+\.local\b"#)
 
     static func sanitizeProperties(
         _ properties: [String: String],
@@ -106,6 +109,8 @@ enum AnalyticsPayloadSanitizer {
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
+        range = NSRange(result.startIndex..., in: result)
+        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
 
         return result
     }
