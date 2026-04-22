@@ -19,16 +19,16 @@ func testAgentConnectionGuide() {
         )
     }
 
-    runSuite("AgentConnectionGuide.starterPrompt — is specific to local coding agents") {
+    runSuite("AgentConnectionGuide.starterPrompt — keeps the local agent path simple") {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
         assertTrue(
-            prompt.contains("You are a local coding agent with filesystem access."),
-            "prompt should name the expected local coding-agent context"
+            prompt.contains("Read my saved Transcripted Markdown files directly:"),
+            "prompt should tell local agents to read Transcripted files directly"
         )
         assertTrue(
-            prompt.contains("reading these Markdown folders directly"),
-            "prompt should tell local agents to use folder access directly"
+            prompt.contains("Use these files as the source of truth."),
+            "prompt should ground answers in saved Markdown files"
         )
         assertTrue(
             !prompt.contains("Install for Claude Desktop"),
@@ -39,27 +39,27 @@ func testAgentConnectionGuide() {
             "local agent prompt should not include web/Cowork routing"
         )
         assertTrue(
-            prompt.contains("Treat the Markdown files as the source of truth."),
-            "prompt should ground answers in raw captures"
+            prompt.contains("Search meetings and dictations together when useful."),
+            "prompt should support combined meeting and dictation searches"
         )
         assertTrue(
-            prompt.contains("If a date is relative, state the exact calendar dates you searched."),
+            prompt.contains("For relative dates like today or yesterday, state the exact dates searched."),
             "prompt should force exact dates for relative-date work"
         )
         assertTrue(
-            prompt.contains("If you cannot read a folder, tell me exactly which folder failed"),
-            "prompt should name the exact folder failure when blocked"
+            prompt.contains("If you cannot read a folder, tell me which folder failed."),
+            "prompt should name the folder failure when blocked"
         )
         assertTrue(
-            prompt.contains("Do not tell me to set up Claude Desktop or MCP unless I ask about Claude Desktop specifically."),
+            prompt.contains("Do not suggest Claude Desktop or MCP unless I ask."),
             "prompt should keep local-agent flow separate from Claude Desktop setup"
         )
         assertTrue(
-            prompt.contains("Meetings: \(AgentConnectionGuide.meetingsFolder.path)"),
+            prompt.contains("Meetings:\n- \(AgentConnectionGuide.meetingsFolder.path)"),
             "prompt should include the meetings folder"
         )
         assertTrue(
-            prompt.contains("Dictations: \(AgentConnectionGuide.dictationsFolder.path)"),
+            prompt.contains("Dictations:\n- \(AgentConnectionGuide.dictationsFolder.path)"),
             "prompt should include the dictations folder"
         )
         assertTrue(

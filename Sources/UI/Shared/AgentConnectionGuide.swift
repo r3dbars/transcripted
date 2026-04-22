@@ -125,19 +125,22 @@ enum AgentConnectionGuide {
         var prompt = """
         I use Transcripted on this Mac.
 
-        You are a local coding agent with filesystem access. Help me search and summarize my saved meetings and dictations by reading these Markdown folders directly:
+        Read my saved Transcripted Markdown files directly:
 
-        - Meetings: \(meetingsFolder.path)
-        - Dictations: \(dictationsFolder.path)
+        Meetings:
+        - \(meetingsFolder.path)
+
+        Dictations:
+        - \(dictationsFolder.path)
+
+        Use these files as the source of truth.
 
         Rules:
-        - Check any folders I granted in this chat before declaring Transcripted empty.
-        - Treat the Markdown files as the source of truth.
+        - Search meetings and dictations together when useful.
         - Cite filenames, dates, speakers, and timestamps when useful.
-        - Search meetings and dictations together when the task spans both.
-        - If a date is relative, state the exact calendar dates you searched.
-        - If you cannot read a folder, tell me exactly which folder failed and the one next step I should take.
-        - Do not tell me to set up Claude Desktop or MCP unless I ask about Claude Desktop specifically.
+        - For relative dates like today or yesterday, state the exact dates searched.
+        - If you cannot read a folder, tell me which folder failed.
+        - Do not suggest Claude Desktop or MCP unless I ask.
         """
 
         if let filename {
