@@ -4,7 +4,7 @@ import CoreGraphics
 import Foundation
 
 func testPhysicalDictationTriggerPreferences() {
-    runSuite("PhysicalDictationTriggerPreferences defaults to Fn, Fn Space, and Fn M") {
+    runSuite("PhysicalDictationTriggerPreferences defaults to Fn, Right Option, and Option M") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -16,12 +16,12 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(
             PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
-            "fresh installs should use Fn Space for hands-free"
+            "fresh installs should use Right Option for hands-free"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
-            "fresh installs should use Fn M for meetings"
+            "fresh installs should use Option M for meetings"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
@@ -30,13 +30,13 @@ func testPhysicalDictationTriggerPreferences() {
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultHandsFreeBinding),
-            "Fn Space",
-            "hands-free default should display as Fn Space"
+            "Right ⌥",
+            "hands-free default should display as Right Option"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultMeetingBinding),
-            "Fn M",
-            "meeting default should display as Fn M"
+            "⌥M",
+            "meeting default should display as Option M"
         )
     }
 
@@ -146,14 +146,14 @@ func testPhysicalDictationTriggerPreferences() {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let rightOption = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
-        defaults.set(Int(rightOption.keyCode), forKey: "dictationTrigger-keyCode")
-        defaults.set(Int(rightOption.modifiers), forKey: "dictationTrigger-modifiers")
+        let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
+        defaults.set(Int(capsLock.keyCode), forKey: "dictationTrigger-keyCode")
+        defaults.set(Int(capsLock.modifiers), forKey: "dictationTrigger-modifiers")
         HotkeyPreferences.setDictationShortcutMode(.pushToTalk, userDefaults: defaults)
 
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
-            rightOption,
+            capsLock,
             "existing push-to-talk users should keep their saved physical key"
         )
         assertEqual(

@@ -61,13 +61,10 @@ enum FunctionKeySystemAction: Equatable {
 
 enum PhysicalDictationTriggerPreferences {
     static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
-    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(
-        keyCode: UInt32(kVK_Space),
-        modifiers: PhysicalDictationTriggerModifiers.function
-    )
+    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
-        modifiers: PhysicalDictationTriggerModifiers.function
+        modifiers: PhysicalDictationTriggerModifiers.option
     )
     static let defaultBinding = defaultPushToTalkBinding
 

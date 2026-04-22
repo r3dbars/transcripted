@@ -136,7 +136,7 @@ private final class PhysicalShortcutDetector {
     private struct PendingModifierShortcut {
         let keyCode: UInt32
         let action: PhysicalShortcutAction
-        let workItem: DispatchWorkItem
+        let workItem: DispatchWorkItem?
     }
 
     private static let modifierChordDelay: TimeInterval = 0.14
@@ -199,7 +199,7 @@ private final class PhysicalShortcutDetector {
     }
 
     private func resetState() {
-        pendingModifierShortcut?.workItem.cancel()
+        pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
         activePushToTalkKeyCode = nil
         consumedKeyCodes.removeAll()
@@ -227,8 +227,12 @@ private final class PhysicalShortcutDetector {
                 return nil
             }
 
-            guard !isRepeat,
-                  let shortcut = matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+            guard !isRepeat else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            guard let shortcut = matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+                cancelPendingModifierShortcut()
                 return Unmanaged.passUnretained(event)
             }
 
@@ -266,6 +270,9 @@ private final class PhysicalShortcutDetector {
                let pending = pendingModifierShortcut,
                matchesRelease(for: pending.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
                 cancelPendingModifierShortcut()
+                if pending.action != .dictationPushToTalk {
+                    onShortcut?(pending.action, .press)
+                }
                 return nil
             }
 
@@ -290,11 +297,19 @@ private final class PhysicalShortcutDetector {
                     onShortcut?(.dictationPushToTalk, .press)
                 }
             case .dictationHandsFree:
-                cancelPendingModifierShortcut()
-                onShortcut?(.dictationHandsFree, .press)
+                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                    schedulePendingModifierShortcut(keyCode: keyCode, action: .dictationHandsFree)
+                } else {
+                    cancelPendingModifierShortcut()
+                    onShortcut?(.dictationHandsFree, .press)
+                }
             case .meeting:
-                cancelPendingModifierShortcut()
-                onShortcut?(.meeting, .press)
+                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                    schedulePendingModifierShortcut(keyCode: keyCode, action: .meeting)
+                } else {
+                    cancelPendingModifierShortcut()
+                    onShortcut?(.meeting, .press)
+                }
             }
             return nil
 
@@ -363,16 +378,23 @@ private final class PhysicalShortcutDetector {
     private func schedulePendingModifierShortcut(keyCode: UInt32, action: PhysicalShortcutAction) {
         cancelPendingModifierShortcut()
 
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self,
-                  self.pendingModifierShortcut?.keyCode == keyCode,
-                  self.pendingModifierShortcut?.action == action else {
-                return
-            }
+        let workItem: DispatchWorkItem?
+        if action == .dictationPushToTalk {
+            let delayedWorkItem = DispatchWorkItem { [weak self] in
+                guard let self,
+                      self.pendingModifierShortcut?.keyCode == keyCode,
+                      self.pendingModifierShortcut?.action == action else {
+                    return
+                }
 
-            self.pendingModifierShortcut = nil
-            self.activePushToTalkKeyCode = keyCode
-            self.onShortcut?(action, .press)
+                self.pendingModifierShortcut = nil
+                self.activePushToTalkKeyCode = keyCode
+                self.onShortcut?(action, .press)
+            }
+            workItem = delayedWorkItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.modifierChordDelay, execute: delayedWorkItem)
+        } else {
+            workItem = nil
         }
 
         pendingModifierShortcut = PendingModifierShortcut(
@@ -380,11 +402,10 @@ private final class PhysicalShortcutDetector {
             action: action,
             workItem: workItem
         )
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.modifierChordDelay, execute: workItem)
     }
 
     private func cancelPendingModifierShortcut() {
-        pendingModifierShortcut?.workItem.cancel()
+        pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
     }
 }
@@ -540,7 +561,7 @@ class ContextCaptureEngine: ObservableObject {
             carbonHotkeyError,
             physicalTriggerError,
             PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
-                for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+                for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
             )
         ].compactMap { $0 }
         let nextError = errors.isEmpty ? nil : errors.joined(separator: " and ")

@@ -28,7 +28,7 @@ struct TranscriptedSettingsView: View {
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
-        for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
@@ -1067,7 +1067,7 @@ struct TranscriptedSettingsView: View {
 
     private func refreshShortcutState() {
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
-            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
     }
 
