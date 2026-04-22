@@ -4,6 +4,7 @@
 import SwiftUI
 import AppKit
 import Carbon
+import Combine
 import TranscriptedCore
 import UniformTypeIdentifiers
 
@@ -24,6 +25,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     var popover: NSPopover?
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
+    private let statusItemUpdateBadge = NSView(frame: .zero)
+    private var statusItemUpdateSubscription: AnyCancellable?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -128,13 +131,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Set up menubar status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
-            let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
-            image?.isTemplate = true
-            button.image = image
-            button.toolTip = "Transcripted"
-            button.action = #selector(togglePopover)
-            button.target = self
+            configureStatusItemButton(button)
         }
+        bindStatusItemUpdateBadge()
         installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
@@ -201,6 +200,59 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @objc private func openSettingsFromAppMenu(_ sender: Any?) {
         closePopover()
         showSettingsWindow()
+    }
+
+    private func configureStatusItemButton(_ button: NSStatusBarButton) {
+        let image = NSImage(systemSymbolName: "mic.and.signal.meter", accessibilityDescription: "Transcripted")
+        image?.isTemplate = true
+        button.image = image
+        button.imagePosition = .imageOnly
+        button.toolTip = "Transcripted"
+        button.action = #selector(togglePopover)
+        button.target = self
+
+        installStatusItemUpdateBadge(on: button)
+    }
+
+    private func installStatusItemUpdateBadge(on button: NSStatusBarButton) {
+        guard statusItemUpdateBadge.superview !== button else { return }
+
+        statusItemUpdateBadge.translatesAutoresizingMaskIntoConstraints = false
+        statusItemUpdateBadge.wantsLayer = true
+        statusItemUpdateBadge.layer?.backgroundColor = NSColor.systemOrange.cgColor
+        statusItemUpdateBadge.layer?.borderColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        statusItemUpdateBadge.layer?.borderWidth = 1
+        statusItemUpdateBadge.layer?.cornerRadius = 4
+        statusItemUpdateBadge.layer?.masksToBounds = true
+        statusItemUpdateBadge.isHidden = true
+
+        button.addSubview(statusItemUpdateBadge)
+        NSLayoutConstraint.activate([
+            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 8),
+            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 8),
+            statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
+            statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
+        ])
+    }
+
+    private func bindStatusItemUpdateBadge() {
+        statusItemUpdateSubscription = appState.sparkleUpdater.$updateStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] status in
+                self?.updateStatusItemBadge(for: status)
+            }
+        updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+    }
+
+    private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
+        let updateVersion = status.availableUpdateVersion
+        statusItemUpdateBadge.isHidden = updateVersion == nil
+
+        if let updateVersion {
+            statusItem?.button?.toolTip = "Transcripted - update \(updateVersion) available"
+        } else {
+            statusItem?.button?.toolTip = "Transcripted"
+        }
     }
 
     private func installSettingsMenuHandler() {
