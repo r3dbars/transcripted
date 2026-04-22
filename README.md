@@ -1,4 +1,4 @@
-<img width="625" height="329" alt="Transcripted meeting and dictation capture on macOS" src="https://github.com/user-attachments/assets/86453a3e-9eee-4525-b985-777366296cf5" />
+![Transcripted meeting and dictation capture on macOS](docs/assets/transcripted-github-banner.png)
 
 # Transcripted
 
