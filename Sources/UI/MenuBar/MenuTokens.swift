@@ -64,8 +64,8 @@ enum MenuTokens {
     // Layout
     static let panelWidth: CGFloat = 304
     static let panelHeight: CGFloat = 320
-    static let onboardingWindowWidth: CGFloat = 620
-    static let onboardingWindowHeight: CGFloat = 760
+    static let onboardingWindowWidth: CGFloat = 720
+    static let onboardingWindowHeight: CGFloat = 740
     static let innerPadding: CGFloat = 10
     static let sectionSpacing: CGFloat = 7
     static let surfaceCornerRadius: CGFloat = 14

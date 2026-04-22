@@ -28,7 +28,7 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: MenuTokens.onboardingWindowWidth, height: 700)
+        window.minSize = NSSize(width: MenuTokens.onboardingWindowWidth, height: 680)
         window.contentViewController = hostingController
         window.center()
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true

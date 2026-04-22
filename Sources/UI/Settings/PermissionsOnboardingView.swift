@@ -89,21 +89,20 @@ struct PermissionsOnboardingView: View {
                 steps: FirstRunExperience.onboardingSteps(),
                 currentStep: currentStep
             )
-            .padding(.horizontal, 22)
-            .padding(.top, 22)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
 
-            Divider()
-                .overlay(MenuTokens.cardBorder)
+            OnboardingHairline()
 
             ScrollView {
                 currentScreen
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 18)
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
             }
 
-            Divider()
-                .overlay(MenuTokens.cardBorder)
+            OnboardingHairline()
 
             OnboardingFooter(
                 action: currentAction,
@@ -112,14 +111,14 @@ struct PermissionsOnboardingView: View {
                 onSecondary: handleSecondaryAction,
                 onPrimary: handlePrimaryAction
             )
-            .padding(.horizontal, 22)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
         }
         .frame(
             minWidth: MenuTokens.onboardingWindowWidth,
-            idealWidth: 680,
+            idealWidth: MenuTokens.onboardingWindowWidth,
             maxWidth: .infinity,
-            minHeight: 700,
+            minHeight: 680,
             idealHeight: MenuTokens.onboardingWindowHeight,
             maxHeight: .infinity
         )
@@ -824,60 +823,53 @@ private struct OnboardingHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                AppIconPreview(size: 44)
+                AppIconPreview(size: 38)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Transcripted")
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(MenuTokens.textPrimary)
 
-                    Text("Step \(currentStep.rawValue + 1) of \(steps.count): \(currentStep.progressTitle)")
+                    Text("Step \(currentStep.rawValue + 1) of \(steps.count) - \(currentStep.progressTitle)")
                         .font(.footnote)
                         .foregroundStyle(MenuTokens.textSecondary)
                 }
 
                 Spacer()
+
+                Text(currentStep.phaseTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(minWidth: 72)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.accentColor.opacity(0.12))
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+                            )
+                    )
             }
 
-            HStack(spacing: 6) {
-                ForEach(steps) { step in
-                    ProgressStepPill(
-                        title: step.progressTitle,
-                        isCurrent: step == currentStep,
-                        isComplete: step.rawValue < currentStep.rawValue
-                    )
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.08))
+
+                    Capsule()
+                        .fill(Color.accentColor)
+                        .frame(width: max(14, proxy.size.width * progress))
                 }
             }
+            .frame(height: 4)
         }
     }
-}
 
-private struct ProgressStepPill: View {
-    let title: String
-    let isCurrent: Bool
-    let isComplete: Bool
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if isComplete {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            Text(isCurrent ? title : "")
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(isCurrent || isComplete ? MenuTokens.textPrimary : MenuTokens.textMuted)
-        .frame(minWidth: isCurrent ? 104 : 18, minHeight: 22)
-        .padding(.horizontal, isCurrent ? 8 : 2)
-        .background(
-            Capsule()
-                .fill(isCurrent ? Color.accentColor.opacity(0.35) : MenuTokens.pillBackground)
-                .overlay(
-                    Capsule()
-                        .stroke(isCurrent ? Color.accentColor.opacity(0.65) : MenuTokens.pillBorder, lineWidth: 1)
-                )
-        )
+    private var progress: CGFloat {
+        guard !steps.isEmpty else { return 0 }
+        return CGFloat(currentStep.rawValue + 1) / CGFloat(steps.count)
     }
 }
 
@@ -889,7 +881,7 @@ private struct OnboardingFooter: View {
     let onPrimary: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 12) {
             Button {
                 onBack()
             } label: {
@@ -898,13 +890,7 @@ private struct OnboardingFooter: View {
             .buttonStyle(.bordered)
             .disabled(!canGoBack)
 
-            Text(action.detail)
-                .font(.footnote)
-                .foregroundStyle(MenuTokens.textSecondary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 10)
+            Spacer(minLength: 16)
 
             if let secondaryTitle = action.secondaryTitle {
                 Button(secondaryTitle) {
@@ -940,16 +926,7 @@ private struct HeroStepView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            OnboardingCard {
-                HStack(spacing: 14) {
-                    FlowSymbol(name: "mic.fill", title: "Speak")
-                    FlowArrow()
-                    FlowSymbol(name: "doc.text.fill", title: "Markdown")
-                    FlowArrow()
-                    FlowSymbol(name: "sparkles", title: "Agent")
-                }
-                .frame(maxWidth: .infinity)
-            }
+            OutcomePreviewCard()
         }
     }
 }
@@ -966,21 +943,17 @@ private struct ValueStepView: View {
                 ValueCard(
                     icon: "mic.fill",
                     title: "Dictation",
-                    detail: "Dictate instead of type."
+                    detail: "Speak a thought, paste it where you were typing, and keep the Markdown."
                 )
 
                 ValueCard(
                     icon: "record.circle.fill",
                     title: "Meetings",
-                    detail: "Record conversations into notes."
+                    detail: "Record calls locally and turn conversations into useful notes."
                 )
             }
 
-            OnboardingCallout(
-                icon: "folder.fill",
-                title: "Local Markdown",
-                detail: FirstRunOnboardingCopy.valueFooter
-            )
+            AgentContextStrip()
         }
     }
 }
@@ -998,29 +971,37 @@ private struct DictationSetupStepView: View {
                 detail: "Dictation needs two things: permission to listen and permission to paste your words back where you were typing."
             )
 
-            SetupRow(
-                icon: "mic.fill",
-                title: "Microphone",
-                detail: "Lets Transcripted listen when you start dictation.",
-                status: micGranted ? "Ready" : "Required",
-                tone: micGranted ? .ready : .needed,
-                buttonTitle: micGranted ? nil : TranscriptedPermissionKind.microphone.actionButtonTitle
-            ) {
-                onPermissionAction(.microphone)
-            }
+            OnboardingCard(padding: 0) {
+                VStack(spacing: 0) {
+                    SetupRow(
+                        icon: "mic.fill",
+                        title: "Microphone",
+                        detail: "Listen when you start dictation.",
+                        status: micGranted ? "Ready" : "Required",
+                        tone: micGranted ? .ready : .needed,
+                        buttonTitle: micGranted ? nil : TranscriptedPermissionKind.microphone.actionButtonTitle
+                    ) {
+                        onPermissionAction(.microphone)
+                    }
 
-            SetupRow(
-                icon: "text.cursor",
-                title: "Paste-back",
-                detail: "Lets Transcripted paste the dictation into the app you were using.",
-                status: accessibilityGranted ? "Ready" : "Required",
-                tone: accessibilityGranted ? .ready : .needed,
-                buttonTitle: accessibilityGranted ? nil : TranscriptedPermissionKind.accessibility.actionButtonTitle
-            ) {
-                onPermissionAction(.accessibility)
-            }
+                    OnboardingHairline()
 
-            LocalModelSetupRow(status: modelStatus)
+                    SetupRow(
+                        icon: "text.cursor",
+                        title: "Paste into other apps",
+                        detail: "Put the finished dictation back where you were typing.",
+                        status: accessibilityGranted ? "Ready" : "Required",
+                        tone: accessibilityGranted ? .ready : .needed,
+                        buttonTitle: accessibilityGranted ? nil : TranscriptedPermissionKind.accessibility.actionButtonTitle
+                    ) {
+                        onPermissionAction(.accessibility)
+                    }
+
+                    OnboardingHairline()
+
+                    LocalModelSetupRow(status: modelStatus)
+                }
+            }
         }
     }
 }
@@ -1039,25 +1020,25 @@ private struct TestDictationStepView: View {
             )
 
             OnboardingCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label(FirstRunOnboardingCopy.dictationPrompt, systemImage: "waveform")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(MenuTokens.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Say this out loud", systemImage: "waveform")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
 
-                    Text("Start dictation, say the sentence, then click Stop and Save here.")
-                        .font(.callout)
-                        .foregroundStyle(MenuTokens.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text("\"Remind me to review the pricing call.\"")
+                            .font(.system(size: 25, weight: .semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("Then stop the capture. Transcripted will paste the text back and save a Markdown copy.")
+                            .font(.callout)
+                            .foregroundStyle(MenuTokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if isRunning {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Listening or preparing...")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(MenuTokens.textSecondary)
-                        }
+                        ListeningStatePill()
                     }
 
                     if let issue {
@@ -1068,14 +1049,6 @@ private struct TestDictationStepView: View {
                             tone: .warning
                         )
                     }
-
-                    Button {
-                        isRunning ? onStop() : onStart()
-                    } label: {
-                        Label(isRunning ? "Stop and Save" : "Start Dictation", systemImage: isRunning ? "stop.fill" : "mic.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
             }
         }
@@ -1099,7 +1072,7 @@ private struct FirstDictationResultStepView: View {
             if let entry {
                 OnboardingCard {
                     VStack(alignment: .leading, spacing: 14) {
-                        Text("Transcript preview")
+                        Label("Your words are now Markdown", systemImage: "checkmark.circle.fill")
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(MenuTokens.textPrimary)
 
@@ -1178,22 +1151,7 @@ private struct MeetingsIntroStepView: View {
                 detail: "Once dictation works, the same idea expands to meetings."
             )
 
-            OnboardingCard {
-                HStack(spacing: 14) {
-                    FlowSymbol(name: "person.2.wave.2.fill", title: "Conversation")
-                    FlowArrow()
-                    FlowSymbol(name: "waveform", title: "Recording")
-                    FlowArrow()
-                    FlowSymbol(name: "doc.text.fill", title: "Notes")
-                }
-                .frame(maxWidth: .infinity)
-            }
-
-            OnboardingCallout(
-                icon: "record.circle.fill",
-                title: "Meetings become notes",
-                detail: FirstRunOnboardingCopy.meetingsDetail
-            )
+            MeetingNotePreviewCard()
         }
     }
 }
@@ -1217,37 +1175,45 @@ private struct MeetingSetupStepView: View {
                 detail: "Meeting recording needs your microphone plus System Audio Recording for the other side of calls."
             )
 
-            SetupRow(
-                icon: "mic.fill",
-                title: "Microphone",
-                detail: "Already used for your side of meetings.",
-                status: micGranted ? "Ready" : "Required",
-                tone: micGranted ? .ready : .needed,
-                buttonTitle: micGranted ? nil : TranscriptedPermissionKind.microphone.actionButtonTitle
-            ) {
-                onPermissionAction(.microphone)
-            }
+            OnboardingCard(padding: 0) {
+                VStack(spacing: 0) {
+                    SetupRow(
+                        icon: "mic.fill",
+                        title: "Microphone",
+                        detail: "Already used for your side of meetings.",
+                        status: micGranted ? "Ready" : "Required",
+                        tone: micGranted ? .ready : .needed,
+                        buttonTitle: micGranted ? nil : TranscriptedPermissionKind.microphone.actionButtonTitle
+                    ) {
+                        onPermissionAction(.microphone)
+                    }
 
-            SetupRow(
-                icon: "speaker.wave.2.fill",
-                title: "System Audio Recording",
-                detail: "Captures the other side of Zoom, Meet, videos, and calls.",
-                status: systemRecordingGranted ? "Ready" : "Needed for meetings",
-                tone: systemRecordingGranted ? .ready : .needed,
-                buttonTitle: systemRecordingGranted ? nil : TranscriptedPermissionKind.systemAudioRecording.actionButtonTitle
-            ) {
-                onPermissionAction(.systemAudioRecording)
-            }
+                    OnboardingHairline()
 
-            SetupRow(
-                icon: "calendar",
-                title: "Calendar",
-                detail: "Optional. Helps Transcripted spot meetings and offer a record prompt.",
-                status: calendarGranted ? "Ready" : "Optional",
-                tone: calendarGranted ? .ready : .neutral,
-                buttonTitle: calendarGranted ? nil : TranscriptedPermissionKind.calendar.actionButtonTitle
-            ) {
-                onPermissionAction(.calendar)
+                    SetupRow(
+                        icon: "speaker.wave.2.fill",
+                        title: "System Audio Recording",
+                        detail: "Captures the other side of Zoom, Meet, videos, and calls.",
+                        status: systemRecordingGranted ? "Ready" : "Needed for meetings",
+                        tone: systemRecordingGranted ? .ready : .needed,
+                        buttonTitle: systemRecordingGranted ? nil : TranscriptedPermissionKind.systemAudioRecording.actionButtonTitle
+                    ) {
+                        onPermissionAction(.systemAudioRecording)
+                    }
+
+                    OnboardingHairline()
+
+                    SetupRow(
+                        icon: "calendar",
+                        title: "Calendar",
+                        detail: "Optional. Helps Transcripted spot meetings and offer a record prompt.",
+                        status: calendarGranted ? "Ready" : "Optional",
+                        tone: calendarGranted ? .ready : .neutral,
+                        buttonTitle: calendarGranted ? nil : TranscriptedPermissionKind.calendar.actionButtonTitle
+                    ) {
+                        onPermissionAction(.calendar)
+                    }
+                }
             }
 
             OnboardingCard {
@@ -1339,22 +1305,7 @@ private struct AgentPayoffStepView: View {
                 detail: FirstRunOnboardingCopy.agentDetail
             )
 
-            OnboardingCard {
-                HStack(spacing: 14) {
-                    FlowSymbol(name: "folder.fill", title: "Markdown")
-                    FlowArrow()
-                    FlowSymbol(name: "magnifyingglass", title: "Search")
-                    FlowArrow()
-                    FlowSymbol(name: "sparkles", title: "Agent")
-                }
-                .frame(maxWidth: .infinity)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                AgentPromptPill(text: "Search my meetings")
-                AgentPromptPill(text: "What am I working on?")
-                AgentPromptPill(text: "Summarize today")
-            }
+            AgentContextPreviewCard()
 
             HStack(spacing: 10) {
                 Button {
@@ -1409,29 +1360,41 @@ private struct ReportingConsentCard: View {
 
     var body: some View {
         OnboardingCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Help improve Transcripted", systemImage: "bolt.shield.fill")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(MenuTokens.textPrimary)
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "bolt.shield.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.accentColor.opacity(0.12)))
 
-                Text("Privacy-safe diagnostics help catch setup problems. Transcripted never sends transcript text, audio, meeting titles, speaker names, source app names, emails, file paths, or raw URLs.")
-                    .font(.footnote)
-                    .foregroundStyle(MenuTokens.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Privacy-safe diagnostics")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(MenuTokens.textPrimary)
 
-                ToggleRow(
-                    title: "Crash and error reports",
-                    detail: crashReportingAvailable ? "Scrubbed reliability events only." : "Unavailable in this build.",
-                    isOn: Binding(get: { crashReportingEnabled }, set: { onCrashToggle($0) }),
-                    isEnabled: crashReportingAvailable
-                )
+                    Text("Helps catch setup problems. Never sends transcript text, audio, meeting titles, speaker names, emails, file paths, or URLs.")
+                        .font(.footnote)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                ToggleRow(
-                    title: "Anonymous usage stats",
-                    detail: analyticsAvailable ? "Allowlisted product events only." : "Unavailable until PostHog is configured.",
-                    isOn: Binding(get: { anonymousAnalyticsEnabled }, set: { onAnalyticsToggle($0) }),
-                    isEnabled: analyticsAvailable
-                )
+                Spacer(minLength: 16)
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    ToggleRow(
+                        title: "Crash reports",
+                        detail: crashReportingAvailable ? "Scrubbed only" : "Unavailable",
+                        isOn: Binding(get: { crashReportingEnabled }, set: { onCrashToggle($0) }),
+                        isEnabled: crashReportingAvailable
+                    )
+
+                    ToggleRow(
+                        title: "Usage stats",
+                        detail: analyticsAvailable ? "Allowlisted only" : "Unavailable",
+                        isOn: Binding(get: { anonymousAnalyticsEnabled }, set: { onAnalyticsToggle($0) }),
+                        isEnabled: analyticsAvailable
+                    )
+                }
             }
         }
     }
@@ -1447,16 +1410,14 @@ private struct ToggleRow: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(MenuTokens.textPrimary)
 
                 Text(detail)
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(MenuTokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer()
 
             Toggle("", isOn: $isOn)
                 .labelsHidden()
@@ -1464,11 +1425,7 @@ private struct ToggleRow: View {
                 .accessibilityLabel(title)
                 .help(detail)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(MenuTokens.pillBackground)
-        )
+        .frame(minHeight: 40)
     }
 }
 
@@ -1479,7 +1436,7 @@ private struct ScreenTitle: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 30, weight: .semibold))
+                .font(.system(size: 31, weight: .semibold))
                 .foregroundStyle(MenuTokens.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -1487,6 +1444,212 @@ private struct ScreenTitle: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(MenuTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct OutcomePreviewCard: View {
+    var body: some View {
+        OnboardingCard {
+            HStack(alignment: .top, spacing: 18) {
+                PreviewColumn(
+                    icon: "waveform",
+                    title: "Speak",
+                    detail: "\"Review onboarding before pricing.\""
+                )
+
+                FlowArrow()
+                    .padding(.top, 28)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    PreviewColumnHeader(icon: "doc.text.fill", title: "Markdown")
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("# Dictation")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        Text("Review onboarding before pricing.")
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+                    .foregroundStyle(MenuTokens.textPrimary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.black.opacity(0.22))
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                FlowArrow()
+                    .padding(.top, 28)
+
+                PreviewColumn(
+                    icon: "sparkles",
+                    title: "Agent",
+                    detail: "Ask: what did I say I should do next?"
+                )
+            }
+        }
+    }
+}
+
+private struct AgentContextStrip: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(Color.accentColor.opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Everything lands in local Markdown")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(MenuTokens.textPrimary)
+
+                Text(FirstRunOnboardingCopy.valueFooter)
+                    .font(.callout)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct ListeningStatePill: View {
+    var body: some View {
+        HStack(spacing: 9) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text("Listening or preparing...")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(MenuTokens.textSecondary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.07))
+        )
+    }
+}
+
+private struct MeetingNotePreviewCard: View {
+    var body: some View {
+        OnboardingCard {
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PreviewColumnHeader(icon: "record.circle.fill", title: "Meeting")
+                    Text("Transcripted records your mic plus system audio. No bot joins the call.")
+                        .font(.callout)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    PreviewColumnHeader(icon: "doc.text.fill", title: "Notes")
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("## Decisions")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        Text("- Keep pricing manual this week")
+                            .font(.system(size: 12, design: .monospaced))
+                        Text("## Follow-ups")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        Text("- Review onboarding dropoff")
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+                    .foregroundStyle(MenuTokens.textPrimary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.black.opacity(0.22))
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct AgentContextPreviewCard: View {
+    var body: some View {
+        OnboardingCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color.accentColor.opacity(0.12)))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Your agent gets searchable spoken context")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
+
+                        Text("Point an agent at the capture folder and ask across dictations, meetings, and imported audio.")
+                            .font(.callout)
+                            .foregroundStyle(MenuTokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    AgentPromptPill(text: "Search my meetings")
+                    AgentPromptPill(text: "What am I working on?")
+                    AgentPromptPill(text: "Summarize today")
+                }
+            }
+        }
+    }
+}
+
+private struct PreviewColumn: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            PreviewColumnHeader(icon: icon, title: title)
+
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(MenuTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PreviewColumnHeader: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(MenuTokens.textPrimary)
         }
     }
 }
@@ -1502,6 +1665,8 @@ private struct ValueCard: View {
                 Image(systemName: icon)
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
+                    .frame(width: 42, height: 42)
+                    .background(Circle().fill(Color.accentColor.opacity(0.12)))
 
                 Text(title)
                     .font(.title3.weight(.semibold))
@@ -1512,7 +1677,7 @@ private struct ValueCard: View {
                     .foregroundStyle(MenuTokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: 130, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 148, alignment: .leading)
         }
     }
 }
@@ -1548,43 +1713,42 @@ private struct SetupRow: View {
     let action: () -> Void
 
     var body: some View {
-        OnboardingCard {
-            HStack(alignment: .center, spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(MenuTokens.pillBackground)
-                        .frame(width: 42, height: 42)
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(tone.color.opacity(tone == .neutral ? 0.10 : 0.14))
+                    .frame(width: 42, height: 42)
 
-                    Image(systemName: icon)
-                        .font(.system(size: 17, weight: .semibold))
+                Image(systemName: tone == .ready ? "checkmark" : icon)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(tone == .ready ? MenuTokens.statusGreen : MenuTokens.textPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(MenuTokens.textPrimary)
+
+                    StatusBadge(title: status, tone: tone)
                 }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(title)
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(MenuTokens.textPrimary)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(MenuTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-                        StatusBadge(title: status, tone: tone)
-                    }
+            Spacer(minLength: 8)
 
-                    Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(MenuTokens.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            if let buttonTitle {
+                Button(buttonTitle) {
+                    action()
                 }
-
-                Spacer(minLength: 8)
-
-                if let buttonTitle {
-                    Button(buttonTitle) {
-                        action()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                .buttonStyle(.borderedProminent)
             }
         }
+        .padding(16)
     }
 }
 
@@ -1592,42 +1756,41 @@ private struct LocalModelSetupRow: View {
     let status: FirstRunModelCardState
 
     var body: some View {
-        OnboardingCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(MenuTokens.pillBackground)
-                            .frame(width: 42, height: 42)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(iconColor.opacity(0.14))
+                        .frame(width: 42, height: 42)
 
-                        Image(systemName: iconName)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(iconColor)
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 8) {
-                            Text("Local model")
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(MenuTokens.textPrimary)
-
-                            StatusBadge(title: status.status, tone: tone)
-                        }
-
-                        Text(status.detail)
-                            .font(.callout)
-                            .foregroundStyle(MenuTokens.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Image(systemName: iconName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(iconColor)
                 }
 
-                if let progress = status.progress, status.tone != .ready {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(iconColor)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("Local model")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(MenuTokens.textPrimary)
+
+                        StatusBadge(title: status.status, tone: tone)
+                    }
+
+                    Text(status.detail)
+                        .font(.callout)
+                        .foregroundStyle(MenuTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            if let progress = status.progress, status.tone != .ready {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(iconColor)
+            }
         }
+        .padding(16)
     }
 
     private var iconName: String {
@@ -1670,10 +1833,10 @@ private struct StatusBadge: View {
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(tone == .ready ? MenuTokens.savedBackground : MenuTokens.pillBackground)
+                    .fill(tone.color.opacity(tone == .ready ? 0.16 : 0.10))
                     .overlay(
                         Capsule()
-                            .stroke(tone == .ready ? MenuTokens.savedBorder : MenuTokens.pillBorder, lineWidth: 1)
+                            .stroke(tone.color.opacity(tone == .ready ? 0.24 : 0.18), lineWidth: 1)
                     )
             )
     }
@@ -1721,19 +1884,34 @@ private struct OnboardingCallout: View {
 }
 
 private struct OnboardingCard<Content: View>: View {
+    let padding: CGFloat
     @ViewBuilder let content: () -> Content
+
+    init(padding: CGFloat = 16, @ViewBuilder content: @escaping () -> Content) {
+        self.padding = padding
+        self.content = content
+    }
 
     var body: some View {
         content()
-            .padding(16)
+            .padding(padding)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(MenuTokens.pillBackground)
+                    .fill(Color.white.opacity(0.055))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                            .stroke(Color.white.opacity(0.085), lineWidth: 1)
                     )
+                    .shadow(color: .black.opacity(0.14), radius: 14, y: 8)
             )
+    }
+}
+
+private struct OnboardingHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(height: 1)
     }
 }
 
@@ -1783,19 +1961,17 @@ private struct AgentPromptPill: View {
                 .foregroundStyle(Color.accentColor)
 
             Text(text)
-                .font(.callout.weight(.semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(MenuTokens.textPrimary)
-
-            Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(MenuTokens.pillBackground)
+            Capsule()
+                .fill(Color.white.opacity(0.07))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(MenuTokens.pillBorder, lineWidth: 1)
+                    Capsule()
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
         )
     }
@@ -1824,6 +2000,19 @@ private struct AppIconPreview: View {
 }
 
 private extension FirstRunOnboardingStep {
+    var phaseTitle: String {
+        switch self {
+        case .hero, .value:
+            return "Value"
+        case .dictationSetup, .testDictation, .dictationResult:
+            return "Dictation"
+        case .meetingsIntro, .meetingSetup:
+            return "Meetings"
+        case .agentPayoff:
+            return "Agent"
+        }
+    }
+
     var analyticsValue: String {
         switch self {
         case .hero:
