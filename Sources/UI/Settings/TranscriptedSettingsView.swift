@@ -1537,131 +1537,150 @@ private struct AgentConnectionSettingsPage: View {
     @State private var claudeDesktopInstallError: String?
     @State private var isInstallingClaudeDesktop = false
     @State private var copiedClaudeDesktopConfig = false
+    @State private var copiedLocalAgentPrompt = false
+    @State private var copiedFolderPrompt = false
+    @State private var copiedFolderPaths = false
+    @State private var showAdvancedAgentSetup = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Connect Claude Desktop or copy one prompt for other agents."
+                summary: "Two good paths. Web chats are fallback only."
             )
 
             SettingsSection(
-                title: "Claude Desktop",
-                detail: "Install Transcripted direct tools with one click."
+                title: "Choose Your App",
+                detail: "Use Claude Desktop for direct tools, or copy one prompt for a local coding agent."
             ) {
-                ClaudeDesktopStatusRow(status: claudeDesktopStatus)
-
-                HStack(spacing: 10) {
-                    Button {
-                        installClaudeDesktop()
-                    } label: {
-                        Label(
-                            isInstallingClaudeDesktop ? "Installing..." : "Install for Claude Desktop",
-                            systemImage: isInstallingClaudeDesktop ? "hourglass" : "checkmark.circle"
-                        )
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isInstallingClaudeDesktop || !claudeDesktopStatus.bundledBinaryExists)
-
-                    Button {
-                        copyClaudeDesktopConfig()
-                    } label: {
-                        Label(copiedClaudeDesktopConfig ? "Copied" : "Copy Config", systemImage: "doc.on.doc")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        revealClaudeDesktopConfig()
-                    } label: {
-                        Label("Show Config", systemImage: "folder")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!claudeDesktopStatus.configExists)
-
-                    if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
+                AgentRouteCard(
+                    symbolName: "bubble.left.and.text.bubble.right.fill",
+                    title: "Claude Desktop",
+                    detail: "Best experience. Transcripted installs direct tools, then you restart Claude Desktop."
+                ) {
+                    HStack(spacing: 10) {
                         Button {
-                            openClaudeDesktopDownload()
+                            installClaudeDesktop()
                         } label: {
-                            Label("Get Claude", systemImage: "arrow.down.circle")
+                            Label(
+                                isInstallingClaudeDesktop ? "Installing..." : "Install",
+                                systemImage: isInstallingClaudeDesktop ? "hourglass" : "checkmark.circle"
+                            )
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isInstallingClaudeDesktop || !claudeDesktopStatus.bundledBinaryExists)
+
+                        if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
+                            Button {
+                                openClaudeDesktopDownload()
+                            } label: {
+                                Label("Get Claude", systemImage: "arrow.down.circle")
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
+
+                    ClaudeDesktopCompactStatus(status: claudeDesktopStatus)
                 }
 
-                if let claudeDesktopInstallResult {
-                    ClaudeDesktopSelfTestResultView(result: claudeDesktopInstallResult)
-                }
-
-                if let claudeDesktopInstallError {
-                    Label(claudeDesktopInstallError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            SettingsSection(
-                title: "Main Prompt",
-                detail: "Best first step for Codex, Claude, Cursor, and similar agents."
-            ) {
-                ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
-                    SettingsQuickLinkRow(
-                        symbolName: skill.symbolName,
-                        title: skill.title,
-                        detail: skill.displayDetail
-                    ) {}
-                    .disabled(true)
-                }
-
-                HStack {
-                    Button("Copy Prompt") {
-                        viewModel.copyStarterPrompt()
+                AgentRouteCard(
+                    symbolName: "terminal.fill",
+                    title: "Local Coding Agents",
+                    detail: "Claude Code, Codex, Cursor, Windsurf, Zed, OpenCode, OpenClaw, Cline, Continue, and VS Code agents."
+                ) {
+                    Button {
+                        copyLocalAgentPrompt()
+                    } label: {
+                        Label(copiedLocalAgentPrompt ? "Copied" : "Copy Prompt", systemImage: "doc.on.doc")
                     }
                     .buttonStyle(.borderedProminent)
                 }
             }
 
-            SettingsSection(
-                title: "Direct Tools",
-                detail: "Manual setup text for agents that support local MCP."
-            ) {
-                Text(viewModel.context.mcpSetupText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let claudeDesktopInstallResult {
+                ClaudeDesktopSelfTestResultView(result: claudeDesktopInstallResult)
+            }
 
-                Button("Copy Setup") {
-                    viewModel.copyMCPSetup()
-                }
-                .buttonStyle(.bordered)
+            if let claudeDesktopInstallError {
+                Label(claudeDesktopInstallError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             SettingsSection(
-                title: "Manual Folders",
-                detail: "Fallback paths for agents or quick inspection."
+                title: "Details",
+                detail: "Only needed when something is not working."
             ) {
-                AgentFolderRow(
-                    name: "Meetings",
-                    detail: "Meeting Markdown files.",
-                    path: viewModel.context.meetingsFolderURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL)
-                ) {
-                    viewModel.reveal(viewModel.context.meetingsFolderURL)
-                }
+                DisclosureGroup("Show setup details", isExpanded: $showAdvancedAgentSetup) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ClaudeDesktopStatusRow(status: claudeDesktopStatus)
 
-                AgentFolderRow(
-                    name: "Dictation",
-                    detail: "Dictation Markdown files.",
-                    path: viewModel.context.dictationsFolderURL.path,
-                    isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL)
-                ) {
-                    viewModel.reveal(viewModel.context.dictationsFolderURL)
-                }
+                        HStack(spacing: 10) {
+                            Button {
+                                copyClaudeDesktopConfig()
+                            } label: {
+                                Label(copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config", systemImage: "doc.on.doc")
+                            }
+                            .buttonStyle(.bordered)
 
-                Button("Copy Folder Paths") {
-                    viewModel.copyFolderPaths()
+                            Button {
+                                revealClaudeDesktopConfig()
+                            } label: {
+                                Label("Show Config", systemImage: "folder")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!claudeDesktopStatus.configExists)
+                        }
+
+                        AgentFolderRow(
+                            name: "Meetings",
+                            detail: "Meeting Markdown files.",
+                            path: viewModel.context.meetingsFolderURL.path,
+                            isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL)
+                        ) {
+                            viewModel.reveal(viewModel.context.meetingsFolderURL)
+                        }
+
+                        AgentFolderRow(
+                            name: "Dictation",
+                            detail: "Dictation Markdown files.",
+                            path: viewModel.context.dictationsFolderURL.path,
+                            isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL)
+                        ) {
+                            viewModel.reveal(viewModel.context.dictationsFolderURL)
+                        }
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Web chats are fallback only", systemImage: "globe")
+                                .font(.subheadline.weight(.semibold))
+
+                            Text("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use them for a pasted meeting or granted folders, not full Transcripted memory.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    copyFolderAccessPrompt()
+                                } label: {
+                                    Label(copiedFolderPrompt ? "Copied" : "Copy Folder Prompt", systemImage: "doc.on.doc")
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button {
+                                    copyFolderPaths()
+                                } label: {
+                                    Label(copiedFolderPaths ? "Copied" : "Copy Paths", systemImage: "folder")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
                 }
-                .buttonStyle(.bordered)
             }
         }
         .onAppear(perform: refreshClaudeDesktopStatus)
@@ -1694,19 +1713,46 @@ private struct AgentConnectionSettingsPage: View {
         }
     }
 
-    private func copyClaudeDesktopConfig() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(
-            ClaudeDesktopIntegrationInstaller.configSnippet(),
-            forType: .string
-        )
+    private func copyLocalAgentPrompt() {
+        copyText(AgentConnectionGuide.starterPrompt(filename: nil))
+        copiedLocalAgentPrompt = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copiedLocalAgentPrompt = false
+        }
+    }
 
+    private func copyFolderAccessPrompt() {
+        copyText(AgentConnectionGuide.folderAccessPrompt)
+        copiedFolderPrompt = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copiedFolderPrompt = false
+        }
+    }
+
+    private func copyFolderPaths() {
+        copyText(AgentConnectionGuide.folderPathsText)
+        copiedFolderPaths = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copiedFolderPaths = false
+        }
+    }
+
+    private func copyClaudeDesktopConfig() {
+        copyText(ClaudeDesktopIntegrationInstaller.configSnippet())
         copiedClaudeDesktopConfig = true
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             copiedClaudeDesktopConfig = false
         }
+    }
+
+    private func copyText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     private func revealClaudeDesktopConfig() {
@@ -1716,6 +1762,105 @@ private struct AgentConnectionSettingsPage: View {
     private func openClaudeDesktopDownload() {
         guard let url = URL(string: "https://claude.ai/download") else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+private struct AgentRouteCard<Content: View>: View {
+    let symbolName: String
+    let title: String
+    let detail: String
+    let content: Content
+
+    init(
+        symbolName: String,
+        title: String,
+        detail: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.symbolName = symbolName
+        self.title = title
+        self.detail = detail
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbolName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 34, height: 34)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.headline)
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    content
+                }
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.75))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct ClaudeDesktopCompactStatus: View {
+    let status: ClaudeDesktopIntegrationStatus
+
+    var body: some View {
+        Label(text, systemImage: symbolName)
+            .font(.caption)
+            .foregroundStyle(tint)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var text: String {
+        switch status.state {
+        case .installed:
+            return "Installed. Restart Claude Desktop if you just installed it."
+        case .notInstalled:
+            return status.bundledBinaryExists ? "Not installed yet." : "This app build is missing direct tools."
+        case .needsRepair:
+            return "Needs update. Click Install to repair it."
+        }
+    }
+
+    private var symbolName: String {
+        switch status.state {
+        case .installed:
+            return "checkmark.circle.fill"
+        case .notInstalled:
+            return "circle"
+        case .needsRepair:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch status.state {
+        case .installed:
+            return .green
+        case .notInstalled:
+            return .secondary
+        case .needsRepair:
+            return .orange
+        }
     }
 }
 

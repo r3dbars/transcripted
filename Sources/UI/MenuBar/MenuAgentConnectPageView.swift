@@ -15,36 +15,36 @@ final class MenuAgentConnectPageView: NSView {
     )
     private let titleLabel = NSTextField(labelWithString: "Connect your agent")
     private let subtitleLabel = NSTextField(wrappingLabelWithString:
-        "Copy once, paste anywhere, and let your agent pick the best available Transcripted connection."
+        "Claude Desktop gets direct tools. Local coding agents get one prompt. Web chats are fallback only."
     )
-    private let starterPromptLabel = NSTextField(labelWithString: "Starter skills")
+    private let starterPromptLabel = NSTextField(labelWithString: "Best options")
     private let benefitOneRow = AgentConnectInfoRowView(
-        symbolName: AgentConnectionGuide.starterSkills[0].symbolName,
-        title: AgentConnectionGuide.starterSkills[0].title,
-        body: AgentConnectionGuide.starterSkills[0].displayDetail
+        symbolName: "bubble.left.and.text.bubble.right.fill",
+        title: "Claude Desktop",
+        body: "Install Transcripted direct tools in Settings > Agent, then restart Claude Desktop."
     )
     private let benefitTwoRow = AgentConnectInfoRowView(
-        symbolName: AgentConnectionGuide.starterSkills[1].symbolName,
-        title: AgentConnectionGuide.starterSkills[1].title,
-        body: AgentConnectionGuide.starterSkills[1].displayDetail
+        symbolName: "terminal.fill",
+        title: "Local coding agents",
+        body: "Claude Code, Codex, Cursor, Windsurf, Zed, Cline, Continue, OpenCode, and OpenClaw."
     )
-    private let manualSetupLabel = NSTextField(labelWithString: "Need manual setup?")
+    private let manualSetupLabel = NSTextField(labelWithString: "Fallback only")
     private let mcpRow = AgentConnectInfoRowView(
-        symbolName: "cable.connector",
-        title: "Optional MCP setup",
-        body: "Copy the MCP setup text only if your agent supports MCP and you want direct read-only tools."
+        symbolName: "globe",
+        title: "Web or Cowork",
+        body: "Not recommended for full library access. Grant folders or paste one meeting."
     )
     private let folderRow = AgentConnectInfoRowView(
         symbolName: "folder",
-        title: "Manual folders",
-        body: "Use these only if you want to inspect or share the raw Transcripted paths yourself."
+        title: "Raw folders",
+        body: "Copy paths only when a web chat or support agent asks for them."
     )
 
     private let copyMCPButton = MenuOutlineButton(
-        title: "Copy MCP setup",
+        title: "Copy steps",
         symbolName: "cable.connector",
-        accessibilityLabel: "Copy MCP setup",
-        toolTip: "Copy MCP setup"
+        accessibilityLabel: "Copy Claude Desktop steps",
+        toolTip: "Copy Claude Desktop steps"
     )
     private let copyFoldersButton = MenuOutlineButton(
         title: "Copy folder paths",
@@ -53,10 +53,10 @@ final class MenuAgentConnectPageView: NSView {
         toolTip: "Copy folder paths"
     )
     private let copyPromptButton = MenuOutlineButton(
-        title: "Copy Agent Setup",
+        title: "Copy prompt",
         symbolName: "doc.on.doc",
-        accessibilityLabel: "Copy Agent Setup",
-        toolTip: "Copy Agent Setup"
+        accessibilityLabel: "Copy local agent prompt",
+        toolTip: "Copy local agent prompt"
     )
 
     private var resetTask: Task<Void, Never>?
@@ -130,32 +130,32 @@ final class MenuAgentConnectPageView: NSView {
         starterPromptLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        let copyPromptWidth = max(132, copyPromptButton.fittingSize.width)
-        let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
-        benefitOneRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
-        copyPromptButton.frame = NSRect(
+        let copyMCPWidth = max(116, copyMCPButton.fittingSize.width)
+        let desktopRowWidth = max(180, width - copyMCPWidth - inlineButtonSpacing)
+        benefitOneRow.frame = NSRect(x: pad, y: y, width: desktopRowWidth, height: AgentConnectInfoRowView.height)
+        copyMCPButton.frame = NSRect(
             x: benefitOneRow.frame.maxX + inlineButtonSpacing,
             y: y + 14,
-            width: copyPromptWidth,
+            width: copyMCPWidth,
             height: MenuTokens.secondaryButtonSize
         )
         y += AgentConnectInfoRowView.height + 14
 
-        benefitTwoRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
+        let copyPromptWidth = max(116, copyPromptButton.fittingSize.width)
+        let promptRowWidth = max(180, width - copyPromptWidth - inlineButtonSpacing)
+        benefitTwoRow.frame = NSRect(x: pad, y: y, width: promptRowWidth, height: AgentConnectInfoRowView.height)
+        copyPromptButton.frame = NSRect(
+            x: benefitTwoRow.frame.maxX + inlineButtonSpacing,
+            y: y + 14,
+            width: copyPromptWidth,
+            height: MenuTokens.secondaryButtonSize
+        )
         y += AgentConnectInfoRowView.height + 18
 
         manualSetupLabel.frame = NSRect(x: pad, y: y, width: width, height: 16)
         y += 22
 
-        let copyMCPWidth = max(120, copyMCPButton.fittingSize.width)
-        let mcpRowWidth = max(180, width - copyMCPWidth - inlineButtonSpacing)
-        mcpRow.frame = NSRect(x: pad, y: y, width: mcpRowWidth, height: AgentConnectInfoRowView.height)
-        copyMCPButton.frame = NSRect(
-            x: mcpRow.frame.maxX + inlineButtonSpacing,
-            y: y + 14,
-            width: copyMCPWidth,
-            height: MenuTokens.secondaryButtonSize
-        )
+        mcpRow.frame = NSRect(x: pad, y: y, width: width, height: AgentConnectInfoRowView.height)
         y += AgentConnectInfoRowView.height + 10
 
         let copyFoldersWidth = max(126, copyFoldersButton.fittingSize.width)
@@ -196,8 +196,8 @@ final class MenuAgentConnectPageView: NSView {
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyPromptButton.title = "Copy Agent Setup"
-            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy Agent Setup")
+            self.copyPromptButton.title = "Copy prompt"
+            self.copyPromptButton.setSymbol("doc.on.doc", accessibilityLabel: "Copy local agent prompt")
         }
     }
 
@@ -215,8 +215,8 @@ final class MenuAgentConnectPageView: NSView {
         resetTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard let self, !Task.isCancelled else { return }
-            self.copyMCPButton.title = "Copy MCP setup"
-            self.copyMCPButton.setSymbol("cable.connector", accessibilityLabel: "Copy MCP setup")
+            self.copyMCPButton.title = "Copy steps"
+            self.copyMCPButton.setSymbol("cable.connector", accessibilityLabel: "Copy Claude Desktop steps")
         }
     }
 

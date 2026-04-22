@@ -19,86 +19,90 @@ func testAgentConnectionGuide() {
         )
     }
 
-    runSuite("AgentConnectionGuide.starterPrompt — points to bundled skill files") {
+    runSuite("AgentConnectionGuide.starterPrompt — explains the two good setup paths") {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
-        assertTrue(prompt.contains("Bundled starter skill files:"), "prompt should include bundled skill section")
-        assertTrue(prompt.contains("Manifest:"), "prompt should point to the skill manifest")
-        assertTrue(prompt.contains("transcripted-summarize/SKILL.md"), "prompt should include Summarize skill file")
-        assertTrue(prompt.contains("transcripted-search-memory/SKILL.md"), "prompt should include Search Memory skill file")
-        assertTrue(prompt.contains("Summarize v0.1.0"), "prompt should include Summarize version")
-        assertTrue(prompt.contains("Search Memory v0.1.0"), "prompt should include Search Memory version")
         assertTrue(
-            prompt.contains("Automatic environment routing:"),
-            "prompt should include environment-specific routing guidance"
+            prompt.contains("If Transcripted direct tools are connected, use them."),
+            "prompt should prefer direct tools when available"
         )
         assertTrue(
-            prompt.contains("Do not ask me to choose a connection mode."),
-            "prompt should keep routing decisions away from the user"
+            prompt.contains("If this is a local coding agent, read the Transcripted folders below."),
+            "prompt should make local coding agents use the saved folders"
         )
         assertTrue(
-            prompt.contains("behave like a friendly setup concierge"),
-            "prompt should request concierge-style setup behavior"
+            prompt.contains("Install for Claude Desktop"),
+            "prompt should route Claude Desktop users to the in-app installer"
         )
         assertTrue(
-            prompt.contains("Ask one short, natural question at a time."),
-            "prompt should avoid dumping setup choices"
+            prompt.contains("web chat or Cowork session, treat it as fallback only"),
+            "prompt should not sell web chats as a first-class full-library path"
         )
         assertTrue(
-            prompt.contains("Local agents running on this Mac, such as Codex, Claude Code in the terminal"),
-            "prompt should name local agent contexts"
+            prompt.contains("Check any folders I granted in this chat before declaring Transcripted empty."),
+            "prompt should prefer user-granted folders before declaring Transcripted empty"
         )
         assertTrue(
-            prompt.contains("Remote or web chats, such as Claude chat in a browser"),
-            "prompt should explain remote chat limitations"
-        )
-        assertTrue(
-            prompt.contains("If I granted folders in Cowork, use those folders before deciding Transcripted has no data."),
-            "prompt should prefer user-granted Cowork folders before declaring Transcripted empty"
-        )
-        assertTrue(
-            prompt.contains("Concierge setup style:"),
-            "prompt should include natural setup behavior guidance"
-        )
-        assertTrue(
-            prompt.contains("If a route works, say \"I found a working path\" and keep going."),
-            "prompt should keep working when any usable route exists"
-        )
-        assertTrue(
-            prompt.contains("Which app are you using: Claude Desktop, Claude Code, Codex, or something else?"),
-            "prompt should ask one natural setup question when blocked"
-        )
-        assertTrue(
-            prompt.contains("Treat the raw transcript or dictation text as the source of truth."),
+            prompt.contains("Treat the Markdown files as the source of truth."),
             "prompt should ground answers in raw captures"
         )
         assertTrue(
-            prompt.contains("If you cannot read the skill files, do not treat that as a setup failure."),
-            "prompt should treat unreadable skill files as optional fallback, not a setup failure"
+            prompt.contains("If a date is relative, state the exact calendar dates you searched."),
+            "prompt should force exact dates for relative-date work"
         )
         assertTrue(
-            prompt.contains("When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering"),
-            "prompt should make SKILL.md files canonical for matching tasks"
+            prompt.contains("If you cannot read anything, tell me the one next step I need to take."),
+            "prompt should give one clear next step when blocked"
         )
         assertTrue(
-            prompt.contains("Briefly tell me the chosen route in natural language."),
-            "prompt should report the chosen route without making the user choose"
+            prompt.contains("Meetings: \(AgentConnectionGuide.meetingsFolder.path)"),
+            "prompt should include the meetings folder"
         )
         assertTrue(
-            prompt.contains("Do not ask me to build Transcripted MCP from source for a normal DMG install."),
-            "prompt should route Claude Desktop users through the DMG-installed app flow"
-        )
-        assertTrue(
-            prompt.contains("Check user-granted folders before checking the default paths."),
-            "prompt should use granted folders before default Transcripted paths"
-        )
-        assertTrue(
-            prompt.contains("continue with folder fallback for the current session when folders are readable"),
-            "prompt should keep Claude Code moving when MCP setup needs restart"
+            prompt.contains("Dictations: \(AgentConnectionGuide.dictationsFolder.path)"),
+            "prompt should include the dictations folder"
         )
         assertTrue(
             prompt.contains("If helpful, start with this meeting:\nPlanning Sync.md"),
             "meeting-specific prompt should preserve the selected filename"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.folderAccessPrompt — marks web setup as fallback") {
+        let prompt = AgentConnectionGuide.folderAccessPrompt
+
+        assertTrue(
+            prompt.contains("fallback setup for a web chat or Cowork session"),
+            "folder prompt should be explicit that web chat setup is fallback only"
+        )
+        assertTrue(
+            prompt.contains("Use those granted folders first."),
+            "folder prompt should prefer folders granted in the current chat"
+        )
+        assertTrue(
+            prompt.contains("tell me exactly which folder is missing"),
+            "folder prompt should ask for a precise missing folder instead of guessing"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpSetupText — avoids source-build instructions for DMG users") {
+        let setupText = AgentConnectionGuide.mcpSetupText
+
+        assertTrue(
+            setupText.contains("Open Transcripted Settings."),
+            "Claude Desktop setup should start inside the app"
+        )
+        assertTrue(
+            setupText.contains("Click Install for Claude Desktop."),
+            "Claude Desktop setup should use the in-app installer"
+        )
+        assertTrue(
+            setupText.contains(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path),
+            "Claude Desktop setup should show the stable installed helper path"
+        )
+        assertTrue(
+            !setupText.contains("swift build"),
+            "DMG setup copy should not ask normal users to build from source"
         )
     }
 

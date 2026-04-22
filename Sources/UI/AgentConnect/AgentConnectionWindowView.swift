@@ -5,6 +5,7 @@ struct AgentConnectionContext {
     let meetingsFolderURL: URL
     let dictationsFolderURL: URL
     let starterPrompt: String
+    let folderAccessPrompt: String
     let mcpSetupText: String
     let mcpConfigExample: String
     let folderPathsText: String
@@ -18,6 +19,7 @@ struct AgentConnectionContext {
         self.meetingsFolderURL = AgentConnectionGuide.meetingsFolder
         self.dictationsFolderURL = AgentConnectionGuide.dictationsFolder
         self.starterPrompt = AgentConnectionGuide.starterPrompt(filename: filename)
+        self.folderAccessPrompt = AgentConnectionGuide.folderAccessPrompt
         self.mcpSetupText = AgentConnectionGuide.mcpSetupText
         self.mcpConfigExample = AgentConnectionGuide.mcpConfigExample
         self.folderPathsText = AgentConnectionGuide.folderPathsText
@@ -27,6 +29,7 @@ struct AgentConnectionContext {
 private enum AgentConnectionCopyItem: Hashable {
     case prompt
     case mcp
+    case folderPrompt
     case folders
 }
 
@@ -47,6 +50,10 @@ final class AgentConnectionViewModel: ObservableObject {
 
     func copyStarterPrompt() {
         copy(context.starterPrompt, as: .prompt)
+    }
+
+    func copyFolderAccessPrompt() {
+        copy(context.folderAccessPrompt, as: .folderPrompt)
     }
 
     func copyMCPSetup() {
@@ -112,9 +119,9 @@ struct AgentConnectionWindowView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    primarySection
-                    mcpSection
-                    foldersSection
+                    claudeDesktopSection
+                    localAgentSection
+                    webFallbackSection
                 }
                 .padding(20)
             }
@@ -136,11 +143,11 @@ struct AgentConnectionWindowView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Connect your agent")
+                Text("Pick your agent")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
-                Text("Copy once, paste anywhere, and let your agent pick the best available Transcripted connection.")
+                Text("Claude Desktop gets direct tools. Local coding agents get one prompt. Web chats are fallback only.")
                     .font(.system(size: 12))
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -153,45 +160,15 @@ struct AgentConnectionWindowView: View {
         .background(AgentConnectionTheme.background)
     }
 
-    private var primarySection: some View {
+    private var claudeDesktopSection: some View {
         AgentConnectionSectionCard(
-            title: "Copy this into your agent",
-            subtitle: "This is the main path for most people."
+            title: "Claude Desktop",
+            subtitle: "Best path: install Transcripted direct tools, then restart Claude Desktop."
         ) {
-            AgentConnectionBodyText("Your agent will choose the best route automatically. Local agents can read Transcripted directly; remote chats get one clear next step if they cannot reach this Mac.")
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Starter skills")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                ForEach(Array(AgentConnectionGuide.starterSkills.enumerated()), id: \.offset) { _, skill in
-                    AgentConnectionInfoRow(
-                        symbolName: skill.symbolName,
-                        title: skill.title,
-                        detail: skill.displayDetail
-                    )
-                }
-            }
+            AgentConnectionBodyText("Use Transcripted Settings > Agent > Install for Claude Desktop. The app writes the Claude config and checks your local library.")
 
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .prompt, default: "Copy Agent Setup")) {
-                    viewModel.copyStarterPrompt()
-                }
-                .buttonStyle(AgentConnectionPrimaryButtonStyle())
-            }
-        }
-    }
-
-    private var mcpSection: some View {
-        AgentConnectionSectionCard(
-            title: "Optional MCP setup",
-            subtitle: "Set this up only if your agent supports MCP and you want the better direct-tool connection."
-        ) {
-            AgentConnectionBodyText(viewModel.context.mcpSetupText)
-
-            HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .mcp, default: "Copy MCP setup")) {
+                Button(viewModel.copyLabel(for: .mcp, default: "Copy Steps")) {
                     viewModel.copyMCPSetup()
                 }
                 .buttonStyle(AgentConnectionSecondaryButtonStyle())
@@ -199,14 +176,30 @@ struct AgentConnectionWindowView: View {
         }
     }
 
-    private var foldersSection: some View {
+    private var localAgentSection: some View {
         AgentConnectionSectionCard(
-            title: "Manual folders",
-            subtitle: "Only use these if you want to inspect or share the raw local paths yourself."
+            title: "Local Coding Agents",
+            subtitle: "Claude Code, Codex, Cursor, Windsurf, Zed, OpenCode, OpenClaw, Cline, Continue, and VS Code agents."
         ) {
-            AgentConnectionBodyText("The main prompt already includes these paths. They are here as a fallback for manual setup.")
+            AgentConnectionBodyText("Paste one prompt into the agent. It will use direct tools if available, otherwise it reads your Transcripted Markdown folders.")
 
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Button(viewModel.copyLabel(for: .prompt, default: "Copy Prompt")) {
+                    viewModel.copyStarterPrompt()
+                }
+                .buttonStyle(AgentConnectionPrimaryButtonStyle())
+            }
+        }
+    }
+
+    private var webFallbackSection: some View {
+        AgentConnectionSectionCard(
+            title: "Fallback Only: Web Chat Or Cowork",
+            subtitle: "Not recommended for full Transcripted memory."
+        ) {
+            AgentConnectionBodyText("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use this only for granted folders or pasted meetings.")
+
+            VStack(alignment: .leading, spacing: 10) {
                 AgentConnectionFileRow(
                     name: "Meetings",
                     detail: "Saved meeting markdown files live here.",
@@ -229,7 +222,12 @@ struct AgentConnectionWindowView: View {
             }
 
             HStack(spacing: 10) {
-                Button(viewModel.copyLabel(for: .folders, default: "Copy folder paths")) {
+                Button(viewModel.copyLabel(for: .folderPrompt, default: "Copy Folder Prompt")) {
+                    viewModel.copyFolderAccessPrompt()
+                }
+                .buttonStyle(AgentConnectionSecondaryButtonStyle())
+
+                Button(viewModel.copyLabel(for: .folders, default: "Copy Paths")) {
                     viewModel.copyFolderPaths()
                 }
                 .buttonStyle(AgentConnectionSecondaryButtonStyle())

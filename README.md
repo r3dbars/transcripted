@@ -131,7 +131,7 @@ See [docs/agent-connect.md](docs/agent-connect.md).
 - Auto Enter for selected apps after dictation
 - Launch at login
 - Local Markdown capture library
-- Optional MCP access for agents
+- One-click Claude Desktop direct tools
 
 ## Privacy
 
