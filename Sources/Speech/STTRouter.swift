@@ -145,7 +145,6 @@ class STTRouter: ObservableObject {
                 return text.isEmpty ? nil : text
             } catch {
                 print("❌ WHISPER | dictation failed: \(error.localizedDescription)")
-                parakeetEngine.finishExternalTranscription()
                 return nil
             }
         }
