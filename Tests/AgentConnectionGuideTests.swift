@@ -53,8 +53,8 @@ func testAgentConnectionGuide() {
             "prompt should explain remote chat limitations"
         )
         assertTrue(
-            prompt.contains("Cowork or shared-agent environments may be local or remote."),
-            "prompt should force cowork-style environments to classify local vs remote execution"
+            prompt.contains("If I granted folders in Cowork, use those folders before deciding Transcripted has no data."),
+            "prompt should prefer user-granted Cowork folders before declaring Transcripted empty"
         )
         assertTrue(
             prompt.contains("Concierge setup style:"),
@@ -73,16 +73,24 @@ func testAgentConnectionGuide() {
             "prompt should ground answers in raw captures"
         )
         assertTrue(
-            prompt.contains("Before offering task options, check whether the manifest and bundled SKILL.md files above are readable."),
-            "prompt should require a skill-file check before offering tasks"
+            prompt.contains("If you cannot read the skill files, do not treat that as a setup failure."),
+            "prompt should treat unreadable skill files as optional fallback, not a setup failure"
         )
         assertTrue(
             prompt.contains("When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering"),
             "prompt should make SKILL.md files canonical for matching tasks"
         )
         assertTrue(
-            prompt.contains("Briefly tell me the chosen route and active skill versions in natural language. Do not make me choose."),
+            prompt.contains("Briefly tell me the chosen route in natural language."),
             "prompt should report the chosen route without making the user choose"
+        )
+        assertTrue(
+            prompt.contains("Do not ask me to build Transcripted MCP from source for a normal DMG install."),
+            "prompt should route Claude Desktop users through the DMG-installed app flow"
+        )
+        assertTrue(
+            prompt.contains("Check user-granted folders before checking the default paths."),
+            "prompt should use granted folders before default Transcripted paths"
         )
         assertTrue(
             prompt.contains("continue with folder fallback for the current session when folders are readable"),

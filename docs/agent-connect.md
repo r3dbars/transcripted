@@ -22,8 +22,9 @@ This is the default path for most people.
 The copied prompt tells the agent to:
 
 - use Transcripted MCP tools first if they are already connected
-- otherwise read the local Transcripted folders directly
-- help you set up the better option if neither path is ready yet
+- otherwise read any Transcripted folders you granted in that chat
+- fall back to the default local Transcripted folders when they are readable
+- for Claude Desktop, use the in-app installer instead of source-build setup
 
 The intended user path is:
 
@@ -41,6 +42,9 @@ Current local folders:
 
 Use MCP when your client supports it and you want direct read-only tools instead
 of asking the model to inspect files manually.
+
+If you installed Transcripted from the DMG, you should not need to clone the
+repo or build the MCP server yourself.
 
 ### Claude Desktop
 
@@ -88,6 +92,9 @@ Current `transcripted-mcp` capabilities:
 - read-only access to local Transcripted data
 
 ### Source Build Fallback
+
+This is for contributors working from a checkout. Normal DMG installs should use
+the Claude Desktop button in Transcripted Settings.
 
 ```bash
 cd Tools/TranscriptedMCP

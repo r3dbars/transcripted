@@ -136,15 +136,15 @@ enum AgentConnectionGuide {
 
         Automatic route priority:
         1. If Transcripted MCP tools are already available in this environment, use them first.
-        2. If Transcripted MCP tools are not available, but this environment can build or configure a local MCP server, try to set up Transcripted MCP using the information below.
-        3. If MCP cannot be used here, fall back to direct file access using the local folders below.
+        2. If Transcripted MCP tools are not available, but this is Claude Desktop on my Mac, tell me to use Transcripted Settings > Agent > Install for Claude Desktop, then restart Claude Desktop.
+        3. If MCP cannot be used in this chat, fall back to direct file access using any folders or files explicitly granted in this session first, then the default local folders below.
         4. If neither MCP nor folder access is possible, stop and tell me exactly what is missing, what you tried, and the smallest next step I need to take.
 
         Automatic environment routing:
-        - Local agents running on this Mac, such as Codex, Claude Code in the terminal, Claude Code in an app, OpenCode, or OpenClaw, can usually read the local folders and bundled skill files. Use MCP when configured; otherwise use folder fallback.
-        - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after the MCP config is added and the client is restarted.
+        - Local agents running on this Mac, such as Codex, Claude Code in the terminal, Claude Code in an app, OpenCode, or OpenClaw, can usually read local folders and any folders I explicitly grant. Use MCP when configured; otherwise use folder fallback.
+        - Desktop clients with local stdio MCP support, such as Claude Desktop, can use Transcripted MCP after Transcripted's in-app installer adds the config and the client is restarted. Do not ask me to build Transcripted MCP from source for a normal DMG install.
         - Remote or web chats, such as Claude chat in a browser, mobile chat, or any sandbox that cannot read `/Users/...` paths, cannot use local folders, local skill files, or local stdio MCP. Do not ask me to choose a mode. Say that this chat cannot reach my Mac directly, then ask me for the single smallest useful action: upload or paste captures, switch to a local agent, or use a remote connector if one is available.
-        - Cowork or shared-agent environments may be local or remote. First determine whether the execution environment can read local Mac paths, then follow the matching rule above.
+        - Cowork or shared-agent environments may be local or remote. First determine whether this session has access to local Mac paths or user-granted folders. If I granted folders in Cowork, use those folders before deciding Transcripted has no data.
 
         Concierge setup style:
         - Start with "I'll check what I can use now."
@@ -157,14 +157,17 @@ enum AgentConnectionGuide {
         \(mcpPromptBlock)
 
         Folder fallback:
+        - First use any Transcripted folders, files, or workspace mounts explicitly granted in this chat.
         - Meetings: \(meetingsFolder.path)
         - Dictations: \(dictationsFolder.path)
 
         When using folders:
+        - Check user-granted folders before checking the default paths.
         - Read meeting and dictation markdown files directly.
         - Prefer the newest or most relevant meeting `.md` file when you need one meeting first.
         - Use exact filenames, dates, and speaker names when relevant.
         - Do not invent access or claim data you cannot read.
+        - Do not say Transcripted is empty just because the default paths are empty or unavailable if I granted another folder.
 
         Working rules:
         - Prefer MCP over raw file inspection when both are available.
@@ -179,11 +182,11 @@ enum AgentConnectionGuide {
         \(starterSkillPromptBlock)
 
         Skill loading rules:
-        - Before offering task options, check whether the manifest and bundled SKILL.md files above are readable.
+        - Try to read the manifest and bundled SKILL.md files above when they are available.
         - If the files are readable, say "Bundled skills active" and list Summarize and Search Memory with their versions.
         - When I ask for Summarize or Search Memory behavior, open the matching SKILL.md before answering and treat it as the canonical behavior.
         - Use the skill versions above when giving feedback or suggesting improvements.
-        - If you cannot read the skill files, say that clearly and use this fallback:
+        - If you cannot read the skill files, do not treat that as a setup failure. Use this fallback and continue:
           - Summarize: create a cited brief from meetings, dictations, or a date range.
           - Search Memory: find what was said, when it happened, and where it came from.
         - If MCP setup requires restarting the agent, say so, then continue with folder fallback for the current session when folders are readable.
@@ -191,8 +194,8 @@ enum AgentConnectionGuide {
         First step:
         1. Silently determine which environment type you are in: local Mac agent, desktop MCP client, remote/web chat, or unknown cowork/shared context.
         2. Silently determine which connection mode is available: MCP, MCP setup, folders, uploaded/pasted files, or unavailable.
-        3. Confirm whether the bundled SKILL.md files are readable.
-        4. Briefly tell me the chosen route and active skill versions in natural language. Do not make me choose.
+        3. Try bundled SKILL.md files if they are readable, but continue with fallback skills if they are not.
+        4. Briefly tell me the chosen route in natural language. Mention missing skill files only if I am debugging setup.
         5. Then continue with my task.
         """
 
@@ -267,29 +270,25 @@ enum AgentConnectionGuide {
 
     static var mcpPromptBlock: String {
         var lines = [
-            "Transcripted MCP setup:",
+            "Transcripted direct tools setup:",
             "- Server name: transcripted",
             "- Transport: local stdio",
+            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install for Claude Desktop, then restart Claude Desktop.",
+            "- Installed command path after setup: \(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)",
+            "- Claude Desktop config path: \(ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)",
         ]
 
         if let buildDirectory = localMCPBuildDirectory {
+            lines.append("")
+            lines.append("Developer source fallback:")
             lines.append("- Build directory: \(buildDirectory.path)")
             lines.append("- Build command: cd \(buildDirectory.path) && swift build -c release")
         }
 
         if let binary = localMCPBinary {
-            lines.append("- Expected binary: \(binary.path)")
-            lines.append("")
-            lines.append("Example MCP config:")
-            lines.append("{")
-            lines.append("  \"mcpServers\": {")
-            lines.append("    \"transcripted\": {")
-            lines.append("      \"command\": \"\(binary.path)\"")
-            lines.append("    }")
-            lines.append("  }")
-            lines.append("}")
+            lines.append("- Current app helper path: \(binary.path)")
         } else {
-            lines.append("- If a local transcripted-mcp binary is installed, add it to your MCP config under mcpServers.transcripted.command.")
+            lines.append("- If the helper is missing, ask me to install or update Transcripted, then use the in-app installer.")
         }
 
         lines.append("")
@@ -308,7 +307,7 @@ enum AgentConnectionGuide {
     }
 
     static var mcpConfigExample: String {
-        let command = localMCPBinary?.path ?? "/path/to/transcripted-mcp"
+        let command = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
         return """
         {
           "mcpServers": {
@@ -325,6 +324,9 @@ enum AgentConnectionGuide {
             "MCP is optional. If your agent supports it, Transcripted can expose direct read-only tools for recent context, search, meetings, dictations, and recaps.",
             "",
             "For Claude Desktop, use Transcripted Settings > Agent > Install for Claude Desktop. Transcripted installs the read-only server, writes the config, checks your local library, then asks you to restart Claude Desktop.",
+            "",
+            "Installed command path after setup:",
+            "`\(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)`",
         ]
 
         if let binary = localMCPBinary {
