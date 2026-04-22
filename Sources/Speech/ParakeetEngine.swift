@@ -681,7 +681,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         let inputNode = audioEngine.inputNode
-        applyPreferredDictationInputDevice(to: inputNode, operation: "prewarm")
+        let selection = applyPreferredDictationInputDevice(to: inputNode, operation: "prewarm")
         let outputFormat = inputNode.outputFormat(forBus: 0)
         let hwFormat = inputNode.inputFormat(forBus: 0)
 
@@ -690,16 +690,24 @@ class ParakeetEngine: ObservableObject {
         // the upsample and the tap delivers at the output bus rate. Both must be
         // valid before declaring the engine ready — input alone or output alone
         // can transiently report zero during device transitions.
-        guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
-              hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+        let readiness = audioFormatReadiness(
+            outputFormat: outputFormat,
+            hwFormat: hwFormat,
+            selection: selection
+        )
+        guard readiness == .ready else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "prewarm_invalid_format",
                 message: "Audio format invalid during prewarm",
-                context: [
-                    "output_rate": "\(outputFormat.sampleRate)",
-                    "output_channels": "\(outputFormat.channelCount)",
-                    "hw_rate": "\(hwFormat.sampleRate)",
-                    "hw_channels": "\(hwFormat.channelCount)"
-                ])
+                context: audioFormatContext(
+                    outputFormat: outputFormat,
+                    hwFormat: hwFormat,
+                    selection: selection,
+                    readiness: readiness
+                ))
+            if readiness == .routeNotSettled {
+                rebuildAudioEngine(reason: "audio_route_not_settled")
+            }
+            markFormatUnreadyAndPublish()
             schedulePrewarmRetry()
             return
         }
@@ -887,22 +895,40 @@ class ParakeetEngine: ObservableObject {
                 // sample rate on first read after device change, even past the
                 // initial settle delay. One extra wait + re-read is enough.
                 let inputNode = self.audioEngine.inputNode
-                self.applyPreferredDictationInputDevice(to: inputNode, operation: "device_recovery")
+                var selection = self.applyPreferredDictationInputDevice(to: inputNode, operation: "device_recovery")
                 var newFormat = inputNode.outputFormat(forBus: 0)
                 var hwFormat = inputNode.inputFormat(forBus: 0)
-                if newFormat.sampleRate == 0 || newFormat.channelCount == 0 ||
-                   hwFormat.sampleRate == 0 || hwFormat.channelCount == 0 {
+                if self.audioFormatReadiness(outputFormat: newFormat, hwFormat: hwFormat, selection: selection) != .ready {
                     try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                     guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                     let refreshedInputNode = self.audioEngine.inputNode
-                    self.applyPreferredDictationInputDevice(to: refreshedInputNode, operation: "device_recovery_retry")
+                    selection = self.applyPreferredDictationInputDevice(to: refreshedInputNode, operation: "device_recovery_retry")
                     newFormat = refreshedInputNode.outputFormat(forBus: 0)
                     hwFormat = refreshedInputNode.inputFormat(forBus: 0)
                 }
-                guard newFormat.sampleRate > 0, newFormat.channelCount > 0,
-                      hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+                let readiness = self.audioFormatReadiness(
+                    outputFormat: newFormat,
+                    hwFormat: hwFormat,
+                    selection: selection
+                )
+                guard readiness == .ready else {
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "device_change_rewarm_deferred",
+                        message: "Audio route still settling after device change",
+                        context: self.audioFormatContext(
+                            outputFormat: newFormat,
+                            hwFormat: hwFormat,
+                            selection: selection,
+                            readiness: readiness
+                        )
+                    )
+                    self.rebuildAudioEngine(reason: "device_change_route_not_settled")
+                    self.prewarmRetryCount = 0
+                    self.schedulePrewarmRetry()
                     throw NSError(domain: "ParakeetEngine", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Invalid audio format after device change (output \(newFormat.sampleRate)Hz/\(newFormat.channelCount)ch, input \(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch)"])
+                        userInfo: [NSLocalizedDescriptionKey: "Audio route not settled after device change"])
                 }
                 self.nativeSampleRate = newFormat.sampleRate
                 self.prewarmRetryCount = 0
@@ -986,6 +1012,59 @@ class ParakeetEngine: ObservableObject {
             recoveryState.markFormatReady()
             publishRecoveryState()
         }
+    }
+
+    private func audioFormatReadiness(
+        outputFormat: AVAudioFormat,
+        hwFormat: AVAudioFormat,
+        selection: DictationInputDeviceSelection?
+    ) -> ParakeetAudioFormatReadiness {
+        ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: outputFormat.sampleRate,
+            outputChannelCount: outputFormat.channelCount,
+            inputSampleRate: hwFormat.sampleRate,
+            inputChannelCount: hwFormat.channelCount,
+            selectedInputClass: selectedInputClass(for: selection),
+            selectionOverrodeDefault: selection?.didOverrideDefault ?? false
+        )
+    }
+
+    private func selectedInputClass(for selection: DictationInputDeviceSelection?) -> String {
+        if let selection {
+            return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput)
+        }
+        return inputDeviceClass(for: inputDeviceName)
+    }
+
+    private func audioFormatContext(
+        outputFormat: AVAudioFormat,
+        hwFormat: AVAudioFormat,
+        selection: DictationInputDeviceSelection?,
+        readiness: ParakeetAudioFormatReadiness
+    ) -> [String: String] {
+        var context = [
+            "format_readiness": readiness.rawValue,
+            "output_rate_hz": String(format: "%.0f", outputFormat.sampleRate),
+            "output_channels": "\(outputFormat.channelCount)",
+            "input_rate_hz": String(format: "%.0f", hwFormat.sampleRate),
+            "hw_channels": "\(hwFormat.channelCount)",
+            "input_device_class": selectedInputClass(for: selection),
+            "selection_overrode_default": "\(selection?.didOverrideDefault ?? false)",
+            "recovering": "\(recoveryState.isRecovering)",
+            "format_ready": "\(recoveryState.inputFormatReady)",
+            "generation": "\(recoveryState.generation)",
+        ]
+
+        if let selection {
+            context["selection_reason"] = selection.reason.rawValue
+            context["default_input_class"] = DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput)
+            context["selected_input_class"] = DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput)
+            if let defaultOutput = selection.defaultOutput {
+                context["default_output_class"] = DictationInputDeviceSelectionPolicy.deviceClass(for: defaultOutput)
+            }
+        }
+
+        return context
     }
 
     private func removeRecordingTap(force: Bool = false) {
@@ -1259,7 +1338,7 @@ class ParakeetEngine: ObservableObject {
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
         for attempt in 1...maxAttempts {
             let inputNode = audioEngine.inputNode
-            applyPreferredDictationInputDevice(to: inputNode, operation: "start_recording")
+            let selection = applyPreferredDictationInputDevice(to: inputNode, operation: "start_recording")
             // The tap is installed with format: nil, which means buffers arrive at the
             // node's OUTPUT bus format. On AirPods HFP the hw input is 24kHz but the
             // node's output bus is 48kHz (CoreAudio's internal converter handles the
@@ -1268,28 +1347,41 @@ class ParakeetEngine: ObservableObject {
             // both so we don't proceed when the device graph is still settling.
             let outputFormat = inputNode.outputFormat(forBus: 0)
             let hwFormat = inputNode.inputFormat(forBus: 0)
-            guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0,
-                  hwFormat.sampleRate > 0, hwFormat.channelCount > 0 else {
+            let readiness = audioFormatReadiness(
+                outputFormat: outputFormat,
+                hwFormat: hwFormat,
+                selection: selection
+            )
+            guard readiness == .ready else {
                 let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                    for: .invalidAudioFormat,
+                    for: readiness.startFailureReason ?? .invalidAudioFormat,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
-                print("⚠️ PARAKEET | input format unavailable: output=\(outputFormat.sampleRate)Hz/\(outputFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+                print("⚠️ PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(outputFormat.sampleRate)Hz/\(outputFormat.channelCount)ch hw=\(hwFormat.sampleRate)Hz/\(hwFormat.channelCount)ch")
+                var context = audioStartContext(
+                    attempt: attempt,
+                    isRecoveryAttempt: isRecoveryAttempt,
+                    engineWasRunning: audioEngine.isRunning,
+                    outputFormat: outputFormat,
+                    hwFormat: hwFormat
+                )
+                context.merge(
+                    audioFormatContext(
+                        outputFormat: outputFormat,
+                        hwFormat: hwFormat,
+                        selection: selection,
+                        readiness: readiness
+                    )
+                ) { current, _ in current }
                 EventReporter.shared.capture(
                     level: .warning,
                     engine: "parakeet",
                     event: "audio_format_unavailable",
                     message: "Audio hardware format not ready while starting dictation",
-                    context: audioStartContext(
-                        attempt: attempt,
-                        isRecoveryAttempt: isRecoveryAttempt,
-                        engineWasRunning: audioEngine.isRunning,
-                        outputFormat: outputFormat,
-                        hwFormat: hwFormat
-                    )
+                    context: context
                 )
                 resetAudioGraphAfterStartFailure(
-                    reason: "invalid_audio_format",
+                    reason: readiness == .routeNotSettled ? "audio_route_not_settled" : "invalid_audio_format",
                     rebuildEngine: startFailureAction.rebuildAudioEngine
                 )
                 if startFailureAction.markFormatUnready {
@@ -1398,12 +1490,14 @@ class ParakeetEngine: ObservableObject {
                         hwFormat: hwFormat,
                         error: error
                     )
-                    let shouldRetry = ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
+                    let failureReason = ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                    let shouldRetry = failureReason == .audioEngineStartFailed
+                        && ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
                         isRecoveryAttempt: isRecoveryAttempt,
                         failedAttempts: attempt
                     )
                     resetAudioGraphAfterStartFailure(
-                        reason: "audio_engine_start_failed",
+                        reason: failureReason == .audioRouteNotSettled ? "audio_route_not_settled" : "audio_engine_start_failed",
                         rebuildEngine: true
                     )
 
@@ -1417,6 +1511,28 @@ class ParakeetEngine: ObservableObject {
                             context: context
                         )
                         continue
+                    }
+
+                    if failureReason == .audioRouteNotSettled {
+                        print("⚠️ PARAKEET | audio route format unsupported while starting; waiting for CoreAudio to settle")
+                        EventReporter.shared.capture(
+                            level: .warning,
+                            engine: "parakeet",
+                            event: "audio_route_not_settled",
+                            message: "Audio route format was not ready while starting dictation",
+                            context: context
+                        )
+                        let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
+                            for: failureReason,
+                            isRecoveryAttempt: isRecoveryAttempt
+                        )
+                        if startFailureAction.markFormatUnready {
+                            markStartFailedAndPublish()
+                        }
+                        if startFailureAction.schedulePrewarmRetry {
+                            schedulePrewarmRetry()
+                        }
+                        return false
                     }
 
                     print("❌ PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")

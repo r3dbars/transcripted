@@ -348,14 +348,19 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        isDictating = false
         overlayController.showError(
             microphoneTimeoutMessage(
                 deviceName: appState.sttRouter.inputDeviceName,
                 startAttempts: startAttempts,
                 inputFormatReady: appState.sttRouter.inputFormatReady
-            )
+            ),
+            actionTitle: "Try Again",
+            action: { [weak self] in
+                guard let self else { return }
+                self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+            }
         )
-        isDictating = false
     }
 
     private func presentMicrophonePermissionError(
