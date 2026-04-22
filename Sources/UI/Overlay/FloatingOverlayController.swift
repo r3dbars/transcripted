@@ -191,7 +191,7 @@ class FloatingOverlayController {
 
     // MARK: - Panel Show/Hide
 
-    func showPanel(near sourceApp: NSRunningApplication?) {
+    func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
         guard let panel = panel else { return }
 
         // Invalidate any pending async _performHide() from a previous session's animation
@@ -205,11 +205,19 @@ class FloatingOverlayController {
         errorMessage = ""
 
         let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
+        let anchorTargetRect: NSRect?
+        if let anchorRect, anchorRect.width > 0, anchorRect.height > 0 {
+            anchorTargetRect = anchorRect
+        } else {
+            anchorTargetRect = nil
+        }
         let panelSize = preferredPanelSize(for: state)
 
         // Validate the accessibility rect — terminal emulators report oversized text areas
         let mousePos = NSEvent.mouseLocation
-        let currentScreen = NSScreen.screens.first { NSMouseInRect(mousePos, $0.frame, false) }
+        let referencePoint = anchorTargetRect.map { NSPoint(x: $0.midX, y: $0.midY) } ?? mousePos
+        let currentScreen = NSScreen.screens.first { NSMouseInRect(referencePoint, $0.frame, false) }
+            ?? NSScreen.screens.first { NSMouseInRect(mousePos, $0.frame, false) }
             ?? NSScreen.main
         let screenSize = currentScreen?.frame.size ?? NSSize(width: 1920, height: 1080)
         let targetRect: CGRect?
@@ -222,7 +230,12 @@ class FloatingOverlayController {
         }
 
         var origin: NSPoint
-        if let rect = targetRect, let screen = NSScreen.main {
+        if let rect = anchorTargetRect {
+            origin = NSPoint(
+                x: rect.midX - panelSize.width / 2,
+                y: rect.midY - panelSize.height / 2
+            )
+        } else if let rect = targetRect, let screen = NSScreen.main {
             let screenHeight = screen.frame.height
             let flippedY = screenHeight - rect.origin.y
             origin = NSPoint(
@@ -241,11 +254,18 @@ class FloatingOverlayController {
             origin.x = max(visibleFrame.minX + 10,
                            min(origin.x, visibleFrame.maxX - panelSize.width - 10))
             if origin.y + panelSize.height > visibleFrame.maxY {
-                origin.y = (targetRect != nil)
-                    ? origin.y - panelSize.height - 24
-                    : mousePos.y - panelSize.height - 10
+                if anchorTargetRect != nil {
+                    origin.y = visibleFrame.maxY - panelSize.height - 10
+                } else {
+                    origin.y = targetRect != nil
+                        ? origin.y - panelSize.height - 24
+                        : mousePos.y - panelSize.height - 10
+                }
             }
-            origin.y = max(visibleFrame.minY + 10, origin.y)
+            origin.y = max(
+                visibleFrame.minY + 10,
+                min(origin.y, visibleFrame.maxY - panelSize.height - 10)
+            )
         }
 
         panel.setFrameOrigin(origin)
@@ -365,7 +385,11 @@ class FloatingOverlayController {
     private var loadingTimerTask: Task<Void, Never>?
     private var successDismissTask: Task<Void, Never>?
 
-    func showLoadingState(near sourceApp: NSRunningApplication? = nil, presentation: LoadingPresentation? = nil) {
+    func showLoadingState(
+        near sourceApp: NSRunningApplication? = nil,
+        presentation: LoadingPresentation? = nil,
+        anchorRect: NSRect? = nil
+    ) {
         errorDismissTask?.cancel()
         errorMessage = ""
         errorActionTitle = nil
@@ -379,7 +403,7 @@ class FloatingOverlayController {
         }
         state = .loading
         if !isVisible {
-            showPanel(near: sourceApp)
+            showPanel(near: sourceApp, anchorRect: anchorRect)
         }
         let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         if enteringLoading {

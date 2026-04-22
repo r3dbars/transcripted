@@ -233,8 +233,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         return PermissionsOnboardingView(
             sttRouter: appState.sttRouter,
             canStartDictation: hasPasteTarget,
-            onStartDictation: { [weak self] in
-                self?.startOnboardingDictationTest()
+            onStartDictation: { [weak self] anchorRect in
+                self?.startOnboardingDictationTest(anchorRect: anchorRect)
             },
             onStopDictation: { [weak self] in
                 self?.stopOnboardingDictationTest()
@@ -287,9 +287,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
     }
 
-    private func startOnboardingDictationTest() {
+    private func startOnboardingDictationTest(anchorRect: NSRect?) {
         NSApp.activate(ignoringOtherApps: true)
-        sessionController.startDictation(sourceApp: nil, trigger: .onboarding)
+        sessionController.startDictation(sourceApp: nil, trigger: .onboarding, anchorRect: anchorRect)
     }
 
     private func stopOnboardingDictationTest() {

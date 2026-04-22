@@ -29,7 +29,7 @@ struct PermissionsOnboardingView: View {
 
     @ObservedObject private var sttRouter: STTRouter
     let canStartDictation: Bool
-    var onStartDictation: (() -> Void)?
+    var onStartDictation: ((NSRect?) -> Void)?
     var onStopDictation: (() -> Void)?
     var onStartMeetingDryRun: (() async -> Bool)?
     var onStopMeetingDryRun: (() async -> Bool)?
@@ -62,11 +62,12 @@ struct PermissionsOnboardingView: View {
     @State private var onboardingStartedAt = Date()
     @State private var currentStepStartedAt = Date()
     @State private var didCompleteOnboarding = false
+    @State private var dictationPracticeAnchor: NSRect?
 
     init(
         sttRouter: STTRouter,
         canStartDictation: Bool = false,
-        onStartDictation: (() -> Void)? = nil,
+        onStartDictation: ((NSRect?) -> Void)? = nil,
         onStopDictation: (() -> Void)? = nil,
         onStartMeetingDryRun: (() async -> Bool)? = nil,
         onStopMeetingDryRun: (() async -> Bool)? = nil,
@@ -170,10 +171,8 @@ struct PermissionsOnboardingView: View {
             )
         case .testDictation:
             TestDictationStepView(
-                isRunning: isFirstDictationRunning,
                 issue: firstDictationIssue,
-                onStart: startFirstDictation,
-                onStop: stopFirstDictation
+                onAnchorChange: { dictationPracticeAnchor = $0 }
             )
         case .dictationResult:
             FirstDictationResultStepView(
@@ -405,7 +404,7 @@ struct PermissionsOnboardingView: View {
             return
         }
 
-        onStartDictation()
+        onStartDictation(dictationPracticeAnchor)
     }
 
     private func stopFirstDictation() {
@@ -913,8 +912,6 @@ private struct HeroStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 14) {
-                AppIconPreview(size: 78)
-
                 Text(FirstRunOnboardingStep.hero.screenTitle)
                     .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(MenuTokens.textPrimary)
@@ -1007,10 +1004,8 @@ private struct DictationSetupStepView: View {
 }
 
 private struct TestDictationStepView: View {
-    let isRunning: Bool
     let issue: String?
-    let onStart: () -> Void
-    let onStop: () -> Void
+    let onAnchorChange: (NSRect?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1037,10 +1032,6 @@ private struct TestDictationStepView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if isRunning {
-                        ListeningStatePill()
-                    }
-
                     if let issue {
                         OnboardingCallout(
                             icon: "exclamationmark.triangle.fill",
@@ -1051,6 +1042,7 @@ private struct TestDictationStepView: View {
                     }
                 }
             }
+            .background(OnboardingScreenFrameReader(onChange: onAnchorChange))
         }
     }
 }
@@ -1527,25 +1519,6 @@ private struct AgentContextStrip: View {
     }
 }
 
-private struct ListeningStatePill: View {
-    var body: some View {
-        HStack(spacing: 9) {
-            ProgressView()
-                .controlSize(.small)
-
-            Text("Listening or preparing...")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(MenuTokens.textSecondary)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(Color.white.opacity(0.07))
-        )
-    }
-}
-
 private struct MeetingNotePreviewCard: View {
     var body: some View {
         OnboardingCard {
@@ -1996,6 +1969,62 @@ private struct AppIconPreview: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: min(16, size * 0.22), style: .continuous))
             .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+    }
+}
+
+private struct OnboardingScreenFrameReader: NSViewRepresentable {
+    let onChange: (NSRect?) -> Void
+
+    func makeNSView(context: Context) -> AnchorTrackingView {
+        let view = AnchorTrackingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: AnchorTrackingView, context: Context) {
+        nsView.onChange = onChange
+        nsView.publishScreenFrame()
+    }
+
+    final class AnchorTrackingView: NSView {
+        var onChange: ((NSRect?) -> Void)?
+        private var lastFrame: NSRect?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            publishScreenFrame()
+        }
+
+        override func layout() {
+            super.layout()
+            publishScreenFrame()
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            publishScreenFrame()
+        }
+
+        func publishScreenFrame() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard let window = self.window else {
+                    if self.lastFrame != nil {
+                        self.lastFrame = nil
+                        self.onChange?(nil)
+                    }
+                    return
+                }
+
+                let windowRect = self.convert(self.bounds, to: nil)
+                let screenRect = window.convertToScreen(windowRect)
+                guard screenRect.width > 0, screenRect.height > 0 else { return }
+                if self.lastFrame != screenRect {
+                    self.lastFrame = screenRect
+                    self.onChange?(screenRect)
+                }
+            }
+        }
     }
 }
 

@@ -59,6 +59,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private var sessionSourceApp: NSRunningApplication?
+    private var sessionAnchorRect: NSRect?
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
     private var recordingStartRetryTask: Task<Void, Never>?
@@ -110,11 +111,16 @@ class DictationSessionController: ObservableObject {
     // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
-    func startDictation(sourceApp: NSRunningApplication?, trigger: DictationTrigger = .unknown) {
+    func startDictation(
+        sourceApp: NSRunningApplication?,
+        trigger: DictationTrigger = .unknown,
+        anchorRect: NSRect? = nil
+    ) {
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
         isDictating = true
         sessionSourceApp = sourceApp
+        sessionAnchorRect = anchorRect
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         currentDictationTrigger = trigger
         lastCompletedText = nil
@@ -130,7 +136,8 @@ class DictationSessionController: ObservableObject {
         case .notDetermined:
             overlayController.showLoadingState(
                 near: sourceApp,
-                presentation: microphonePermissionPresentation()
+                presentation: microphonePermissionPresentation(),
+                anchorRect: anchorRect
             )
             startupTask?.cancel()
             startupTask = Task { @MainActor [weak self] in
@@ -196,7 +203,7 @@ class DictationSessionController: ObservableObject {
         guard isDictating else { return }
         if appState.sttRouter.isModelLoaded {
             overlayController.state = .listening
-            overlayController.showPanel(near: sourceApp)
+            overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
             beginDictationRecording(sourceApp: sourceApp)
             return
         }
@@ -267,7 +274,8 @@ class DictationSessionController: ObservableObject {
                     isRecovering: isRecovering,
                     inputFormatReady: inputFormatReady,
                     startAttempts: startAttempts
-                )
+                ),
+                anchorRect: sessionAnchorRect
             )
 
             if !isRecovering, inputFormatReady {
@@ -370,7 +378,7 @@ class DictationSessionController: ObservableObject {
             )
         )
         if !overlayController.isVisible {
-            overlayController.showPanel(near: sourceApp)
+            overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
         }
         overlayController.showError(
             microphoneUnavailableMessage(for: status, openedSettings: false),
@@ -389,12 +397,20 @@ class DictationSessionController: ObservableObject {
                             )
                             return
                         }
-                        self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                        self.startDictation(
+                            sourceApp: sourceApp,
+                            trigger: self.currentDictationTrigger,
+                            anchorRect: self.sessionAnchorRect
+                        )
                     }
                 case .denied, .restricted:
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
-                    self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
+                    self.startDictation(
+                        sourceApp: sourceApp,
+                        trigger: self.currentDictationTrigger,
+                        anchorRect: self.sessionAnchorRect
+                    )
                 @unknown default:
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 }
@@ -644,7 +660,11 @@ class DictationSessionController: ObservableObject {
                         "Dictation couldn't start: \(message)",
                         actionTitle: "Retry Dictation",
                         action: { [weak self] in
-                            self?.startDictation(sourceApp: sourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+                            self?.startDictation(
+                                sourceApp: sourceApp,
+                                trigger: self?.currentDictationTrigger ?? .unknown,
+                                anchorRect: self?.sessionAnchorRect
+                            )
                         }
                     )
                     return
@@ -662,7 +682,11 @@ class DictationSessionController: ObservableObject {
                 "Dictation is still loading. Please try again in a moment.",
                 actionTitle: "Retry Dictation",
                 action: { [weak self] in
-                    self?.startDictation(sourceApp: sourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+                    self?.startDictation(
+                        sourceApp: sourceApp,
+                        trigger: self?.currentDictationTrigger ?? .unknown,
+                        anchorRect: self?.sessionAnchorRect
+                    )
                 }
             )
         }
@@ -674,7 +698,11 @@ class DictationSessionController: ObservableObject {
     ) {
         guard let appState = appState else { return }
         let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.modelDownloadState)
-        overlayController?.showLoadingState(near: sourceApp, presentation: presentation)
+        overlayController?.showLoadingState(
+            near: sourceApp,
+            presentation: presentation,
+            anchorRect: sessionAnchorRect
+        )
     }
 
     private func loadingPresentation(for modelState: ParakeetModelState) -> FloatingOverlayController.LoadingPresentation {
@@ -839,7 +867,11 @@ class DictationSessionController: ObservableObject {
             "Recording was interrupted. Check your microphone or audio device, then try again.",
             actionTitle: "Retry Dictation",
             action: { [weak self] in
-                self?.startDictation(sourceApp: self?.sessionSourceApp, trigger: self?.currentDictationTrigger ?? .unknown)
+                self?.startDictation(
+                    sourceApp: self?.sessionSourceApp,
+                    trigger: self?.currentDictationTrigger ?? .unknown,
+                    anchorRect: self?.sessionAnchorRect
+                )
             }
         )
     }
