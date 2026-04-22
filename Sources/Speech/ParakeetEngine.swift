@@ -25,18 +25,107 @@ private enum InputDeviceLookupError: Error {
 }
 
 private enum CoreAudioInputDeviceLookup {
-    static func defaultInputDeviceName() throws -> String {
-        let deviceID = try defaultInputDeviceID()
+    static func preferredDictationInputSelection() throws -> DictationInputDeviceSelection {
+        let defaultInputID = try defaultInputDeviceID()
+        var availableInputs = try allInputDevices()
+
+        let defaultInput: DictationAudioDevice
+        if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
+            defaultInput = existingDefault
+        } else {
+            defaultInput = try deviceDescriptor(for: defaultInputID, inputChannelCount: 1)
+            availableInputs.append(defaultInput)
+        }
+
+        let defaultOutput = try? deviceDescriptor(for: defaultOutputDeviceID(), inputChannelCount: 0)
+
+        return DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: defaultInput,
+            defaultOutput: defaultOutput,
+            availableInputs: availableInputs
+        )
+    }
+
+    private static func allInputDevices() throws -> [DictationAudioDevice] {
+        try allDeviceIDs().compactMap { deviceID in
+            let inputChannels = (try? channelCount(for: deviceID, scope: kAudioDevicePropertyScopeInput)) ?? 0
+            guard inputChannels > 0 else { return nil }
+            return try? deviceDescriptor(for: deviceID, inputChannelCount: inputChannels)
+        }
+    }
+
+    private static func allDeviceIDs() throws -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize
+        )
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+
+        var devices = [AudioDeviceID](
+            repeating: AudioDeviceID(kAudioObjectUnknown),
+            count: Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        )
+
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &devices
+        )
+
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+
+        return devices.filter { $0 != AudioDeviceID(kAudioObjectUnknown) }
+    }
+
+    private static func deviceDescriptor(
+        for deviceID: AudioDeviceID,
+        inputChannelCount: UInt32
+    ) throws -> DictationAudioDevice {
         let name = try readStringProperty(
             selector: kAudioDevicePropertyDeviceNameCFString,
             objectID: AudioObjectID(deviceID)
         )
-        return name.isEmpty ? "Unknown" : name
+        let transport = (try? readUInt32Property(
+            selector: kAudioDevicePropertyTransportType,
+            objectID: AudioObjectID(deviceID)
+        )).map(transportType) ?? .other
+
+        return DictationAudioDevice(
+            id: deviceID,
+            name: name.isEmpty ? "Unknown" : name,
+            transport: transport,
+            inputChannelCount: inputChannelCount
+        )
     }
 
     private static func defaultInputDeviceID() throws -> AudioDeviceID {
+        try defaultDeviceID(selector: kAudioHardwarePropertyDefaultInputDevice)
+    }
+
+    private static func defaultOutputDeviceID() throws -> AudioDeviceID {
+        try defaultDeviceID(selector: kAudioHardwarePropertyDefaultOutputDevice)
+    }
+
+    private static func defaultDeviceID(selector: AudioObjectPropertySelector) throws -> AudioDeviceID {
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -60,6 +149,54 @@ private enum CoreAudioInputDeviceLookup {
         }
 
         return deviceID
+    }
+
+    private static func channelCount(
+        for deviceID: AudioDeviceID,
+        scope: AudioObjectPropertyScope
+    ) throws -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(deviceID),
+            &address,
+            0,
+            nil,
+            &dataSize
+        )
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+        guard dataSize > 0 else { return 0 }
+
+        let rawPointer = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { rawPointer.deallocate() }
+
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(deviceID),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            rawPointer
+        )
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+
+        let bufferList = rawPointer.bindMemory(to: AudioBufferList.self, capacity: 1)
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+        return buffers.reduce(UInt32(0)) { total, buffer in
+            total + buffer.mNumberChannels
+        }
     }
 
     private static func readStringProperty(
@@ -90,6 +227,53 @@ private enum CoreAudioInputDeviceLookup {
         }
 
         return (value?.takeUnretainedValue() as String?) ?? ""
+    }
+
+    private static func readUInt32Property(
+        selector: AudioObjectPropertySelector,
+        objectID: AudioObjectID
+    ) throws -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+
+        let status = AudioObjectGetPropertyData(
+            objectID,
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &value
+        )
+
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyReadFailed(status)
+        }
+
+        return value
+    }
+
+    private static func transportType(_ rawValue: UInt32) -> DictationAudioTransport {
+        switch rawValue {
+        case kAudioDeviceTransportTypeBuiltIn:
+            return .builtIn
+        case kAudioDeviceTransportTypeBluetooth:
+            return .bluetooth
+        case kAudioDeviceTransportTypeBluetoothLE:
+            return .bluetoothLE
+        case kAudioDeviceTransportTypeUSB:
+            return .usb
+        case kAudioDeviceTransportTypeAggregate:
+            return .aggregate
+        case kAudioDeviceTransportTypeVirtual:
+            return .virtual
+        default:
+            return .other
+        }
     }
 }
 
@@ -209,6 +393,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var didReceiveAudioSamples = false
     private var cachedInputDeviceName = "Unknown"
     private var lastAudioStartFailureReportAt: TimeInterval?
+    private var lastInputSelectionReportKey: String?
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
@@ -217,18 +402,36 @@ class ParakeetEngine: ObservableObject {
         scheduleInputDeviceNameRefresh()
     }
 
-    nonisolated private static func loadInputDeviceName() -> String {
+    nonisolated private static func loadDictationInputDeviceSelection() -> DictationInputDeviceSelection? {
         do {
-            return try CoreAudioInputDeviceLookup.defaultInputDeviceName()
+            return try CoreAudioInputDeviceLookup.preferredDictationInputSelection()
         } catch {
-            return "Unknown"
+            return nil
         }
+    }
+
+    nonisolated private static var unknownInputDeviceSelection: DictationInputDeviceSelection {
+        let unknownDevice = DictationAudioDevice(
+            id: AudioDeviceID(kAudioObjectUnknown),
+            name: "Unknown",
+            transport: .other,
+            inputChannelCount: 0
+        )
+        return DictationInputDeviceSelection(
+            defaultInput: unknownDevice,
+            selectedInput: unknownDevice,
+            defaultOutput: nil,
+            reason: .defaultIsSafe
+        )
     }
 
     private func scheduleInputDeviceNameRefresh() {
         Task.detached(priority: .utility) { [weak self] in
-            let deviceName = Self.loadInputDeviceName()
-            await self?.updateCachedInputDeviceName(deviceName)
+            if let selection = Self.loadDictationInputDeviceSelection() {
+                await self?.updateCachedInputDeviceSelection(selection)
+            } else {
+                await self?.updateCachedInputDeviceName("Unknown")
+            }
         }
     }
 
@@ -236,15 +439,19 @@ class ParakeetEngine: ObservableObject {
         cachedInputDeviceName = deviceName
     }
 
-    private func handleDefaultInputDeviceChange(deviceName: String) {
-        cachedInputDeviceName = deviceName
-        print("🎤 PARAKEET | default input changed → \(deviceName)")
+    private func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
+        cachedInputDeviceName = selection.selectedInput.name
+    }
+
+    private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {
+        cachedInputDeviceName = selection.selectedInput.name
+        print("🎤 PARAKEET | default input changed → \(selection.defaultInput.name); dictation input → \(selection.selectedInput.name)")
         EventReporter.shared.capture(
             level: .info,
             engine: "parakeet",
             event: "default_input_device_changed",
             message: "Default input device changed",
-            context: ["audio_device": deviceName]
+            context: inputSelectionContext(selection)
         )
         handleAudioConfigChange()
     }
@@ -473,6 +680,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         let inputNode = audioEngine.inputNode
+        applyPreferredDictationInputDevice(to: inputNode, operation: "prewarm")
         let outputFormat = inputNode.outputFormat(forBus: 0)
         let hwFormat = inputNode.inputFormat(forBus: 0)
 
@@ -576,8 +784,8 @@ class ParakeetEngine: ObservableObject {
 
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             Task.detached(priority: .utility) { [weak self] in
-                let deviceName = Self.loadInputDeviceName()
-                await self?.handleDefaultInputDeviceChange(deviceName: deviceName)
+                let selection = Self.loadDictationInputDeviceSelection() ?? Self.unknownInputDeviceSelection
+                await self?.handleDefaultInputDeviceChange(selection: selection)
             }
         }
 
@@ -674,6 +882,7 @@ class ParakeetEngine: ObservableObject {
                 // sample rate on first read after device change, even past the
                 // initial settle delay. One extra wait + re-read is enough.
                 let inputNode = self.audioEngine.inputNode
+                self.applyPreferredDictationInputDevice(to: inputNode, operation: "device_recovery")
                 var newFormat = inputNode.outputFormat(forBus: 0)
                 var hwFormat = inputNode.inputFormat(forBus: 0)
                 if newFormat.sampleRate == 0 || newFormat.channelCount == 0 ||
@@ -681,6 +890,7 @@ class ParakeetEngine: ObservableObject {
                     try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                     guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                     let refreshedInputNode = self.audioEngine.inputNode
+                    self.applyPreferredDictationInputDevice(to: refreshedInputNode, operation: "device_recovery_retry")
                     newFormat = refreshedInputNode.outputFormat(forBus: 0)
                     hwFormat = refreshedInputNode.inputFormat(forBus: 0)
                 }
@@ -860,6 +1070,75 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Recording
 
+    @discardableResult
+    private func applyPreferredDictationInputDevice(
+        to inputNode: AVAudioInputNode,
+        operation: String
+    ) -> DictationInputDeviceSelection? {
+        guard let selection = Self.loadDictationInputDeviceSelection() else {
+            return nil
+        }
+
+        do {
+            try inputNode.auAudioUnit.setDeviceID(selection.selectedInput.id)
+            cachedInputDeviceName = selection.selectedInput.name
+
+            let reportKey = "\(selection.defaultInput.id)->\(selection.selectedInput.id)"
+            if selection.didOverrideDefault, lastInputSelectionReportKey != reportKey {
+                lastInputSelectionReportKey = reportKey
+                print("🎤 PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "parakeet",
+                    event: "dictation_input_device_auto_selected",
+                    message: "Dictation input changed away from Bluetooth headset microphone",
+                    context: inputSelectionContext(selection, operation: operation)
+                )
+            } else if !selection.didOverrideDefault {
+                lastInputSelectionReportKey = nil
+            }
+        } catch {
+            cachedInputDeviceName = selection.defaultInput.name
+            var context = inputSelectionContext(selection, operation: operation)
+            context["error"] = error.localizedDescription
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "dictation_input_device_selection_failed",
+                message: "Failed to apply preferred dictation input device",
+                context: context
+            )
+        }
+
+        return selection
+    }
+
+    private func inputSelectionContext(
+        _ selection: DictationInputDeviceSelection,
+        operation: String? = nil
+    ) -> [String: String] {
+        var context = [
+            "audio_device": selection.selectedInput.name,
+            "default_input_device": selection.defaultInput.name,
+            "selected_input_device": selection.selectedInput.name,
+            "default_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput),
+            "selected_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput),
+            "selection_reason": selection.reason.rawValue,
+            "selection_overrode_default": "\(selection.didOverrideDefault)"
+        ]
+
+        if let defaultOutput = selection.defaultOutput {
+            context["default_output_device"] = defaultOutput.name
+            context["default_output_class"] = DictationInputDeviceSelectionPolicy.deviceClass(for: defaultOutput)
+        }
+
+        if let operation {
+            context["operation"] = operation
+        }
+
+        return context
+    }
+
     private func audioStartContext(
         attempt: Int,
         isRecoveryAttempt: Bool,
@@ -894,32 +1173,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func inputDeviceClass(for deviceName: String) -> String {
-        let normalized = deviceName.lowercased()
-
-        if normalized.contains("airpods")
-            || normalized.contains("bluetooth")
-            || normalized.contains("beats")
-            || normalized.contains("buds")
-            || normalized.contains("headset") {
-            return "bluetooth"
-        }
-
-        if normalized.contains("macbook")
-            || normalized.contains("built-in")
-            || normalized.contains("built in")
-            || normalized.contains("studio display") {
-            return "built_in"
-        }
-
-        if normalized.contains("usb")
-            || normalized.contains("scarlett")
-            || normalized.contains("rode")
-            || normalized.contains("shure")
-            || normalized.contains("yeti") {
-            return "external"
-        }
-
-        return "unknown"
+        DictationInputDeviceSelectionPolicy.deviceClass(forName: deviceName)
     }
 
     private func reportAudioStartFailureIfNeeded(message: String, context: [String: String]) {
@@ -989,6 +1243,7 @@ class ParakeetEngine: ObservableObject {
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
         for attempt in 1...maxAttempts {
             let inputNode = audioEngine.inputNode
+            applyPreferredDictationInputDevice(to: inputNode, operation: "start_recording")
             // The tap is installed with format: nil, which means buffers arrive at the
             // node's OUTPUT bus format. On AirPods HFP the hw input is 24kHz but the
             // node's output bus is 48kHz (CoreAudio's internal converter handles the
