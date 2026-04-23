@@ -119,6 +119,24 @@ func testMeetingPromptHeuristics() {
         assertEqual(interval, 30 * 60, "calendar prompts should preserve the longer snooze")
     }
 
+    runSuite("MeetingPromptHeuristics.remindSoonBackoffKind — short reminders stay distinct from dismissal") {
+        assertEqual(
+            MeetingPromptHeuristics.remindSoonInterval,
+            2 * 60,
+            "remind-soon prompts should come back quickly"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.remindSoonBackoffKind(for: .calendarEvent),
+            .calendarShortReminder,
+            "calendar remind-soon should not look like a full dismissal"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.remindSoonBackoffKind(for: .runtimeApp),
+            .runtimeShortReminder,
+            "runtime remind-soon should not look like a full dismissal"
+        )
+    }
+
     runSuite("MeetingPromptHeuristics.dismissMinimumInterval — Teams get a stickier dismissal") {
         let defaultInterval: TimeInterval = 30 * 60
         assertEqual(
