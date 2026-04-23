@@ -79,8 +79,8 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized feedback issue payloads and support links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
-- `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript
-- `Shared/MeetingAudioPlayback.swift` — shared `NSSound`-backed playback coordinator for recent-meeting audio previews in Settings
+- `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
+- `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/TranscriptedSupportActions.swift` — "Send feedback" flow that builds a GitHub-issue URL seeded with sanitized recent log lines
@@ -115,12 +115,12 @@ bash run-tests.sh
 Manual checks:
 
 - dictation overlay starts, stops, and auto-pastes cleanly
-- detected-meeting prompts appear only when appropriate and can start or snooze a meeting cleanly
+- detected-meeting prompts appear only when appropriate and can start, dismiss, or remind a meeting cleanly
 - meeting overlay warms up and records cleanly
 - imported-audio transcription can be started from the menubar and lands in the normal recent-meetings flow
 - menubar popover renders shortcuts, primary actions, settings actions, and the agent-connect page cleanly
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
-- completed meeting review cleanly separates "People in the room" from remote participants, and "Keep as You" restores the single-speaker local path when needed
+- completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
 - recent meetings in Settings can play retained audio attachments without losing sync between transcript rows and playback state
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change

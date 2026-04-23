@@ -14,13 +14,13 @@ Important entry points:
 - `TranscriptedApp.swift` — app entry point, menubar wiring, popover, overlay setup, and detected-meeting prompt wiring
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
-- `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode plus legacy hotkey migration helpers
+- `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode, meeting shortcut compatibility, and legacy hotkey migration helpers
 - `Support/PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier bindings used by capture routing for push-to-talk, hands-free dictation, and meeting shortcuts
 - `Support/CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements applied to final dictation and meeting transcript text
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
-- `Capture/ContextCaptureEngine.swift` — right-option dictation handling, keyboard hotkeys, meeting hotkey routing
+- `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting hotkey routing, and hotkey error surfacing
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
@@ -30,7 +30,7 @@ Important entry points:
 
 - `Accessibility/` — AX helpers for overlay positioning
 - `Beta/` — beta-only config currently; older API docs are historical
-- `Capture/` — hotkeys, context parsing, capture routing
+- `Capture/` — meeting hotkey registration, physical dictation trigger capture, context parsing, and capture routing
 - `Dictation/` — dictation transcript persistence and timeout helpers
 - `Meeting/` — app-side meeting bridge, prompts, imported-audio prep, storage, and transcript restyling
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
