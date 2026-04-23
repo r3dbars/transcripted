@@ -19,6 +19,8 @@ func testSentryPayloadSanitizer() {
             "dsn": "https://example@sentry.invalid/1",
             "duration_ms": "123",
             "meeting_state": "transcribing",
+            "meeting_name": "Weekly roadmap call",
+            "name": "Customer name",
             "password": "hunter2",
             "title": "Private customer call",
             "transcript_url": "/Users/redbars/Library/Application Support/Draft/meetings/demo.md",
@@ -30,6 +32,8 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["meeting_state"], "transcribing", "non-sensitive state should remain")
         assertNil(sanitized["client_secret"], "client secrets should be dropped")
         assertNil(sanitized["dsn"], "DSNs should be dropped")
+        assertNil(sanitized["meeting_name"], "meeting names should be dropped")
+        assertNil(sanitized["name"], "generic names should be dropped")
         assertNil(sanitized["password"], "password fields should be dropped")
         assertNil(sanitized["title"], "title should be dropped")
         assertNil(sanitized["transcript_url"], "transcript path should be dropped")
