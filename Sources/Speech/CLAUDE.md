@@ -8,6 +8,7 @@
 
 - `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, permission-aware input-readiness checks, audio-device handling, short-audio gating, wake-recovery support, and sanitized failure reporting for model init errors
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
+- `DictationAudioRecovery.swift` — analyzes recorded dictation audio for usable speech signal and extracts focused, gain-normalized retry segments when an initial transcription attempt returns empty
 - `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades
 - `ParakeetModelInitDiagnostics.swift` — builds safe diagnostic context for model-initialization failures without leaking transcript or user-content data
 - `ParakeetPrewarmPolicy.swift` — central policy for deciding whether speech-engine input-readiness checks should proceed or be skipped based on microphone authorization state
@@ -26,6 +27,7 @@
 - `ParakeetEngine` consults `DictationInputDeviceSelectionPolicy` before recording so Bluetooth headset input does not unnecessarily hijack playback when a built-in mic fallback is available.
 - `ParakeetEngine` consults `ParakeetStartRecordingFailurePolicy` when startup fails so format-reset, engine rebuild, and prewarm-retry behavior stay consistent across direct starts and recovery attempts.
 - `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.
+- `DictationAudioRecovery` analyzes buffered audio for usable speech signal (peak, RMS, active ratio) and can produce a focused, gain-normalized retry segment. `ParakeetEngine` uses it to retry transcription when an initial attempt returns empty rather than silently dropping audio that contained real speech.
 - The meeting pipeline reuses the same app-owned `STTRouter` through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - Do not assume a separate local-LLM drafting path exists in this tree.
 
@@ -48,6 +50,7 @@ Manual checks:
 
 Relevant direct coverage:
 
+- `Tests/DictationAudioRecoveryTests.swift`
 - `Tests/DictationInputDeviceSelectionPolicyTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
