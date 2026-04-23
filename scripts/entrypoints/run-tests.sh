@@ -117,6 +117,7 @@ APP_SOURCES=(
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
     "Sources/Support/MenuBarVisibilityPreferences.swift"
+    "Sources/Support/PermissionsOnboardingPreferences.swift"
     "Sources/Support/HotkeyPreferences.swift"
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
