@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief - April 23, 2026</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #56616f;
+      --line: #d9e0ea;
+      --teal: #0f766e;
+      --teal-soft: #dff5f1;
+      --blue: #1d4ed8;
+      --blue-soft: #e3edff;
+      --amber: #a16207;
+      --amber-soft: #fff4d6;
+      --red: #b91c1c;
+      --red-soft: #fee2e2;
+      --green: #166534;
+      --green-soft: #e4f7e9;
+      --shadow: 0 16px 44px rgba(17, 24, 39, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Avenir Next, Segoe UI, Helvetica Neue, Arial, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eef3f8 0%, var(--bg) 36%, #f9fafb 100%);
+      line-height: 1.48;
+    }
+
+    .page {
+      width: min(1160px, calc(100vw - 32px));
+      margin: 28px auto 56px;
+    }
+
+    .hero,
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 32px;
+      border-top: 5px solid var(--teal);
+    }
+
+    .section {
+      margin-top: 18px;
+      padding: 24px;
+    }
+
+    .eyebrow,
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      color: var(--teal);
+      font-size: 0.8rem;
+    }
+
+    .kicker {
+      font-size: 0.72rem;
+      padding: 5px 9px;
+      margin-bottom: 10px;
+    }
+
+    .critical { background: var(--red-soft); color: var(--red); }
+    .watch { background: var(--amber-soft); color: var(--amber); }
+    .stable { background: var(--teal-soft); color: var(--teal); }
+    .good { background: var(--green-soft); color: var(--green); }
+    .info { background: var(--blue-soft); color: var(--blue); }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.08;
+    }
+
+    h1 {
+      max-width: 13ch;
+      margin: 12px 0 12px;
+      font-size: clamp(2.3rem, 5vw, 4.2rem);
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: clamp(1.4rem, 2.2vw, 2rem);
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(15, 118, 110, 0.45);
+      text-underline-offset: 0.16em;
+    }
+
+    code {
+      font-family: SF Mono, JetBrains Mono, Menlo, monospace;
+      font-size: 0.92em;
+      padding: 0.1rem 0.35rem;
+      border: 1px solid #d7deea;
+      border-radius: 6px;
+      background: #f3f6fa;
+      white-space: nowrap;
+    }
+
+    .grid,
+    .stat-grid,
+    .issue-grid,
+    .signal-grid,
+    .links {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid,
+    .stat-grid,
+    .issue-grid,
+    .signal-grid,
+    .links {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .two-up {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .chip,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 16px;
+    }
+
+    .chip-label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .big-number {
+      margin: 6px 0 4px;
+      font-size: clamp(1.9rem, 3.8vw, 3rem);
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    th,
+    td {
+      padding: 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      background: #f3f6fa;
+      font-size: 0.74rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .bar-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.8fr) minmax(160px, 1.2fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .bar-label {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .bar-track {
+      min-height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e7edf5;
+    }
+
+    .bar-fill {
+      height: 12px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    .bar-fill.blue {
+      background: var(--blue);
+    }
+
+    .bar-fill.amber {
+      background: var(--amber);
+    }
+
+    .bar-fill.red {
+      background: var(--red);
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 840px) {
+      .two-up,
+      .bar-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="eyebrow">Transcripted health brief - Apr 23, 2026</div>
+      <h1>Healthy, but still watching audio start.</h1>
+      <p>Version 1.1.18 is live, Sparkle points at the right feed, early product usage is working, and the main risk is still CoreAudio/Parakeet startup behavior.</p>
+
+      <div class="grid" style="margin-top: 24px;">
+        <div class="chip">
+          <span class="chip-label">Current release</span>
+          <strong>1.1.18, published Apr 23 02:00 UTC</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Most real signal</span>
+          <strong>Audio engine start/hang path</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Repo mode</span>
+          <strong>Reliability plus release plumbing</strong>
+        </div>
+        <div class="chip">
+          <span class="chip-label">Overall call</span>
+          <strong>Too early to declare 1.1.18 clean, but no red flag yet</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>At A Glance</h2>
+      <div class="stat-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Sentry</div>
+          <h3>Top open issue</h3>
+          <div class="big-number">144</div>
+          <p><a href="https://r3dbars.sentry.io/issues/APPLE-MACOS-V">APPLE-MACOS-V</a> audio engine start failures. Mostly 1.1.12 and 1.1.13; latest seen on 1.1.16.</p>
+        </article>
+        <article class="card">
+          <div class="kicker stable">PostHog</div>
+          <h3>7-day active devices</h3>
+          <div class="big-number">40</div>
+          <p>724 launches, 1,219 completed dictations, and 149 meeting transcripts saved.</p>
+        </article>
+        <article class="card">
+          <div class="kicker good">GitHub</div>
+          <h3>14-day interest</h3>
+          <div class="big-number">896</div>
+          <p>102 unique repo viewers, 9,426 clones, 8 new stars, and 380 all-time release downloads.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Product Usage</h2>
+      <div class="bar-list">
+        <div class="bar-row">
+          <div class="bar-label">Dictation completed</div>
+          <div class="bar-track"><div class="bar-fill" style="width: 77%;"></div></div>
+          <div class="small">1,219 / 1,582 starts</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Meetings saved</div>
+          <div class="bar-track"><div class="bar-fill blue" style="width: 88%;"></div></div>
+          <div class="small">149 / 170 starts</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">Meeting failures</div>
+          <div class="bar-track"><div class="bar-fill red" style="width: 6%;"></div></div>
+          <div class="small">10 failures, mostly recording too short</div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label">1.1.18 adoption</div>
+          <div class="bar-track"><div class="bar-fill amber" style="width: 26%;"></div></div>
+          <div class="small">21 launches on 3 devices</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Sentry: Real Vs Noise</h2>
+      <div class="issue-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Real bug</div>
+          <h3>Parakeet audio engine start failed</h3>
+          <p>High count, production-facing, and core workflow-adjacent.</p>
+          <ul>
+            <li>144 total events; first seen Apr 20, last seen Apr 22.</li>
+            <li>Release spread: 111 on 1.1.12, 27 on 1.1.13, 4 on 1.1.16, 2 on 1.1.14.</li>
+            <li>Latest sample had CoreAudio status <code>-10868</code>, built-in input, Parakeet loaded, and tap installed.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="kicker watch">Watch</div>
+          <h3>1.1.18 has one AVAudioEngine app hang</h3>
+          <p>This is the only latest-release Sentry error in the last 24 hours.</p>
+          <ul>
+            <li><a href="https://r3dbars.sentry.io/issues/APPLE-MACOS-6">APPLE-MACOS-6</a> hit inside <code>AVAudioEngine inputNode</code>.</li>
+            <li>Only one event on 1.1.18, so treat it as a watch item until more devices upgrade.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <div class="kicker info">Noise</div>
+          <h3>Test and dashboard clutter</h3>
+          <p>Do not let these pull attention away from capture reliability.</p>
+          <ul>
+            <li><code>sentry_test_event</code> is Settings verification noise.</li>
+            <li>The Sentry dashboard script issue is not app code.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Release Health</h2>
+      <div class="two-up" style="margin-top: 18px;">
+        <table>
+          <thead>
+            <tr>
+              <th>1.1.18 Signal</th>
+              <th>Value</th>
+              <th>Read</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GitHub release downloads</td>
+              <td>12</td>
+              <td>Fresh release. Too early to judge conversion.</td>
+            </tr>
+            <tr>
+              <td>PostHog launches</td>
+              <td>21 on 3 devices</td>
+              <td>Small sample, but it is reaching real app sessions.</td>
+            </tr>
+            <tr>
+              <td>First dictation success</td>
+              <td>2026-04-23 10:46 UTC</td>
+              <td>Dictation is working on the new version.</td>
+            </tr>
+            <tr>
+              <td>First meeting transcript saved</td>
+              <td>2026-04-23 07:19 UTC</td>
+              <td>Meeting flow is working on the new version.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <article class="card">
+          <div class="kicker stable">Local repo</div>
+          <h3>Appcast and version line up</h3>
+          <p><code>Info.plist</code> reports 1.1.18, production Sentry environment, and the Sparkle feed at <code>docs/appcast.xml</code>. The appcast top item is also 1.1.18.</p>
+          <ul>
+            <li>Latest local commit: contributor mailmap cleanup.</li>
+            <li>Recent merged work: release metadata, meeting prompt reminder, dictation reliability.</li>
+            <li>Worktree had one generated <code>.wrangler</code> cache from this check, not user code.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>GitHub And Websites</h2>
+      <div class="two-up" style="margin-top: 18px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th>Signal</th>
+              <th>Call</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GitHub traffic</td>
+              <td>896 views, 102 uniques, 9,426 clones in 14 days</td>
+              <td>Interest is real; clones are probably inflated by automation, but still strong.</td>
+            </tr>
+            <tr>
+              <td>Stars</td>
+              <td>17 total, 8 new in 14 days</td>
+              <td>Discovery is moving.</td>
+            </tr>
+            <tr>
+              <td>Releases</td>
+              <td>380 total downloads; 12 on 1.1.18</td>
+              <td>Downloads lag repo interest, so install conversion needs work.</td>
+            </tr>
+            <tr>
+              <td>Open repo issue</td>
+              <td><a href="https://github.com/r3dbars/transcripted/issues/487">#487 nightly cron points at removed Xcode project</a></td>
+              <td>Fix this so automation stops crying wolf.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <article class="card">
+          <div class="kicker info">Websites</div>
+          <h3>Deploys are fresh; analytics are blocked</h3>
+          <p><code>transcripted.app</code> deployed successfully Apr 23 at 11:23 UTC from "Simplify site navigation." <code>r3d.br</code> resolved to <code>r3d.bar</code>, last production deploy Apr 19.</p>
+          <ul>
+            <li>Cloudflare zone analytics returned 403 for both domains.</li>
+            <li>Cloudflare Web Analytics is not configured on either Pages project.</li>
+            <li>This means "traffic unknown," not "traffic is low."</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What To Test</h2>
+      <table style="margin-top: 18px;">
+        <thead>
+          <tr>
+            <th>Scenario</th>
+            <th>Why</th>
+            <th>Pass Condition</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1.1.18 dictation on built-in mic and AirPods</td>
+            <td>Matches the audio start failure family.</td>
+            <td>No new <code>audio_engine_start_failed</code>, <code>microphone_start_timeout</code>, or app hang clusters.</td>
+          </tr>
+          <tr>
+            <td>Meeting start/stop under 10 seconds</td>
+            <td>Most meeting failures are <code>recording_too_short</code>.</td>
+            <td>UI explains the short recording path cleanly and Sentry does not treat it like a crash.</td>
+          </tr>
+          <tr>
+            <td>Nightly automation build path</td>
+            <td>GitHub issue #487 says cron still targets removed <code>Transcripted.xcodeproj</code>.</td>
+            <td>Nightly job uses <code>bash build.sh</code> and posts a useful pass/fail result.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Bottom Line</h2>
+      <div class="signal-grid" style="margin-top: 18px;">
+        <article class="card">
+          <div class="kicker critical">Fix now</div>
+          <h3>Close the audio-start loop</h3>
+          <p>Confirm 1.1.18 stays clean for <code>APPLE-MACOS-V</code>. If it recurs, fix the AVAudioEngine start/retry path before new feature work.</p>
+        </article>
+        <article class="card">
+          <div class="kicker watch">Fix next</div>
+          <h3>Repair nightly automation</h3>
+          <p>Issue #487 is operational noise, but it weakens confidence in every future release.</p>
+        </article>
+        <article class="card">
+          <div class="kicker stable">Set up next</div>
+          <h3>Restore website analytics</h3>
+          <p>Add the Cloudflare analytics permission or Web Analytics setup so site traffic can be compared against release downloads.</p>
+        </article>
+      </div>
+
+      <div class="links" style="margin-top: 18px;">
+        <a class="card" href="https://r3dbars.sentry.io/issues/APPLE-MACOS-V">Sentry APPLE-MACOS-V</a>
+        <a class="card" href="https://github.com/r3dbars/transcripted/releases/tag/v1.1.18">GitHub release v1.1.18</a>
+        <a class="card" href="https://github.com/r3dbars/transcripted/issues/487">GitHub issue #487</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
