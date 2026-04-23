@@ -1798,6 +1798,10 @@ class ParakeetEngine: ObservableObject {
     }
 
     func finishExternalTranscription() {
+        finishTranscription()
+    }
+
+    private func finishTranscription() {
         isTranscribing = false
         sampleBuffer.removeAll(keepingCapacity: true)
     }
@@ -1854,8 +1858,7 @@ class ParakeetEngine: ObservableObject {
                 message: shortAudioDecision.message ?? "Dictation audio too short for transcription",
                 context: shortAudioDecision.context
             )
-            isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
+            finishTranscription()
             return nil
         }
 
@@ -1914,8 +1917,7 @@ class ParakeetEngine: ObservableObject {
                                     "chars": "\(retryCorrected.count)",
                                     "input_samples": "\(nativeCount)",
                                 ]) { current, _ in current })
-                            isTranscribing = false
-                            sampleBuffer.removeAll(keepingCapacity: true)
+                            finishTranscription()
                             return retryCorrected
                         }
 
@@ -1938,13 +1940,11 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
                     message: "Parakeet returned no text after \(String(format: "%.1f", elapsed))s inference",
                     context: emptyContext)
-                isTranscribing = false
-                sampleBuffer.removeAll(keepingCapacity: true)
+                finishTranscription()
                 return nil
             }
 
-            isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
+            finishTranscription()
 
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "transcription_complete",
                 message: "Transcribed in \(String(format: "%.2f", elapsed))s",
@@ -1972,8 +1972,7 @@ class ParakeetEngine: ObservableObject {
                     message: fallbackDecision.message ?? "Dictation audio too short for transcription",
                     context: fallbackContext
                 )
-                isTranscribing = false
-                sampleBuffer.removeAll(keepingCapacity: true)
+                finishTranscription()
                 return nil
             }
 
@@ -1981,8 +1980,7 @@ class ParakeetEngine: ObservableObject {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
-            isTranscribing = false
-            sampleBuffer.removeAll(keepingCapacity: true)
+            finishTranscription()
             return nil
         }
     }

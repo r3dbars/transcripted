@@ -54,8 +54,9 @@ enum DictationAudioRecovery {
 
         let rms = Float(sqrt(sumOfSquares / Double(samples.count)))
         let activityThreshold = activeThreshold(forPeak: peak)
-        let activeCount = samples.reduce(0) { count, sample in
-            count + (abs(sample) >= activityThreshold ? 1 : 0)
+        var activeCount = 0
+        for sample in samples {
+            if abs(sample) >= activityThreshold { activeCount += 1 }
         }
 
         return DictationAudioAnalysis(
@@ -94,7 +95,8 @@ enum DictationAudioRecovery {
             return nil
         }
 
-        let focusedPeak = focused.reduce(Float(0)) { max($0, abs($1)) }
+        var focusedPeak: Float = 0
+        for sample in focused { focusedPeak = max(focusedPeak, abs(sample)) }
         guard focusedPeak > 0.0001 else { return nil }
 
         let gain = max(1.0, min(12.0, 0.45 / focusedPeak))
