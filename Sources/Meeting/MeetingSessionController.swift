@@ -36,6 +36,8 @@ final class MeetingSessionController: ObservableObject {
     enum StopReason: String {
         case hotkeyToggle = "hotkey_toggle"
         case overlayStopButton = "overlay_stop_button"
+        case audioInactivityPrompt = "audio_inactivity_prompt"
+        case audioInactivityTimeout = "audio_inactivity_timeout"
         case unknown = "unknown"
     }
 
@@ -120,6 +122,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var displayStatus: DisplayStatus = .idle
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
+    @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -148,6 +151,9 @@ final class MeetingSessionController: ObservableObject {
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
+    private var audioInactivityDetector = MeetingAudioInactivityDetector()
+    private var latestMicLevel: Float = 0
+    private var latestSystemLevel: Float = 0
 
     // MARK: - Init
 
@@ -311,6 +317,8 @@ final class MeetingSessionController: ObservableObject {
     /// placed behind the current background task.
     func stopRecording(reason: StopReason = .unknown) async {
         guard case .recording = state else { return }
+        _ = audioInactivityDetector.stopRecording()
+        audioInactivityWarning = nil
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -382,6 +390,42 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    func dismissAudioInactivityWarning() {
+        guard audioInactivityWarning != nil else { return }
+        applyAudioInactivityEvent(audioInactivityDetector.dismissWarning())
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_audio_inactivity_warning_dismissed",
+            message: "Meeting audio inactivity warning dismissed",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+    }
+
+    func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
+        guard audioInactivityWarning != nil else { return }
+        let reason: StopReason = automatic ? .audioInactivityTimeout : .audioInactivityPrompt
+
+        DiagnosticsTrail.record(
+            level: automatic ? .warning : .info,
+            engine: "meeting",
+            event: automatic ? "meeting_audio_inactivity_timeout" : "meeting_audio_inactivity_end_requested",
+            message: automatic
+                ? "Meeting recording ended after audio inactivity countdown"
+                : "Meeting recording ended from audio inactivity prompt",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+
+        await stopRecording(reason: reason)
+    }
+
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
@@ -442,16 +486,47 @@ final class MeetingSessionController: ObservableObject {
 
     private func wireSubscriptions() {
         capture.$isRecording
-            .assign(to: &$isRecording)
+            .sink { [weak self] isRecording in
+                guard let self else { return }
+                self.isRecording = isRecording
+                let event: MeetingAudioInactivityDetector.Event
+                if isRecording {
+                    event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
+                } else {
+                    event = self.audioInactivityDetector.stopRecording()
+                }
+                self.applyAudioInactivityEvent(event)
+            }
+            .store(in: &cancellables)
 
         capture.$audioLevel
-            .assign(to: &$audioLevel)
+            .sink { [weak self] level in
+                guard let self else { return }
+                self.audioLevel = level
+                self.latestMicLevel = level
+                self.observeAudioActivity()
+            }
+            .store(in: &cancellables)
 
         capture.$systemLevel
-            .assign(to: &$systemLevel)
+            .sink { [weak self] level in
+                guard let self else { return }
+                self.systemLevel = level
+                self.latestSystemLevel = level
+                self.observeAudioActivity()
+            }
+            .store(in: &cancellables)
 
         capture.$recordingDuration
-            .assign(to: &$recordingDuration)
+            .sink { [weak self] duration in
+                guard let self else { return }
+                self.recordingDuration = duration
+                guard self.isRecording else { return }
+                self.applyAudioInactivityEvent(
+                    self.audioInactivityDetector.tick(at: duration)
+                )
+            }
+            .store(in: &cancellables)
 
         capture.$systemAudioStatus
             .removeDuplicates()
@@ -531,6 +606,52 @@ final class MeetingSessionController: ObservableObject {
 
         refreshFailedMeetings()
         refreshWarmupStatus()
+    }
+
+    private func observeAudioActivity() {
+        guard isRecording else { return }
+        applyAudioInactivityEvent(
+            audioInactivityDetector.observe(
+                micLevel: latestMicLevel,
+                systemLevel: latestSystemLevel,
+                at: recordingDuration
+            )
+        )
+    }
+
+    private func applyAudioInactivityEvent(_ event: MeetingAudioInactivityDetector.Event) {
+        switch event {
+        case .none:
+            return
+        case .warningStarted(let warning):
+            audioInactivityWarning = warning
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_audio_inactivity_warning_started",
+                message: "No meeting audio detected",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "inactive_ms": "\(Int(warning.inactiveDuration * 1000))",
+                        "countdown_seconds": "\(warning.countdownSeconds)",
+                        "duration_ms": "\(Int(recordingDuration * 1000))"
+                    ]
+                )
+            )
+        case .warningCleared:
+            guard audioInactivityWarning != nil else { return }
+            audioInactivityWarning = nil
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_audio_inactivity_warning_cleared",
+                message: "Meeting audio inactivity warning cleared",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "duration_ms": "\(Int(recordingDuration * 1000))"
+                    ]
+                )
+            )
+        }
     }
 
     private func refreshWarmupStatus() {

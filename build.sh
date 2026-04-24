@@ -79,6 +79,16 @@ sign_embedded_frameworks() {
     done
 }
 
+sign_embedded_runtime_assets() {
+    local sign_hash="$1"
+    local asset_path
+
+    for asset_path in "$APP_BUNDLE"/Contents/MacOS/*.metallib; do
+        [ -f "$asset_path" ] || continue
+        codesign --force --sign "$sign_hash" "$asset_path"
+    done
+}
+
 echo "Building Transcripted..."
 
 ensure_build_prerequisites
@@ -195,12 +205,14 @@ fi
 if [ -n "$SIGN_HASH" ]; then
     echo "Signing with: ${SIGN_NAME:-$SIGN_HASH} ($SIGN_HASH)"
     sign_embedded_frameworks "$SIGN_HASH"
+    sign_embedded_runtime_assets "$SIGN_HASH"
     codesign --force --sign "$SIGN_HASH" \
         --entitlements "$LOCAL_ENTITLEMENTS" \
         "$APP_BUNDLE"
 else
     echo "No Developer ID found — signing ad-hoc (permissions may not persist)"
     sign_embedded_frameworks "-"
+    sign_embedded_runtime_assets "-"
     codesign --force --sign - \
         --entitlements "$LOCAL_ENTITLEMENTS" \
         "$APP_BUNDLE"

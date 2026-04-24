@@ -108,6 +108,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/TranscriptedConstants.swift"
     "Sources/Text/DiffSummary.swift"
+    "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"

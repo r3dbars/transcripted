@@ -418,13 +418,20 @@ final class MeetingOverlayRootView: NSView {
             timerLabel.stringValue = prompt?.countdownText ?? ""
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotPrompt.cgColor
             closeButton.attributedTitle = NSAttributedString(
-                string: "Not now",
+                string: prompt?.secondaryTitle ?? "Not now",
                 attributes: [
                     .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
                     .foregroundColor: MeetingOverlayTokens.textPrimary
                 ]
             )
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            recordButton.attributedTitle = NSAttributedString(
+                string: prompt?.primaryTitle ?? "Record",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: NSColor.black
+                ]
+            )
         case .recording:
             titleLabel.stringValue = "Recording meeting"
             statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotRecording.cgColor
@@ -549,6 +556,8 @@ final class MeetingOverlayController {
         let title: String
         let detail: String
         let countdownText: String
+        let secondaryTitle: String
+        let primaryTitle: String
     }
 
     // MARK: - State
@@ -561,6 +570,7 @@ final class MeetingOverlayController {
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
     private var promptCandidate: MeetingPromptDetector.Candidate?
+    private var promptKind: PromptKind?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
 
@@ -570,6 +580,11 @@ final class MeetingOverlayController {
     private var rootView: MeetingOverlayRootView?
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
+
+    private enum PromptKind {
+        case detectedMeeting
+        case audioInactivity
+    }
 
     // MARK: - Dependencies
 
@@ -649,11 +664,14 @@ final class MeetingOverlayController {
         promptCountdownTask?.cancel()
 
         promptCandidate = candidate
+        promptKind = .detectedMeeting
         promptSecondsRemaining = max(1, seconds)
         currentPrompt = PromptDisplay(
             title: "Meeting detected",
             detail: candidate.detail,
-            countdownText: "\(promptSecondsRemaining)s"
+            countdownText: "\(promptSecondsRemaining)s",
+            secondaryTitle: "Not now",
+            primaryTitle: "Record"
         )
         state = .prompt
         showPanel()
@@ -704,6 +722,36 @@ final class MeetingOverlayController {
             }
             .store(in: &subscriptions)
 
+        session.$audioInactivityWarning
+            .receive(on: RunLoop.main)
+            .sink { [weak self] warning in
+                self?.applyAudioInactivityWarning(warning)
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {
+        guard let warning else {
+            clearAudioInactivityPrompt()
+            return
+        }
+
+        guard meetingSession?.state == .recording else { return }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+
+        promptCandidate = nil
+        promptKind = .audioInactivity
+        promptSecondsRemaining = max(1, warning.countdownSeconds)
+        currentPrompt = audioInactivityPromptDisplay(
+            warning: warning,
+            countdownSeconds: promptSecondsRemaining
+        )
+        state = .prompt
+        showPanel()
+        pushToView()
+        schedulePromptCountdown()
     }
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
@@ -713,12 +761,14 @@ final class MeetingOverlayController {
                 pushToView()
                 break
             }
+            promptKind = nil
             state = .idle
             hidePanel()
         case .loadingModels:
             state = .preparing
             currentPrompt = nil
             promptCandidate = nil
+            promptKind = nil
             promptCountdownTask?.cancel()
             showPanel()
         case .ready:
@@ -742,6 +792,7 @@ final class MeetingOverlayController {
             state = .recording
             currentPrompt = nil
             promptCandidate = nil
+            promptKind = nil
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
             showPanel()
@@ -749,12 +800,14 @@ final class MeetingOverlayController {
             state = .transcribing
             currentPrompt = nil
             promptCandidate = nil
+            promptKind = nil
             promptCountdownTask?.cancel()
             showPanel()
         case .error(let message):
             state = .error(message)
             currentPrompt = nil
             promptCandidate = nil
+            promptKind = nil
             promptCountdownTask?.cancel()
             showPanel()
             scheduleAutoHide(after: 5)
@@ -840,7 +893,12 @@ final class MeetingOverlayController {
     private func handleSecondaryActionTapped() {
         switch state {
         case .prompt:
-            dismissPrompt(notifyDetector: true)
+            switch promptKind {
+            case .audioInactivity:
+                meetingSession?.dismissAudioInactivityWarning()
+            case .detectedMeeting, .none:
+                dismissPrompt(notifyDetector: true)
+            }
         case .recording:
             handleCloseTapped()
         default:
@@ -849,9 +907,19 @@ final class MeetingOverlayController {
     }
 
     private func handlePrimaryActionTapped() {
-        guard case .prompt = state, let candidate = promptCandidate else { return }
+        guard case .prompt = state else { return }
         promptCountdownTask?.cancel()
-        onPromptRecord?(candidate)
+
+        switch promptKind {
+        case .audioInactivity:
+            Task { @MainActor [weak self] in
+                guard let session = self?.meetingSession else { return }
+                await session.endRecordingFromAudioInactivityPrompt(automatic: false)
+            }
+        case .detectedMeeting, .none:
+            guard let candidate = promptCandidate else { return }
+            onPromptRecord?(candidate)
+        }
     }
 
     private func dismissPrompt(notifyDetector: Bool) {
@@ -862,9 +930,27 @@ final class MeetingOverlayController {
         }
 
         promptCandidate = nil
+        promptKind = nil
         currentPrompt = nil
         state = .idle
         hidePanel()
+    }
+
+    private func clearAudioInactivityPrompt() {
+        guard promptKind == .audioInactivity else { return }
+
+        promptCountdownTask?.cancel()
+        promptKind = nil
+        currentPrompt = nil
+
+        if meetingSession?.state == .recording {
+            state = .recording
+            showPanel()
+            pushToView()
+        } else {
+            state = .idle
+            hidePanel()
+        }
     }
 
     private func schedulePromptCountdown() {
@@ -873,11 +959,7 @@ final class MeetingOverlayController {
             guard let self else { return }
 
             while self.promptSecondsRemaining > 0 {
-                self.currentPrompt = PromptDisplay(
-                    title: "Meeting detected",
-                    detail: self.promptCandidate?.detail ?? "Record this meeting?",
-                    countdownText: "\(self.promptSecondsRemaining)s"
-                )
+                self.refreshPromptCountdownDisplay()
                 self.pushToView()
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -885,8 +967,61 @@ final class MeetingOverlayController {
                 self.promptSecondsRemaining -= 1
             }
 
-            self.dismissPrompt(notifyDetector: true)
+            self.handlePromptCountdownExpired()
         }
+    }
+
+    private func refreshPromptCountdownDisplay() {
+        switch promptKind {
+        case .audioInactivity:
+            let warning = meetingSession?.audioInactivityWarning
+                ?? MeetingAudioInactivityWarning(
+                    inactiveDuration: 5 * 60,
+                    countdownSeconds: max(1, promptSecondsRemaining)
+                )
+            currentPrompt = audioInactivityPromptDisplay(
+                warning: warning,
+                countdownSeconds: promptSecondsRemaining
+            )
+        case .detectedMeeting, .none:
+            currentPrompt = PromptDisplay(
+                title: "Meeting detected",
+                detail: promptCandidate?.detail ?? "Record this meeting?",
+                countdownText: "\(promptSecondsRemaining)s",
+                secondaryTitle: "Not now",
+                primaryTitle: "Record"
+            )
+        }
+    }
+
+    private func handlePromptCountdownExpired() {
+        switch promptKind {
+        case .audioInactivity:
+            Task { @MainActor [weak self] in
+                guard let session = self?.meetingSession else { return }
+                await session.endRecordingFromAudioInactivityPrompt(automatic: true)
+            }
+        case .detectedMeeting, .none:
+            dismissPrompt(notifyDetector: true)
+        }
+    }
+
+    private func audioInactivityPromptDisplay(
+        warning: MeetingAudioInactivityWarning,
+        countdownSeconds: Int
+    ) -> PromptDisplay {
+        PromptDisplay(
+            title: "No audio detected",
+            detail: "No mic or system audio for \(formatInactiveDuration(warning.inactiveDuration)).",
+            countdownText: "Ends in \(max(0, countdownSeconds))s",
+            secondaryTitle: "Cancel",
+            primaryTitle: "End & Transcribe"
+        )
+    }
+
+    private func formatInactiveDuration(_ duration: TimeInterval) -> String {
+        let minutes = max(1, Int(round(duration / 60)))
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
     }
 
     // MARK: - View push
