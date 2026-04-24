@@ -84,6 +84,34 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(segments[1].end, 2.5, accuracy: 0.05)
     }
 
+    func testDetectSpeechSegmentsFindsAttenuatedSpeechBelowOldFixedThreshold() {
+        let voiced = alternatingSamples(amplitude: 0.006, count: 16_000)
+        let silence = [Float](repeating: 0.0, count: 8_000)
+        let samples = voiced + silence + voiced
+
+        let segments = Transcription.detectSpeechSegments(samples: samples, sampleRate: 16_000)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].start, 0.0, accuracy: 0.02)
+        XCTAssertEqual(segments[0].end, 1.0, accuracy: 0.05)
+        XCTAssertEqual(segments[1].start, 1.5, accuracy: 0.05)
+        XCTAssertEqual(segments[1].end, 2.5, accuracy: 0.05)
+    }
+
+    func testDetectSpeechSegmentsDoesNotRaiseThresholdAboveLegacyValue() {
+        let voiced = alternatingSamples(amplitude: 0.011, count: 16_000)
+        let silence = [Float](repeating: 0.0, count: 8_000)
+        let samples = voiced + silence + voiced
+
+        let segments = Transcription.detectSpeechSegments(samples: samples, sampleRate: 16_000)
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual(segments[0].start, 0.0, accuracy: 0.02)
+        XCTAssertEqual(segments[0].end, 1.0, accuracy: 0.05)
+        XCTAssertEqual(segments[1].start, 1.5, accuracy: 0.05)
+        XCTAssertEqual(segments[1].end, 2.5, accuracy: 0.05)
+    }
+
     func testDetectSpeechSegmentsFallsBackToWholeTrackForSilentInput() {
         let samples = [Float](repeating: 0.0, count: 16_000)
 
@@ -92,6 +120,68 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(segments.count, 1)
         XCTAssertEqual(segments[0].start, 0.0, accuracy: 0.000_1)
         XCTAssertEqual(segments[0].end, 1.0, accuracy: 0.000_1)
+    }
+
+    func testAudioSignalRecoveryNormalizesQuietSpeechCandidate() {
+        var samples = [Float](repeating: 0.0, count: 64_000)
+        let quietSpeech = alternatingSamples(amplitude: 0.008, count: 24_000)
+        samples.replaceSubrange(20_000..<44_000, with: quietSpeech)
+
+        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: 16_000)
+        let normalized = AudioSignalRecovery.normalizeForSpeech(
+            samples: samples,
+            sampleRate: 16_000,
+            analysis: analysis
+        )
+
+        XCTAssertTrue(analysis.hasSpeechCandidate)
+        XCTAssertTrue(normalized.wasNormalized)
+        XCTAssertEqual(normalized.samples.count, samples.count)
+        XCTAssertGreaterThan(normalized.samples.map(abs).max() ?? 0, analysis.peak)
+    }
+
+    func testAudioSignalRecoveryDoesNotNormalizeSilence() {
+        let samples = [Float](repeating: 0.0, count: 16_000)
+
+        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: 16_000)
+        let normalized = AudioSignalRecovery.normalizeForSpeech(
+            samples: samples,
+            sampleRate: 16_000,
+            analysis: analysis
+        )
+
+        XCTAssertFalse(analysis.hasSpeechCandidate)
+        XCTAssertFalse(normalized.wasNormalized)
+        XCTAssertEqual(normalized.samples, samples)
+    }
+
+    func testPrepareMicSegmentPadsShortQuietSpeechForParakeet() {
+        let samples = alternatingSamples(amplitude: 0.006, count: 8_000)
+
+        let prepared = Transcription.prepareMicSegmentForTranscription(
+            samples: samples,
+            sampleRate: 16_000
+        )
+
+        XCTAssertNotNil(prepared)
+        XCTAssertEqual(prepared?.samples.count, 16_000)
+        XCTAssertEqual(prepared?.paddedSampleCount, 8_000)
+        XCTAssertGreaterThan(prepared?.gain ?? 1, 1)
+    }
+
+    func testPrepareMicSegmentSkipsShortSilenceInsteadOfPaddingNoise() {
+        let samples = [Float](repeating: 0.0, count: 8_000)
+
+        let prepared = Transcription.prepareMicSegmentForTranscription(
+            samples: samples,
+            sampleRate: 16_000
+        )
+
+        XCTAssertNil(prepared)
+    }
+
+    private func alternatingSamples(amplitude: Float, count: Int) -> [Float] {
+        (0..<count).map { $0.isMultiple(of: 2) ? amplitude : -amplitude }
     }
 
     private func utterance(
