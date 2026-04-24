@@ -702,6 +702,8 @@ class ParakeetEngine: ObservableObject {
         scheduleInputDeviceNameRefresh()
 
         await releaseIdleAudioHardware(removeTap: false)
+        let prewarmGeneration = audioGraphGeneration
+        guard canContinuePrewarm(generation: prewarmGeneration) else { return }
 
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         switch ParakeetPrewarmPolicy.decision(for: microphoneStatus) {
@@ -729,6 +731,7 @@ class ParakeetEngine: ObservableObject {
         do {
             snapshot = try await audioInputSnapshot(operation: "prewarm")
         } catch {
+            guard canContinuePrewarm(generation: prewarmGeneration) else { return }
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -739,6 +742,7 @@ class ParakeetEngine: ObservableObject {
             schedulePrewarmRetry()
             return
         }
+        guard canContinuePrewarm(generation: prewarmGeneration) else { return }
 
         // Validate both formats. AirPods on macOS run input in Hands-Free Profile
         // (24kHz hw / 48kHz output bus); CoreAudio's internal converter handles
@@ -760,7 +764,9 @@ class ParakeetEngine: ObservableObject {
                     readiness: readiness
                 ))
             if readiness == .routeNotSettled {
+                let rebuildGeneration = audioGraphGeneration + 1
                 await rebuildAudioEngine(reason: "audio_route_not_settled")
+                guard canContinuePrewarm(generation: rebuildGeneration) else { return }
             }
             markFormatUnreadyAndPublish()
             schedulePrewarmRetry()
@@ -772,6 +778,13 @@ class ParakeetEngine: ObservableObject {
         prewarmRetryCount = 0
         markFormatReadyAndPublish()
         print("🔥 PARAKEET | input ready (\(inputDeviceName), \(nativeSampleRate)Hz)")
+    }
+
+    private func canContinuePrewarm(generation: Int) -> Bool {
+        !isShuttingDown
+            && !isRecording
+            && !audioStartInProgress
+            && audioGraphGeneration == generation
     }
 
     private func schedulePrewarmRetry() {
