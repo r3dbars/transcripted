@@ -8,7 +8,8 @@ enum DiagnosticsPreferences {
 
     static var isEnabled: Bool {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: enabledKey) != nil else { return false }
+        // Beta diagnostics are opt-out; turning the onboarding switch off stops shipping.
+        guard defaults.object(forKey: enabledKey) != nil else { return true }
         return defaults.bool(forKey: enabledKey)
     }
 
