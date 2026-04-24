@@ -221,9 +221,8 @@ final class TranscriptIndex: @unchecked Sendable {
 
     func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
         try queue.sync {
-            guard let kind = TranscriptLoader.artifactKind(for: url) else { return }
             let standardizedURL = url.standardizedFileURL
-            guard let containingRoot = allowedRoots.first(where: { root in
+            guard allowedRoots.contains(where: { root in
                 let basePath = root.standardizedFileURL.path
                 return standardizedURL.path == basePath
                     || standardizedURL.path.hasPrefix(basePath + "/")
@@ -233,15 +232,23 @@ final class TranscriptIndex: @unchecked Sendable {
             }
 
             let filename = standardizedURL.deletingPathExtension().lastPathComponent
-            switch PathSecurity.validateExistingFile(standardizedURL, under: containingRoot) {
-            case .valid(let safeURL):
-                try reindex(file: safeURL, filename: filename, kind: kind)
-            case .missing:
-                try removeFromIndex(filename: filename)
-            case .invalid:
-                log("Skipping invalid or unsafe file change: \(url.path)")
-                try removeFromIndex(filename: filename)
+            let requestedName = standardizedURL.lastPathComponent
+
+            for root in allowedRoots {
+                switch PathSecurity.resolveReadableFile(named: requestedName, in: root) {
+                case .valid(let safeURL):
+                    guard let kind = TranscriptLoader.artifactKind(for: safeURL) else { continue }
+                    try reindex(file: safeURL, filename: filename, kind: kind)
+                    return
+                case .missing:
+                    continue
+                case .invalid:
+                    log("Skipping invalid or unsafe file change: \(root.appendingPathComponent(requestedName).path)")
+                    continue
+                }
             }
+
+            try removeFromIndex(filename: filename)
         }
     }
 

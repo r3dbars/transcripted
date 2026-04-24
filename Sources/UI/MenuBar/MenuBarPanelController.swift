@@ -14,6 +14,9 @@ final class MenuBarPanelController: NSViewController {
 
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
+    private var latestDictation: SavedDictationEntry?
+    private var latestDictationLoaded = false
+    private var latestDictationTask: Task<Void, Never>?
 
     init(
         appState: TranscriptedAppState,
@@ -63,7 +66,6 @@ final class MenuBarPanelController: NSViewController {
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus
         )
-        let latestDictation = DictationTranscriptStore.latestSavedDictation()
         let updatePresentation = menuUpdatePresentation(for: appState.sparkleUpdater.updateStatus)
         let menuVisibility = MenuBarVisibilityPreferences.snapshot()
 
@@ -111,6 +113,7 @@ final class MenuBarPanelController: NSViewController {
         content.needsLayout = true
         content.layoutSubtreeIfNeeded()
         preferredContentSize = content.preferredPanelSize
+        refreshLatestDictationIfNeeded()
     }
 
     private func setupSubscriptions() {
@@ -153,6 +156,14 @@ final class MenuBarPanelController: NSViewController {
         NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
+
+        NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.latestDictationLoaded = false
                 self?.refresh()
             }
             .store(in: &subscriptions)
@@ -216,9 +227,23 @@ final class MenuBarPanelController: NSViewController {
                 "action_id": actionID,
                 "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
+                "paste_available": latestDictation == nil ? "false" : "true",
             ]
         )
+    }
+
+    private func refreshLatestDictationIfNeeded() {
+        guard !latestDictationLoaded else { return }
+        latestDictationTask?.cancel()
+        latestDictationTask = Task { @MainActor [weak self] in
+            let latest = await Task.detached(priority: .utility) {
+                DictationTranscriptStore.latestSavedDictation()
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.latestDictation = latest
+            self.latestDictationLoaded = true
+            self.refresh()
+        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

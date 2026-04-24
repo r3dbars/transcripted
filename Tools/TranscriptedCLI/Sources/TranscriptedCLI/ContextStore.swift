@@ -278,9 +278,25 @@ enum CLIContextStore {
 
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
         let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
-        guard let markdownURL = directories.dictationDirs
-            .map({ $0.appendingPathComponent(requestedName) })
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+        var invalidPathRequested = false
+        var markdownURL: URL?
+        for directory in directories.dictationDirs {
+            switch CLIPathSecurity.resolveReadableFile(named: requestedName, in: directory) {
+            case .valid(let safeURL):
+                markdownURL = safeURL
+            case .missing:
+                continue
+            case .invalid:
+                invalidPathRequested = true
+            }
+            if markdownURL != nil { break }
+        }
+
+        if invalidPathRequested && markdownURL == nil {
+            throw ValidationError("Invalid dictation filename: \(filename)")
+        }
+
+        guard let markdownURL else {
             throw ValidationError("Dictation not found: \(filename)")
         }
 
@@ -339,7 +355,7 @@ enum CLIContextStore {
     }
 
     private static func loadMeetings(from directory: URL) -> [MeetingRecord] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        let files = safeMarkdownFiles(in: directory)
         return files.compactMap { url in
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
@@ -372,7 +388,7 @@ enum CLIContextStore {
     }
 
     private static func loadDictationDays(from directory: URL) -> [DictationDayRecord] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        let files = safeMarkdownFiles(in: directory)
         return files.compactMap { url in
             guard url.pathExtension == "md", url.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else { return nil }
             guard let day = loadDictationDay(at: url) else { return nil }
@@ -405,6 +421,22 @@ enum CLIContextStore {
         }
 
         return deduplicated
+    }
+
+    private static func safeMarkdownFiles(in directory: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return files.compactMap { url in
+            guard url.pathExtension == "md" else { return nil }
+            switch CLIPathSecurity.validateExistingFile(url, under: directory) {
+            case .valid(let safeURL): return safeURL
+            case .missing, .invalid: return nil
+            }
+        }
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {

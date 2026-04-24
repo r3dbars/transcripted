@@ -39,11 +39,11 @@ struct TranscriptedMCP {
         }
 
         let watchers = directories.watchedDirectories.map { directory in
-            FileWatcher(directory: directory) { changedURL in
+            FileWatcher(directory: directory) {
                 do {
-                    try index.indexSingleFile(changedURL, allowedRoots: directories.watchedDirectories)
+                    try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
                 } catch {
-                    log("Failed to index \(changedURL.lastPathComponent): \(error.localizedDescription)")
+                    log("Failed to reconcile watched directories: \(error.localizedDescription)")
                 }
             }
         }

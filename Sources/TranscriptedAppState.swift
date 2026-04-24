@@ -126,6 +126,13 @@ class TranscriptedAppState: ObservableObject {
         )
     }
 
+    func recoverHotkeysAfterPermissionChange() {
+        logger.log("HOTKEY | refreshing hotkeys after onboarding permissions")
+        contextCapture.unregisterHotkey()
+        contextCapture.registerHotkey()
+        contextCapture.refreshShortcutStatus()
+    }
+
     func shutdown() {
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()

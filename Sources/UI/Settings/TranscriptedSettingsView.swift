@@ -47,6 +47,7 @@ struct TranscriptedSettingsView: View {
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var recentMeetings: [RecentMeetingItem] = []
     @State private var recentDictations: [SavedDictationEntry] = []
+    @State private var recentCapturesLoading = false
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
@@ -737,7 +738,11 @@ struct TranscriptedSettingsView: View {
                 title: "Recent",
                 detail: "The last five saved meeting transcripts."
             ) {
-                if recentMeetings.isEmpty {
+                if recentCapturesLoading && recentMeetings.isEmpty {
+                    Text("Loading recent meetings...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if recentMeetings.isEmpty {
                     Text("No meeting transcripts saved yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -802,7 +807,11 @@ struct TranscriptedSettingsView: View {
                 title: "Recent",
                 detail: "The newest saved dictations."
             ) {
-                if recentDictations.isEmpty {
+                if recentCapturesLoading && recentDictations.isEmpty {
+                    Text("Loading recent dictations...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if recentDictations.isEmpty {
                     Text("No dictations saved yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1260,11 +1269,13 @@ struct TranscriptedSettingsView: View {
 
     private func refreshRecentCaptures() {
         recentCaptureRefreshTask?.cancel()
+        recentCapturesLoading = true
         recentCaptureRefreshTask = Task { @MainActor in
             let snapshot = await RecentCaptureLoader.load(limit: 5)
             guard !Task.isCancelled else { return }
             recentMeetings = snapshot.meetings
             recentDictations = snapshot.dictations
+            recentCapturesLoading = false
         }
     }
 

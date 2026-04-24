@@ -211,6 +211,52 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.title, "Duplicate names")
     }
 
+    func testReadDictationRejectsParentTraversal() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        let outsideDir = root.appendingPathComponent("outside", isDirectory: true)
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try makeDictationMarkdown(text: "escaped content")
+            .write(to: outsideDir.appendingPathComponent("Dictations_2026-04-07.md"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CLIContextStore.readDictation(
+            filename: "../outside/Dictations_2026-04-07.md",
+            entryId: nil,
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        ))
+    }
+
+    func testReadDictationRejectsSymlinkEscape() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        let outsideDir = root.appendingPathComponent("outside", isDirectory: true)
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+
+        let outsideFile = outsideDir.appendingPathComponent("Dictations_2026-04-07.md")
+        try makeDictationMarkdown(text: "escaped content")
+            .write(to: outsideFile, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"),
+            withDestinationURL: outsideFile
+        )
+
+        XCTAssertThrowsError(try CLIContextStore.readDictation(
+            filename: "Dictations_2026-04-07.md",
+            entryId: nil,
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        ))
+    }
+
     private func makeTempDir() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -232,6 +278,29 @@ final class ContextStoreTests: XCTestCase {
         ## Full Transcript
 
         \(body)
+        """
+    }
+
+    private func makeDictationMarkdown(text: String) -> String {
+        """
+        ---
+        title: "Dictations for 2026-04-07"
+        date: 2026-04-07
+        capture_type: dictation_day
+        ---
+
+        # Dictations for 2026-04-07
+
+        ## 9:15 AM - Morning note
+
+        Entry ID: `dictation-20260407-091500-000`
+        Captured: 2026-04-07T09:15:00-0500
+        Source app: Slack
+        Delivery: copied
+        Words: 2
+        Characters: \(text.count)
+
+        \(text)
         """
     }
 }

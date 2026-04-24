@@ -85,6 +85,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
     private var clipURLsByProfileID: [UUID: URL] = [:]
+    private var refreshGeneration = 0
 
     private struct Snapshot {
         let profiles: [SpeakerProfile]
@@ -135,6 +136,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func refresh() {
+        refreshGeneration += 1
+        let generation = refreshGeneration
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
@@ -145,7 +148,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 legacyClipsDirectory: legacyClipsDirectory
             )
             DispatchQueue.main.async {
-                self?.applySnapshot(snapshot)
+                guard let self, self.refreshGeneration == generation else { return }
+                self.applySnapshot(snapshot)
             }
         }
     }
