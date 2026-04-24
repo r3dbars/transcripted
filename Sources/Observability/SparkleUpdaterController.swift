@@ -87,6 +87,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             // Sparkle recommends forcing launch-time background checks, if
             // desired, immediately after the updater has started and only when
             // automatic checks are enabled.
+            guard !updaterController.updater.sessionInProgress else { return }
             updaterController.updater.checkForUpdatesInBackground()
         } else {
             refreshUpdateStatus()
@@ -100,6 +101,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
 
         beginObservedUpdateCheck()
+        guard updaterController.updater.canCheckForUpdates else { return }
         updaterController.checkForUpdates(nil)
     }
 
@@ -108,9 +110,12 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             setUpdateStatus(.unknown, canCheckForUpdates: false)
             return
         }
-        guard updaterController.updater.canCheckForUpdates else { return }
 
         beginObservedUpdateCheck()
+        guard updaterController.updater.canCheckForUpdates,
+              !updaterController.updater.sessionInProgress else {
+            return
+        }
         updaterController.updater.checkForUpdateInformation()
     }
 
@@ -232,6 +237,34 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         updateStatus = nextStatus
     }
 
+    private func markNoUpdateAvailable(from updater: SPUUpdater) {
+        if updateStatus.availableUpdateVersion != nil {
+            trackUpdateCheckFinished(
+                result: "no_change",
+                state: updateStatus.state,
+                version: updateStatus.availableUpdateVersion
+            )
+            return
+        }
+
+        let state = UpdateStatus.State.noUpdateAvailable
+        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
+        trackUpdateCheckFinished(result: "up_to_date", state: state, version: nil)
+    }
+
+    private func markUpdateCheckFailed(from updater: SPUUpdater) {
+        if updateStatus.availableUpdateVersion == nil {
+            let state: UpdateStatus.State = updater.canCheckForUpdates ? .readyToCheck : .unknown
+            setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
+        }
+
+        trackUpdateCheckFinished(
+            result: "error",
+            state: updateStatus.state,
+            version: updateStatus.availableUpdateVersion
+        )
+    }
+
     private func versionString(for item: SUAppcastItem) -> String {
         Self.displayVersionString(for: item)
     }
@@ -336,13 +369,11 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
-        setUpdateStatus(.noUpdateAvailable, canCheckForUpdates: updater.canCheckForUpdates)
-        trackUpdateCheckFinished(result: "up_to_date", state: .noUpdateAvailable, version: nil)
+        markUpdateCheckFailed(from: updater)
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
-        setUpdateStatus(.noUpdateAvailable, canCheckForUpdates: updater.canCheckForUpdates)
-        trackUpdateCheckFinished(result: "up_to_date", state: .noUpdateAvailable, version: nil)
+        markNoUpdateAvailable(from: updater)
     }
 
     func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
@@ -420,9 +451,15 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
         state: SPUUserUpdateState
     ) {
         let version = Self.displayVersionString(for: update)
-        let updateState: UpdateStatus.State = state.stage == .downloaded
-            ? .readyToInstall(version: version)
-            : .updateAvailable(version: version)
+        let updateState: UpdateStatus.State
+        switch state.stage {
+        case .downloaded, .installing:
+            updateState = .readyToInstall(version: version)
+        case .notDownloaded:
+            updateState = .updateAvailable(version: version)
+        @unknown default:
+            updateState = .updateAvailable(version: version)
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.setUpdateStatus(
