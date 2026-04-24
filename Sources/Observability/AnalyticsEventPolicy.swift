@@ -169,6 +169,62 @@ struct AnalyticsEventPolicy: Equatable {
                 "paste_available",
             ]
         ),
+        "update_action_clicked": .init(
+            name: "update_action_clicked",
+            allowedProperties: [
+                "action_id",
+                "automatic_downloads_enabled",
+                "state",
+                "surface",
+                "version",
+            ]
+        ),
+        "update_setting_changed": .init(
+            name: "update_setting_changed",
+            allowedProperties: [
+                "enabled",
+                "setting_id",
+            ]
+        ),
+        "update_check_finished": .init(
+            name: "update_check_finished",
+            allowedProperties: [
+                "automatic_downloads_enabled",
+                "result",
+                "state",
+                "version",
+            ]
+        ),
+        "update_download_started": .init(
+            name: "update_download_started",
+            allowedProperties: [
+                "automatic_downloads_enabled",
+                "state",
+                "version",
+            ]
+        ),
+        "update_download_finished": .init(
+            name: "update_download_finished",
+            allowedProperties: [
+                "automatic_downloads_enabled",
+                "state",
+                "version",
+            ]
+        ),
+        "update_ready_to_install": .init(
+            name: "update_ready_to_install",
+            allowedProperties: [
+                "automatic_downloads_enabled",
+                "state",
+                "version",
+            ]
+        ),
+        "update_relaunching": .init(
+            name: "update_relaunching",
+            allowedProperties: [
+                "version",
+            ]
+        ),
         "settings_opened": .init(
             name: "settings_opened",
             allowedProperties: [

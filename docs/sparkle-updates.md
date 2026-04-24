@@ -17,13 +17,21 @@ Future agents should treat this as a release requirement:
 
 - `Info.plist` points Sparkle at `https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml`
 - `SUEnableAutomaticChecks` is enabled by default
+- `SUScheduledCheckInterval` is set to 4 hours so automatic checks happen
+  more often than Sparkle's default daily cadence
+- `SUAllowsAutomaticUpdates` is enabled so users can opt in to background
+  downloads from Settings
 - the app triggers a background update check on launch when automatic checks are enabled
 - scheduled update reminders are handled quietly inside Transcripted instead of
   showing automatic Sparkle pop-ups
-- the menu bar footer includes a manual `Check for updates` action and changes
-  to an update-ready action when Sparkle finds a newer release
+- the menu bar footer includes a manual `Check for updates` action; when
+  Sparkle finds a newer release, a prominent update action appears near the top
+  of the menu
 - the settings sidebar footer also becomes an update-ready action when Sparkle
   finds a newer release
+- the About settings page exposes `Check automatically` and `Download
+  automatically`; if Sparkle has already downloaded an update, the primary
+  action becomes `Restart to Update`
 
 ## Local tooling
 

@@ -260,7 +260,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         statusItemUpdateBadge.isHidden = updateVersion == nil
 
         if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - update \(updateVersion) available"
+            statusItem?.button?.toolTip = "Transcripted - update \(updateVersion) ready"
         } else {
             statusItem?.button?.toolTip = "Transcripted"
         }
@@ -410,6 +410,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             updateState = "up_to_date"
         case .updateAvailable:
             updateState = "available"
+        case .downloading:
+            updateState = "downloading"
+        case .readyToInstall:
+            updateState = "ready_to_install"
         }
 
         AnalyticsReporter.track(

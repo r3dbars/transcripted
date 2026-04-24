@@ -40,8 +40,9 @@ final class MenuBarPanelController: NSViewController {
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
         content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.meetings) }
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
-        content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.checkForUpdatesFromMenu() }
+        content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
         content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }
+        content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
         view.appearance = NSAppearance(named: .darkAqua)
@@ -84,12 +85,23 @@ final class MenuBarPanelController: NSViewController {
             showRecentMeetings: menuVisibility[.recentMeetings] ?? true
         )
 
+        content.updateProminentUpdate(
+            symbolName: updatePresentation.symbolName,
+            title: updatePresentation.title,
+            detail: updatePresentation.detail,
+            trailingText: updatePresentation.trailingText,
+            tone: updatePresentation.tone,
+            isVisible: updatePresentation.isProminent,
+            isEnabled: appState.sparkleUpdater.updateStatus.canRunUserUpdateAction
+        )
+
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
             updateDetail: updatePresentation.detail,
-            updateVersion: updatePresentation.version,
+            updateVersion: updatePresentation.trailingText,
             updateTone: updatePresentation.tone,
-            updateEnabled: appState.sparkleUpdater.updateStatus.canCheckForUpdates
+            updateEnabled: appState.sparkleUpdater.updateStatus.canRunUserUpdateAction,
+            showUpdateRow: !updatePresentation.isProminent
         )
 
         if case .unknown = appState.sparkleUpdater.updateStatus.state {
@@ -191,10 +203,10 @@ final class MenuBarPanelController: NSViewController {
         openSettingsWindow(page)
     }
 
-    private func checkForUpdatesFromMenu() {
-        trackMenuAction("check_updates")
+    private func performUpdateActionFromMenu() {
+        trackMenuAction(menuUpdateActionID(for: appState.sparkleUpdater.updateStatus.state))
         dismissPopover()
-        appState.sparkleUpdater.checkForUpdates()
+        appState.sparkleUpdater.performUserUpdateAction(surface: "menu_bar")
     }
 
     private func trackMenuAction(_ actionID: String) {
@@ -217,36 +229,82 @@ final class MenuBarPanelController: NSViewController {
 
     private func menuUpdatePresentation(
         for status: SparkleUpdaterController.UpdateStatus
-    ) -> (title: String, detail: String, version: String?, tone: MenuBarActionRowView.Tone) {
+    ) -> (
+        symbolName: String,
+        title: String,
+        detail: String,
+        trailingText: String?,
+        tone: MenuBarActionRowView.Tone,
+        isProminent: Bool
+    ) {
         switch status.state {
         case .unknown, .readyToCheck:
             return (
+                "arrow.triangle.2.circlepath.circle",
                 "Check for Updates",
                 "",
                 nil,
-                .standard
+                .standard,
+                false
             )
         case .checking:
             return (
+                "arrow.triangle.2.circlepath.circle",
                 "Checking for Updates…",
                 "",
                 nil,
-                .standard
+                .standard,
+                false
             )
         case .noUpdateAvailable:
             return (
+                "arrow.triangle.2.circlepath.circle",
                 "Check for Updates",
                 "",
                 nil,
-                .standard
+                .standard,
+                false
             )
         case .updateAvailable(let version):
             return (
-                "Update Available",
-                "Version \(version) ready",
+                "arrow.down.circle.fill",
+                "Install \(version)",
+                "Update ready",
                 "Install",
-                .accent
+                .warning,
+                true
             )
+        case .downloading(let version):
+            return (
+                "arrow.down.circle",
+                "Downloading \(version)",
+                "Update will be ready soon",
+                nil,
+                .warning,
+                true
+            )
+        case .readyToInstall(let version):
+            return (
+                "arrow.clockwise.circle.fill",
+                "Restart to Update",
+                "Version \(version) downloaded",
+                "Restart",
+                .warning,
+                true
+            )
+        }
+    }
+
+    private func menuUpdateActionID(for state: SparkleUpdaterController.UpdateStatus.State) -> String {
+        switch state {
+        case .updateAvailable:
+            return "install_update"
+        case .readyToInstall:
+            return "restart_to_update"
+        case .checking, .downloading:
+            return "view_update_progress"
+        case .unknown, .readyToCheck, .noUpdateAvailable:
+            return "check_updates"
         }
     }
 
