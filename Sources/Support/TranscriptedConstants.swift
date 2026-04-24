@@ -65,6 +65,11 @@ enum TranscriptedConstants {
     /// Debounce window for coalescing rapid audio config change notifications (e.g. BT reconnect bursts)
     static let audioConfigChangeDebounceDelay: UInt64 = 250_000_000  // 250ms
 
+    /// Max time a device-change recovery may stay active before being marked
+    /// failed. This leaves room inside `dictationRecoveryBudget` for a fallback
+    /// prewarm/start attempt.
+    static let audioDeviceRecoveryTimeout: UInt64 = 2_000_000_000  // 2 seconds
+
     /// Total budget for dictation to wait on engine readiness after a device change.
     /// Sized to cover slower USB/Bluetooth CoreAudio graph rebuilds without trapping
     /// users indefinitely; the overlay remains cancellable during this window.
@@ -72,6 +77,10 @@ enum TranscriptedConstants {
 
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
     static let dictationReadinessPollInterval: UInt64 = 150_000_000  // 150ms
+
+    /// Minimum interval between active readiness refreshes while dictation waits.
+    /// This lets a failed recovery get unstuck without hammering CoreAudio.
+    static let dictationReadinessRefreshInterval: TimeInterval = 0.3
 
     /// Max consecutive prewarm retries before giving up. Each retry waits
     /// `audioRecoveryDelay` (300ms), so 18 retries = ~5.4s of background settling.

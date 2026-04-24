@@ -39,6 +39,14 @@ struct ParakeetRecoveryState: Equatable {
         return true
     }
 
+    mutating func timeoutRecovery(generation: UInt64) -> Bool {
+        guard generation == self.generation, isRecovering else { return false }
+        self.generation &+= 1
+        isRecovering = false
+        inputFormatReady = false
+        return true
+    }
+
     func isStale(generation: UInt64) -> Bool {
         generation != self.generation
     }
