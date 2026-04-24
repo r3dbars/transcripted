@@ -1,15 +1,23 @@
 import Foundation
 
 struct TranscriptedDataDirectories {
-    let meetingsDir: URL
-    let dictationsDir: URL
+    let meetingDirs: [URL]
+    let dictationDirs: [URL]
     let indexDir: URL
+
+    var meetingsDir: URL {
+        meetingDirs[0]
+    }
+
+    var dictationsDir: URL {
+        dictationDirs[0]
+    }
 
     var watchedDirectories: [URL] {
         var seen: Set<String> = []
         var directories: [URL] = []
 
-        for url in [meetingsDir, dictationsDir] {
+        for url in meetingDirs + dictationDirs {
             let path = url.standardizedFileURL.path
             guard !seen.contains(path) else { continue }
             seen.insert(path)
@@ -22,6 +30,18 @@ struct TranscriptedDataDirectories {
     static func resolve(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
+    ) -> TranscriptedDataDirectories {
+        resolve(
+            environment: environment,
+            fileManager: fileManager,
+            homeDirectory: fileManager.homeDirectoryForCurrentUser
+        )
+    }
+
+    static func resolve(
+        environment: [String: String],
+        fileManager: FileManager,
+        homeDirectory home: URL
     ) -> TranscriptedDataDirectories {
         if let sharedPath = environment["TRANSCRIPTED_DATA_DIR"], !sharedPath.isEmpty {
             let sharedURL = URL(fileURLWithPath: sharedPath)
@@ -38,13 +58,12 @@ struct TranscriptedDataDirectories {
             let indexURL = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
                 ?? sharedURL
             return TranscriptedDataDirectories(
-                meetingsDir: meetingsURL,
-                dictationsDir: dictationsURL,
+                meetingDirs: [meetingsURL],
+                dictationDirs: [dictationsURL],
                 indexDir: indexURL
             )
         }
 
-        let home = fileManager.homeDirectoryForCurrentUser
         let transcriptedRoot = home
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Application Support", isDirectory: true)
@@ -73,20 +92,56 @@ struct TranscriptedDataDirectories {
         let dictationsOverride = environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
 
-        let useLegacyDraft = meetingsOverride == nil
-            && dictationsOverride == nil
-            && !fileManager.fileExists(atPath: defaultMeetings.path)
-            && fileManager.fileExists(atPath: legacyDraftMeetings.path)
-        let useLegacyShared = meetingsOverride == nil
-            && dictationsOverride == nil
-            && !fileManager.fileExists(atPath: defaultMeetings.path)
-            && !fileManager.fileExists(atPath: legacyDraftMeetings.path)
-            && fileManager.fileExists(atPath: legacyShared.path)
+        let meetingDirs = meetingsOverride.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultMeetings,
+                legacyCandidates: [legacyDraftMeetings, legacyShared],
+                fileManager: fileManager
+            )
+        let dictationDirs = dictationsOverride.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultDictations,
+                legacyCandidates: [legacyDraftDictations, legacyShared],
+                fileManager: fileManager
+            )
 
         return TranscriptedDataDirectories(
-            meetingsDir: meetingsOverride ?? (useLegacyDraft ? legacyDraftMeetings : (useLegacyShared ? legacyShared : defaultMeetings)),
-            dictationsDir: dictationsOverride ?? (useLegacyDraft ? legacyDraftDictations : (useLegacyShared ? legacyShared : defaultDictations)),
+            meetingDirs: meetingDirs,
+            dictationDirs: dictationDirs,
             indexDir: indexOverride ?? defaultIndex
         )
+    }
+
+    private static func captureDirectories(primary: URL, legacyCandidates: [URL], fileManager: FileManager) -> [URL] {
+        var directories = [primary]
+        var seen = Set([primary.standardizedFileURL.path])
+
+        for candidate in legacyCandidates where directoryHasMarkdownFiles(candidate, fileManager: fileManager) {
+            let path = candidate.standardizedFileURL.path
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            directories.append(candidate)
+        }
+
+        return directories
+    }
+
+    private static func directoryHasMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        return contents.contains { url in
+            guard url.pathExtension == "md",
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            else {
+                return false
+            }
+            return values.isRegularFile == true && values.isSymbolicLink != true
+        }
     }
 }

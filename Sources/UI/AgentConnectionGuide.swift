@@ -62,8 +62,8 @@ enum AgentConnectionGuide {
         - Dictations: \(dictationsFolder.path)
 
         When using folders:
-        - Read AGENT.md and transcripted.json in the meetings folder if they exist.
-        - Prefer the most direct source available.
+        - Read AGENT.md in the meetings folder if it exists.
+        - Read local Markdown files directly: Call_*.md for meetings and Dictations_*.md for dictations.
         - Use exact filenames, dates, and speaker names when relevant.
         - Do not invent access or claim data you cannot read.
 
@@ -79,7 +79,8 @@ enum AgentConnectionGuide {
         """
 
         if let filename {
-            prompt += "\n\nIf helpful, start with this meeting:\n\(filename).json"
+            let markdownFilename = filename.hasSuffix(".md") ? filename : "\(filename).md"
+            prompt += "\n\nIf helpful, start with this meeting:\n\(markdownFilename)"
         }
 
         return prompt

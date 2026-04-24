@@ -8,7 +8,7 @@ enum DiagnosticsPreferences {
 
     static var isEnabled: Bool {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: enabledKey) != nil else { return true }
+        guard defaults.object(forKey: enabledKey) != nil else { return false }
         return defaults.bool(forKey: enabledKey)
     }
 

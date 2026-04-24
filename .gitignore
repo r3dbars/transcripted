@@ -16,6 +16,7 @@ llamacpp-modules/
 .deps-build/
 deps-libs/
 deps-modules/
+deps-frameworks/
 
 # GGUF models (legacy, replaced by MLX HuggingFace download)
 models/

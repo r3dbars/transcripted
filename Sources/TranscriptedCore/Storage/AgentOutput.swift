@@ -276,73 +276,70 @@ public enum AgentOutput {
 
     /// Content shared by both CLAUDE.md and AGENT.md in the output directory.
     private static let agentReadmeContent = """
-    # Transcripted — Meeting Data
+    # Transcripted Meeting Data
 
     Transcripted records, transcribes, and diarizes voice conversations locally on macOS.
-    This directory contains structured data for AI agents to consume.
+    This directory contains local Markdown meeting transcripts for AI agents to read.
 
     ## File Structure
 
     | File | Purpose |
     |------|---------|
-    | `transcripted.json` | Index of all transcripts with metadata |
-    | `Call_*.json` | Structured JSON sidecar for each transcript |
-    | `Call_*.md` | Human-readable Markdown transcript |
+    | `Call_*.md` | Markdown transcript with YAML metadata, speaker analytics, and the full transcript |
 
-    ## Data Model
+    ## Markdown Layout
 
-    ### transcripted.json (Index)
+    Each meeting file usually includes:
 
-    ```json
-    {
-      "version": "1.0",
-      "updated_at": "ISO 8601",
-      "transcript_count": 47,
-      "transcripts": [{ "filename", "date", "duration_seconds", "speaker_count", "word_count", "speakers" }],
-      "known_speakers": [{ "persistent_id", "name", "call_count" }]
-    }
-    ```
-
-    ### Call_*.json (Transcript Sidecar)
-
-    ```json
-    {
-      "version": "1.0",
-      "recording": { "date", "duration_seconds", "dropped_segments", "engines": { "stt", "diarization" } },
-      "speakers": [{ "id", "persistent_speaker_id", "name", "confidence", "word_count", "speaking_seconds" }],
-      "utterances": [{ "start", "end", "speaker_id", "text" }]
-    }
-    ```
+    - YAML frontmatter with date, time, duration, engine, source, and speaker metadata
+    - A channel and speaker analytics section
+    - A full timestamped transcript
 
     ### Speaker Tracking
 
     - Each speaker has an `id` (e.g., `mic_0`, `system_0`) unique within one transcript
-    - `persistent_speaker_id` is a UUID that tracks the same person across meetings
-    - `known_speakers` in the index lists all named speakers with their call count
-    - Confidence: `"high"` (voice match > 85%), `"medium"` (voice match > 70%), or `null`
+    - `db_id` in YAML is a persistent UUID that can track the same person across meetings
+    - Confidence values are included when Transcripted has enough information
 
     ## Common Agent Tasks
 
     **Summarize latest meeting:**
-    Read `transcripted.json` → find newest transcript → read its `.json` sidecar → summarize utterances
+    Sort `Call_*.md` files by filename or file modified date, then summarize the newest transcript.
 
     **Extract action items:**
-    Read sidecar → filter utterances containing task-like language → attribute to speakers
+    Read the full transcript and pull out task-like language with speaker names and timestamps.
 
     **Track speaker across meetings:**
-    Use `persistent_speaker_id` to find all transcripts where a person spoke
+    Use `db_id` and speaker names in YAML to connect people across meeting files.
 
     **Search by topic:**
-    Read index → scan utterance text across sidecars for keyword matches
+    Scan the Markdown transcript text across `Call_*.md` files.
     """
 
-    /// Write CLAUDE.md and AGENT.md to the save directory (only if missing).
+    /// Write CLAUDE.md and AGENT.md to the save directory.
     public static func writeAgentReadme(to folder: URL) {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for filename in ["CLAUDE.md", "AGENT.md"] {
             let fileURL = folder.appendingPathComponent(filename)
-            guard !FileManager.default.fileExists(atPath: fileURL.path) else { continue }
+            if FileManager.default.fileExists(atPath: fileURL.path),
+               !shouldReplaceGeneratedAgentReadme(at: fileURL) {
+                continue
+            }
             try? agentReadmeContent.write(to: fileURL, atomically: true, encoding: .utf8)
         }
+    }
+
+    private static func shouldReplaceGeneratedAgentReadme(at fileURL: URL) -> Bool {
+        guard let existing = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return false
+        }
+        return existing.contains("Transcripted")
+            && existing.contains("Meeting Data")
+            && (
+                existing.contains("| `transcripted.json` | Index")
+                    || existing.contains("| `Call_*.json` | Structured JSON sidecar")
+                    || existing.contains("Read `transcripted.json`")
+            )
     }
 
     /// Generate a paste-ready prompt for connecting an AI agent.
@@ -352,15 +349,16 @@ public enum AgentOutput {
         My transcripts are saved at: \(folder.path)
 
         To get started:
-        1. Read AGENT.md for the data model
-        2. Read transcripted.json for the full index of all transcripts
-        3. Read any .json sidecar for structured transcript data
+        1. Read AGENT.md for the folder notes
+        2. Read the local Call_*.md meeting files
+        3. Use YAML metadata, speaker analytics, timestamps, and transcript text
 
         Each transcript has persistent speaker IDs that track people across meetings.
         """
 
         if let filename = filename {
-            prompt += "\n\nStart with: \(filename).json"
+            let markdownFilename = filename.hasSuffix(".md") ? filename : "\(filename).md"
+            prompt += "\n\nStart with: \(markdownFilename)"
         }
 
         return prompt

@@ -45,9 +45,7 @@ enum TranscriptLoader {
 
         let entries = parseTranscriptEntries(from: document.body)
         let speakerMetadata = parseSpeakerMetadata(from: content)
-        let speakerMetadataByName = Dictionary(uniqueKeysWithValues: speakerMetadata.map {
-            (normalizeSpeakerLabel($0.name), $0)
-        })
+        let speakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(speakerMetadata)
 
         var generatedIDsByLabel: [String: String] = [:]
         var nextMicId = 0
@@ -276,6 +274,21 @@ enum TranscriptLoader {
         }
         flush()
         return speakers
+    }
+
+    private static func uniqueSpeakerMetadataByNormalizedName(
+        _ speakers: [ParsedFrontmatterSpeaker]
+    ) -> [String: ParsedFrontmatterSpeaker] {
+        var grouped: [String: [ParsedFrontmatterSpeaker]] = [:]
+        for speaker in speakers {
+            grouped[normalizeSpeakerLabel(speaker.name), default: []].append(speaker)
+        }
+
+        var unique: [String: ParsedFrontmatterSpeaker] = [:]
+        for (name, matches) in grouped where matches.count == 1 {
+            unique[name] = matches[0]
+        }
+        return unique
     }
 
     private static func parseTranscriptEntries(from body: String) -> [ParsedTranscriptEntry] {

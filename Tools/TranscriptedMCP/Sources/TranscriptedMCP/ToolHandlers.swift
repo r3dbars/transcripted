@@ -235,23 +235,23 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
         do {
             switch params.name {
             case "list_meetings":
-                return try handleListMeetings(params: params, index: index, meetingsDir: directories.meetingsDir)
+                return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "list_dictations":
                 return try handleListDictations(params: params, index: index)
             case "read_meeting":
-                return try handleReadMeeting(params: params, meetingsDir: directories.meetingsDir)
+                return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
             case "read_dictation":
-                return try handleReadDictation(params: params, dictationsDir: directories.dictationsDir)
+                return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
             case "search":
                 return try handleSearch(params: params, index: index)
             case "search_context":
-                return try handleSearchContext(params: params, index: index, meetingsDir: directories.meetingsDir)
+                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "recent_context":
-                return try handleRecentContext(params: params, index: index, meetingsDir: directories.meetingsDir)
+                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "who_is":
                 return try handleWhoIs(params: params, index: index)
             case "recap":
-                return try handleRecap(params: params, index: index, meetingsDir: directories.meetingsDir)
+                return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
             default:
                 return .init(content: [.text(text: "Unknown tool: \(params.name)")], isError: true)
             }
@@ -263,7 +263,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
 
 // MARK: - list_meetings
 
-private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
+private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     let count = params.arguments?["count"]?.intValue ?? 10
     let date = params.arguments?["date"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
@@ -276,7 +276,7 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
         guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
             named: results[i].filename,
             appendingExtension: "md",
-            in: meetingsDir
+            in: meetingDirs
         ) else { continue }
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
             results[i].title = extractTitle(from: content) ?? results[i].filename
@@ -335,7 +335,7 @@ private func extractDialogueLines(from content: String) -> [String] {
 
 // MARK: - read_meeting
 
-private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) throws -> CallTool.Result {
+private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return .init(content: [.text(text: "Missing required parameter: filename")], isError: true)
     }
@@ -343,7 +343,7 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) th
     let section = params.arguments?["section"]?.stringValue ?? "full"
 
     let mdURL: URL
-    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: meetingsDir) {
+    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: meetingDirs) {
     case .valid(let url):
         mdURL = url
     case .missing:
@@ -382,14 +382,14 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingsDir: URL) th
     }
 }
 
-private func handleReadDictation(params: CallTool.Parameters, dictationsDir: URL) throws -> CallTool.Result {
+private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return .init(content: [.text(text: "Missing required parameter: filename")], isError: true)
     }
 
     let entryId = params.arguments?["entry_id"]?.stringValue
     let markdownURL: URL
-    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: dictationsDir) {
+    switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: dictationDirs) {
     case .valid(let url):
         markdownURL = url
     case .missing:
@@ -451,7 +451,7 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) t
     return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "[]")])
 }
 
-private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
+private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
         return .init(content: [.text(text: "Missing required parameter: query")], isError: true)
     }
@@ -471,7 +471,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
         maxItems: count
     )
 
-    hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
+    hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
         return .init(content: [.text(text: "No context found for \"\(query)\".")])
@@ -481,14 +481,14 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     return .init(content: [.text(text: String(data: json, encoding: .utf8) ?? "{}")])
 }
 
-private func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
+private func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
 
     var result = try index.listRecentContext(kind: kind, count: count, dateFrom: dateFrom, dateTo: dateTo)
-    hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingsDir: meetingsDir)
+    hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if result.items.isEmpty {
         return .init(content: [.text(text: "No recent context found.")])
@@ -517,7 +517,7 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
 
 // MARK: - recap
 
-private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingsDir: URL) throws -> CallTool.Result {
+private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     // Use local calendar so "today" matches transcript dates (which are stored in local time)
     let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
@@ -536,7 +536,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
         guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
             named: meeting.filename,
             appendingExtension: "md",
-            in: meetingsDir
+            in: meetingDirs
         ) else { continue }
         var preview = ""
         var title = meeting.filename
@@ -588,6 +588,27 @@ struct RecapResult: Codable {
 
 // MARK: - Helpers
 
+private extension PathSecurity {
+    static func resolveReadableFile(
+        named requestedName: String,
+        appendingExtension pathExtension: String? = nil,
+        in baseDirectories: [URL]
+    ) -> PathResolutionStatus {
+        for directory in baseDirectories {
+            switch resolveReadableFile(named: requestedName, appendingExtension: pathExtension, in: directory) {
+            case .valid(let url):
+                return .valid(url)
+            case .invalid:
+                return .invalid
+            case .missing:
+                continue
+            }
+        }
+
+        return .missing
+    }
+}
+
 private func parseContextKind(_ raw: String?) -> ContextKind {
     guard let raw, let kind = ContextKind(rawValue: raw.lowercased()) else {
         return .all
@@ -595,11 +616,11 @@ private func parseContextKind(_ raw: String?) -> ContextKind {
     return kind
 }
 
-private func meetingTitle(for filename: String, meetingsDir: URL) -> String {
+private func meetingTitle(for filename: String, meetingDirs: [URL]) -> String {
     guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
         named: filename,
         appendingExtension: "md",
-        in: meetingsDir
+        in: meetingDirs
     ),
     let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
         return filename
@@ -612,10 +633,10 @@ private func hydrateMeetingTitles<T>(
     kind: KeyPath<T, ContextKind>,
     filename: KeyPath<T, String>,
     title: WritableKeyPath<T, String>,
-    meetingsDir: URL
+    meetingDirs: [URL]
 ) {
     for index in collection.indices where collection[index][keyPath: kind] == .meeting {
-        collection[index][keyPath: title] = meetingTitle(for: collection[index][keyPath: filename], meetingsDir: meetingsDir)
+        collection[index][keyPath: title] = meetingTitle(for: collection[index][keyPath: filename], meetingDirs: meetingDirs)
     }
 }
 

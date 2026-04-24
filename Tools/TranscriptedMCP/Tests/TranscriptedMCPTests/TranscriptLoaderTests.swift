@@ -25,6 +25,26 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(transcript?.speakers.count, 2)
     }
 
+    func testLoadDuplicateSpeakerNamesDoesNotCrash() throws {
+        let fixture = makeFixtureJSON(
+            speakers: [
+                ("mic_0", "You", nil),
+                ("system_0", "Alex", "80FB272B-6061-4FC4-8408-3F7A974C59DB"),
+                ("system_1", "Alex", "4F57C98D-B6B7-449F-95B9-3521FA99D7DA"),
+            ],
+            utterances: [
+                ("system_0", 0.0, 4.0, "First speaker with the shared display name."),
+                ("system_1", 4.0, 8.0, "Second speaker with the shared display name."),
+            ]
+        )
+        try writeFixture(fixture, filename: "Call_duplicate_names", to: tempDir)
+
+        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_duplicate_names.md"))
+
+        XCTAssertNotNil(transcript)
+        XCTAssertEqual(transcript?.utterances.count, 2)
+    }
+
     func testLoadMalformedMarkdownReturnsNil() throws {
         try "not markdown at all".write(to: tempDir.appendingPathComponent("Call_bad.md"), atomically: true, encoding: .utf8)
         let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_bad.md"))

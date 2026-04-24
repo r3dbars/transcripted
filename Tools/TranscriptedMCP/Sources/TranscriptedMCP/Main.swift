@@ -7,8 +7,8 @@ struct TranscriptedMCP {
         let directories = TranscriptedDataDirectories.resolve()
 
         log("Starting transcripted-mcp v1.0.0")
-        log("Meetings directory: \(directories.meetingsDir.path)")
-        log("Dictations directory: \(directories.dictationsDir.path)")
+        log("Meetings directories: \(directories.meetingDirs.map(\.path).joined(separator: ", "))")
+        log("Dictations directories: \(directories.dictationDirs.map(\.path).joined(separator: ", "))")
         log("Index directory: \(directories.indexDir.path)")
 
         for directory in directories.watchedDirectories + [directories.indexDir] {
@@ -22,7 +22,7 @@ struct TranscriptedMCP {
         let index: TranscriptIndex
         do {
             index = try TranscriptIndex(indexDir: directories.indexDir)
-            try index.reconcile(meetingsDir: directories.meetingsDir, dictationsDir: directories.dictationsDir)
+            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
         } catch {
             log("Failed to initialize index: \(error.localizedDescription)")
             throw error

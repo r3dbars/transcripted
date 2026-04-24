@@ -253,7 +253,7 @@ struct PermissionsOnboardingView: View {
                 .frame(width: 480)
                 .padding(.top, 10)
                 .onChange(of: diagnosticsEnabled) { _, newValue in
-                    DiagnosticsPreferences.setEnabled(newValue)
+                    setDiagnosticsEnabled(newValue)
                 }
             }
         case .done:
@@ -316,6 +316,17 @@ struct PermissionsOnboardingView: View {
             guard !Task.isCancelled else { return }
             copiedAgentItem = nil
         }
+    }
+
+    private func setDiagnosticsEnabled(_ enabled: Bool) {
+        DiagnosticsPreferences.setEnabled(enabled)
+        #if BETA_BUILD
+        if enabled {
+            BetaTelemetry.shared.startPeriodicShipping()
+        } else {
+            BetaTelemetry.shared.stopPeriodicShipping()
+        }
+        #endif
     }
 
     private func checkAllPermissions() {
