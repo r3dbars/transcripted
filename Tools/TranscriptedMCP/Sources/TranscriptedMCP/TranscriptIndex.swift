@@ -178,17 +178,26 @@ final class TranscriptIndex: @unchecked Sendable {
     // MARK: - Reconciliation
 
     func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
+        try reconcile(meetingDirs: [meetingsDir], dictationDirs: [dictationsDir])
+    }
+
+    func reconcile(meetingDirs: [URL], dictationDirs: [URL]) throws {
         try queue.sync {
-            let diskFiles: [ContextArtifactFile]
-            if meetingsDir.standardizedFileURL == dictationsDir.standardizedFileURL {
-                diskFiles = TranscriptLoader.enumerateArtifacts(in: meetingsDir)
-            } else {
-                diskFiles = TranscriptLoader.enumerateArtifacts(in: meetingsDir)
-                    + TranscriptLoader.enumerateArtifacts(in: dictationsDir)
+            var seenPaths: Set<String> = []
+            var diskMap: [String: ContextArtifactFile] = [:]
+
+            for directory in meetingDirs + dictationDirs {
+                let directoryPath = directory.standardizedFileURL.path
+                guard !seenPaths.contains(directoryPath) else { continue }
+                seenPaths.insert(directoryPath)
+
+                for file in TranscriptLoader.enumerateArtifacts(in: directory) {
+                    let filename = file.url.deletingPathExtension().lastPathComponent
+                    if diskMap[filename] == nil {
+                        diskMap[filename] = file
+                    }
+                }
             }
-            let diskMap = Dictionary(uniqueKeysWithValues: diskFiles.map {
-                ($0.url.deletingPathExtension().lastPathComponent, $0)
-            })
 
             let indexed = try getIndexedModDates()
 

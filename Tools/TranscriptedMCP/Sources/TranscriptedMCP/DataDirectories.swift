@@ -1,15 +1,23 @@
 import Foundation
 
 struct TranscriptedDataDirectories {
-    let meetingsDir: URL
-    let dictationsDir: URL
+    let meetingDirs: [URL]
+    let dictationDirs: [URL]
     let indexDir: URL
+
+    var meetingsDir: URL {
+        meetingDirs[0]
+    }
+
+    var dictationsDir: URL {
+        dictationDirs[0]
+    }
 
     var watchedDirectories: [URL] {
         var seen: Set<String> = []
         var directories: [URL] = []
 
-        for url in [meetingsDir, dictationsDir] {
+        for url in meetingDirs + dictationDirs {
             let path = url.standardizedFileURL.path
             guard !seen.contains(path) else { continue }
             seen.insert(path)
@@ -17,6 +25,18 @@ struct TranscriptedDataDirectories {
         }
 
         return directories
+    }
+
+    init(meetingsDir: URL, dictationsDir: URL, indexDir: URL) {
+        self.meetingDirs = [meetingsDir]
+        self.dictationDirs = [dictationsDir]
+        self.indexDir = indexDir
+    }
+
+    init(meetingDirs: [URL], dictationDirs: [URL], indexDir: URL) {
+        self.meetingDirs = meetingDirs
+        self.dictationDirs = dictationDirs
+        self.indexDir = indexDir
     }
 
     static func resolve(
@@ -73,26 +93,56 @@ struct TranscriptedDataDirectories {
         let meetingsOverride = environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsOverride = environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
-        let currentTranscriptedCapturesExist = fileManager.fileExists(atPath: defaultMeetings.path)
-            || fileManager.fileExists(atPath: defaultDictations.path)
-
-        let legacyDraftCapturesExist = fileManager.fileExists(atPath: legacyDraftMeetings.path)
-            || fileManager.fileExists(atPath: legacyDraftDictations.path)
-
-        let useLegacyDraft = meetingsOverride == nil
-            && dictationsOverride == nil
-            && !currentTranscriptedCapturesExist
-            && legacyDraftCapturesExist
-        let useLegacyShared = meetingsOverride == nil
-            && dictationsOverride == nil
-            && !currentTranscriptedCapturesExist
-            && !legacyDraftCapturesExist
-            && fileManager.fileExists(atPath: legacyShared.path)
+        let meetingDirs = meetingsOverride.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultMeetings,
+                legacyCandidates: [legacyDraftMeetings, legacyShared],
+                fileManager: fileManager
+            )
+        let dictationDirs = dictationsOverride.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultDictations,
+                legacyCandidates: [legacyDraftDictations, legacyShared],
+                fileManager: fileManager
+            )
 
         return TranscriptedDataDirectories(
-            meetingsDir: meetingsOverride ?? (useLegacyDraft ? legacyDraftMeetings : (useLegacyShared ? legacyShared : defaultMeetings)),
-            dictationsDir: dictationsOverride ?? (useLegacyDraft ? legacyDraftDictations : (useLegacyShared ? legacyShared : defaultDictations)),
+            meetingDirs: meetingDirs,
+            dictationDirs: dictationDirs,
             indexDir: indexOverride ?? defaultIndex
         )
+    }
+
+    private static func captureDirectories(primary: URL, legacyCandidates: [URL], fileManager: FileManager) -> [URL] {
+        var directories = [primary]
+        var seen = Set([primary.standardizedFileURL.path])
+
+        for candidate in legacyCandidates where directoryHasMarkdownFiles(candidate, fileManager: fileManager) {
+            let path = candidate.standardizedFileURL.path
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            directories.append(candidate)
+        }
+
+        return directories
+    }
+
+    private static func directoryHasMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        return contents.contains { url in
+            guard url.pathExtension == "md",
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            else {
+                return false
+            }
+            return values.isRegularFile == true && values.isSymbolicLink != true
+        }
     }
 }

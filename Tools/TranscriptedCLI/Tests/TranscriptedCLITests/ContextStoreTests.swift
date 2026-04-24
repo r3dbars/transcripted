@@ -131,9 +131,107 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.preview, "I agree, and the product plan still needs a test pass.")
     }
 
+    func testRecentIncludesLegacyMeetingDirectories() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let currentMeetingsDir = root.appendingPathComponent("current-meetings", isDirectory: true)
+        let legacyMeetingsDir = root.appendingPathComponent("legacy-meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentMeetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyMeetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        try makeMeetingMarkdown(title: "Current meeting", date: "2026-04-18", body: "[00:03] [Mic/You] Current note.")
+            .write(to: currentMeetingsDir.appendingPathComponent("Call_current.md"), atomically: true, encoding: .utf8)
+        try makeMeetingMarkdown(title: "Legacy meeting", date: "2026-04-17", body: "[00:03] [Mic/You] Legacy note.")
+            .write(to: legacyMeetingsDir.appendingPathComponent("Call_legacy.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(
+                meetingDirs: [currentMeetingsDir, legacyMeetingsDir],
+                dictationDirs: [dictationsDir]
+            ),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.map(\.title), ["Current meeting", "Legacy meeting"])
+    }
+
+    func testRecentMeetingWithDuplicateSpeakerNamesDoesNotCrash() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let meeting = """
+        ---
+        capture_type: meeting
+        title: Duplicate names
+        date: 2026-04-16
+        time: 09:15:00
+        duration: "0:18"
+        speakers:
+          - id: "0"
+            name: Alex
+            db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
+          - id: "1"
+            name: Alex
+            db_id: "4F57C98D-B6B7-449F-95B9-3521FA99D7DA"
+        ---
+
+        # Duplicate names
+
+        ## Full Transcript
+
+        [00:03] [System/Alex] First shared name.
+        [00:08] [System/Alex] Second shared name.
+        """
+        try meeting.write(
+            to: meetingsDir.appendingPathComponent("Duplicate names.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.title, "Duplicate names")
+    }
+
     private func makeTempDir() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func makeMeetingMarkdown(title: String, date: String, body: String) -> String {
+        """
+        ---
+        capture_type: meeting
+        title: \(title)
+        date: \(date)
+        time: 09:15:00
+        duration: "0:18"
+        ---
+
+        # \(title)
+
+        ## Full Transcript
+
+        \(body)
+        """
     }
 }

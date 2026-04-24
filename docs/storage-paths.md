@@ -88,6 +88,6 @@ can follow the user-selected capture library.
 
 The standalone tools do not all resolve paths the same way:
 
-- `TranscriptedCLI` prefers `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/`, then falls back to legacy Draft `.../transcripts/` folders, then `~/Documents/Transcripted/`
-- `TranscriptedMCP` follows the same Transcripted -> Draft -> `~/Documents/Transcripted/` order and keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default
+- `TranscriptedCLI` reads `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/` first, then also merges legacy Draft `.../transcripts/` folders and `~/Documents/Transcripted/` when those folders still contain Markdown captures
+- `TranscriptedMCP` follows the same current-plus-legacy read order and keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default
 - `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
