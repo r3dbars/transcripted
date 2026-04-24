@@ -82,12 +82,10 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
 
         if updaterController.updater.automaticallyChecksForUpdates {
-            beginObservedUpdateCheck()
-
             // Sparkle recommends forcing launch-time background checks, if
             // desired, immediately after the updater has started and only when
             // automatic checks are enabled.
-            guard !updaterController.updater.sessionInProgress else { return }
+            guard beginObservedUpdateCheckIfPossible(allowExistingSession: true) else { return }
             updaterController.updater.checkForUpdatesInBackground()
         } else {
             refreshUpdateStatus()
@@ -100,8 +98,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return
         }
 
-        beginObservedUpdateCheck()
-        guard updaterController.updater.canCheckForUpdates else { return }
+        guard beginObservedUpdateCheckIfPossible(allowExistingSession: true) else { return }
         updaterController.checkForUpdates(nil)
     }
 
@@ -111,11 +108,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return
         }
 
-        beginObservedUpdateCheck()
-        guard updaterController.updater.canCheckForUpdates,
-              !updaterController.updater.sessionInProgress else {
-            return
-        }
+        guard beginObservedUpdateCheckIfPossible(allowExistingSession: false) else { return }
         updaterController.updater.checkForUpdateInformation()
     }
 
@@ -161,8 +154,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             enabled: updaterController.updater.automaticallyDownloadsUpdates
         )
 
-        guard updaterController.updater.automaticallyDownloadsUpdates, !updaterController.updater.sessionInProgress else { return }
-        beginObservedUpdateCheck()
+        guard updaterController.updater.automaticallyDownloadsUpdates,
+              beginObservedUpdateCheckIfPossible(allowExistingSession: false) else { return }
         updaterController.updater.checkForUpdatesInBackground()
     }
 
@@ -205,6 +198,26 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         default:
             setUpdateStatus(.checking, canCheckForUpdates: updaterController.updater.canCheckForUpdates)
         }
+    }
+
+    private func beginObservedUpdateCheckIfPossible(allowExistingSession: Bool) -> Bool {
+        let updater = updaterController.updater
+        if updater.sessionInProgress {
+            if allowExistingSession {
+                beginObservedUpdateCheck()
+            } else {
+                syncReadiness(from: updater)
+            }
+            return false
+        }
+
+        guard updater.canCheckForUpdates else {
+            markUpdaterIdle(from: updater)
+            return false
+        }
+
+        beginObservedUpdateCheck()
+        return true
     }
 
     private func syncReadiness(from updater: SPUUpdater) {
@@ -263,6 +276,16 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             state: updateStatus.state,
             version: updateStatus.availableUpdateVersion
         )
+    }
+
+    private func markUpdaterIdle(from updater: SPUUpdater) {
+        guard updateStatus.availableUpdateVersion == nil else {
+            syncReadiness(from: updater)
+            return
+        }
+
+        let state: UpdateStatus.State = updater.canCheckForUpdates ? .readyToCheck : .unknown
+        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
     }
 
     private func versionString(for item: SUAppcastItem) -> String {
@@ -442,7 +465,7 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
         _ update: SUAppcastItem,
         andInImmediateFocus immediateFocus: Bool
     ) -> Bool {
-        false
+        update.isCriticalUpdate
     }
 
     nonisolated func standardUserDriverWillHandleShowingUpdate(
