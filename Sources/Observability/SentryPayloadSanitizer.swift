@@ -46,7 +46,10 @@ enum SentryPayloadSanitizer {
     private static let commonSecretRegex = makeRegex(
         #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
     )
-    private static let bearerRegex = makeRegex(#"Bearer\s+[A-Za-z0-9._-]+"#, options: [.caseInsensitive])
+    private static let authSchemeRegex = makeRegex(#"(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+"#, options: [.caseInsensitive])
+    private static let authorizationAssignmentRegex = makeRegex(
+        #"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*(?:basic|bearer)\s+[^\s,;]+"#
+    )
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
     )
@@ -122,7 +125,9 @@ enum SentryPayloadSanitizer {
         range = NSRange(result.startIndex..., in: result)
         result = commonSecretRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
-        result = bearerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "Bearer ****")
+        result = authorizationAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
+        range = NSRange(result.startIndex..., in: result)
+        result = authSchemeRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1 ****")
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
