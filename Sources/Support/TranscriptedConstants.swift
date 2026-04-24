@@ -73,6 +73,10 @@ enum TranscriptedConstants {
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
     static let dictationReadinessPollInterval: UInt64 = 150_000_000  // 150ms
 
+    /// Minimum interval between active readiness refreshes while dictation waits.
+    /// This lets a failed recovery get unstuck without hammering CoreAudio.
+    static let dictationReadinessRefreshInterval: TimeInterval = 0.3
+
     /// Max consecutive prewarm retries before giving up. Each retry waits
     /// `audioRecoveryDelay` (300ms), so 18 retries = ~5.4s of background settling.
     /// Prevents infinite Task chains when the mic is permanently unavailable.

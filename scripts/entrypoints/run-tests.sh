@@ -131,6 +131,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
+    "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"

@@ -272,10 +272,12 @@ class DictationSessionController: ObservableObject {
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
         var readinessRefreshes = 0
+        var nextReadinessRefreshAt = startedAt
 
         if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
             await appState.sttRouter.refreshInputReadiness()
             readinessRefreshes += 1
+            nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
         }
 
         while CFAbsoluteTimeGetCurrent() < deadline {
@@ -296,7 +298,18 @@ class DictationSessionController: ObservableObject {
                 anchorRect: sessionAnchorRect
             )
 
-            if !isRecovering, inputFormatReady {
+            switch DictationReadinessWaitPolicy.action(isRecovering: isRecovering, inputFormatReady: inputFormatReady) {
+            case .waitForRecovery:
+                break
+
+            case .refreshInputReadiness:
+                if CFAbsoluteTimeGetCurrent() >= nextReadinessRefreshAt {
+                    await appState.sttRouter.refreshInputReadiness()
+                    readinessRefreshes += 1
+                    nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+                }
+
+            case .startRecording:
                 startAttempts += 1
                 let started = await appState.sttRouter.startRecording()
                 guard !Task.isCancelled, isDictating else {
@@ -347,6 +360,7 @@ class DictationSessionController: ObservableObject {
                 if !appState.sttRouter.isRecovering {
                     await appState.sttRouter.refreshInputReadiness()
                     readinessRefreshes += 1
+                    nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
             }
 
