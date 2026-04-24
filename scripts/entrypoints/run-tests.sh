@@ -143,6 +143,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
+    "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingRecordingCleanup.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
