@@ -12,8 +12,17 @@ final class MenuBarContentView: NSView {
     private var documentHeight: CGFloat = MenuTokens.panelHeight
 
     let headerView = MenuBarHeaderView(frame: .zero)
+    let updateCalloutRow = MenuBarActionRowView(frame: .zero)
     let primaryActionsView = MenuBarPrimaryActionsView(frame: .zero)
     let utilityActionsView = MenuBarUtilityActionsView(frame: .zero)
+
+    var onUpdateAction: (() -> Void)? {
+        didSet {
+            updateCalloutRow.onPress = { [weak self] in
+                self?.onUpdateAction?()
+            }
+        }
+    }
 
     weak var appState: TranscriptedAppState? {
         didSet {
@@ -52,7 +61,8 @@ final class MenuBarContentView: NSView {
             documentView.addSubview($0)
         }
 
-        [headerView, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
+        updateCalloutRow.isHidden = true
+        [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
     }
 
     override func layout() {
@@ -78,6 +88,14 @@ final class MenuBarContentView: NSView {
             headerDivider.frame = .zero
         }
 
+        if !updateCalloutRow.isHidden {
+            let updateHeight = updateCalloutRow.intrinsicContentSize.height
+            updateCalloutRow.frame = NSRect(x: pad, y: y, width: width, height: updateHeight)
+            y += updateHeight + 7
+        } else {
+            updateCalloutRow.frame = .zero
+        }
+
         let primaryHeight = primaryActionsView.intrinsicHeight
         primaryActionsView.frame = NSRect(x: pad, y: y, width: width, height: primaryHeight)
         y += primaryHeight + MenuTokens.sectionSpacing
@@ -96,6 +114,30 @@ final class MenuBarContentView: NSView {
     func scrollToTop() {
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    func updateProminentUpdate(
+        symbolName: String,
+        title: String,
+        detail: String,
+        trailingText: String?,
+        tone: MenuBarActionRowView.Tone,
+        isVisible: Bool,
+        isEnabled: Bool
+    ) {
+        updateCalloutRow.isHidden = !isVisible
+        if isVisible {
+            updateCalloutRow.update(
+                symbolName: symbolName,
+                title: title,
+                detail: detail,
+                trailingText: trailingText,
+                tone: tone,
+                size: .primary,
+                isEnabled: isEnabled
+            )
+        }
+        needsLayout = true
     }
 
     var preferredPanelSize: NSSize {

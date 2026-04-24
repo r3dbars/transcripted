@@ -45,7 +45,8 @@ final class MenuBarUtilityActionsView: NSView {
         updateDetail: String,
         updateVersion: String?,
         updateTone: MenuBarActionRowView.Tone,
-        updateEnabled: Bool
+        updateEnabled: Bool,
+        showUpdateRow: Bool = true
     ) {
         connectAgentRow.update(
             symbolName: "sparkles",
@@ -72,6 +73,7 @@ final class MenuBarUtilityActionsView: NSView {
             size: .utility,
             isEnabled: updateEnabled
         )
+        updatesRow.isHidden = !showUpdateRow
 
         settingsRow.update(
             symbolName: "gearshape",
@@ -98,10 +100,14 @@ final class MenuBarUtilityActionsView: NSView {
         super.layout()
 
         var y: CGFloat = 0
-        for row in allRows {
+        for row in visibleRows {
             let rowHeight = row.intrinsicContentSize.height
             row.frame = NSRect(x: 0, y: y, width: bounds.width, height: rowHeight)
             y += rowHeight + 1
+        }
+
+        for row in allRows where row.isHidden {
+            row.frame = .zero
         }
     }
 
@@ -124,7 +130,7 @@ final class MenuBarUtilityActionsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat {
-        let rows = allRows
+        let rows = visibleRows
         let rowSpacing = max(0, rows.count - 1)
         return rows
             .map { $0.intrinsicContentSize.height }
@@ -133,5 +139,9 @@ final class MenuBarUtilityActionsView: NSView {
 
     private var allRows: [MenuBarActionRowView] {
         [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
+    }
+
+    private var visibleRows: [MenuBarActionRowView] {
+        allRows.filter { !$0.isHidden }
     }
 }

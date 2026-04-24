@@ -32,6 +32,10 @@
 	<true/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>14400</integer>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml</string>
 	<key>SUPublicEDKey</key>

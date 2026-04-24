@@ -53,6 +53,9 @@ func testAnalyticsEventPolicy() {
         let settingsToggle = AnalyticsEventPolicy.policy(forEvent: "settings_toggle_changed")
         let settingsPermission = AnalyticsEventPolicy.policy(forEvent: "settings_permission_cta_clicked")
         let captureLibrary = AnalyticsEventPolicy.policy(forEvent: "settings_capture_library_changed")
+        let updateAction = AnalyticsEventPolicy.policy(forEvent: "update_action_clicked")
+        let updateSetting = AnalyticsEventPolicy.policy(forEvent: "update_setting_changed")
+        let updateCheckFinished = AnalyticsEventPolicy.policy(forEvent: "update_check_finished")
 
         assertEqual(menuOpened?.allowedProperties.contains("paste_available"), true, "menu opens should preserve whether paste has value")
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
@@ -62,20 +65,30 @@ func testAnalyticsEventPolicy() {
         assertEqual(settingsToggle?.allowedProperties.contains("setting_id"), true, "settings toggles should preserve setting id")
         assertEqual(settingsPermission?.allowedProperties.contains("permission_kind"), true, "settings permission CTAs should preserve permission kind")
         assertEqual(captureLibrary?.allowedProperties.contains("location_type"), true, "capture library changes should preserve default-vs-custom only")
+        assertEqual(updateAction?.allowedProperties.contains("surface"), true, "update clicks should preserve whether menu or settings drove the action")
+        assertEqual(updateAction?.allowedProperties.contains("automatic_downloads_enabled"), true, "update clicks should preserve auto-download state")
+        assertEqual(updateSetting?.allowedProperties.contains("setting_id"), true, "update settings should preserve the changed toggle")
+        assertEqual(updateCheckFinished?.allowedProperties.contains("result"), true, "update checks should preserve the coarse outcome")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_id": "start_dictation",
+                "automatic_downloads_enabled": "true",
                 "page_id": "home",
                 "setting_id": "menu_bar_start_dictation",
                 "source": "menu_bar",
+                "state": "ready_to_install",
+                "surface": "settings_about",
             ],
-            allowedKeys: ["action_id", "page_id", "setting_id", "source"]
+            allowedKeys: ["action_id", "automatic_downloads_enabled", "page_id", "setting_id", "source", "state", "surface"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
+        assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
         assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
+        assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
+        assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
     }
 
     runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {

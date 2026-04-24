@@ -154,7 +154,8 @@ struct TranscriptedSettingsView: View {
 
     private var settingsSidebarFooter: some View {
         Button {
-            actions.checkForUpdates()
+            trackSettingsAction(settingsUpdateActionID, page: .about)
+            sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
         } label: {
             HStack(spacing: 8) {
                 if sparkleUpdater.updateStatus.availableUpdateVersion != nil {
@@ -182,7 +183,7 @@ struct TranscriptedSettingsView: View {
                 Image(systemName: settingsFooterIsUpdateAvailable ? "arrow.down.circle.fill" : "arrow.triangle.2.circlepath")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(settingsFooterIsUpdateAvailable ? Color.accentColor : Color.secondary)
-                    .opacity(sparkleUpdater.updateStatus.canCheckForUpdates ? 1 : 0.45)
+                    .opacity(sparkleUpdater.updateStatus.canRunUserUpdateAction ? 1 : 0.45)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, settingsFooterIsUpdateAvailable ? 8 : 10)
@@ -190,7 +191,7 @@ struct TranscriptedSettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!sparkleUpdater.updateStatus.canCheckForUpdates)
+        .disabled(!sparkleUpdater.updateStatus.canRunUserUpdateAction)
         .help(settingsFooterHelp)
     }
 
@@ -1002,12 +1003,36 @@ struct TranscriptedSettingsView: View {
                     tone: aboutUpdateStatusTone
                 )
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Check automatically", isOn: Binding(
+                        get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
+                        set: { newValue in
+                            trackSettingsToggle("automatic_update_checks", enabled: newValue, page: .about)
+                            sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
+                        }
+                    ))
+
+                    Toggle("Download automatically", isOn: Binding(
+                        get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
+                        set: { newValue in
+                            trackSettingsToggle("automatic_update_downloads", enabled: newValue, page: .about)
+                            sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
+                        }
+                    ))
+                    .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
+
+                    Text(automaticUpdatesDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack {
                     Button(aboutUpdateButtonTitle) {
-                        trackSettingsAction("check_updates", page: .about)
-                        actions.checkForUpdates()
+                        trackSettingsAction(settingsUpdateActionID, page: .about)
+                        sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
-                    .disabled(!sparkleUpdater.updateStatus.canCheckForUpdates)
+                    .disabled(!sparkleUpdater.updateStatus.canRunUserUpdateAction)
 
                     Button("Submit Feedback") {
                         trackSettingsAction("submit_feedback", page: .about)
@@ -1030,6 +1055,10 @@ struct TranscriptedSettingsView: View {
         switch sparkleUpdater.updateStatus.state {
         case .checking:
             return "Checking for updates"
+        case .downloading(let version):
+            return "Downloading \(version)"
+        case .readyToInstall(let version):
+            return "Restart to update \(version)"
         case .noUpdateAvailable, .unknown, .readyToCheck:
             return TranscriptedSupportActions.appVersionDescription
         case .updateAvailable:
@@ -1046,6 +1075,9 @@ struct TranscriptedSettingsView: View {
 
     private var settingsFooterHelp: String {
         if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
+            if case .readyToInstall = sparkleUpdater.updateStatus.state {
+                return "Restart to install update \(version)."
+            }
             return "Install update \(version)."
         }
         return "Check for updates."
@@ -1400,6 +1432,10 @@ struct TranscriptedSettingsView: View {
             return "Up to date"
         case .updateAvailable(let version):
             return "Update available (\(version))"
+        case .downloading(let version):
+            return "Downloading update (\(version))"
+        case .readyToInstall(let version):
+            return "Ready to restart (\(version))"
         }
     }
 
@@ -1413,6 +1449,10 @@ struct TranscriptedSettingsView: View {
             return "This Mac is on the newest visible version."
         case .updateAvailable(let version):
             return "Version \(version) is ready."
+        case .downloading(let version):
+            return "Version \(version) is downloading."
+        case .readyToInstall(let version):
+            return "Version \(version) is downloaded."
         }
     }
 
@@ -1424,19 +1464,47 @@ struct TranscriptedSettingsView: View {
             return .working
         case .noUpdateAvailable:
             return .ready
-        case .updateAvailable:
+        case .updateAvailable, .downloading, .readyToInstall:
             return .caution
         }
     }
 
     private var aboutUpdateButtonTitle: String {
         switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable:
-            return "Update Available"
+        case .updateAvailable(let version):
+            return "Install \(version)"
+        case .downloading:
+            return "Downloading…"
+        case .readyToInstall:
+            return "Restart to Update"
         case .checking:
             return "Checking for Updates…"
         case .unknown, .readyToCheck, .noUpdateAvailable:
             return "Check for Updates"
+        }
+    }
+
+    private var automaticUpdatesDetail: String {
+        let settings = sparkleUpdater.automaticUpdateSettings
+        if settings.automaticDownloadsEnabled {
+            return "Transcripted will download updates in the background. When one is ready, you only need to restart."
+        }
+        if settings.automaticChecksEnabled {
+            return "Transcripted will check in the background and show an update badge when one is ready."
+        }
+        return "Turn on automatic checks to see updates sooner."
+    }
+
+    private var settingsUpdateActionID: String {
+        switch sparkleUpdater.updateStatus.state {
+        case .updateAvailable:
+            return "install_update"
+        case .readyToInstall:
+            return "restart_to_update"
+        case .checking, .downloading:
+            return "view_update_progress"
+        case .unknown, .readyToCheck, .noUpdateAvailable:
+            return "check_updates"
         }
     }
 
