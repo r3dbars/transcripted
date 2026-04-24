@@ -66,6 +66,11 @@ struct JSONSidecarValidator {
 
             // Utterances sorted by start
             if let utterances = json["utterances"] as? [[String: Any]] {
+                if utterances.isEmpty {
+                    results.append(.fail("artifact/json-utterances-present", target: name, detail: "No utterances found"))
+                    continue
+                }
+
                 var sorted = true
                 var prevStart: Double = -1
                 var missingStartCount = 0

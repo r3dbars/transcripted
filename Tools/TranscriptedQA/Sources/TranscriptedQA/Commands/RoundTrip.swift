@@ -96,6 +96,22 @@ struct RoundTrip: ParsableCommand {
                 }
             }),
 
+            ("Remove all utterances from JSON sidecar", {
+                try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "empty-utterances") { dir in
+                    let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
+                    let data = try Data(contentsOf: jsonFile)
+                    guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        return false
+                    }
+                    json["utterances"] = [[String: Any]]()
+                    let newData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
+                    try newData.write(to: jsonFile)
+
+                    let results = JSONSidecarValidator(directory: dir).validate()
+                    return results.contains { $0.status == .fail && $0.check == "artifact/json-utterances-present" }
+                }
+            }),
+
             ("Set negative duration_seconds in JSON", {
                 try corruptionTest(cleanDir: cleanDir, tmpBase: tmpBase, name: "negative-duration") { dir in
                     let jsonFile = dir.appendingPathComponent("Call_2026-03-26_10-30-00.json")
