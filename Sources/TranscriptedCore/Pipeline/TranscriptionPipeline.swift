@@ -79,6 +79,17 @@ extension Transcription {
                 AppLogger.transcription.debug("Mic: skipped for system-audio-only transcription")
             }
 
+            let micSignalAnalysis: AudioSignalAnalysis?
+            if micURL != nil, !micSamples.isEmpty {
+                let rawMicAnalysis = AudioSignalRecovery.analyze(samples: micSamples, sampleRate: 16000)
+                var context = rawMicAnalysis.context
+                context["suggested_gain"] = String(format: "%.2f", AudioSignalRecovery.normalizationGain(for: rawMicAnalysis))
+                AppLogger.transcription.info("Analyzed meeting mic signal", context)
+                micSignalAnalysis = rawMicAnalysis
+            } else {
+                micSignalAnalysis = nil
+            }
+
             // Validate system audio has meaningful content (at least 1 second at 16kHz).
             // Without this, a failed system audio capture produces an empty transcript.
             guard systemSamples.count >= 16000 else {
@@ -110,7 +121,9 @@ extension Transcription {
                     micEnergyPerFrame[i] = sqrt(sumSquares / Float(micFrameSize))
                 }
             }
-            let micActiveThreshold: Float = 0.02  // matches isSilent threshold
+            let micActiveThreshold = AudioSignalRecovery.speechDetectionThreshold(
+                for: micSignalAnalysis ?? AudioSignalRecovery.analyze(samples: [], sampleRate: 16000)
+            )
 
             /// Returns the fraction of a time range where the local mic was active (0.0-1.0).
             func micActiveFraction(startTime: Double, endTime: Double) -> Double {
@@ -429,8 +442,13 @@ extension Transcription {
 
                 if splitLocalSpeakers {
                     // B) Mic diarization path
-                    let micResult = try await Self.processMicChannelWithDiarization(
+                    let diarizationMicSamples = AudioSignalRecovery.normalizeForSpeech(
                         samples: micSamples,
+                        sampleRate: 16000,
+                        analysis: micSignalAnalysis
+                    ).samples
+                    let micResult = try await Self.processMicChannelWithDiarization(
+                        samples: diarizationMicSamples,
                         diarization: diarization,
                         parakeet: parakeet,
                         speakerDB: speakerDB,
@@ -461,11 +479,23 @@ extension Transcription {
                             endTime: segment.end
                         )
 
-                        // Skip segments shorter than 1s — Parakeet requires at least 16,000 samples
-                        guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+                        guard let preparedSegment = Self.prepareMicSegmentForTranscription(
+                            samples: segmentSamples,
+                            sampleRate: 16000
+                        ) else {
+                            droppedSegments += 1
+                            continue
+                        }
 
-                        let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
-                        guard !text.isEmpty else { continue }
+                        let text = try await parakeet.transcribeSegment(samples: preparedSegment.samples, source: .microphone)
+                        guard !text.isEmpty else {
+                            var context = preparedSegment.analysis.context
+                            context["segment_index"] = "\(index)"
+                            context["gain"] = String(format: "%.2f", preparedSegment.gain)
+                            context["padded_samples"] = "\(preparedSegment.paddedSampleCount)"
+                            AppLogger.transcription.warning("Mic segment returned empty transcription", context)
+                            continue
+                        }
 
                         micUtterances.append(TranscriptionUtterance(
                             start: segment.start,
@@ -706,10 +736,23 @@ extension Transcription {
                 startTime: segment.startTime,
                 endTime: segment.endTime
             )
-            guard segmentSamples.count >= 16000 else { droppedSegments += 1; continue }
+            guard let preparedSegment = Self.prepareMicSegmentForTranscription(
+                samples: segmentSamples,
+                sampleRate: 16000
+            ) else {
+                droppedSegments += 1
+                continue
+            }
 
-            let text = try await parakeet.transcribeSegment(samples: segmentSamples, source: .microphone)
-            guard !text.isEmpty else { continue }
+            let text = try await parakeet.transcribeSegment(samples: preparedSegment.samples, source: .microphone)
+            guard !text.isEmpty else {
+                var context = preparedSegment.analysis.context
+                context["segment_index"] = "\(index)"
+                context["gain"] = String(format: "%.2f", preparedSegment.gain)
+                context["padded_samples"] = "\(preparedSegment.paddedSampleCount)"
+                AppLogger.transcription.warning("Mic diarization segment returned empty transcription", context)
+                continue
+            }
 
             let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
             let persistentId: UUID?
@@ -808,6 +851,35 @@ extension Transcription {
 
     // MARK: - Silence-Based Speech Segmentation
 
+    struct PreparedMicSegment {
+        let samples: [Float]
+        let analysis: AudioSignalAnalysis
+        let gain: Float
+        let paddedSampleCount: Int
+    }
+
+    nonisolated static func prepareMicSegmentForTranscription(
+        samples: [Float],
+        sampleRate: Double
+    ) -> PreparedMicSegment? {
+        guard !samples.isEmpty, sampleRate > 0 else { return nil }
+
+        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+        let normalization = AudioSignalRecovery.normalizeForSpeech(
+            samples: samples,
+            sampleRate: sampleRate,
+            analysis: analysis
+        )
+        let padded = AudioSignalRecovery.padForParakeet(samples: normalization.samples)
+
+        return PreparedMicSegment(
+            samples: padded,
+            analysis: analysis,
+            gain: normalization.gain,
+            paddedSampleCount: padded.count - normalization.samples.count
+        )
+    }
+
     /// A time range representing a speech segment in the audio.
     struct SpeechSegment {
         let start: Double   // seconds
@@ -830,7 +902,8 @@ extension Transcription {
 
         let frameSamples = Int(sampleRate * 0.025)  // 25ms frames (400 samples at 16kHz)
         let hopSamples = Int(sampleRate * 0.010)    // 10ms hop
-        let silenceThreshold: Float = 0.01          // RMS below this = silence
+        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+        let silenceThreshold = AudioSignalRecovery.speechDetectionThreshold(for: analysis)
         let minSilenceDuration: Double = 0.4        // 400ms gap to split
         let minSegmentDuration: Double = 0.5        // Don't create segments shorter than this
 
