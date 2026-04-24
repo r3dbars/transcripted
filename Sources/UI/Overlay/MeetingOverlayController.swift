@@ -735,12 +735,8 @@ final class MeetingOverlayRootView: NSView {
             closeButton.setAccessibilityLabel(dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
-            remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
             remindButton.setAccessibilityLabel(remindPromptTooltip)
             remindButton.setAccessibilityHelp("Dismisses this prompt and asks again in a little bit.")
-            remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-            remindButton.layer?.borderWidth = 0.5
-            remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
         case .recording:
             titleLabel.stringValue = self.isRecordingMinimized ? "Rec" : "Recording meeting"
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
