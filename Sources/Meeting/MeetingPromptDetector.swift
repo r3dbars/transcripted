@@ -111,6 +111,7 @@ final class MeetingPromptDetector {
     private func evaluate() async {
         pruneExpiredEntries()
 
+        guard MeetingPromptPreferences.isEnabled else { return }
         guard TranscriptedPermissionAccess.calendarAccessGranted() else { return }
 
         let now = Date()

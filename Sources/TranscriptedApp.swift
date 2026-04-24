@@ -151,15 +151,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 lastExternalApplication = frontmost
             }
             if !PermissionsOnboardingView.hasCompleted {
+                configurePopoverForOnboarding()
                 popover.contentViewController = NSHostingController(
                     rootView: PermissionsOnboardingView(onComplete: { [weak self] in
                         PermissionsOnboardingView.markCompleted()
                         guard let self else { return }
+                        self.configurePopoverForMenu()
                         self.menuPanelController.refresh()
                         self.popover?.contentViewController = self.menuPanelController
                     })
                 )
             } else {
+                configurePopoverForMenu()
                 menuPanelController.refresh()
                 popover.contentViewController = menuPanelController
             }
@@ -173,7 +176,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         popover?.performClose(nil)
         if popover?.contentViewController !== menuPanelController {
             popover?.contentViewController = nil
+            configurePopoverForMenu()
         }
+    }
+
+    private func configurePopoverForOnboarding() {
+        popover?.contentSize = PermissionsOnboardingView.preferredSize
+        popover?.appearance = NSAppearance(named: .aqua)
+    }
+
+    private func configurePopoverForMenu() {
+        popover?.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
+        popover?.appearance = NSAppearance(named: .darkAqua)
     }
 
     private func showSettingsWindow() {
@@ -200,6 +214,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         menuPanelController.prepareForClose()
         if popover?.contentViewController !== menuPanelController {
             popover?.contentViewController = nil
+            configurePopoverForMenu()
         }
     }
 }

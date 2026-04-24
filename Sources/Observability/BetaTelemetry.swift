@@ -32,6 +32,7 @@ final class BetaTelemetry {
     // MARK: - Discrete events (fire-and-forget, unchanged)
 
     func sendEvent(type: String, sourceApp: String? = nil, payload: [String: Any] = [:]) {
+        guard DiagnosticsPreferences.isEnabled else { return }
         guard let token = Self.activeToken() else { return }
 
         Task.detached(priority: .utility) {
@@ -56,6 +57,7 @@ final class BetaTelemetry {
     // MARK: - Periodic shipping (60s timer)
 
     func startPeriodicShipping() {
+        guard DiagnosticsPreferences.isEnabled else { return }
         shippingTimer?.cancel()
         shippingTimer = Task { [weak self] in
             while !Task.isCancelled {
@@ -74,6 +76,7 @@ final class BetaTelemetry {
     // MARK: - Quit shipping (synchronous, 3s timeout — called from applicationWillTerminate)
 
     func shipLogs() {
+        guard DiagnosticsPreferences.isEnabled else { return }
         guard let token = Self.activeToken(),
               let body = shippingBody(
                 logChunk: readChunk(from: debugLogURL, offset: &debugLogOffset),
@@ -95,6 +98,7 @@ final class BetaTelemetry {
     // MARK: - Incremental shipping
 
     private func shipIncremental() async {
+        guard DiagnosticsPreferences.isEnabled else { return }
         guard let token = Self.activeToken() else { return }
 
         // Read new chunks from both files
