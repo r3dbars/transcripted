@@ -82,7 +82,7 @@ Rule of thumb:
 - `Sources/TranscriptedCore/CLAUDE.md`
   Library boundary, pipeline layout, embedder seams.
 - `Tools/TranscriptedCLI/CLAUDE.md`
-  Standalone diarization CLI.
+  Standalone local-context and offline diarization CLI.
 
 ## Historical Zones
 
