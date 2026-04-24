@@ -121,7 +121,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
-                guard PermissionsOnboardingView.hasCompleted else { return false }
+                guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
                 let presented = self.meetingOverlayController.presentDetectedMeetingPrompt(candidate)
                 if presented {
@@ -194,7 +194,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     @objc func togglePopover() {
-        if !PermissionsOnboardingView.hasCompleted {
+        if !PermissionsOnboardingPreferences.hasCompleted() {
             _ = resolvedSourceApp()
             onboardingWindowController.present()
             return
@@ -320,17 +320,17 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func presentInitialOnboardingIfNeeded() {
-        guard !PermissionsOnboardingView.hasCompleted, !hasPresentedInitialOnboarding else { return }
+        guard !PermissionsOnboardingPreferences.hasCompleted(), !hasPresentedInitialOnboarding else { return }
         hasPresentedInitialOnboarding = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingView.hasCompleted else { return }
+            guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }
             self.onboardingWindowController.present()
         }
     }
 
     private func finishOnboarding() {
-        PermissionsOnboardingView.markCompleted()
+        PermissionsOnboardingPreferences.markCompleted()
         onboardingWindowController.dismiss()
         closePopover()
 
@@ -343,7 +343,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboardingAndStartDictation() {
         let sourceApp = resolvedSourceApp()
-        PermissionsOnboardingView.markCompleted()
+        PermissionsOnboardingPreferences.markCompleted()
         onboardingWindowController.dismiss()
         closePopover()
         sourceApp?.activate(options: [])
