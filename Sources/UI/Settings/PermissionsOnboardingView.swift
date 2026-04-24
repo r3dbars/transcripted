@@ -24,9 +24,6 @@ extension FirstRunLocalModelState {
 }
 
 struct PermissionsOnboardingView: View {
-    private static let completionKey = "permissionsOnboardingCompleted"
-    private static let forceKey = "forcePermissionsOnboarding"
-
     @ObservedObject private var sttRouter: STTRouter
     let canStartDictation: Bool
     var onStartDictation: ((NSRect?) -> Void)?
@@ -804,14 +801,11 @@ struct PermissionsOnboardingView: View {
     }
 
     static var hasCompleted: Bool {
-        if UserDefaults.standard.bool(forKey: forceKey) {
-            return false
-        }
-        return UserDefaults.standard.bool(forKey: completionKey)
+        PermissionsOnboardingPreferences.hasCompleted()
     }
 
     static func markCompleted() {
-        UserDefaults.standard.set(true, forKey: completionKey)
+        PermissionsOnboardingPreferences.markCompleted()
     }
 }
 
