@@ -2,8 +2,26 @@ import ArgumentParser
 import Foundation
 
 struct CLIContextDirectories {
-    let meetingsDir: URL
-    let dictationsDir: URL
+    let meetingDirs: [URL]
+    let dictationDirs: [URL]
+
+    var meetingsDir: URL {
+        meetingDirs[0]
+    }
+
+    var dictationsDir: URL {
+        dictationDirs[0]
+    }
+
+    init(meetingsDir: URL, dictationsDir: URL) {
+        self.meetingDirs = [meetingsDir]
+        self.dictationDirs = [dictationsDir]
+    }
+
+    init(meetingDirs: [URL], dictationDirs: [URL]) {
+        self.meetingDirs = meetingDirs
+        self.dictationDirs = dictationDirs
+    }
 
     static func resolve(
         dataDir: String?,
@@ -64,26 +82,56 @@ struct CLIContextDirectories {
             ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsURL = dictationsDir.map(URL.init(fileURLWithPath:))
             ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
-        let currentTranscriptedCapturesExist = fileManager.fileExists(atPath: defaultMeetings.path)
-            || fileManager.fileExists(atPath: defaultDictations.path)
-
-        let legacyDraftCapturesExist = fileManager.fileExists(atPath: legacyDraftMeetings.path)
-            || fileManager.fileExists(atPath: legacyDraftDictations.path)
-
-        let useLegacyDraft = meetingsURL == nil
-            && dictationsURL == nil
-            && !currentTranscriptedCapturesExist
-            && legacyDraftCapturesExist
-        let useLegacyShared = meetingsURL == nil
-            && dictationsURL == nil
-            && !currentTranscriptedCapturesExist
-            && !legacyDraftCapturesExist
-            && fileManager.fileExists(atPath: legacyShared.path)
+        let meetingDirs = meetingsURL.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultMeetings,
+                legacyCandidates: [legacyDraftMeetings, legacyShared],
+                fileManager: fileManager
+            )
+        let dictationDirs = dictationsURL.map { [$0] }
+            ?? captureDirectories(
+                primary: defaultDictations,
+                legacyCandidates: [legacyDraftDictations, legacyShared],
+                fileManager: fileManager
+            )
 
         return CLIContextDirectories(
-            meetingsDir: meetingsURL ?? (useLegacyDraft ? legacyDraftMeetings : (useLegacyShared ? legacyShared : defaultMeetings)),
-            dictationsDir: dictationsURL ?? (useLegacyDraft ? legacyDraftDictations : (useLegacyShared ? legacyShared : defaultDictations))
+            meetingDirs: meetingDirs,
+            dictationDirs: dictationDirs
         )
+    }
+
+    private static func captureDirectories(primary: URL, legacyCandidates: [URL], fileManager: FileManager) -> [URL] {
+        var directories = [primary]
+        var seen = Set([primary.standardizedFileURL.path])
+
+        for candidate in legacyCandidates where directoryHasMarkdownFiles(candidate, fileManager: fileManager) {
+            let path = candidate.standardizedFileURL.path
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            directories.append(candidate)
+        }
+
+        return directories
+    }
+
+    private static func directoryHasMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        return contents.contains { url in
+            guard url.pathExtension == "md",
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            else {
+                return false
+            }
+            return values.isRegularFile == true && values.isSymbolicLink != true
+        }
     }
 }
 
@@ -104,7 +152,7 @@ struct CLIContextPathOptions: ParsableArguments {
 
 enum CLIContextStore {
     static func listDictationDays(in directories: CLIContextDirectories, count: Int, dateFrom: String?, dateTo: String?) -> [CLIDictationDaySummary] {
-        let days = loadDictationDays(from: directories.dictationsDir).filter { day in
+        let days = loadDictationDays(from: directories.dictationDirs).filter { day in
             if let dateFrom, day.date < dateFrom { return false }
             if let dateTo, day.date > dateTo { return false }
             return true
@@ -127,7 +175,7 @@ enum CLIContextStore {
         var items: [CLIContextItem] = []
 
         if kind != .dictation {
-            items.append(contentsOf: loadMeetings(from: directories.meetingsDir).compactMap { meeting in
+            items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 return CLIContextItem(
                     kind: .meeting,
@@ -146,7 +194,7 @@ enum CLIContextStore {
         }
 
         if kind != .meeting {
-            items.append(contentsOf: loadDictationDays(from: directories.dictationsDir).flatMap { day in
+            items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                     return CLIContextItem(
@@ -174,7 +222,7 @@ enum CLIContextStore {
         var items: [CLIContextItem] = []
 
         if kind != .dictation {
-            items.append(contentsOf: loadMeetings(from: directories.meetingsDir).compactMap { meeting in
+            items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 if let speaker, !meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(speaker) }) {
                     return nil
@@ -201,7 +249,7 @@ enum CLIContextStore {
         }
 
         if kind != .meeting, speaker == nil {
-            items.append(contentsOf: loadDictationDays(from: directories.dictationsDir).flatMap { day in
+            items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                     guard entry.title.localizedCaseInsensitiveContains(normalizedQuery)
@@ -229,7 +277,13 @@ enum CLIContextStore {
     }
 
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
-        let markdownURL = directories.dictationsDir.appendingPathComponent(filename.hasSuffix(".md") ? filename : filename + ".md")
+        let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
+        guard let markdownURL = directories.dictationDirs
+            .map({ $0.appendingPathComponent(requestedName) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw ValidationError("Dictation not found: \(filename)")
+        }
+
         guard let day = loadDictationDay(at: markdownURL) else {
             throw ValidationError("Dictation not found: \(filename)")
         }
@@ -280,13 +334,18 @@ enum CLIContextStore {
         let payload: CLIAgentDictationDay
     }
 
+    private static func loadMeetings(from directories: [URL]) -> [MeetingRecord] {
+        deduplicating(directories.flatMap { loadMeetings(from: $0) }, by: \.filename)
+    }
+
     private static func loadMeetings(from directory: URL) -> [MeetingRecord] {
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return files.compactMap { url in
+            let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
+                  !filename.hasPrefix("Dictations_"),
                   let transcript = loadMeeting(at: url) else { return nil }
 
-            let filename = url.deletingPathExtension().lastPathComponent
             let title = readMeetingTitle(filename: filename, from: directory)
             let speakerLookup = Dictionary(uniqueKeysWithValues: transcript.speakers.map { ($0.id, $0.name) })
             return MeetingRecord(
@@ -308,6 +367,10 @@ enum CLIContextStore {
         }
     }
 
+    private static func loadDictationDays(from directories: [URL]) -> [DictationDayRecord] {
+        deduplicating(directories.flatMap { loadDictationDays(from: $0) }, by: \.filename)
+    }
+
     private static func loadDictationDays(from directory: URL) -> [DictationDayRecord] {
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return files.compactMap { url in
@@ -325,6 +388,23 @@ enum CLIContextStore {
                 payload: day.payload
             )
         }
+    }
+
+    private static func deduplicating<Record>(
+        _ records: [Record],
+        by keyPath: KeyPath<Record, String>
+    ) -> [Record] {
+        var seen: Set<String> = []
+        var deduplicated: [Record] = []
+
+        for record in records {
+            let key = record[keyPath: keyPath]
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            deduplicated.append(record)
+        }
+
+        return deduplicated
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {
@@ -412,9 +492,7 @@ enum CLIContextStore {
 
         let entries = parseTranscriptEntries(from: frontmatter.body)
         let speakerMetadata = parseFrontmatterSpeakers(from: content)
-        let speakerMetadataByName = Dictionary(uniqueKeysWithValues: speakerMetadata.map {
-            (normalizeSpeakerLabel($0.name), $0)
-        })
+        let speakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(speakerMetadata)
 
         var generatedIDsByLabel: [String: String] = [:]
         var nextMicId = 0
@@ -564,6 +642,21 @@ enum CLIContextStore {
         flush()
 
         return speakers
+    }
+
+    private static func uniqueSpeakerMetadataByNormalizedName(
+        _ speakers: [ParsedFrontmatterSpeaker]
+    ) -> [String: ParsedFrontmatterSpeaker] {
+        var grouped: [String: [ParsedFrontmatterSpeaker]] = [:]
+        for speaker in speakers {
+            grouped[normalizeSpeakerLabel(speaker.name), default: []].append(speaker)
+        }
+
+        var unique: [String: ParsedFrontmatterSpeaker] = [:]
+        for (name, matches) in grouped where matches.count == 1 {
+            unique[name] = matches[0]
+        }
+        return unique
     }
 
     private static func parseTranscriptEntries(from body: String) -> [ParsedTranscriptEntry] {

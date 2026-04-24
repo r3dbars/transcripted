@@ -17,8 +17,8 @@ struct TranscriptedMCP {
         let directories = TranscriptedDataDirectories.resolve()
 
         log("Starting transcripted-mcp v1.0.0")
-        log("Meetings directory: \(directories.meetingsDir.path)")
-        log("Dictations directory: \(directories.dictationsDir.path)")
+        log("Meetings directories: \(directories.meetingDirs.map(\.path).joined(separator: ", "))")
+        log("Dictations directories: \(directories.dictationDirs.map(\.path).joined(separator: ", "))")
         log("Index directory: \(directories.indexDir.path)")
 
         for directory in directories.watchedDirectories + [directories.indexDir] {
@@ -32,7 +32,7 @@ struct TranscriptedMCP {
         let index: TranscriptIndex
         do {
             index = try TranscriptIndex(indexDir: directories.indexDir)
-            try index.reconcile(meetingsDir: directories.meetingsDir, dictationsDir: directories.dictationsDir)
+            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
         } catch {
             log("Failed to initialize index: \(error.localizedDescription)")
             throw error
@@ -79,21 +79,27 @@ struct TranscriptedMCP {
         }
 
         let index = try TranscriptIndex(indexDir: directories.indexDir)
-        try index.reconcile(meetingsDir: directories.meetingsDir, dictationsDir: directories.dictationsDir)
+        try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
 
         let result = TranscriptedMCPSelfTestResult(
             ok: true,
             meetingsDirectory: directories.meetingsDir.path,
             dictationsDirectory: directories.dictationsDir.path,
+            meetingDirectories: directories.meetingDirs.map(\.path),
+            dictationDirectories: directories.dictationDirs.map(\.path),
             indexDirectory: directories.indexDir.path,
-            meetingFileCount: markdownFileCount(in: directories.meetingsDir),
-            dictationFileCount: markdownFileCount(in: directories.dictationsDir)
+            meetingFileCount: markdownFileCount(in: directories.meetingDirs),
+            dictationFileCount: markdownFileCount(in: directories.dictationDirs)
         )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(result)
         print(String(decoding: data, as: UTF8.self))
+    }
+
+    private static func markdownFileCount(in directories: [URL]) -> Int {
+        directories.reduce(0) { $0 + markdownFileCount(in: $1) }
     }
 
     private static func markdownFileCount(in directory: URL) -> Int {
@@ -121,6 +127,8 @@ private struct TranscriptedMCPSelfTestResult: Codable {
     let ok: Bool
     let meetingsDirectory: String
     let dictationsDirectory: String
+    let meetingDirectories: [String]
+    let dictationDirectories: [String]
     let indexDirectory: String
     let meetingFileCount: Int
     let dictationFileCount: Int
@@ -129,6 +137,8 @@ private struct TranscriptedMCPSelfTestResult: Codable {
         case ok
         case meetingsDirectory = "meetings_directory"
         case dictationsDirectory = "dictations_directory"
+        case meetingDirectories = "meeting_directories"
+        case dictationDirectories = "dictation_directories"
         case indexDirectory = "index_directory"
         case meetingFileCount = "meeting_file_count"
         case dictationFileCount = "dictation_file_count"
