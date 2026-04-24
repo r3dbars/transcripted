@@ -800,13 +800,6 @@ struct PermissionsOnboardingView: View {
         pasteboard.setString(text, forType: .string)
     }
 
-    static var hasCompleted: Bool {
-        PermissionsOnboardingPreferences.hasCompleted()
-    }
-
-    static func markCompleted() {
-        PermissionsOnboardingPreferences.markCompleted()
-    }
 }
 
 private struct OnboardingHeader: View {

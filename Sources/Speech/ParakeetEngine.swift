@@ -368,7 +368,7 @@ class ParakeetEngine: ObservableObject {
     private var audioStartInProgress = false
     private var inputTapInstalled = false
     private var sampleBuffer: [Float] = []
-    private var nativeSampleRate: Double = 48000
+    private nonisolated(unsafe) var nativeSampleRate: Double = 48000
     private let pendingSamplesLock = NSLock()
     private var pendingSamples: [Float] = []
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
@@ -381,7 +381,6 @@ class ParakeetEngine: ObservableObject {
     private let liveDisplayEnabled = false
     private nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
     private var committedStreamText: String = ""
-    // Accumulates resampled 16kHz samples between tap callbacks before flushing to EOU.
     // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
     private let streamingSamplesLock = NSLock()
     private var streamingSampleBuffer: [Float] = []
@@ -1788,18 +1787,6 @@ class ParakeetEngine: ObservableObject {
             break
         }
 
-        guard startGeneration == audioGraphGeneration else {
-            await removeRecordingTap(force: true)
-            await stopAudioEngine()
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "audio_start_aborted",
-                message: "Audio start aborted before publishing recording state",
-                context: ["audio_graph_generation": "\(audioGraphGeneration)"]
-            )
-            return false
-        }
         isRecording = true
         markFormatReadyAndPublish()
         liveTranscript = ""
@@ -1879,7 +1866,6 @@ class ParakeetEngine: ObservableObject {
                 message: "No audio samples received after recording start — resetting engine",
                 context: ["audio_device": self.inputDeviceName])
 
-            // Full teardown
             self.streamingSamplesLock.withLock {
                 self.streamingSampleBuffer.removeAll(keepingCapacity: true)
             }
@@ -1893,7 +1879,6 @@ class ParakeetEngine: ObservableObject {
             self.isRecording = false
             self.audioLevel = 0
 
-            // Brief delay for hardware to reinitialize
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled else { return }
 
