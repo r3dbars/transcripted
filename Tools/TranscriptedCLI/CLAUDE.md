@@ -86,6 +86,6 @@ instruction to run `bash build-deps.sh` from the repo root before rebuilding.
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - retrieval-only commands should still build and run even when the diarization bundle is absent
-- `swift test` currently covers the agent-facing context path resolver only
+- `swift test` currently covers the agent-facing context path resolver and context-store loading behavior
 - the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
 - changes here should be verified independently from the app build
