@@ -43,12 +43,17 @@ For helper and legacy scripts, see `scripts/README.md`.
 ## Directory Map
 
 - `Sources/` — macOS app target
-- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
-- `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
+- `Sources/Accessibility/` — AX helpers for overlay positioning
+- `Sources/Beta/` — beta-only configuration
+- `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
+- `Sources/Observability/` — analytics, crash reporting, debug logging, and Sparkle updater
 - `Sources/Reliability/` — wake/sleep recovery
+- `Sources/Speech/` — local STT engines, router, and audio recovery
+- `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
+- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs
