@@ -16,8 +16,8 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
             contentRect: NSRect(
                 x: 0,
                 y: 0,
-                width: MenuTokens.onboardingWindowWidth,
-                height: MenuTokens.onboardingWindowHeight
+                width: PermissionsOnboardingView.preferredSize.width,
+                height: PermissionsOnboardingView.preferredSize.height
             ),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -28,7 +28,7 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: MenuTokens.onboardingWindowWidth, height: 680)
+        window.minSize = PermissionsOnboardingView.preferredSize
         window.contentViewController = hostingController
         window.center()
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
