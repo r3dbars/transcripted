@@ -96,6 +96,21 @@ func testAnalyticsPayloadSanitizer() {
         }
     }
 
+    runSuite("AnalyticsPayloadSanitizer redacts basic auth headers and authorization assignments") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "Authorization: Basic dXNlcjpwYXNz Basic ZGVtbzpwYXNz",
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("dXNlcjpwYXNz"), "basic auth payloads should be redacted")
+        assertFalse(value.contains("ZGVtbzpwYXNz"), "standalone basic auth values should be redacted")
+        assertTrue(value.contains("Authorization=[redacted-secret]"), "authorization assignments should collapse to a redacted marker")
+        assertTrue(value.contains("Basic ****"), "standalone basic auth marker should remain")
+    }
+
     runSuite("AnalyticsPayloadSanitizer.redact scrubs without the analytics length cap") {
         // Build a multi-line log blob longer than maxValueLength (80 chars) so
         // the feedback path can verify redaction happens but length is preserved.

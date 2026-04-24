@@ -132,8 +132,20 @@ func testSentryPayloadSanitizer() {
             assertFalse(sanitized.lowercased().contains("tokenabc"), "case-insensitive bearer should still redact token part in '\(raw)'")
             assertFalse(sanitized.contains("abc.def_ghi"), "bearer with whitespace variants should redact token in '\(raw)'")
             assertFalse(sanitized.contains("mixed_case_token"), "mixed-case bearer should redact in '\(raw)'")
-            assertTrue(sanitized.contains("Bearer ****"), "sanitized bearer marker should remain in '\(raw)'")
+            assertTrue(sanitized.contains("****"), "sanitized auth marker should remain in '\(raw)'")
         }
+    }
+
+    runSuite("SentryPayloadSanitizer redacts basic auth headers and authorization assignments") {
+        let input = "Authorization: Basic dXNlcjpwYXNz Proxy-Authorization=Bearer abc123 fallback Basic ZGVtbzpwYXNz"
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("dXNlcjpwYXNz"), "basic auth payloads should be redacted")
+        assertFalse(sanitized.contains("abc123"), "authorization assignment bearer tokens should be redacted")
+        assertFalse(sanitized.contains("ZGVtbzpwYXNz"), "standalone basic auth values should be redacted")
+        assertTrue(sanitized.contains("Authorization=[redacted-secret]"), "authorization assignments should collapse to a redacted marker")
+        assertTrue(sanitized.contains("Proxy-Authorization=[redacted-secret]"), "proxy authorization assignments should collapse to a redacted marker")
+        assertTrue(sanitized.contains("Basic ****"), "standalone basic auth marker should remain")
     }
 
     runSuite("SentryPayloadSanitizer.sanitizeAnyDictionary redacts nested free-form values") {
