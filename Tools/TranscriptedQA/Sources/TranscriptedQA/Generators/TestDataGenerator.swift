@@ -11,7 +11,7 @@ struct TestDataGenerator {
         try fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
         let transcripts: [(name: String, utterances: Int, speakers: Int, duration: Int)] = [
-            ("Call_2026-03-26_00-00-00", 0, 0, 0),       // empty
+            ("Call_2026-03-26_00-00-00", 1, 1, 6),       // minimal valid artifact
             ("Call_2026-03-26_10-30-00", 5, 2, 120),      // small
             ("Call_2026-03-26_14-00-00", 50, 5, 3600),    // large
         ]
