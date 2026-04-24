@@ -27,6 +27,7 @@ enum MeetingTranscriptStyler {
         formatter.timeStyle = .short
         return formatter
     }()
+    private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingTranscriptStyler.formatters")
 
     static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
         styledTranscript(at: url, persistChanges: true)
@@ -150,7 +151,7 @@ enum MeetingTranscriptStyler {
     private static func parseRecordedAt(values: [String: String], fallbackURL: URL) -> Date {
         if let date = values["date"],
            let time = values["time"],
-           let parsed = parseFormatter.date(from: "\(date) \(time)") {
+           let parsed = parsedRecordedAt(from: "\(date) \(time)") {
             return parsed
         }
 
@@ -187,7 +188,7 @@ enum MeetingTranscriptStyler {
 
     private static func renderBody(document: ParsedDocument, title: String) -> String {
         var detailParts = [
-            "Recorded \(detailFormatter.string(from: document.recordedAt))",
+            "Recorded \(detailString(from: document.recordedAt))",
             formatDuration(document.durationSeconds, fallback: document.duration)
         ]
         if document.totalWords > 0 {
@@ -256,7 +257,25 @@ enum MeetingTranscriptStyler {
             return "Quick notes"
         }
 
-        return titleFormatter.string(from: document.recordedAt)
+        return titleString(from: document.recordedAt)
+    }
+
+    private static func parsedRecordedAt(from value: String) -> Date? {
+        formatterQueue.sync {
+            parseFormatter.date(from: value)
+        }
+    }
+
+    private static func titleString(from date: Date) -> String {
+        formatterQueue.sync {
+            titleFormatter.string(from: date)
+        }
+    }
+
+    private static func detailString(from date: Date) -> String {
+        formatterQueue.sync {
+            detailFormatter.string(from: date)
+        }
     }
 
     private static func parseDurationSeconds(_ duration: String) -> Int {

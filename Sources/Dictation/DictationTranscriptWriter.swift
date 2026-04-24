@@ -4,12 +4,12 @@
 import AppKit
 import Foundation
 
-struct SavedDictationTranscript {
+struct SavedDictationTranscript: Sendable {
     let url: URL
     let title: String
 }
 
-enum DictationDelivery: String {
+enum DictationDelivery: String, Sendable {
     case pasted
     case copied
     case failed

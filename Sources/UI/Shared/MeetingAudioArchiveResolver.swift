@@ -1,6 +1,6 @@
 import Foundation
 
-struct MeetingAudioAttachment: Equatable {
+struct MeetingAudioAttachment: Equatable, Sendable {
     let directoryURL: URL
     let urls: [URL]
 

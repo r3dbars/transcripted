@@ -80,6 +80,20 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
     private let legacyClipsDirectory: URL
+    private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
+    private var duplicateProfileIDs: Set<UUID> = []
+    private var duplicateCountsByProfileID: [UUID: Int] = [:]
+    private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
+    private var clipURLsByProfileID: [UUID: URL] = [:]
+
+    private struct Snapshot {
+        let profiles: [SpeakerProfile]
+        let duplicateCandidates: [SpeakerDuplicateCandidate]
+        let duplicateProfileIDs: Set<UUID>
+        let duplicateCountsByProfileID: [UUID: Int]
+        let mergeTargetsByProfileID: [UUID: [SpeakerProfile]]
+        let clipURLsByProfileID: [UUID: URL]
+    }
 
     init(
         speakerDatabase: SpeakerDatabase,
@@ -90,10 +104,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
         refresh()
-    }
-
-    var duplicateCandidates: [SpeakerDuplicateCandidate] {
-        Self.duplicateCandidates(from: profiles)
     }
 
     var filteredProfiles: [SpeakerProfile] {
@@ -124,31 +134,24 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    var duplicateProfileIDs: Set<UUID> {
-        var ids = Set<UUID>()
-        for candidate in duplicateCandidates {
-            ids.insert(candidate.source.id)
-            ids.insert(candidate.target.id)
-        }
-        return ids
-    }
-
     func refresh() {
         let speakerDatabase = self.speakerDatabase
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let profiles = Self.sortedProfiles(from: speakerDatabase)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
             DispatchQueue.main.async {
-                self?.profiles = profiles
+                self?.applySnapshot(snapshot)
             }
         }
     }
 
     func clipURL(for speakerId: UUID) -> URL? {
-        Self.clipURL(
-            for: speakerId,
-            preferredClipsDirectory: preferredClipsDirectory,
-            legacyClipsDirectory: legacyClipsDirectory
-        )
+        clipURLsByProfileID[speakerId]
     }
 
     func playSample(for speakerId: UUID) {
@@ -162,13 +165,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             speakerDatabase.setDisplayName(id: profileId, name: trimmed, source: NameSource.userManual)
             speakerDatabase.resetDisputeCount(id: profileId)
             TranscriptSaver.retroactivelyUpdateSpeaker(dbId: profileId, newName: trimmed)
-            let profiles = Self.sortedProfiles(from: speakerDatabase)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
             DispatchQueue.main.async {
-                self?.profiles = profiles
+                self?.applySnapshot(snapshot)
             }
         }
     }
@@ -204,9 +213,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 ?? "Speaker \(targetId.uuidString.prefix(8))"
 
             TranscriptSaver.retroactivelyUpdateSpeaker(dbId: sourceId, newName: resolvedName)
-            let profiles = Self.sortedProfiles(from: speakerDatabase)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
             DispatchQueue.main.async {
-                self?.profiles = profiles
+                self?.applySnapshot(snapshot)
             }
         }
     }
@@ -224,27 +237,105 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            let profiles = Self.sortedProfiles(from: speakerDatabase)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
             DispatchQueue.main.async {
-                self?.profiles = profiles
+                self?.applySnapshot(snapshot)
             }
         }
     }
 
     func duplicateCount(for profile: SpeakerProfile) -> Int {
-        duplicateCandidates.filter { candidate in
-            candidate.source.id == profile.id || candidate.target.id == profile.id
-        }.count
+        duplicateCountsByProfileID[profile.id] ?? 0
     }
 
     func mergeTargets(for profile: SpeakerProfile) -> [SpeakerProfile] {
-        let duplicatePeerIds = Set(duplicateCandidates.compactMap { candidate -> UUID? in
-            if candidate.source.id == profile.id { return candidate.target.id }
-            if candidate.target.id == profile.id { return candidate.source.id }
-            return nil
-        })
+        mergeTargetsByProfileID[profile.id] ?? []
+    }
 
-        return profiles.filter { $0.id != profile.id }.sorted { lhs, rhs in
+    private func applySnapshot(_ snapshot: Snapshot) {
+        duplicateCandidates = snapshot.duplicateCandidates
+        duplicateProfileIDs = snapshot.duplicateProfileIDs
+        duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
+        mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
+        clipURLsByProfileID = snapshot.clipURLsByProfileID
+        profiles = snapshot.profiles
+    }
+
+    nonisolated private static func snapshot(
+        from speakerDatabase: SpeakerDatabase,
+        preferredClipsDirectory: URL,
+        legacyClipsDirectory: URL
+    ) -> Snapshot {
+        snapshot(
+            from: sortedProfiles(from: speakerDatabase),
+            preferredClipsDirectory: preferredClipsDirectory,
+            legacyClipsDirectory: legacyClipsDirectory
+        )
+    }
+
+    nonisolated private static func snapshot(
+        from profiles: [SpeakerProfile],
+        preferredClipsDirectory: URL,
+        legacyClipsDirectory: URL
+    ) -> Snapshot {
+        let duplicateCandidates = duplicateCandidates(from: profiles)
+        var duplicateCountsByProfileID: [UUID: Int] = [:]
+        var duplicatePeerIDsByProfileID: [UUID: Set<UUID>] = [:]
+
+        for candidate in duplicateCandidates {
+            let sourceID = candidate.source.id
+            let targetID = candidate.target.id
+            duplicateCountsByProfileID[sourceID, default: 0] += 1
+            duplicateCountsByProfileID[targetID, default: 0] += 1
+            duplicatePeerIDsByProfileID[sourceID, default: []].insert(targetID)
+            duplicatePeerIDsByProfileID[targetID, default: []].insert(sourceID)
+        }
+
+        let duplicateProfileIDs = Set(duplicateCountsByProfileID.keys)
+        let mergeTargetsByProfileID = Dictionary(
+            uniqueKeysWithValues: profiles.map { profile in
+                (
+                    profile.id,
+                    sortedMergeTargets(
+                        for: profile,
+                        in: profiles,
+                        duplicatePeerIds: duplicatePeerIDsByProfileID[profile.id] ?? []
+                    )
+                )
+            }
+        )
+
+        var clipURLsByProfileID: [UUID: URL] = [:]
+        for profile in profiles {
+            if let url = clipURL(
+                for: profile.id,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            ) {
+                clipURLsByProfileID[profile.id] = url
+            }
+        }
+
+        return Snapshot(
+            profiles: profiles,
+            duplicateCandidates: duplicateCandidates,
+            duplicateProfileIDs: duplicateProfileIDs,
+            duplicateCountsByProfileID: duplicateCountsByProfileID,
+            mergeTargetsByProfileID: mergeTargetsByProfileID,
+            clipURLsByProfileID: clipURLsByProfileID
+        )
+    }
+
+    nonisolated private static func sortedMergeTargets(
+        for profile: SpeakerProfile,
+        in profiles: [SpeakerProfile],
+        duplicatePeerIds: Set<UUID>
+    ) -> [SpeakerProfile] {
+        profiles.filter { $0.id != profile.id }.sorted { lhs, rhs in
             let lhsIsDuplicate = duplicatePeerIds.contains(lhs.id)
             let rhsIsDuplicate = duplicatePeerIds.contains(rhs.id)
             if lhsIsDuplicate != rhsIsDuplicate {

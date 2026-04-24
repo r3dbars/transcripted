@@ -1,6 +1,6 @@
 import Foundation
 
-struct RecentMeetingItem: Identifiable {
+struct RecentMeetingItem: Identifiable, Sendable {
     let title: String
     let date: Date
     let transcriptURL: URL
@@ -9,7 +9,22 @@ struct RecentMeetingItem: Identifiable {
     var id: String { transcriptURL.path }
 }
 
-@MainActor
+struct RecentCaptureSnapshot: Sendable {
+    let meetings: [RecentMeetingItem]
+    let dictations: [SavedDictationEntry]
+}
+
+enum RecentCaptureLoader {
+    static func load(limit: Int = 5) async -> RecentCaptureSnapshot {
+        await Task.detached(priority: .utility) {
+            RecentCaptureSnapshot(
+                meetings: RecentMeetingsScanner.loadRecent(limit: limit),
+                dictations: DictationTranscriptStore.recentSavedDictations(limit: limit)
+            )
+        }.value
+    }
+}
+
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
 
