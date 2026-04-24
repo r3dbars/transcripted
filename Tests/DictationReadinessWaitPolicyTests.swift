@@ -29,4 +29,23 @@ func testDictationReadinessWaitPolicy() {
 
         assertEqual(action, .startRecording, "ready input should start recording")
     }
+
+    runSuite("DictationReadinessWaitPolicy — stuck recovery timeout becomes refreshable") {
+        var recovery = ParakeetRecoveryState()
+        let generation = recovery.beginConfigChange()
+
+        let stuckAction = DictationReadinessWaitPolicy.action(
+            isRecovering: recovery.isRecovering,
+            inputFormatReady: recovery.inputFormatReady
+        )
+        assertEqual(stuckAction, .waitForRecovery, "active recovery should match the Sentry stuck-recovery shape")
+
+        assertTrue(recovery.timeoutRecovery(generation: generation), "timeout should apply to the active recovery")
+
+        let postTimeoutAction = DictationReadinessWaitPolicy.action(
+            isRecovering: recovery.isRecovering,
+            inputFormatReady: recovery.inputFormatReady
+        )
+        assertEqual(postTimeoutAction, .refreshInputReadiness, "timeout should unblock dictation into a refresh path")
+    }
 }

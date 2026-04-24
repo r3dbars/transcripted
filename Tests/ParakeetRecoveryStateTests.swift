@@ -53,6 +53,54 @@ func testParakeetRecoveryState() {
         assertFalse(state.inputFormatReady, "format should still be unready after stale finish")
     }
 
+    runSuite("ParakeetRecoveryState.timeoutRecovery — fails active recovery and supersedes stale tasks") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+        let applied = state.timeoutRecovery(generation: recoveryGeneration)
+
+        assertTrue(applied, "matching active recovery should time out")
+        assertFalse(state.isRecovering, "timeout should clear active recovery")
+        assertFalse(state.inputFormatReady, "timeout should leave input unready for prewarm")
+        assertTrue(state.isStale(generation: recoveryGeneration), "timeout should supersede the stuck recovery generation")
+    }
+
+    runSuite("ParakeetRecoveryState.timeoutRecovery — ignores stale or finished recovery") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+        _ = state.finishRecovery(success: true, generation: recoveryGeneration)
+
+        assertFalse(state.timeoutRecovery(generation: recoveryGeneration), "finished recovery should not time out later")
+        assertTrue(state.inputFormatReady, "finished recovery should keep its ready state")
+    }
+
+    runSuite("ParakeetRecoveryState.timeoutRecovery — rejects superseded generations") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+        _ = state.beginConfigChange()
+
+        assertFalse(state.timeoutRecovery(generation: staleGeneration), "stale timeout should not affect newer recovery")
+        assertTrue(state.isRecovering, "newer recovery should stay active")
+        assertFalse(state.inputFormatReady, "newer recovery should keep input unready")
+    }
+
+    runSuite("ParakeetRecoveryState.timeoutRecovery — ignores pristine state") {
+        var state = ParakeetRecoveryState()
+
+        assertFalse(state.timeoutRecovery(generation: 0), "fresh non-recovering state should not time out")
+        assertFalse(state.isRecovering, "fresh state should remain not recovering")
+        assertTrue(state.inputFormatReady, "fresh state should remain ready")
+    }
+
+    runSuite("ParakeetRecoveryState.finishRecovery — timeout supersedes late success") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+        _ = state.timeoutRecovery(generation: recoveryGeneration)
+
+        assertFalse(state.finishRecovery(success: true, generation: recoveryGeneration), "late recovery success should stay stale after timeout")
+        assertFalse(state.isRecovering, "timed-out state should remain not recovering")
+        assertFalse(state.inputFormatReady, "late success should not mark timed-out input ready")
+    }
+
     runSuite("ParakeetRecoveryState.isStale — detects superseded generations") {
         var state = ParakeetRecoveryState()
         let g1 = state.beginConfigChange()

@@ -392,6 +392,7 @@ class ParakeetEngine: ObservableObject {
     private var configChangeObserver: NSObjectProtocol?
     private var configChangeDebounceTask: Task<Void, Never>?
     private var configRecoveryTask: Task<Void, Never>?
+    private var configRecoveryTimeoutTask: Task<Void, Never>?
     /// Tracks whether a recording was active when the first config change in a
     /// burst arrived. Subsequent changes during recovery inherit this flag so
     /// the final recovery attempt knows to restart recording.
@@ -905,8 +906,13 @@ class ParakeetEngine: ObservableObject {
 
         // Bump the generation counter and signal UI that engine is recovering.
         // DictationSessionController waits on these flags instead of racing.
-        _ = recoveryState.beginConfigChange()
+        cancelConfigRecoveryTimeout()
+        let recoveryGeneration = recoveryState.beginConfigChange()
         publishRecoveryState()
+        scheduleConfigRecoveryTimeout(
+            generation: recoveryGeneration,
+            wasRecording: configChangeWasRecording
+        )
         // Fresh device state warrants a fresh retry budget for prewarm.
         prewarmRetryCount = 0
 
@@ -998,6 +1004,7 @@ class ParakeetEngine: ObservableObject {
 
                 guard !Task.isCancelled else { return }
                 guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
+                self.cancelConfigRecoveryTimeout()
                 self.publishRecoveryState()
 
                 // If we were recording, try to restart on the new device.
@@ -1035,6 +1042,7 @@ class ParakeetEngine: ObservableObject {
                 }
             } catch {
                 if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
+                    self.cancelConfigRecoveryTimeout()
                     self.publishRecoveryState()
                 }
                 if shouldRestartRecording {
@@ -1052,6 +1060,51 @@ class ParakeetEngine: ObservableObject {
                 self.schedulePrewarmRetry()
             }
         }
+    }
+
+    private func scheduleConfigRecoveryTimeout(generation: UInt64, wasRecording: Bool) {
+        configRecoveryTimeoutTask?.cancel()
+        configRecoveryTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioDeviceRecoveryTimeout)
+            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            guard self.recoveryState.timeoutRecovery(generation: generation) else { return }
+
+            self.configRecoveryTimeoutTask = nil
+            self.publishRecoveryState()
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "device_change_recovery_timeout",
+                message: "Audio device recovery timed out",
+                context: [
+                    "recovery_generation": "\(generation)",
+                    "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
+                    "was_recording": "\(wasRecording)",
+                    "audio_device": self.inputDeviceName
+                ]
+            )
+            if wasRecording {
+                self.recordingInterrupted = true
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: "recording_interrupted",
+                    message: "Recording interrupted because audio device recovery timed out",
+                    context: [
+                        "audio_device": self.inputDeviceName,
+                        "reason": "device_change_recovery_timeout"
+                    ]
+                )
+            }
+            await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
+            self.prewarmRetryCount = 0
+            self.schedulePrewarmRetry()
+        }
+    }
+
+    private func cancelConfigRecoveryTimeout() {
+        configRecoveryTimeoutTask?.cancel()
+        configRecoveryTimeoutTask = nil
     }
 
     private func publishRecoveryState() {
@@ -2350,6 +2403,7 @@ class ParakeetEngine: ObservableObject {
         configChangeDebounceTask = nil
         configRecoveryTask?.cancel()
         configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
         Task { @MainActor [weak self] in
