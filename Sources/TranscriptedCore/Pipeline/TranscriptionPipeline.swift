@@ -865,6 +865,10 @@ extension Transcription {
         guard !samples.isEmpty, sampleRate > 0 else { return nil }
 
         let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+        if samples.count < AudioSignalRecovery.parakeetMinimumInferenceSamples, !analysis.hasSpeechCandidate {
+            return nil
+        }
+
         let normalization = AudioSignalRecovery.normalizeForSpeech(
             samples: samples,
             sampleRate: sampleRate,

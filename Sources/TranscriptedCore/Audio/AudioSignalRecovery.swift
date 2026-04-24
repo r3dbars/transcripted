@@ -46,6 +46,7 @@ struct AudioNormalizationResult: Equatable {
 enum AudioSignalRecovery {
     static let parakeetSampleRate: Double = 16_000
     static let parakeetMinimumInferenceSamples = 16_000
+    static let legacySpeechDetectionThreshold: Float = 0.010
 
     static func analyze(samples: [Float], sampleRate: Double) -> AudioSignalAnalysis {
         guard !samples.isEmpty, sampleRate > 0 else {
@@ -122,12 +123,12 @@ enum AudioSignalRecovery {
 
     static func speechDetectionThreshold(for analysis: AudioSignalAnalysis) -> Float {
         guard analysis.hasSpeechCandidate else {
-            return activeThreshold(forPeak: analysis.peak)
+            return min(legacySpeechDetectionThreshold, activeThreshold(forPeak: analysis.peak))
         }
 
         let peakBased = activeThreshold(forPeak: analysis.peak)
         let rmsBased = max(0.003, min(0.020, analysis.rms * 0.8))
-        return min(peakBased, rmsBased)
+        return min(legacySpeechDetectionThreshold, peakBased, rmsBased)
     }
 
     static func activeThreshold(forPeak peak: Float) -> Float {
