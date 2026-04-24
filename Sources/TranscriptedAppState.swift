@@ -61,6 +61,18 @@ class TranscriptedAppState: ObservableObject {
         }
 
         sparkleUpdater.performStartupUpdateCheckIfNeeded()
+        AppSoundPlayer.shared.setWarningReporter { cue in
+            Task { @MainActor in
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "ui_sound",
+                    event: "cue_preload_failed",
+                    message: "UI sound cue could not be preloaded",
+                    context: ["cue": String(describing: cue)]
+                )
+            }
+        }
+        AppSoundPlayer.shared.preload()
 
         // Kick off shared runtime prep once; wake recovery can await or reuse it.
         startRuntimeReadinessIfNeeded()

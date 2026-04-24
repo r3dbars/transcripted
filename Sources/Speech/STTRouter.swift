@@ -92,17 +92,17 @@ class STTRouter: ObservableObject {
         refreshModelDownloadState()
     }
 
-    func startRecording() -> Bool {
+    func startRecording() async -> Bool {
         activeRecordingModel = selectedModel
-        return parakeetEngine.startRecording()
+        return await parakeetEngine.startRecording()
     }
 
-    func refreshInputReadiness() {
-        parakeetEngine.prewarm()
+    func refreshInputReadiness() async {
+        await parakeetEngine.prewarm()
     }
 
-    func stopRecording() {
-        parakeetEngine.stopRecording()
+    func stopRecording() async {
+        await parakeetEngine.stopRecording()
     }
 
     func transcribe() async -> String? {

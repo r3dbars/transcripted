@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 func testDictationSounds() {
@@ -27,16 +26,13 @@ func testDictationSounds() {
         assertTrue(UISoundPreferences.isEnabled(), "explicit true should enable sounds")
     }
 
-    runSuite("AppSoundPlayer uses expected bundled files and fallbacks") {
+    runSuite("AppSoundPlayer uses expected bundled files only") {
         assertEqual(AppSoundPlayer.Cue.dictationStart.bundledFileName, "dictation-start.mp3", "start cue file")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.m4a", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
         assertEqual(AppSoundPlayer.Cue.feedbackSubmitted.bundledFileName, "wilhelm-scream.mp3", "feedback cue file")
-        assertEqual(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName, "Basso", "cancel cue fallback")
-        assertEqual(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName, "Tink", "no speech cue fallback")
-        assertEqual(AppSoundPlayer.Cue.dictationDelivered.fallbackSystemSoundName, "Funk", "delivery cue fallback")
-        assertEqual(AppSoundPlayer.Cue.feedbackSubmitted.fallbackSystemSoundName, "Glass", "feedback cue fallback")
+        assertNil(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "cancel cue should skip playback instead of using system sounds")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
         assertEqual(AppSoundPlayer.Cue.noSpeech.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "no speech cue volume")
@@ -54,12 +50,16 @@ func testDictationSounds() {
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("wilhelm-scream.mp3").path), "wilhelm-scream.mp3 should exist")
     }
 
-    runSuite("Fallback system sounds exist") {
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationStart.fallbackSystemSoundName)), "Funk should exist as start fallback")
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationDelivered.fallbackSystemSoundName)), "Funk should exist")
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.dictationCancelled.fallbackSystemSoundName)), "Basso should exist")
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.noSpeech.fallbackSystemSoundName)), "Tink should exist")
-        assertNotNil(NSSound(named: NSSound.Name(AppSoundPlayer.Cue.feedbackSubmitted.fallbackSystemSoundName)), "Glass should exist")
+    runSuite("AppSoundPlayer playback entrypoints are best effort") {
+        let key = "enableUISounds"
+        let original = UserDefaults.standard.object(forKey: key)
+        defer {
+            restoreUserDefault(original, forKey: key)
+        }
+
+        UISoundPreferences.setEnabled(false)
+        AppSoundPlayer.shared.play(.dictationStart)
+        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
     }
 }
 
