@@ -45,8 +45,9 @@ struct TranscriptedSettingsView: View {
     @State private var sentryTestStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    @State private var recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
-    @State private var recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+    @State private var recentMeetings: [RecentMeetingItem] = []
+    @State private var recentDictations: [SavedDictationEntry] = []
+    @State private var recentCaptureRefreshTask: Task<Void, Never>?
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
@@ -141,6 +142,10 @@ struct TranscriptedSettingsView: View {
             refreshPermissions()
             refreshRecentCaptures()
             refreshShortcutState()
+        }
+        .onDisappear {
+            recentCaptureRefreshTask?.cancel()
+            recentCaptureRefreshTask = nil
         }
     }
 
@@ -1254,8 +1259,13 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshRecentCaptures() {
-        recentMeetings = RecentMeetingsScanner.loadRecent(limit: 5)
-        recentDictations = DictationTranscriptStore.recentSavedDictations(limit: 5)
+        recentCaptureRefreshTask?.cancel()
+        recentCaptureRefreshTask = Task { @MainActor in
+            let snapshot = await RecentCaptureLoader.load(limit: 5)
+            guard !Task.isCancelled else { return }
+            recentMeetings = snapshot.meetings
+            recentDictations = snapshot.dictations
+        }
     }
 
     private func refreshShortcutState() {

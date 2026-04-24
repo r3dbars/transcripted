@@ -9,7 +9,7 @@ extension Notification.Name {
     static let dictationNoSpeechDetected = Notification.Name("Transcripted.DictationNoSpeechDetected")
 }
 
-struct SavedDictationEntry: Identifiable {
+struct SavedDictationEntry: Identifiable, Sendable {
     let url: URL
     let title: String
     let text: String
@@ -35,6 +35,7 @@ enum DictationTranscriptStore {
 
         return [fractional, standard]
     }()
+    private static let iso8601FormatterQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.iso8601Formatters")
 
     @discardableResult
     static func save(
@@ -233,12 +234,13 @@ enum DictationTranscriptStore {
             return nil
         }
 
-        for formatter in iso8601Formatters {
-            if let parsed = formatter.date(from: value) {
-                return parsed
+        return iso8601FormatterQueue.sync { () -> Date? in
+            for formatter in iso8601Formatters {
+                if let parsed = formatter.date(from: value) {
+                    return parsed
+                }
             }
+            return nil
         }
-
-        return nil
     }
 }
