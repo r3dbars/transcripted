@@ -56,6 +56,17 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.rebuildAudioEngine, "stale route formats should rebuild the audio engine")
     }
 
+    runSuite("ParakeetStartRecordingFailurePolicy route-not-settled during recovery does not chain retries") {
+        let action = ParakeetStartRecordingFailurePolicy.action(
+            for: .audioRouteNotSettled,
+            isRecoveryAttempt: true
+        )
+
+        assertTrue(action.markFormatUnready, "recovery route failures should still hold recording starts")
+        assertFalse(action.schedulePrewarmRetry, "recovery route failures should not recursively schedule retries")
+        assertTrue(action.rebuildAudioEngine, "recovery route failures should rebuild the audio engine")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,
@@ -110,6 +121,30 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .invalidAudioFormat, "invalid format should map to invalidAudioFormat")
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy rejects invalid input-side formats") {
+        let zeroInputRate = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 1,
+            inputSampleRate: 0,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            selectionOverrodeDefault: true
+        )
+        let zeroInputChannels = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 0,
+            selectedInputClass: "built_in",
+            selectionOverrodeDefault: true
+        )
+
+        assertEqual(zeroInputRate, .invalid, "zero input rate should be invalid")
+        assertEqual(zeroInputRate.startFailureReason, .invalidAudioFormat, "zero input rate should map to invalidAudioFormat")
+        assertEqual(zeroInputChannels, .invalid, "zero input channels should be invalid")
+        assertEqual(zeroInputChannels.startFailureReason, .invalidAudioFormat, "zero input channels should map to invalidAudioFormat")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy maps CoreAudio format-not-supported") {
         let error = NSError(
             domain: "com.apple.coreaudio.avfaudio",
@@ -120,6 +155,16 @@ func testParakeetStartRecordingFailurePolicy() {
             ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error),
             .audioRouteNotSettled,
             "CoreAudio -10868 should be treated as a settling route instead of a terminal engine failure"
+        )
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy maps generic CoreAudio errors to start failure") {
+        let error = NSError(domain: "com.apple.coreaudio.avfaudio", code: -1)
+
+        assertEqual(
+            ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error),
+            .audioEngineStartFailed,
+            "non-route CoreAudio errors should stay generic engine-start failures"
         )
     }
 }

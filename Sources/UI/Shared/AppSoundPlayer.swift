@@ -1,4 +1,5 @@
-import AppKit
+import AVFoundation
+import Foundation
 
 enum UISoundPreferences {
     private static let enabledKey = "enableUISounds"
@@ -13,8 +14,9 @@ enum UISoundPreferences {
     }
 }
 
-@MainActor
 final class AppSoundPlayer {
+    typealias WarningReporter = @Sendable (_ cue: Cue) -> Void
+
     enum Cue: CaseIterable {
         case dictationStart
         case dictationDelivered
@@ -40,23 +42,6 @@ final class AppSoundPlayer {
             }
         }
 
-        var fallbackSystemSoundName: String {
-            switch self {
-            case .dictationStart:
-                return "Funk"
-            case .dictationDelivered:
-                return "Funk"
-            case .dictationCancelled:
-                return "Basso"
-            case .noSpeech:
-                return "Tink"
-            case .meetingTranscriptComplete:
-                return "Glass"
-            case .feedbackSubmitted:
-                return "Glass"
-            }
-        }
-
         var volumeMultiplier: Float {
             switch self {
             case .dictationDelivered, .noSpeech:
@@ -69,32 +54,58 @@ final class AppSoundPlayer {
 
     static let shared = AppSoundPlayer()
 
-    private let sounds: [Cue: NSSound]
+    private let queue = DispatchQueue(label: "com.transcripted.ui-sound-player", qos: .utility)
+    private var players: [Cue: AVAudioPlayer] = [:]
+    private var didAttemptPreload = false
+    private var warningReporter: WarningReporter?
 
-    private init() {
-        var loadedSounds: [Cue: NSSound] = [:]
-        for cue in Cue.allCases {
-            guard let sound = Self.loadSound(for: cue) else { continue }
-            sound.volume = TranscriptedConstants.overlayCueVolume * cue.volumeMultiplier
-            loadedSounds[cue] = sound
+    private init() {}
+
+    func setWarningReporter(_ reporter: WarningReporter?) {
+        queue.async { [weak self] in
+            self?.warningReporter = reporter
         }
-        sounds = loadedSounds
+    }
+
+    func preload() {
+        queue.async { [weak self] in
+            self?.loadPlayersIfNeeded()
+        }
     }
 
     func play(_ cue: Cue, respectingPreferences: Bool = true) {
         guard !respectingPreferences || UISoundPreferences.isEnabled() else { return }
-        guard let sound = sounds[cue] else { return }
-        sound.stop()
-        _ = sound.play()
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.loadPlayersIfNeeded()
+            guard let player = self.players[cue] else { return }
+            if player.isPlaying {
+                player.stop()
+            }
+            player.currentTime = 0
+            _ = player.play()
+        }
     }
 
-    private static func loadSound(for cue: Cue) -> NSSound? {
-        if let fileName = cue.bundledFileName,
-           let url = Bundle.main.resourceURL?.appendingPathComponent("Sounds/\(fileName)"),
-           let sound = NSSound(contentsOf: url, byReference: true) {
-            return sound
-        }
+    private func loadPlayersIfNeeded() {
+        guard !didAttemptPreload else { return }
+        didAttemptPreload = true
 
-        return NSSound(named: NSSound.Name(cue.fallbackSystemSoundName))
+        for cue in Cue.allCases {
+            guard let url = Self.bundledURL(for: cue) else { continue }
+            do {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.volume = TranscriptedConstants.overlayCueVolume * cue.volumeMultiplier
+                player.prepareToPlay()
+                players[cue] = player
+            } catch {
+                warningReporter?(cue)
+            }
+        }
+    }
+
+    private static func bundledURL(for cue: Cue) -> URL? {
+        guard let fileName = cue.bundledFileName else { return nil }
+        return Bundle.main.resourceURL?.appendingPathComponent("Sounds/\(fileName)")
     }
 }

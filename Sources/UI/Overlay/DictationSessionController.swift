@@ -218,17 +218,35 @@ class DictationSessionController: ObservableObject {
 
         overlayController.state = .listening
 
-        // Fast path — engine is ready right now.
+        // Fast path — engine is ready right now. The actual CoreAudio start
+        // still runs asynchronously so a slow device graph never blocks UI.
         if let appState = appState,
            !appState.sttRouter.isRecovering,
-           appState.sttRouter.inputFormatReady,
-           appState.sttRouter.startRecording() {
+           appState.sttRouter.inputFormatReady {
             recordingStartRetryTask?.cancel()
-            recordingStartRetryTask = nil
-            resizePanelToCompact()
-            appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
-            AppSoundPlayer.shared.play(.dictationStart)
-            installSessionTimeout()
+            recordingStartRetryTask = Task { @MainActor [weak self] in
+                guard let self,
+                      self.isDictating,
+                      let appState = self.appState,
+                      let overlayController = self.overlayController else { return }
+                let started = await appState.sttRouter.startRecording()
+                guard !Task.isCancelled, self.isDictating else {
+                    if started {
+                        await appState.sttRouter.stopRecording()
+                    }
+                    return
+                }
+                if started {
+                    self.recordingStartRetryTask = nil
+                    overlayController.state = .listening
+                    self.resizePanelToCompact()
+                    appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+                    AppSoundPlayer.shared.play(.dictationStart)
+                    self.installSessionTimeout()
+                } else {
+                    await self.waitForEngineAndStart(sourceApp: sourceApp)
+                }
+            }
             return
         }
 
@@ -256,7 +274,7 @@ class DictationSessionController: ObservableObject {
         var readinessRefreshes = 0
 
         if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
-            appState.sttRouter.refreshInputReadiness()
+            await appState.sttRouter.refreshInputReadiness()
             readinessRefreshes += 1
         }
 
@@ -280,7 +298,14 @@ class DictationSessionController: ObservableObject {
 
             if !isRecovering, inputFormatReady {
                 startAttempts += 1
-                if appState.sttRouter.startRecording() {
+                let started = await appState.sttRouter.startRecording()
+                guard !Task.isCancelled, isDictating else {
+                    if started {
+                        await appState.sttRouter.stopRecording()
+                    }
+                    return
+                }
+                if started {
                     overlayController.state = .listening
                     resizePanelToCompact()
                     let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
@@ -320,7 +345,7 @@ class DictationSessionController: ObservableObject {
                     )
                 )
                 if !appState.sttRouter.isRecovering {
-                    appState.sttRouter.refreshInputReadiness()
+                    await appState.sttRouter.refreshInputReadiness()
                     readinessRefreshes += 1
                 }
             }
@@ -485,9 +510,10 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
 
-        appState.sttRouter.stopRecording()
         streamingTask?.cancel()
         streamingTask = Task {
+            await appState.sttRouter.stopRecording()
+
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
             if !appState.sttRouter.isModelLoaded {

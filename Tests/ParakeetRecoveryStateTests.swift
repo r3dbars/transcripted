@@ -106,6 +106,26 @@ func testParakeetRecoveryState() {
         assertEqual(state.generation, before, "plain start failure should not supersede device-change generations")
     }
 
+    runSuite("ParakeetRecoveryState.markStartFailed — preserves active recovery generation") {
+        var state = ParakeetRecoveryState()
+        let generation = state.beginConfigChange()
+
+        state.markStartFailed()
+
+        assertTrue(state.isRecovering, "start failure during device recovery should keep recovery visible")
+        assertFalse(state.inputFormatReady, "start failure should keep the input format unready")
+        assertEqual(state.generation, generation, "start failure should not supersede the active recovery generation")
+    }
+
+    runSuite("ParakeetRecoveryState.markFormatReady — recovers after start failure") {
+        var state = ParakeetRecoveryState()
+        state.markStartFailed()
+
+        state.markFormatReady()
+
+        assertTrue(state.canStartRecording, "format-ready should unblock recording after a failed start")
+    }
+
     runSuite("ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure — retries only normal first failures") {
         assertTrue(
             ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: false, failedAttempts: 1, retryBudget: 1),
