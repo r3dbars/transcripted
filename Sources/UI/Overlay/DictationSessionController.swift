@@ -652,6 +652,24 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    func finishDictationForTermination() async {
+        if isInSession {
+            cancelSession()
+        }
+
+        guard isDictating else { return }
+        stopDictationAndPaste(trigger: .unknown)
+
+        for _ in 0..<100 {
+            if !isDictating { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        if isDictating {
+            cancelDictation()
+        }
+    }
+
     // MARK: - Private
 
     private func startDictationAfterWarmup(sourceApp: NSRunningApplication?) {

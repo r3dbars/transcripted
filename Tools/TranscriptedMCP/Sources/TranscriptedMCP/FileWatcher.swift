@@ -5,11 +5,11 @@ final class FileWatcher: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var pendingScan: DispatchWorkItem?
     private let directory: URL
-    private let onChange: (URL) -> Void
+    private let onChange: () -> Void
     private var knownModTimes: [String: TimeInterval] = [:]
     private let watchQueue = DispatchQueue(label: "com.transcripted.mcp.watcher", qos: .utility)
 
-    init(directory: URL, onChange: @escaping (URL) -> Void) {
+    init(directory: URL, onChange: @escaping () -> Void) {
         self.directory = directory
         self.onChange = onChange
     }
@@ -64,16 +64,26 @@ final class FileWatcher: @unchecked Sendable {
         self.timer = timer
     }
 
-    private func scanForChanges() {
+    func scanForChanges() {
         let files = TranscriptLoader.enumerateArtifacts(in: directory)
+        var currentModTimes: [String: TimeInterval] = [:]
+        var changed = false
 
         for file in files {
             let filename = file.url.deletingPathExtension().lastPathComponent
             let modDate = file.modDate
+            currentModTimes[filename] = modDate
             if knownModTimes[filename] != modDate {
-                knownModTimes[filename] = modDate
-                onChange(file.url)
+                changed = true
             }
         }
+
+        if Set(knownModTimes.keys) != Set(currentModTimes.keys) {
+            changed = true
+        }
+
+        guard changed else { return }
+        knownModTimes = currentModTimes
+        onChange()
     }
 }

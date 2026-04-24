@@ -24,6 +24,7 @@ public class TranscriptionTaskManager: ObservableObject {
     public let failedTranscriptionManager: FailedTranscriptionManager
     public let statsStore: (any StatsStore)?
     let retainedAudioDirectory: URL?
+    private let retainedAudioDirectoryProvider: (() -> URL?)?
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -37,6 +38,7 @@ public class TranscriptionTaskManager: ObservableObject {
         speakerStore: any SpeakerStore,
         speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
         retainedAudioDirectory: URL? = nil,
+        retainedAudioDirectoryProvider: (() -> URL?)? = nil,
         statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
     ) {
@@ -44,6 +46,7 @@ public class TranscriptionTaskManager: ObservableObject {
         self.statsStore = statsStore
         self.notifier = notifier
         self.retainedAudioDirectory = retainedAudioDirectory
+        self.retainedAudioDirectoryProvider = retainedAudioDirectoryProvider
         self.transcription = Transcription(
             speechToText: speechToText,
             diarization: diarization,
@@ -458,7 +461,7 @@ public class TranscriptionTaskManager: ObservableObject {
         systemURL: URL?,
         taskId: UUID
     ) {
-        guard let retainedAudioDirectory else { return }
+        guard let retainedAudioDirectory = retainedAudioDirectoryProvider?() ?? retainedAudioDirectory else { return }
 
         let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
         let placeholderTranscriptURL = retainedAudioDirectory

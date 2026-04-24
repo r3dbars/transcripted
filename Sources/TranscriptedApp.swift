@@ -64,6 +64,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @available(macOS 14.0, *)
     lazy var meetingPromptDetector = MeetingPromptDetector()
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var terminationCleanupStarted = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Crash reporting
@@ -191,6 +192,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.stop()
         }
         appState.shutdown()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminationCleanupStarted else { return .terminateNow }
+        terminationCleanupStarted = true
+
+        Task { @MainActor [weak self, sender] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: true)
+                return
+            }
+
+            await self.sessionController.finishDictationForTermination()
+            if #available(macOS 14.0, *) {
+                await self.appState.meetingSession.prepareForTermination()
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+
+        return .terminateLater
     }
 
     @objc func togglePopover() {
@@ -331,6 +352,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
 
@@ -344,6 +366,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func finishOnboardingAndStartDictation() {
         let sourceApp = resolvedSourceApp()
         PermissionsOnboardingPreferences.markCompleted()
+        appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
         sourceApp?.activate(options: [])
@@ -423,8 +446,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "entrypoint": entrypoint,
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
                 "model_state": modelState,
-                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
-                "recent_meetings_available": RecentMeetingsScanner.loadRecent(limit: 1).isEmpty ? "false" : "true",
+                "paste_available": "unknown",
+                "recent_meetings_available": "unknown",
                 "update_state": updateState,
             ]
         )

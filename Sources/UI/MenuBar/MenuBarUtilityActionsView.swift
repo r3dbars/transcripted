@@ -122,7 +122,7 @@ final class MenuBarUtilityActionsView: NSView {
                 "action_id": actionID,
                 "dictation_ready": appState?.sttRouter.isModelLoaded == true ? "true" : "false",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "paste_available": DictationTranscriptStore.latestSavedDictation() == nil ? "false" : "true",
+                "paste_available": "unknown",
             ]
         )
     }

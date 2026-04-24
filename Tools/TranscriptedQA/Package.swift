@@ -16,5 +16,10 @@ let package = Package(
             path: "Sources/TranscriptedQA",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
+        .testTarget(
+            name: "TranscriptedQATests",
+            dependencies: ["transcripted-qa"],
+            path: "Tests/TranscriptedQATests"
+        ),
     ]
 )

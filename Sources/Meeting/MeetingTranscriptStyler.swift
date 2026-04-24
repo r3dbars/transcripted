@@ -305,7 +305,7 @@ enum MeetingTranscriptStyler {
         return entries
     }
 
-    private static let transcriptEntryRegex = try? NSRegularExpression(pattern: #"^\[?([0-9:]+)\]?\s+\[(.+?)\](.*)$"#)
+    private static let transcriptTimestampRegex = try? NSRegularExpression(pattern: #"^\[?([0-9:]+)\]?\s+"#)
 
     private static func parseTranscriptEntry(from chunk: String) -> TranscriptEntry? {
         let lines = chunk
@@ -318,24 +318,72 @@ enum MeetingTranscriptStyler {
             .replacingOccurrences(of: "**", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let regex = transcriptEntryRegex else {
+        guard let regex = transcriptTimestampRegex else {
             return nil
         }
 
         let nsHeader = normalizedHeader as NSString
         let range = NSRange(location: 0, length: nsHeader.length)
         guard let match = regex.firstMatch(in: normalizedHeader, range: range),
-              match.numberOfRanges >= 4 else {
+              match.numberOfRanges >= 2 else {
             return nil
         }
 
         let timestamp = nsHeader.substring(with: match.range(at: 1))
-        let label = nsHeader.substring(with: match.range(at: 2))
-        let inlineTail = nsHeader.substring(with: match.range(at: 3)).trimmingCharacters(in: .whitespaces)
+        let headerTailStart = normalizedHeader.index(
+            normalizedHeader.startIndex,
+            offsetBy: match.range.location + match.range.length
+        )
+        guard let parsedLabel = parseBracketedSpeakerLabel(in: String(normalizedHeader[headerTailStart...])) else {
+            return nil
+        }
+
+        let label = parsedLabel.label
+        let inlineTail = parsedLabel.tail.trimmingCharacters(in: .whitespaces)
         let textLines = (inlineTail.isEmpty ? Array(lines.dropFirst()) : [inlineTail] + Array(lines.dropFirst()))
         let text = textLines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         return TranscriptEntry(timestamp: timestamp, label: label, text: text)
+    }
+
+    private static func parseBracketedSpeakerLabel(in value: String) -> (label: String, tail: String)? {
+        let characters = Array(value)
+        guard characters.first == "[" else { return nil }
+
+        var label = ""
+        var index = 1
+        var wikiLinkDepth = 0
+
+        while index < characters.count {
+            let character = characters[index]
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+
+            if character == "[", next == "[" {
+                wikiLinkDepth += 1
+                label.append(character)
+                label.append(next!)
+                index += 2
+                continue
+            }
+
+            if character == "]", next == "]", wikiLinkDepth > 0 {
+                wikiLinkDepth -= 1
+                label.append(character)
+                label.append(next!)
+                index += 2
+                continue
+            }
+
+            if character == "]", wikiLinkDepth == 0 {
+                let tail = String(characters.dropFirst(index + 1))
+                return (label, tail)
+            }
+
+            label.append(character)
+            index += 1
+        }
+
+        return nil
     }
 
     private static func formatDuration(_ seconds: Int, fallback: String) -> String {

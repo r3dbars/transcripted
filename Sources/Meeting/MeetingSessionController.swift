@@ -230,6 +230,7 @@ final class MeetingSessionController: ObservableObject {
             speakerStore: services.speakerStore,
             speakerClipsDirectory: storagePaths.speakerClips,
             retainedAudioDirectory: MeetingStoragePaths.audioArchiveFolder,
+            retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
             statsStore: statsDatabase
         )
 
@@ -772,6 +773,44 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    func prepareForTermination() async {
+        guard case .recording = state else { return }
+        guard !isFinishingRecording else { return }
+        isFinishingRecording = true
+        defer { isFinishingRecording = false }
+
+        _ = audioInactivityDetector.stopRecording()
+        audioInactivityWarning = nil
+
+        let recordingTrigger = activeRecordingTrigger
+        let files = await capture.stopAndAwaitFiles()
+        activeRecordingTrigger = .unknown
+
+        if let micURL = files.micURL {
+            failedManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: files.systemURL,
+                errorMessage: "Transcripted quit before this meeting could be transcribed."
+            )
+            refreshFailedMeetings()
+        }
+
+        state = .ready
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_recording_saved_for_shutdown",
+            message: "Meeting recording was preserved during app termination",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": recordingTrigger.rawValue,
+                    "mic_file_present": boolString(files.micURL != nil),
+                    "system_file_present": boolString(files.systemURL != nil)
+                ]
+            )
+        )
+    }
+
     func retryFailedMeeting(id: UUID) {
         guard !isRecording, !hasBackgroundTranscriptionWork else { return }
         guard !retryingFailedMeetingIDs.contains(id) else { return }
@@ -784,7 +823,7 @@ final class MeetingSessionController: ObservableObject {
             guard let self else { return }
             _ = await self.taskManager.retryFailedTranscription(
                 failedId: id,
-                outputFolder: self.storagePaths.transcripts
+                outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
             self.refreshFailedMeetings()
@@ -1118,14 +1157,14 @@ final class MeetingSessionController: ObservableObject {
             taskManager.startTranscription(
                 micURL: micURL,
                 systemURL: systemURL,
-                outputFolder: storagePaths.transcripts,
+                outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
         case .imported(let audioURL, let suggestedTitle):
             taskManager.startImportedTranscription(
                 audioURL: audioURL,
-                outputFolder: storagePaths.transcripts,
+                outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle
             )
         }

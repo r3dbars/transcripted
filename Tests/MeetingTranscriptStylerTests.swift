@@ -7,6 +7,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
+        testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
     }
 }
 
@@ -96,6 +97,20 @@ private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {
     assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "Original retained audio directory should be replaced")
 }
 
+private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleObsidianTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
+
+    assertTrue(updatedMarkdown?.contains("[System/[[Alex]]]") == true, "Styler should preserve Obsidian speaker links")
+    assertTrue(updatedMarkdown?.contains("Linked speaker text should stay intact.") == true, "Styler should keep the transcript text attached to the right speaker")
+}
+
 private func sampleMeetingTranscript() -> String {
     """
     ---
@@ -136,6 +151,24 @@ private func sampleImportedTranscript() -> String {
 
     **[00:04] [System/Speaker 1]**
     Happy to help.
+    """
+}
+
+private func sampleObsidianTranscript() -> String {
+    """
+    ---
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "0"
+    system_utterances: "1"
+    ---
+
+    ## Full Transcript
+
+    **[00:04] [System/[[Alex]]]**
+    Linked speaker text should stay intact.
     """
 }
 

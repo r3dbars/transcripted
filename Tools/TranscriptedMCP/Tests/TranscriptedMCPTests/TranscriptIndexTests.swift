@@ -95,6 +95,56 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 0)
     }
 
+    func testIndexSingleFileKeepsHigherPriorityDuplicateBasename() throws {
+        let currentDir = makeTempDir()
+        let legacyDir = makeTempDir()
+        defer {
+            removeTempDir(currentDir)
+            removeTempDir(legacyDir)
+        }
+
+        let filename = "Call_2026-03-29_10-00-00"
+        try writeFixture(
+            makeFixtureJSON(utterances: [("mic_0", 0.0, 3.0, "Current root content")]),
+            filename: filename,
+            to: currentDir
+        )
+        try writeFixture(
+            makeFixtureJSON(utterances: [("mic_0", 0.0, 3.0, "Legacy root content")]),
+            filename: filename,
+            to: legacyDir
+        )
+
+        try index.reconcile(meetingDirs: [currentDir, legacyDir], dictationDirs: [])
+        try index.indexSingleFile(
+            legacyDir.appendingPathComponent("\(filename).md"),
+            allowedRoots: [currentDir, legacyDir]
+        )
+
+        let currentResults = try index.searchUtterances(query: "Current", speaker: nil, dateFrom: nil, dateTo: nil)
+        let legacyResults = try index.searchUtterances(query: "Legacy", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(currentResults.results.count, 1)
+        XCTAssertTrue(legacyResults.results.isEmpty)
+    }
+
+    func testFileWatcherSignalsDeletes() throws {
+        let directory = makeTempDir()
+        defer { removeTempDir(directory) }
+
+        var changeCount = 0
+        let watcher = FileWatcher(directory: directory) {
+            changeCount += 1
+        }
+
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: directory)
+        watcher.scanForChanges()
+        XCTAssertEqual(changeCount, 1)
+
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("Call_2026-03-29_10-00-00.md"))
+        watcher.scanForChanges()
+        XCTAssertEqual(changeCount, 2)
+    }
+
     func testMalformedMarkdownIsSkipped() throws {
         try "not markdown".write(to: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"), atomically: true, encoding: .utf8)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
