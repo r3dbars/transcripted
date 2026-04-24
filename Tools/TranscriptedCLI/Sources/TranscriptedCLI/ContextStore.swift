@@ -181,6 +181,7 @@ enum CLIContextStore {
                 }
                 let matches = meeting.utterances.filter { utterance in
                     utterance.text.localizedCaseInsensitiveContains(normalizedQuery)
+                        && (speaker == nil || speakerMatches(filter: speaker!, speakerName: utterance.speakerId))
                 }
                 guard let firstMatch = matches.first else { return nil }
                 return CLIContextItem(
@@ -380,6 +381,10 @@ enum CLIContextStore {
         if let dateFrom, date < dateFrom { return false }
         if let dateTo, date > dateTo { return false }
         return true
+    }
+
+    private static func speakerMatches(filter: String, speakerName: String) -> Bool {
+        speakerName.localizedCaseInsensitiveContains(filter)
     }
 
     private struct ParsedFrontmatter {
