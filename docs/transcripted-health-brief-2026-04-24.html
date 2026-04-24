@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Health Brief - April 24, 2026</title>
+  <style>
+    :root {
+      --bg: #f6f1e8;
+      --paper: #fffaf2;
+      --paper-2: #ffffff;
+      --ink: #18212b;
+      --muted: #5f6b76;
+      --line: rgba(24, 33, 43, 0.12);
+      --green: #166534;
+      --green-soft: #e8f5ea;
+      --teal: #0f766e;
+      --teal-soft: #e4f4f2;
+      --amber: #b45309;
+      --amber-soft: #fff0d7;
+      --red: #b91c1c;
+      --red-soft: #ffe3e3;
+      --blue: #1d4ed8;
+      --blue-soft: #e7efff;
+      --shadow: 0 22px 60px rgba(44, 35, 24, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: Avenir Next, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif;
+      background:
+        linear-gradient(130deg, rgba(15, 118, 110, 0.14), transparent 30%),
+        linear-gradient(240deg, rgba(29, 78, 216, 0.11), transparent 34%),
+        var(--bg);
+      line-height: 1.45;
+    }
+
+    .page {
+      width: min(1160px, calc(100vw - 32px));
+      margin: 28px auto 52px;
+    }
+
+    header, section {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 250, 242, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    header { padding: 32px; }
+    section { margin-top: 18px; padding: 24px; }
+
+    .eyebrow {
+      color: var(--teal);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { margin: 0; line-height: 1.08; }
+
+    h1 {
+      max-width: 13ch;
+      margin: 12px 0;
+      font-size: clamp(2.3rem, 5vw, 4.25rem);
+    }
+
+    h2 {
+      margin-bottom: 14px;
+      font-size: clamp(1.35rem, 2vw, 2rem);
+    }
+
+    h3 { font-size: 1.05rem; }
+    p { margin: 0; color: var(--muted); }
+
+    .chips, .grid, .two-up {
+      display: grid;
+      gap: 14px;
+    }
+
+    .chips, .grid {
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    }
+
+    .two-up {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper-2);
+      padding: 16px;
+    }
+
+    .label {
+      display: inline-flex;
+      align-items: center;
+      margin-bottom: 8px;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .good { background: var(--green-soft); color: var(--green); }
+    .stable { background: var(--teal-soft); color: var(--teal); }
+    .watch { background: var(--amber-soft); color: var(--amber); }
+    .critical { background: var(--red-soft); color: var(--red); }
+    .info { background: var(--blue-soft); color: var(--blue); }
+
+    .number {
+      margin: 6px 0 4px;
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      font-weight: 850;
+      line-height: 1;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 6px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper-2);
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.74rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: #f7fafc;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    code {
+      padding: 0.08rem 0.35rem;
+      border: 1px solid rgba(24, 33, 43, 0.1);
+      border-radius: 0.4rem;
+      background: rgba(24, 33, 43, 0.05);
+      font-family: SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(15, 118, 110, 0.45);
+      text-underline-offset: 0.16em;
+    }
+
+    .bar {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(24, 33, 43, 0.08);
+      margin-top: 10px;
+    }
+
+    .fill { height: 100%; border-radius: inherit; }
+    .fill.green { width: 80%; background: var(--green); }
+    .fill.teal { width: 85%; background: var(--teal); }
+    .fill.amber { width: 58%; background: var(--amber); }
+    .fill.blue { width: 92%; background: var(--blue); }
+
+    @media (max-width: 820px) {
+      .two-up { grid-template-columns: 1fr; }
+      header, section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="eyebrow">Transcripted health check - generated Apr 24, 2026 at 6:42 PM CT</div>
+      <h1>Healthy release, one hang to watch.</h1>
+      <p>Transcripted is shipping fast and the latest release is already producing successful dictations and meeting saves. The only current-release Sentry signal is a small app-hang cluster on <code>1.1.22</code>.</p>
+
+      <div class="chips" style="margin-top: 24px;">
+        <div class="card">
+          <span class="label good">Release</span>
+          <h3>1.1.22 is live</h3>
+          <p class="small">GitHub release, Sparkle appcast, Homebrew cask, and website download redirect all point at <code>1.1.22</code>.</p>
+        </div>
+        <div class="card">
+          <span class="label watch">Real signal</span>
+          <h3>2 app-hang events</h3>
+          <p class="small">Both are production Sentry events on <code>transcripted@1.1.22</code>, from the same device, with <code>NSAlert runModal</code> in the stack.</p>
+        </div>
+        <div class="card">
+          <span class="label stable">Usage</span>
+          <h3>Core flows work</h3>
+          <p class="small">First <code>1.1.22</code> dictation completion landed at 20:59 UTC. First meeting transcript save landed at 23:07 UTC.</p>
+        </div>
+        <div class="card">
+          <span class="label info">Mode</span>
+          <h3>Release hardening</h3>
+          <p class="small">Recent PRs are mostly releases, updater fixes, dictation recovery, settings performance, and meeting mic normalization.</p>
+        </div>
+      </div>
+    </header>
+
+    <section>
+      <h2>At a Glance</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label watch">Sentry</span>
+          <h3>Latest-release errors</h3>
+          <div class="number">2</div>
+          <p>Only <code>APPLE-MACOS-4</code> appears on <code>1.1.22</code> in production over the last 7 days.</p>
+        </article>
+        <article class="card">
+          <span class="label stable">PostHog</span>
+          <h3>Launch devices</h3>
+          <div class="number">43</div>
+          <p>Last 7 days across all app versions.</p>
+        </article>
+        <article class="card">
+          <span class="label good">Dictation</span>
+          <h3>Completion rate</h3>
+          <div class="number">80%</div>
+          <p>1,498 completions from 1,879 dictation starts in the last 7 days.</p>
+          <div class="bar"><div class="fill green"></div></div>
+        </article>
+        <article class="card">
+          <span class="label stable">Meetings</span>
+          <h3>Save rate</h3>
+          <div class="number">85%</div>
+          <p>165 saved transcripts from 194 meeting recording starts; 12 failures.</p>
+          <div class="bar"><div class="fill teal"></div></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="two-up">
+      <div>
+        <h2>Main Issue</h2>
+        <article class="card">
+          <span class="label watch">Fix next</span>
+          <h3><a href="https://r3dbars.sentry.io/issues/APPLE-MACOS-4">APPLE-MACOS-4</a>: app hang while a modal alert is running</h3>
+          <ul>
+            <li>56 total events, last seen Apr 24, 2026 at 21:16 UTC.</li>
+            <li>2 events on <code>transcripted@1.1.22</code>, both from the same Mac17,7 device.</li>
+            <li>The stack includes <code>NSAlert runModal</code>, so the best next check is alert presentation on updater, permission, and recovery paths.</li>
+          </ul>
+        </article>
+      </div>
+      <div>
+        <h2>Not Real Problems</h2>
+        <article class="card">
+          <span class="label info">Noise</span>
+          <h3>Do not chase these first</h3>
+          <ul>
+            <li><code>APPLE-MACOS-2</code> is a manual Sentry test event.</li>
+            <li><code>APPLE-MACOS-V</code> has 144 audio-engine start failures, but its newest event is Apr 22 on <code>1.1.16</code>.</li>
+            <li>Older app-hang groups are spread across old releases; only <code>APPLE-MACOS-4</code> is confirmed on <code>1.1.22</code>.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Product Usage</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Signal</th>
+            <th>Last 7 days</th>
+            <th>Read</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>App launches</td>
+            <td>780 events, 43 devices</td>
+            <td>Real usage, but still early and concentrated.</td>
+          </tr>
+          <tr>
+            <td>Dictation</td>
+            <td>1,879 starts, 1,498 completions, 258 no-speech events</td>
+            <td>The main workflow is active. No-speech is worth product polish, not panic.</td>
+          </tr>
+          <tr>
+            <td>Meetings</td>
+            <td>194 starts, 165 saves, 12 failures</td>
+            <td>Meeting capture is working and being used, with a small failure tail.</td>
+          </tr>
+          <tr>
+            <td>1.1.22 adoption</td>
+            <td>3 launch devices, 29 starts, 28 completions, 1 meeting save</td>
+            <td>Good first smoke signal. Too small to declare the release fully clean.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>GitHub</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label good">Attention</span>
+          <h3>916 views</h3>
+          <p>104 unique visitors in the last 14 days.</p>
+        </article>
+        <article class="card">
+          <span class="label good">Clones</span>
+          <h3>9,976 clones</h3>
+          <p>2,013 unique cloners in the last 14 days. Interest is ahead of installs.</p>
+        </article>
+        <article class="card">
+          <span class="label good">Stars</span>
+          <h3>19 total</h3>
+          <p>10 new stars in the 14-day window.</p>
+        </article>
+        <article class="card">
+          <span class="label stable">Releases</span>
+          <h3>462 downloads</h3>
+          <p><code>v1.1.22</code> has 7 downloads so far. Recent releases are moving, but conversion still has room.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Websites</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label good">transcripted.app</span>
+          <h3>Fresh deploy</h3>
+          <p>Live with status 200. Production deploy was Apr 24, 2026 at 20:47 UTC: “Update download redirect to 1.1.22”.</p>
+          <p style="margin-top: 8px;">7-day Cloudflare analytics: 1,679 page views, 3,301 requests, 49 threats.</p>
+        </article>
+        <article class="card">
+          <span class="label stable">r3d.bar</span>
+          <h3>Healthy but older</h3>
+          <p>The requested <code>r3d.br</code> maps to known domain <code>r3d.bar</code>. Live with status 200; last production deploy was Apr 19.</p>
+          <p style="margin-top: 8px;">7-day Cloudflare analytics: 652 page views, 2,370 requests, 17 threats.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="two-up">
+      <div>
+        <h2>What to Test</h2>
+        <article class="card">
+          <span class="label watch">Manual QA</span>
+          <ul>
+            <li>Open updater UI and force a no-update or failed-update path; watch for modal alerts that block the main thread.</li>
+            <li>Start dictation after sleep/wake, audio device change, and microphone permission refresh.</li>
+            <li>Record one short meeting and one normal meeting on <code>1.1.22</code>; confirm save and failure messaging.</li>
+          </ul>
+        </article>
+      </div>
+      <div>
+        <h2>What to Fix</h2>
+        <article class="card">
+          <span class="label critical">Next patch</span>
+          <ul>
+            <li>Replace any blocking <code>NSAlert.runModal()</code> in recovery/update paths with sheet or non-blocking presentation.</li>
+            <li>Add a compact context key to app-hang reports for active surface: updater, permissions, recovery, settings, dictation, or meeting.</li>
+            <li>Keep audio-engine failures on the watchlist, but do not treat <code>APPLE-MACOS-V</code> as a <code>1.1.22</code> blocker yet.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Bottom Line</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="label critical">Fix now</span>
+          <h3>Investigate blocking modal alerts</h3>
+          <p><code>APPLE-MACOS-4</code> is the only confirmed latest-release Sentry issue.</p>
+        </article>
+        <article class="card">
+          <span class="label watch">Fix next</span>
+          <h3>Reduce no-speech and meeting failure tail</h3>
+          <p>The product works, but user-facing recovery can still get smoother.</p>
+        </article>
+        <article class="card">
+          <span class="label info">Set up next</span>
+          <h3>Better release adoption view</h3>
+          <p>Track downloads to launches by version so interest, installs, and usage line up in one place.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
