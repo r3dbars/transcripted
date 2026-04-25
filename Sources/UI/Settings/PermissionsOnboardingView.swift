@@ -350,6 +350,10 @@ struct PermissionsOnboardingView: View {
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { @MainActor in
+            // Foundation Timers run in .default mode and pause during menu
+            // tracking, so onboarding could miss a permission flip while the
+            // user has the System Settings menu open. A Task-driven loop keeps
+            // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
                 checkAllPermissions()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

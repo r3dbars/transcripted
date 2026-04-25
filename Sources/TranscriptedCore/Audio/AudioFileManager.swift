@@ -1,6 +1,5 @@
 import Foundation
 @preconcurrency import AVFoundation
-import AppKit
 import QuartzCore
 
 // MARK: - Audio File Creation & Buffer Management
@@ -248,13 +247,14 @@ extension Audio {
 
         try engine.start()
 
+        let cueHandler = self.onCaptureLifecycleCue
         await MainActor.run {
             // isRecording already set in start()
             self.startTime = Date()
             self.recordingDuration = 0.0
             self.startTimer()
             self.startWatchdog()
-            NSSound(named: "Tink")?.play()
+            cueHandler?(.recordingStarted)
         }
     }
 

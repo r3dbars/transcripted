@@ -208,11 +208,12 @@ final class MeetingSessionController: ObservableObject {
         self.statsDatabase = StatsDatabase(path: storagePaths.statsDB.path)
 
         // Failed-queue manager: takes CoreStoragePaths so its JSON file lives
-        // under app-owned state, not the capture library.
-        // TODO: Phase 2 ships without failed-transcription recovery for meeting
-        // mode — we construct the manager because TranscriptionTaskManager
-        // requires it, but nothing in the app currently drains the failed queue
-        // or exposes retry UI. Follow-up work lands in a later phase.
+        // under app-owned state, not the capture library. The queue is drained
+        // by `refreshFailedMeetings()` (subscribed to
+        // `failedManager.$failedTranscriptions`) and surfaced in Settings →
+        // Meetings → "Needs Attention", with retry / dismiss / delete actions
+        // wired through `retryFailedMeeting`, `dismissFailedMeeting`, and
+        // `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
 
         // DI container — the protocol-typed "what Core sees" surface.
