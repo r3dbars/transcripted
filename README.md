@@ -2,29 +2,61 @@
 
 # Transcripted
 
-Audio context for your agent.
+Turn spoken work into local memory for your agents.
 
-Transcripted is a local Mac app that turns meetings, dictation, and audio files
-into clean Markdown on your Mac. Point Claude, Codex, Cursor, Obsidian, or any
-file-reading agent at the folder and ask it what happened, what matters, and
-what you should do next.
+Transcripted is a local Mac app for meetings, dictation, and audio files. It
+turns the things you say out loud into clean Markdown files on your Mac, so
+Claude, Codex, Cursor, Obsidian, or any file-reading agent can understand what
+happened and help you use it later.
 
-[Download the latest release](https://github.com/r3dbars/transcripted/releases/latest)
+[Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
 
-## Why This Exists
+## The Aha
 
-A lot of your best context is spoken.
+Your agents can only help with the context they can see.
 
-It happens in meetings, calls, quick thoughts, voice notes, and half-formed
-ideas you say out loud before they ever become writing.
+A lot of your most useful context is spoken. It happens in meetings, calls,
+quick dictations, voice notes, and half-formed ideas you say before they become
+writing.
 
 Most of that context disappears.
 
-Transcripted saves it as plain local Markdown so your agent and second brain can
-use it later.
+Transcripted makes spoken work readable. It saves it as local Markdown, in
+folders your tools can search, quote, summarize, and reason over.
 
-Ask things like:
+Before Transcripted:
+
+- A meeting ends and the useful details fade
+- A good spoken idea never makes it into your notes
+- Your agent has to guess because it cannot see the conversation
+
+After Transcripted:
+
+- Your meetings become searchable files
+- Your dictations become a running memory of what you were thinking
+- Your agent can answer from the things you actually said
+
+## What This App Does
+
+Transcripted captures spoken context and turns it into files you own.
+
+- Record meetings from your Mac
+- Capture quick dictation and paste it back where you were typing
+- Import audio files you already have
+- Save readable Markdown files on disk
+- Give your agents a folder of real spoken context
+- Keep audio and transcripts local by default
+
+That is the whole idea: your spoken work stops being throwaway audio and becomes
+useful memory.
+
+## Why It Matters
+
+Transcripted is for the moments where you need to remember, decide, and follow
+through.
+
+Ask your agent things like:
 
 - What did I promise to follow up on this week?
 - What did we decide in the pricing call?
@@ -33,24 +65,18 @@ Ask things like:
 - Pull the strongest product ideas from my recent meetings.
 - What am I repeating across conversations?
 
-## What It Does
-
-- Records meetings from your Mac
-- Captures quick dictation and pastes it back where you were typing
-- Imports audio files you already have
-- Saves readable Markdown files on disk
-- Keeps audio and transcripts local by default
-- Gives your agent a folder of real spoken context
+The point is not just transcription. The point is that your tools can finally
+use the spoken context that used to vanish.
 
 ## The Outcome
 
 You get a local memory layer for spoken work.
 
-Not another trapped notes database.
 Not a meeting bot joining your calls.
-Not a black box.
+Not a closed notes database.
+Not another place where your context gets trapped.
 
-Just files your tools can read.
+Just local files your tools can read.
 
 Use Transcripted with:
 
@@ -60,9 +86,27 @@ Use Transcripted with:
 - Cursor for engineering and product memory
 - Any agent that can read local files
 
+## How It Works
+
+1. Capture a meeting, dictate a thought, or import an audio file.
+2. Transcripted transcribes it locally.
+3. Transcripted saves the result as Markdown on your Mac.
+4. You point your agent or notes app at the folder.
+5. You ask questions across your spoken context.
+
+Default folders:
+
+```text
+~/Library/Application Support/Transcripted/captures/meetings/
+~/Library/Application Support/Transcripted/captures/dictations/
+```
+
+You can also choose a different capture library in Settings.
+
 ## Local Markdown
 
-Transcripted saves normal Markdown files.
+Transcripted saves normal Markdown files. You can open them yourself, search
+them, sync them, back them up, or hand them to an agent.
 
 Meeting example:
 
@@ -90,28 +134,18 @@ Dictation example:
 Need to test the onboarding changes before touching pricing.
 ```
 
-You can open these files yourself, search them, sync them, back them up, or hand
-them to an agent.
+The files are plain enough for you to read and structured enough for agents to
+use.
 
 ## Agent Setup
 
-The simplest path:
+You can use Transcripted two ways:
 
-1. Open Transcripted.
-2. Record a meeting, capture a dictation, or import audio.
-3. Point your agent at the Transcripted capture folder.
-4. Ask questions across your spoken context.
+- Point your agent at the capture folder
+- Install the optional read-only MCP server for richer tools
 
-Default folders:
-
-```text
-~/Library/Application Support/Transcripted/captures/meetings/
-~/Library/Application Support/Transcripted/captures/dictations/
-```
-
-Transcripted also includes an optional read-only MCP server for agents that
-support MCP. It gives tools for recent context, search, recaps, meeting reads,
-dictation reads, and speaker lookup.
+The MCP server gives supported agents tools for recent context, search, recaps,
+meeting reads, dictation reads, and speaker lookup.
 
 For Claude Desktop, open Transcripted Settings, go to `Agent`, then click
 `Install for Claude Desktop`. Transcripted installs the local server, writes the
@@ -122,16 +156,24 @@ See [docs/agent-connect.md](docs/agent-connect.md).
 
 ## Features
 
+Capture spoken work:
+
 - Local meeting recording with mic and system audio
 - Dictation with paste-back
 - Audio file import
+
+Make it readable:
+
+- Local transcription models, with Parakeet as the default and Whisper as an advanced option
 - Speaker labels and speaker review
 - Custom dictionary for names, acronyms, and uncommon words
-- Local transcription models, with Parakeet as the default and Whisper as an advanced option
+- Local Markdown capture library
+
+Connect it to your workflow:
+
+- One-click Claude Desktop direct tools
 - Auto Enter for selected apps after dictation
 - Launch at login
-- Local Markdown capture library
-- One-click Claude Desktop direct tools
 
 ## Privacy
 
@@ -173,6 +215,8 @@ Transcripted also supports in-app updates through Sparkle.
 
 ## Build From Source
 
+For contributors:
+
 ```bash
 bash build-deps.sh
 bash build.sh
@@ -182,6 +226,8 @@ bash build.sh
 `TranscriptedCore` tests and smoke coverage.
 
 ## Run Tests
+
+For contributors:
 
 ```bash
 bash run-tests.sh
