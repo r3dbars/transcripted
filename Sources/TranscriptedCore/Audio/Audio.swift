@@ -139,6 +139,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var startTime: Date?
     var timer: Timer?
 
+    // True once setVoiceProcessingEnabled(true) has succeeded on the current
+    // inputNode. Reset whenever engine.reset() runs (device recovery) so we
+    // re-arm VPIO before reinstalling the tap. Issue #500: Safari/Firefox
+    // WebRTC activates AUVoiceProcessingIO on the shared input device which
+    // hands every other reader an attenuated stream; running our own VPIO
+    // gives us our own AGC'd copy.
+    var voiceProcessingEnabled: Bool = false
+
     // Device change watchdog - thread-safe access via lock
     // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
     // Matches SystemAudioCapture.swift which also uses CACurrentMediaTime().
@@ -417,6 +425,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
             AppLogger.audioMic.info("Using system default microphone")
         }
 
+        if let inputNode {
+            armVoiceProcessing(on: inputNode)
+        }
+
         guard let engine, let inputNode else {
             throw NSError(
                 domain: "Audio",
@@ -426,6 +438,52 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
 
         return (engine, inputNode)
+    }
+
+    /// Format the mic tap will actually deliver. With VPIO enabled the tap
+    /// receives the VPIO output (mono Float32 at the unit's preferred rate),
+    /// not the raw hardware format. Without VPIO we keep using the hardware
+    /// format read on bus 1 so Bluetooth devices keep working.
+    func recordingFormat(for inputNode: AVAudioInputNode) -> AVAudioFormat {
+        if voiceProcessingEnabled {
+            return inputNode.outputFormat(forBus: 0)
+        }
+        return inputNode.inputFormat(forBus: 1)
+    }
+
+    /// Enable AUVoiceProcessingIO on the meeting input node so Transcripted
+    /// gets its own AGC'd copy of the mic stream rather than reading the raw
+    /// shared device. Issue #500: when Safari/Firefox WebRTC has VPIO active
+    /// on the same physical device, plain AVAudioEngine taps see attenuated
+    /// audio and meeting recordings come out very quiet.
+    ///
+    /// Idempotent and safe to call repeatedly. Skips when the engine is
+    /// already running (toggling VPIO requires a stopped engine). Falls back
+    /// silently when the device cannot host VPIO (rare, e.g. unusual
+    /// aggregate devices) so a VPIO failure never blocks recording.
+    func armVoiceProcessing(on inputNode: AVAudioInputNode) {
+        if voiceProcessingEnabled, inputNode.isVoiceProcessingEnabled {
+            return
+        }
+
+        if let engine, engine.isRunning {
+            // VPIO can only be toggled while the engine is stopped. Defer until
+            // the next start cycle re-enters this path.
+            return
+        }
+
+        do {
+            try inputNode.setVoiceProcessingEnabled(true)
+            voiceProcessingEnabled = true
+            AppLogger.audioMic.info("Voice processing enabled on meeting mic", [
+                "reason": "issue_500_safari_firefox_vpio_contention"
+            ])
+        } catch {
+            voiceProcessingEnabled = false
+            AppLogger.audioMic.warning("Voice processing unavailable, continuing without it", [
+                "error": error.localizedDescription
+            ])
+        }
     }
 
     func prepareForNewRecordingStart() {
@@ -650,15 +708,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         AppLogger.audio.info("Starting audio level monitoring")
 
-        let hardwareFormat = inputNode.inputFormat(forBus: 1)
-        guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0 else {
+        let monitorFormat = recordingFormat(for: inputNode)
+        guard monitorFormat.sampleRate > 0, monitorFormat.channelCount > 0 else {
             AppLogger.audio.warning("Cannot start monitoring — invalid input format")
             return
         }
 
         // Install mic tap for level metering only (no file writing)
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: hardwareFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
             self?.calculateLevel(buffer: buffer)
         }
 

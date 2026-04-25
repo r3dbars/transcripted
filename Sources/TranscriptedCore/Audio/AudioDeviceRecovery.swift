@@ -92,6 +92,8 @@ extension Audio {
 
         // Reset to system default (ignore UserDefaults preference during recovery)
         engine.reset()
+        // engine.reset() clears VPIO state on the input node; require re-arm.
+        voiceProcessingEnabled = false
         self.inputNode = engine.inputNode
 
         // Get new device format
@@ -113,15 +115,22 @@ extension Audio {
             return
         }
 
-        // Get ACTUAL hardware format (not converter format)
-        var recordingFormat = newInputNode.inputFormat(forBus: 1)
+        // Re-enable VPIO after the HAL settles so setVoiceProcessingEnabled
+        // queries a stable device. Skips silently if VPIO can't engage on the
+        // new device, in which case recordingFormat(for:) falls back to the
+        // hardware format and recording continues without AGC.
+        armVoiceProcessing(on: newInputNode)
+
+        // Read the format the tap will actually deliver (VPIO-aware when
+        // armVoiceProcessing succeeded above, hardware format otherwise).
+        var recordingFormat = self.recordingFormat(for: newInputNode)
         if recordingFormat.sampleRate <= 0 || recordingFormat.channelCount <= 0 {
             AppLogger.audioMic.warning("Recovery format invalid after first read, retrying", [
                 "sampleRate": "\(recordingFormat.sampleRate)",
                 "channels": "\(recordingFormat.channelCount)"
             ])
             Thread.sleep(forTimeInterval: 0.3)
-            recordingFormat = newInputNode.inputFormat(forBus: 1)
+            recordingFormat = self.recordingFormat(for: newInputNode)
         }
         guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
             AppLogger.audioMic.error("Recovery format remained invalid", [
