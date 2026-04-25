@@ -191,6 +191,12 @@ If you touch meeting capture or `TranscriptedCore`, also run:
 
 ```bash
 bash run-integration-smoke.sh
+```
+
+If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core
+package seam, also run:
+
+```bash
 swift test
 ```
 
