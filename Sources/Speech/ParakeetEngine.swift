@@ -624,8 +624,17 @@ class ParakeetEngine: ObservableObject {
             } else {
                 // Download from HuggingFace (~120MB) and cache locally
                 // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
-                let cacheBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                    .appendingPathComponent("FluidAudio/Models", isDirectory: true)
+                guard let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                    print("⚠️ PARAKEET EOU | application support directory unavailable")
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "eou_app_support_unavailable",
+                        message: "Application support directory lookup returned no results; cannot resolve EOU model cache"
+                    )
+                    return
+                }
+                let cacheBase = appSupportRoot.appendingPathComponent("FluidAudio/Models", isDirectory: true)
                 let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
                 let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
                 if FileManager.default.fileExists(atPath: checkFile.path) {

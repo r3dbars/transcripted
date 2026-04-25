@@ -41,7 +41,7 @@ struct PermissionsOnboardingView: View {
     @State private var demoDictationText = ""
     @State private var copiedAgentItem: AgentCopyItem?
     @State private var copiedResetTask: Task<Void, Never>?
-    @State private var pollTimer: Timer?
+    @State private var pollTask: Task<Void, Never>?
     @FocusState private var demoEditorFocused: Bool
 
     init(
@@ -359,17 +359,23 @@ struct PermissionsOnboardingView: View {
     }
 
     private func startPolling() {
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            Task { @MainActor in
+        pollTask?.cancel()
+        pollTask = Task { @MainActor in
+            // Foundation Timers run in .default mode and pause during menu
+            // tracking, so onboarding could miss a permission flip while the
+            // user has the System Settings menu open. A Task-driven loop keeps
+            // polling regardless and dies cleanly when onDisappear cancels it.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
                 checkAllPermissions()
             }
         }
     }
 
     private func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        pollTask?.cancel()
+        pollTask = nil
     }
 
     private func completeOnboarding() {

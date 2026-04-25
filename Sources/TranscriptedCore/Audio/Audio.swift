@@ -5,6 +5,13 @@ import AppKit
 import CoreAudio
 import Combine
 
+/// Cosmetic lifecycle cues emitted by `Audio` so embedders can play start /
+/// stop UI feedback without `Audio` itself depending on AppKit / NSSound.
+public enum CaptureLifecycleCue: Sendable {
+    case recordingStarted
+    case recordingStopped
+}
+
 /// Status of system audio capture for UI feedback
 /// Used to show warnings when device switching or audio loss occurs
 public enum SystemAudioStatus: Equatable {
@@ -296,6 +303,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
 
+    // Cosmetic capture lifecycle cues. Embedders decide how (or whether) to
+    // surface these — typically a UI sound. Fires from whichever queue the
+    // underlying lifecycle event runs on; the host should hop to the main
+    // actor before touching UI.
+    public var onCaptureLifecycleCue: ((CaptureLifecycleCue) -> Void)?
+
     // MARK: - Live PCM buffer hooks (host app live-preview integration)
     //
     // These callbacks let an embedder tap the raw PCM buffers as they arrive
@@ -571,6 +584,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         // Update UI immediately - don't wait for file cleanup
         // This makes the app feel instant
+        let cueHandler = self.onCaptureLifecycleCue
         DispatchQueue.main.async {
             self.isRecording = false
             self.audioLevel = 0.0
@@ -578,7 +592,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.stopTimer()
             self.stopWatchdog()
             self.isMicRecovering = false
-            NSSound(named: "Pop")?.play()
+            cueHandler?(.recordingStopped)
         }
 
         // Close audio files asynchronously - use DispatchGroup to coordinate

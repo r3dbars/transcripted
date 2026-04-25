@@ -14,6 +14,7 @@
 //   3. Keeping the bridge isolated from the pipeline lets Lane C swap in a mock
 //      for preview/testing without touching CoreAudio.
 
+import AppKit
 import AVFoundation
 import Combine
 import Foundation
@@ -228,6 +229,23 @@ final class MeetingCaptureBridge: ObservableObject {
                 self.completionTimeoutTask?.cancel()
                 self.completionTimeoutTask = nil
                 continuation?.resume(returning: (micURL, systemURL))
+            }
+        }
+
+        // Capture-lifecycle cues used to live inside Core (NSSound("Tink") on
+        // start, NSSound("Pop") on stop). Core no longer depends on AppKit for
+        // cosmetic UI; the host plays the sounds here. Audio fires the cue from
+        // the main queue (via DispatchQueue.main.async / MainActor.run inside
+        // the lifecycle helpers), but we still bounce through Task @MainActor
+        // to match the rest of the bridge's threading discipline.
+        audio.onCaptureLifecycleCue = { cue in
+            Task { @MainActor in
+                switch cue {
+                case .recordingStarted:
+                    NSSound(named: "Tink")?.play()
+                case .recordingStopped:
+                    NSSound(named: "Pop")?.play()
+                }
             }
         }
     }
