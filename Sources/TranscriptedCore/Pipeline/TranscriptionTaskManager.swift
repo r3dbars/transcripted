@@ -456,12 +456,16 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    func resolvedRetainedAudioDirectory() -> URL? {
+        retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
+    }
+
     private func archiveFailedRecordingAudioIfConfigured(
         micURL: URL?,
         systemURL: URL?,
         taskId: UUID
     ) {
-        guard let retainedAudioDirectory = retainedAudioDirectoryProvider?() ?? retainedAudioDirectory else { return }
+        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return }
 
         let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
         let placeholderTranscriptURL = retainedAudioDirectory

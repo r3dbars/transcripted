@@ -47,7 +47,6 @@ final class MeetingSessionController: ObservableObject {
 
     enum RecordingCancelReason: String {
         case discardButton = "discard_button"
-        case onboardingDryRun = "onboarding_dry_run"
         case unknown = "unknown"
     }
 
@@ -229,7 +228,6 @@ final class MeetingSessionController: ObservableObject {
             diarization: services.diarization,
             speakerStore: services.speakerStore,
             speakerClipsDirectory: storagePaths.speakerClips,
-            retainedAudioDirectory: MeetingStoragePaths.audioArchiveFolder,
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
             statsStore: statsDatabase
         )

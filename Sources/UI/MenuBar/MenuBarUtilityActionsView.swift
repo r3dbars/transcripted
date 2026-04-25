@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class MenuBarUtilityActionsView: NSView {
     weak var appState: TranscriptedAppState?
+    var pasteAvailable: Bool?
 
     var onOpenConnectAgent: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
@@ -122,7 +123,7 @@ final class MenuBarUtilityActionsView: NSView {
                 "action_id": actionID,
                 "dictation_ready": appState?.sttRouter.isModelLoaded == true ? "true" : "false",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "paste_available": "unknown",
+                "paste_available": pasteAvailable.map { $0 ? "true" : "false" } ?? "unknown",
             ]
         )
     }

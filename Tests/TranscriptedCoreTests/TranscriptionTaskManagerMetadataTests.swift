@@ -47,7 +47,35 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastSavedSpeakerCount, 5)
     }
 
-    private func makeManager() -> TranscriptionTaskManager {
+    func testResolvedRetainedAudioDirectoryFollowsProvider() {
+        var providerCallCount = 0
+        var nextDirectory = tempDirectory.appendingPathComponent("first")
+        let manager = makeManager(retainedAudioDirectoryProvider: {
+            providerCallCount += 1
+            return nextDirectory
+        })
+
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), tempDirectory.appendingPathComponent("first"))
+        XCTAssertEqual(providerCallCount, 1, "resolver should call provider on each lookup")
+
+        nextDirectory = tempDirectory.appendingPathComponent("second")
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), tempDirectory.appendingPathComponent("second"),
+                       "resolver should reflect provider changes between calls (e.g. user moves capture library)")
+        XCTAssertEqual(providerCallCount, 2)
+    }
+
+    func testResolvedRetainedAudioDirectoryFallsBackToStaticValue() {
+        let staticDirectory = tempDirectory.appendingPathComponent("static")
+        let manager = makeManager(retainedAudioDirectory: staticDirectory)
+
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), staticDirectory,
+                       "embedders that pass only the static value should still get a valid resolver result")
+    }
+
+    private func makeManager(
+        retainedAudioDirectory: URL? = nil,
+        retainedAudioDirectoryProvider: (() -> URL?)? = nil
+    ) -> TranscriptionTaskManager {
         let paths = CoreStoragePaths(
             transcripts: tempDirectory.appendingPathComponent("transcripts"),
             speakerDB: tempDirectory.appendingPathComponent("speakers.sqlite"),
@@ -66,7 +94,9 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             failedTranscriptionManager: FailedTranscriptionManager(paths: paths),
             speechToText: MetadataStubSpeechToTextEngine(),
             diarization: MetadataStubDiarizationEngine(),
-            speakerStore: SpeakerDatabase(path: paths.speakerDB.path)
+            speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
+            retainedAudioDirectory: retainedAudioDirectory,
+            retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
         )
     }
 }
