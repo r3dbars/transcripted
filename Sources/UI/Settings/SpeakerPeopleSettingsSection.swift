@@ -76,6 +76,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
     @Published var profileFilter: SpeakerPeopleProfileFilter = .all
+    @Published private(set) var playbackRevision: Int = 0
 
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
@@ -86,6 +87,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var refreshGeneration = 0
+    private var playbackObserver: NSObjectProtocol?
 
     private struct Snapshot {
         let profiles: [SpeakerProfile]
@@ -104,7 +106,22 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         self.speakerDatabase = speakerDatabase
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
+        playbackObserver = NotificationCenter.default.addObserver(
+            forName: SpeakerClipPlayback.stateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.playbackRevision &+= 1
+            }
+        }
         refresh()
+    }
+
+    deinit {
+        if let playbackObserver {
+            NotificationCenter.default.removeObserver(playbackObserver)
+        }
     }
 
     var filteredProfiles: [SpeakerProfile] {
@@ -161,6 +178,48 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     func playSample(for speakerId: UUID) {
         guard let url = clipURL(for: speakerId) else { return }
         SpeakerClipPlayback.play(url)
+    }
+
+    func isSamplePlaying(for speakerId: UUID) -> Bool {
+        guard let url = clipURL(for: speakerId) else { return false }
+        return SpeakerClipPlayback.isPlaying(url)
+    }
+
+    func isSampleActive(for speakerId: UUID) -> Bool {
+        guard let url = clipURL(for: speakerId) else { return false }
+        return SpeakerClipPlayback.isActive(url)
+    }
+
+    func sampleProgress(for speakerId: UUID) -> Double? {
+        guard let url = clipURL(for: speakerId) else { return nil }
+        return SpeakerClipPlayback.progress(for: url)
+    }
+
+    func sampleTimeLabel(for speakerId: UUID) -> String? {
+        guard let url = clipURL(for: speakerId) else { return nil }
+        return SpeakerClipPlayback.timeLabel(for: url)
+    }
+
+    func confirmIdentity(profile: SpeakerProfile) {
+        guard profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return
+        }
+
+        let profileId = profile.id
+        let speakerDatabase = self.speakerDatabase
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            speakerDatabase.resetDisputeCount(id: profileId)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
+            DispatchQueue.main.async {
+                self?.applySnapshot(snapshot)
+            }
+        }
     }
 
     func rename(profile: SpeakerProfile, to newName: String) {
@@ -716,19 +775,9 @@ private struct DuplicatePersonSummary: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            Button {
-                model.playSample(for: profile.id)
-            } label: {
-                Label(hasClip ? "Sample" : "No Sample", systemImage: hasClip ? "play.circle.fill" : "play.slash")
-            }
-            .font(.caption)
-            .disabled(!hasClip)
+            SpeakerSamplePlaybackControl(profile: profile, model: model, compact: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var hasClip: Bool {
-        model.clipURL(for: profile.id) != nil
     }
 }
 
@@ -739,6 +788,7 @@ private struct SpeakerPersonRow: View {
     @State private var isEditing = false
     @State private var renameDraft: String = ""
     @State private var showDeleteConfirmation = false
+    @State private var didConfirmIdentity = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -769,12 +819,16 @@ private struct SpeakerPersonRow: View {
                 Spacer()
 
                 HStack(spacing: 8) {
+                    SpeakerSamplePlaybackControl(profile: profile, model: model)
+
                     Button {
-                        model.playSample(for: profile.id)
+                        model.confirmIdentity(profile: profile)
+                        didConfirmIdentity = true
                     } label: {
-                        Label(hasClip ? "Sample" : "No Sample", systemImage: hasClip ? "play.circle.fill" : "play.slash")
+                        Label("Correct", systemImage: "checkmark.circle")
                     }
-                    .disabled(!hasClip)
+                    .disabled(!canConfirmIdentity)
+                    .help("Mark this voice as the right person")
 
                     if !isEditing {
                         Button {
@@ -797,6 +851,16 @@ private struct SpeakerPersonRow: View {
                         }
                     }
 
+                    Button {
+                        renameDraft = ""
+                        isEditing = true
+                        didConfirmIdentity = false
+                    } label: {
+                        Label("Not This Person", systemImage: "xmark.circle")
+                    }
+                    .disabled(!hasClip)
+                    .help("Listen again, then enter the right name or merge this voice into another person")
+
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
@@ -805,20 +869,32 @@ private struct SpeakerPersonRow: View {
                 }
             }
 
+            if didConfirmIdentity {
+                Label("Marked correct for future matching.", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
             if isEditing {
-                HStack(spacing: 8) {
-                    TextField("Enter a name", text: $renameDraft)
-                        .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("If the sample is not this person, enter the correct name or use Merge to link it to an existing person.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                    Button("Save") {
-                        model.rename(profile: profile, to: renameDraft)
-                        isEditing = false
-                    }
-                    .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    HStack(spacing: 8) {
+                        TextField("Enter the correct name", text: $renameDraft)
+                            .textFieldStyle(.roundedBorder)
 
-                    Button("Cancel") {
-                        renameDraft = ""
-                        isEditing = false
+                        Button("Save") {
+                            model.rename(profile: profile, to: renameDraft)
+                            isEditing = false
+                        }
+                        .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Button("Cancel") {
+                            renameDraft = ""
+                            isEditing = false
+                        }
                     }
                 }
             }
@@ -876,6 +952,10 @@ private struct SpeakerPersonRow: View {
         model.clipURL(for: profile.id) != nil
     }
 
+    private var canConfirmIdentity: Bool {
+        hasClip && profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
     private func mergeLabel(for target: SpeakerProfile) -> String {
         let name = target.displayName ?? "Unnamed speaker"
         return "\(name) (\(target.callCount))"
@@ -887,4 +967,56 @@ private struct SpeakerPersonRow: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct SpeakerSamplePlaybackControl: View {
+    let profile: SpeakerProfile
+    @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    var compact: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                model.playSample(for: profile.id)
+            } label: {
+                Label(buttonTitle, systemImage: buttonImage)
+            }
+            .font(compact ? .caption : .body)
+            .disabled(!hasClip)
+            .help(hasClip ? "Play this person's saved voice sample" : "No saved voice sample yet")
+
+            if isActive {
+                ProgressView(value: model.sampleProgress(for: profile.id) ?? 0)
+                    .progressViewStyle(.linear)
+                    .frame(width: compact ? 96 : 130)
+
+                Text(model.sampleTimeLabel(for: profile.id) ?? "Playing sample")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private var hasClip: Bool {
+        model.clipURL(for: profile.id) != nil
+    }
+
+    private var isPlaying: Bool {
+        model.isSamplePlaying(for: profile.id)
+    }
+
+    private var isActive: Bool {
+        model.isSampleActive(for: profile.id)
+    }
+
+    private var buttonTitle: String {
+        if !hasClip { return "No Sample" }
+        return isPlaying ? "Stop Sample" : "Play Sample"
+    }
+
+    private var buttonImage: String {
+        if !hasClip { return "play.slash" }
+        return isPlaying ? "stop.circle.fill" : "play.circle.fill"
+    }
 }
