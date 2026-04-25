@@ -49,6 +49,7 @@ They also honor:
 | `DiarizeCommand.swift` | Single-file diarization command |
 | `BatchCommand.swift` | Directory diarization command |
 | `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
+| `CLIPathSecurity.swift` | shared path-validation helper for direct dictation reads and other on-disk file access |
 | `RTTMWriter.swift` | RTTM output formatter |
 
 ## Test Files
@@ -84,6 +85,7 @@ instruction to run `bash build-deps.sh` from the repo root before rebuilding.
 ## Gotchas
 
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
+- direct dictation or meeting file reads should keep using `CLIPathSecurity` so filename inputs cannot escape the resolved Transcripted data roots
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - retrieval-only commands should still build and run even when the diarization bundle is absent
 - `swift test` currently covers the agent-facing context path resolver and context-store loading behavior

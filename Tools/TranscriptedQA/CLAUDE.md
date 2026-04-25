@@ -1,16 +1,72 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-`Tools/TranscriptedQA/` is a compact standalone Swift package for validating
-Transcripted artifacts on disk.
+QA testing suite for Transcripted. 24 Swift files total: `Package.swift`, 22 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
-- `Package.swift` — Swift package manifest for the CLI
-- `Sources/TranscriptedQA/TranscriptedQA.swift` — `@main` entry point, shared
-  path resolution, subcommand registration, validators, fixture generation, and
-  report formatting
-- `Tests/TranscriptedQATests/ValidatorTests.swift` — targeted coverage for the
-  lightweight validators and report exit behavior
+### Package Root (1 file)
+
+| File | Purpose |
+|------|---------|
+| `Package.swift` | Swift package manifest for the standalone QA CLI |
+
+### Root (1 file)
+
+| File | Purpose |
+|------|---------|
+| `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
+
+### Commands/ (10 files)
+
+| File | Purpose |
+|------|---------|
+| `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
+| `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
+| `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
+| `StressTest.swift` | Generate large datasets and validate performance + correctness |
+| `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
+| `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
+| `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
+| `ValidateIndex.swift` | Legacy transcripted.json consistency and orphan-file checks |
+| `ValidateLogs.swift` | Log file analysis and `app.jsonl` format validation |
+| `ValidateTranscripts.swift` | Transcript content validation, speaker attribution, timestamp checks |
+
+### Generators/ (1 file)
+
+| File | Purpose |
+|------|---------|
+| `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
+
+### Validators/ (7 files)
+
+| File | Purpose |
+|------|---------|
+| `HealthChecker.swift` | System health: disk space, model files, DB existence |
+| `IndexValidator.swift` | Legacy index consistency and orphan-file checks |
+| `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
+| `LogValidator.swift` | Log file parsing and error pattern detection |
+| `SpeakerDBValidator.swift` | SpeakerDB schema, record count, embedding integrity |
+| `StatsDBValidator.swift` | StatsDB schema, recording history, daily activity |
+| `TranscriptValidator.swift` | Transcript content, speaker attribution, timestamp validity |
+
+### Utilities/ (2 files)
+
+| File | Purpose |
+|------|---------|
+| `SQLiteReader.swift` | SQLite file reading, query execution, result parsing |
+| `YAMLParser.swift` | YAML frontmatter parsing and metadata extraction |
+
+### Models/ (1 file)
+
+| File | Purpose |
+|------|---------|
+| `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
+
+### Tests/ (1 file)
+
+| File | Purpose |
+|------|---------|
+| `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
 
@@ -40,11 +96,13 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
 
 ## Validation Results
 
-`ValidationResult` / `ValidationReport` capture:
-- `success: Bool` - Overall validation status
-- `errors: [String]` - List of errors found
-- `warnings: [String]` - Non-critical warnings
-- `metrics` - Validation metrics (record counts, file sizes, etc.)
+`ValidationResult` captures one structured check row with:
+- `check` - validator check name
+- `status` - `PASS`, `WARN`, or `FAIL`
+- `target` - the file, database, or subsystem that was checked
+- `detail` - optional human-readable detail when more context is useful
+
+`ValidationReport` wraps all rows, computes a pass/fail/warn summary, exposes the CLI exit code, and can print either aligned text output or pretty JSON.
 
 ## Key Features
 
@@ -65,7 +123,7 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
   types defined below it.
 - All validators run synchronously on background threads
 - SQLite readers use dedicated utility queues for thread safety
-- Validation results are structured for programmatic consumption
+- Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
 - Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
 - If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
