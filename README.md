@@ -12,7 +12,7 @@ happened and help you use it later.
 [Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
 
-## Why Spoken Work Matters
+## Why Audio Context Matters
 
 Your agents can only help with the context they can see.
 
@@ -37,7 +37,7 @@ After Transcripted:
 - Your dictations become a running memory of what you were thinking
 - Your agent can answer from the things you actually said
 
-## What This App Does
+## What Transcripted Does
 
 Transcripted captures spoken context and turns it into files you own.
 
@@ -68,7 +68,7 @@ Ask your agent things like:
 The point is not just transcription. The point is that your tools can finally
 use the spoken context that used to vanish.
 
-## The Outcome
+## What You Get
 
 You get a local memory layer for spoken work.
 
@@ -103,7 +103,7 @@ Default folders:
 
 You can also choose a different capture library in Settings.
 
-## Local Markdown
+## Plain Local Markdown
 
 Transcripted saves normal Markdown files. You can open them yourself, search
 them, sync them, back them up, or hand them to an agent.
@@ -137,7 +137,7 @@ Need to test the onboarding changes before touching pricing.
 The files are plain enough for you to read and structured enough for agents to
 use.
 
-## Agent Setup
+## Connect Your Agent
 
 You can use Transcripted two ways:
 
@@ -154,7 +154,7 @@ Claude Desktop.
 
 See [docs/agent-connect.md](docs/agent-connect.md).
 
-## Features
+## Feature List
 
 Capture spoken work:
 
