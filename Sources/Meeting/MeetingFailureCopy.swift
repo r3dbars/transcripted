@@ -50,6 +50,13 @@ struct MeetingFailureCopy: Equatable {
             )
         }
 
+        if message.contains("stop timed out") {
+            return MeetingFailureCopy(
+                title: "Recording didn't close cleanly",
+                detail: "The audio files may be incomplete. Retry to transcribe what was captured, or delete to discard."
+            )
+        }
+
         return MeetingFailureCopy(
             title: isRetryable ? "Transcript needs another pass" : "Recording needs attention",
             detail: shortErrorMessage

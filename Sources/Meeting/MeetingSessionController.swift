@@ -495,7 +495,8 @@ final class MeetingSessionController: ObservableObject {
         // Snapshot capture health before stop resets system-audio status/stats during cleanup.
         let healthInfo = capture.healthInfo()
         let finalSystemAudioStatus = capture.systemAudioStatus
-        let files = await capture.stopAndAwaitFiles()
+        let stopResult = await capture.stopAndAwaitFiles()
+        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let durationMs = Int(recordingDuration * 1000)
         activeRecordingTrigger = .unknown
         state = .transcribing
@@ -512,6 +513,7 @@ final class MeetingSessionController: ObservableObject {
                     "duration_ms": "\(durationMs)",
                     "mic_file_present": boolString(files.micURL != nil),
                     "system_file_present": boolString(files.systemURL != nil),
+                    "stop_timed_out": boolString(stopResult.didTimeOut),
                     "capture_quality": healthInfo.captureQuality.rawValue,
                     "audio_gaps": "\(healthInfo.audioGaps)",
                     "device_switches": "\(healthInfo.deviceSwitches)"
@@ -529,6 +531,28 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
             )
             state = .error("No microphone audio was captured.")
+            return
+        }
+
+        // Stop timeout means Audio.onRecordingComplete never fired. The WAV
+        // header may not be fully patched, so route the audio to the failed
+        // queue rather than enqueuing for transcription. The user can retry
+        // from Settings → Meetings, where the pipeline will either succeed
+        // on a now-finalized file or fail cleanly.
+        if stopResult.didTimeOut {
+            failedManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: files.systemURL,
+                errorMessage: "Recording stop timed out before audio files were finalized."
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_recording_stop_timeout_failed",
+                message: "Meeting routed to failed queue due to stop timeout",
+                context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+            )
+            state = .error("Recording didn't close cleanly. Open Settings → Meetings to retry.")
             return
         }
 
