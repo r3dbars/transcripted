@@ -17,6 +17,45 @@ private struct SettingsSidebarSection: Identifiable {
     ]
 }
 
+private struct CustomCorrectionDraft: Identifiable, Equatable {
+    let id: UUID
+    var spoken: String
+    var replacement: String
+
+    init(id: UUID = UUID(), spoken: String = "", replacement: String = "") {
+        self.id = id
+        self.spoken = spoken
+        self.replacement = replacement
+    }
+
+    static func rows(from rawText: String) -> [CustomCorrectionDraft] {
+        CustomDictionaryPreferences.entries(from: rawText).map {
+            CustomCorrectionDraft(spoken: $0.spoken, replacement: $0.replacement)
+        }
+    }
+
+    static func rawText(from rows: [CustomCorrectionDraft]) -> String {
+        rows.compactMap { row in
+            let spoken = normalized(row.spoken)
+            let replacement = normalized(row.replacement)
+
+            if spoken.isEmpty, replacement.isEmpty {
+                return nil
+            }
+
+            return "\(spoken) -> \(replacement)"
+        }
+        .joined(separator: "\n")
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -33,6 +72,8 @@ struct TranscriptedSettingsView: View {
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
+    @State private var customCorrectionRows = CustomCorrectionDraft.rows(from: CustomDictionaryPreferences.rawText())
+    @State private var customCorrectionPreviewText = "we use post hog and jay son"
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
@@ -538,7 +579,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "General",
-                summary: "Startup and words Transcripted should know."
+                summary: "Startup and transcript fixes."
             )
 
             SettingsSection(
@@ -558,26 +599,11 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
-                title: "Custom Words",
-                detail: "Names, acronyms, and phrases to favor."
+                title: "Corrections",
+                detail: "Fix words and phrases after transcription."
             ) {
                 VStack(alignment: .leading, spacing: 10) {
-                    TextEditor(text: Binding(
-                        get: { customDictionaryText },
-                        set: { updateCustomDictionaryText($0) }
-                    ))
-                    .font(.body)
-                    .frame(minHeight: 150)
-                    .padding(8)
-                    .scrollContentBackground(.hidden)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                    )
+                    customCorrectionsEditor
 
                     HStack(alignment: .firstTextBaseline) {
                         Text(customDictionaryStatusLine)
@@ -587,18 +613,133 @@ struct TranscriptedSettingsView: View {
                         Spacer()
 
                         Button("Clear") {
-                            updateCustomDictionaryText("")
+                            clearCustomCorrections()
                         }
                         .disabled(customDictionaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    Text("One per line. Use spoken text -> preferred text for corrections.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    customCorrectionsPreview
+
+                    DisclosureGroup("Advanced text format") {
+                        TextEditor(text: Binding(
+                            get: { customDictionaryText },
+                            set: { updateCustomDictionaryText($0) }
+                        ))
+                        .font(.body)
+                        .frame(minHeight: 96)
+                        .padding(8)
+                        .scrollContentBackground(.hidden)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+
+                        Text("One per line. Use written text -> corrected text.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
                 }
             }
         }
+    }
+
+    private var customCorrectionsEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("When Transcripted writes")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("Replace with")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer()
+                    .frame(width: 30)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if customCorrectionRows.isEmpty {
+                Text("No corrections yet.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            } else {
+                ForEach(customCorrectionRows) { row in
+                    customCorrectionRow(row)
+                }
+            }
+
+            Button {
+                addCustomCorrection()
+            } label: {
+                Label("Add Correction", systemImage: "plus")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func customCorrectionRow(_ row: CustomCorrectionDraft) -> some View {
+        HStack(spacing: 10) {
+            TextField("post hog", text: Binding(
+                get: { correctionDraft(for: row.id).spoken },
+                set: { updateCustomCorrection(row.id, spoken: $0) }
+            ))
+
+            Image(systemName: "arrow.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            TextField("PostHog", text: Binding(
+                get: { correctionDraft(for: row.id).replacement },
+                set: { updateCustomCorrection(row.id, replacement: $0) }
+            ))
+
+            Button {
+                removeCustomCorrection(row.id)
+            } label: {
+                Image(systemName: "trash")
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Remove correction")
+        }
+    }
+
+    private var customCorrectionsPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Try it")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("we use post hog", text: $customCorrectionPreviewText)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Result")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(customCorrectionPreviewResult)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor).opacity(0.54))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 
     private var modelsPage: some View {
@@ -1202,7 +1343,9 @@ struct TranscriptedSettingsView: View {
         refreshShortcutState()
         refreshMenuBarVisibility()
         refreshLaunchAtLoginState()
-        customDictionaryText = CustomDictionaryPreferences.rawText()
+        let rawDictionaryText = CustomDictionaryPreferences.rawText()
+        customDictionaryText = rawDictionaryText
+        customCorrectionRows = CustomCorrectionDraft.rows(from: rawDictionaryText)
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
@@ -1317,13 +1460,58 @@ struct TranscriptedSettingsView: View {
     private var customDictionaryStatusLine: String {
         let count = CustomDictionaryPreferences.entries(from: customDictionaryText).count
         if count == 0 {
-            return "No custom words yet."
+            return "No corrections active."
         }
-        return "\(count) custom word\(count == 1 ? "" : "s") active."
+        return "\(count) correction\(count == 1 ? "" : "s") active."
     }
 
     private func updateCustomDictionaryText(_ text: String) {
         let clampedText = CustomDictionaryPreferences.clampedRawText(text)
+        customDictionaryText = clampedText
+        customCorrectionRows = CustomCorrectionDraft.rows(from: clampedText)
+        CustomDictionaryPreferences.setRawText(clampedText)
+    }
+
+    private var customCorrectionPreviewResult: String {
+        CustomDictionaryTextProcessor.apply(
+            to: customCorrectionPreviewText,
+            entries: CustomDictionaryPreferences.entries(from: customDictionaryText)
+        )
+    }
+
+    private func addCustomCorrection() {
+        customCorrectionRows.append(CustomCorrectionDraft())
+    }
+
+    private func removeCustomCorrection(_ id: UUID) {
+        customCorrectionRows.removeAll { $0.id == id }
+        persistCustomCorrectionRows()
+    }
+
+    private func clearCustomCorrections() {
+        customCorrectionRows = []
+        customDictionaryText = ""
+        CustomDictionaryPreferences.setRawText("")
+    }
+
+    private func correctionDraft(for id: UUID) -> CustomCorrectionDraft {
+        customCorrectionRows.first { $0.id == id } ?? CustomCorrectionDraft(id: id)
+    }
+
+    private func updateCustomCorrection(_ id: UUID, spoken: String? = nil, replacement: String? = nil) {
+        guard let index = customCorrectionRows.firstIndex(where: { $0.id == id }) else { return }
+        if let spoken {
+            customCorrectionRows[index].spoken = spoken
+        }
+        if let replacement {
+            customCorrectionRows[index].replacement = replacement
+        }
+        persistCustomCorrectionRows()
+    }
+
+    private func persistCustomCorrectionRows() {
+        let rawText = CustomCorrectionDraft.rawText(from: customCorrectionRows)
+        let clampedText = CustomDictionaryPreferences.clampedRawText(rawText)
         customDictionaryText = clampedText
         CustomDictionaryPreferences.setRawText(clampedText)
     }
