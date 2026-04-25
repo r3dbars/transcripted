@@ -36,6 +36,7 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
+        let speakerClipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
         })
@@ -118,6 +119,14 @@ extension TranscriptionTaskManager {
             }
 
             if didFinalizeTranscript {
+                Self.persistReviewedSpeakerClips(
+                    clips: clips,
+                    regularUpdates: plannedChanges.resolvedUpdates,
+                    collapsedUpdates: collapsedUpdates,
+                    discardedUpdates: discardedUpdates,
+                    newlyCreatedMicProfileIds: newlyCreatedMicProfileIds,
+                    clipsDirectory: speakerClipsDirectory
+                )
                 Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
                     speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
@@ -148,6 +157,44 @@ extension TranscriptionTaskManager {
                     resolvedURL: resolvedURL
                 )
             }
+        }
+    }
+
+    nonisolated private static func persistReviewedSpeakerClips(
+        clips: [SpeakerNamingEntry],
+        regularUpdates: [SpeakerNameUpdate],
+        collapsedUpdates: [SpeakerNameUpdate],
+        discardedUpdates: [SpeakerNameUpdate],
+        newlyCreatedMicProfileIds: Set<UUID>,
+        clipsDirectory: URL
+    ) {
+        let discardedKeys = Set(discardedUpdates.map {
+            $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
+        })
+        let collapsedNewProfileKeys = Set(collapsedUpdates.compactMap { update in
+            newlyCreatedMicProfileIds.contains(update.persistentSpeakerId)
+                ? update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+                : nil
+        })
+        let resolvedIdsByKey = Dictionary(uniqueKeysWithValues: regularUpdates.map {
+            (
+                $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId),
+                $0.resolvedPersistentSpeakerId ?? $0.persistentSpeakerId
+            )
+        })
+
+        for clip in clips {
+            let key = clip.channel.speakerKey(diarizerSpeakerId: clip.diarizerSpeakerId)
+            guard !discardedKeys.contains(key),
+                  !collapsedNewProfileKeys.contains(key) else {
+                continue
+            }
+
+            SpeakerClipExtractor.persistClip(
+                from: clip.clipURL,
+                speakerId: resolvedIdsByKey[key] ?? clip.id,
+                clipsDirectory: clipsDirectory
+            )
         }
     }
 

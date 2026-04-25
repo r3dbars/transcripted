@@ -154,6 +154,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertNotNil(
+            SpeakerClipExtractor.persistentClipURL(
+                for: persistentSpeakerId,
+                clipsDirectory: harness.paths.speakerClips
+            )
+        )
     }
 
     @MainActor
@@ -243,6 +249,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         XCTAssertNil(harness.speakerDB.getSpeaker(id: persistentSpeakerId))
+        XCTAssertNil(
+            SpeakerClipExtractor.persistentClipURL(
+                for: persistentSpeakerId,
+                clipsDirectory: harness.paths.speakerClips
+            )
+        )
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertFalse(savedTranscript.contains(persistentSpeakerId.uuidString))
@@ -1302,6 +1314,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(correctedProfile?.displayName, "Sarah Graham")
         XCTAssertEqual(correctedProfile?.disputeCount, 0)
         XCTAssertGreaterThan(correctedProfile?.callCount ?? 0, targetBefore?.callCount ?? 0)
+        XCTAssertNotNil(
+            SpeakerClipExtractor.persistentClipURL(
+                for: targetProfile.id,
+                clipsDirectory: harness.paths.speakerClips
+            )
+        )
     }
 
     @MainActor
@@ -1533,7 +1551,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             failedTranscriptionManager: failedManager,
             speechToText: StubSpeechToTextEngine(),
             diarization: StubDiarizationEngine(),
-            speakerStore: speakerDB
+            speakerStore: speakerDB,
+            speakerClipsDirectory: paths.speakerClips
         )
 
         return TestHarness(paths: paths, speakerDB: speakerDB, manager: manager)
