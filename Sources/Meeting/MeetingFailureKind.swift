@@ -14,6 +14,7 @@ enum MeetingFailureKind: String {
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
     case pipelineBusy = "pipeline_busy"
+    case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
     static func isRecordingTooShortMessage(_ message: String) -> Bool {
@@ -31,6 +32,11 @@ enum MeetingFailureKind: String {
 
     static func classify(message: String) -> MeetingFailureKind {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains("stop timed out")
+            || normalized.contains("recording stop timed out") {
+            return .stopTimeout
+        }
 
         if normalized.contains("system audio is required")
             || normalized.contains("system audio recording")
