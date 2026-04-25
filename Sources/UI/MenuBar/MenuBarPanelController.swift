@@ -64,7 +64,8 @@ final class MenuBarPanelController: NSViewController {
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
-            meetingsStatus: warmupStatus.meetingsStatus
+            meetingsStatus: warmupStatus.meetingsStatus,
+            isRecording: appState.meetingSession.isRecording
         )
         let updatePresentation = menuUpdatePresentation(for: appState.sparkleUpdater.updateStatus)
         let menuVisibility = MenuBarVisibilityPreferences.snapshot()
@@ -118,6 +119,13 @@ final class MenuBarPanelController: NSViewController {
 
     private func setupSubscriptions() {
         appState.meetingSession.$warmupStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &subscriptions)
+
+        appState.meetingSession.$state
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.refresh()
@@ -186,12 +194,17 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func startMeetingFromMenu() {
-        trackMenuAction("start_meeting")
+        let isRecording = appState.meetingSession.isRecording
+        trackMenuAction(isRecording ? "stop_meeting" : "start_meeting")
         let sourceApp = resolvedSourceApp()
         dismissPopover()
         sourceApp?.activate(options: [])
-        Task {
-            await appState.meetingSession.startRecording(trigger: .menu)
+        Task { [meetingSession = appState.meetingSession] in
+            if isRecording {
+                await meetingSession.stopRecording(reason: .menuBarStopButton)
+            } else {
+                await meetingSession.startRecording(trigger: .menu)
+            }
         }
     }
 

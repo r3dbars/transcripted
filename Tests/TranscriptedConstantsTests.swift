@@ -8,6 +8,13 @@ func testTranscriptedConstants() async {
         assertTrue(TranscriptedConstants.hasMinimumParakeetAudioSamples(20_000), "longer audio should still be accepted")
     }
 
+    runSuite("TranscriptedConstants restores borrowed clipboard before auto-enter") {
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreDelay < TranscriptedConstants.dictationAutoEnterDelay,
+            "clipboard restore should happen before follow-up keypresses and before users can easily paste stale dictation text"
+        )
+    }
+
     await runSuite("TranscriptedConstants.withTimeout — returns completed work before deadline") {
         let result = try? await TranscriptedConstants.withTimeout(seconds: 1) {
             "ok"

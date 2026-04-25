@@ -114,11 +114,8 @@ enum TranscriptedConstants {
 
     // MARK: - Clipboard
 
-    /// Clipboard restore polling interval (nanoseconds)
-    static let clipboardPollInterval: UInt64 = 50_000_000  // 50ms
-
-    /// Clipboard restore timeout in seconds
-    static let clipboardRestoreTimeout: Double = 2.0
+    /// Delay after posting Cmd+V before restoring the user's clipboard.
+    static let clipboardRestoreDelay: UInt64 = 120_000_000  // 120ms
 
     // MARK: - Dictation Auto Enter
 

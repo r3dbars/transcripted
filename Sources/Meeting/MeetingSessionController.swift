@@ -40,6 +40,7 @@ final class MeetingSessionController: ObservableObject {
     enum StopReason: String {
         case hotkeyToggle = "hotkey_toggle"
         case overlayStopButton = "overlay_stop_button"
+        case menuBarStopButton = "menu_bar_stop_button"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
         case unknown = "unknown"
