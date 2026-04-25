@@ -12,7 +12,7 @@ enum SentryRuntimeConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> String? {
-        firstNonEmpty(
+        firstValidHTTPSValue(
             environment[dsnEnvironmentKey],
             infoDictionary?[dsnInfoKey] as? String
         )
@@ -61,6 +61,27 @@ enum SentryRuntimeConfiguration {
         candidates
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
+    }
+
+    private static func firstValidHTTPSValue(_ candidates: String?...) -> String? {
+        candidates
+            .compactMap { normalizedHTTPSValue($0) }
+            .first
+    }
+
+    private static func normalizedHTTPSValue(_ candidate: String?) -> String? {
+        guard let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+
+        // Security: fail closed on non-HTTPS DSNs so a tampered env var or Info.plist
+        // cannot downgrade crash reports to plaintext transport.
+        guard trimmed.lowercased().hasPrefix("https://") else {
+            return nil
+        }
+
+        return trimmed
     }
 
     private static func parseBoolean(_ value: String) -> Bool? {
