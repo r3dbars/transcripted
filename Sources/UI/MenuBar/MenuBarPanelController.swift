@@ -97,6 +97,7 @@ final class MenuBarPanelController: NSViewController {
             isEnabled: appState.sparkleUpdater.updateStatus.canRunUserUpdateAction
         )
 
+        content.utilityActionsView.pasteAvailable = latestDictationLoaded ? (latestDictation != nil) : nil
         content.utilityActionsView.update(
             updateTitle: updatePresentation.title,
             updateDetail: updatePresentation.detail,

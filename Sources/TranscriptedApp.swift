@@ -313,31 +313,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
-        let hasPasteTarget = resolvedSourceApp() != nil
-        return PermissionsOnboardingView(
-            sttRouter: appState.sttRouter,
-            canStartDictation: hasPasteTarget,
-            onStartDictation: { [weak self] anchorRect in
-                self?.startOnboardingDictationTest(anchorRect: anchorRect)
-            },
-            onStopDictation: { [weak self] in
-                self?.stopOnboardingDictationTest()
-            },
-            onStartMeetingDryRun: { [weak self] in
-                guard let self else { return false }
-                return await self.startOnboardingMeetingDryRun()
-            },
-            onStopMeetingDryRun: { [weak self] in
-                guard let self else { return false }
-                return await self.stopOnboardingMeetingDryRun()
-            },
-            onOpenAgentSettings: { [weak self] in
-                self?.showSettingsWindow(page: .connectAgent, source: "onboarding")
-            },
-            onComplete: { [weak self] in
-                self?.finishOnboarding()
-            }
-        )
+        PermissionsOnboardingView { [weak self] in
+            self?.finishOnboarding()
+        }
     }
 
     private func presentInitialOnboardingIfNeeded() {
@@ -371,25 +349,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         closePopover()
         sourceApp?.activate(options: [])
         sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
-    }
-
-    private func startOnboardingDictationTest(anchorRect: NSRect?) {
-        NSApp.activate(ignoringOtherApps: true)
-        sessionController.startDictation(sourceApp: nil, trigger: .onboarding, anchorRect: anchorRect)
-    }
-
-    private func stopOnboardingDictationTest() {
-        sessionController.stopDictationAndPaste(trigger: .onboarding)
-    }
-
-    private func startOnboardingMeetingDryRun() async -> Bool {
-        await appState.meetingSession.startRecording(trigger: .onboarding)
-    }
-
-    private func stopOnboardingMeetingDryRun() async -> Bool {
-        guard case .recording = appState.meetingSession.state else { return false }
-        await appState.meetingSession.cancelRecording(reason: .onboardingDryRun)
-        return true
     }
 
     private func showMainPopover(
