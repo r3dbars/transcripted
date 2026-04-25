@@ -24,6 +24,8 @@ PostHog controls described below.
 - never send emails, tokens, or raw URLs
 - keep analytics to allowlisted events and coarse buckets only
 - keep crash reporting separately user-controllable from anonymous analytics
+- keep Sentry automatic app-hang tracking off by default; modal macOS update,
+  permission, and confirmation dialogs can otherwise be misreported as hangs
 
 ## Current rollout checklist
 
@@ -59,6 +61,9 @@ PostHog controls described below.
 9. Use `Send Test Sentry Event` to verify Sentry wiring.
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive
    in PostHog.
+11. If intentionally testing Sentry app-hang tracking, launch locally with
+    `SENTRY_ENABLE_APP_HANG_TRACKING=true`. Do not enable it in release builds
+    without a specific review of modal dialog false positives.
 
 ## Allowlisted analytics events
 

@@ -57,4 +57,35 @@ func testSentryRuntimeConfiguration() {
             "dist should still mirror CFBundleVersion"
         )
     }
+
+    runSuite("SentryRuntimeConfiguration disables app hang tracking by default") {
+        assertFalse(
+            SentryRuntimeConfiguration.appHangTrackingEnabled(environment: [:], infoDictionary: [:]),
+            "automatic app hang tracking should default off because modal system alerts can look like hangs"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration allows explicit app hang tracking opt in") {
+        assertTrue(
+            SentryRuntimeConfiguration.appHangTrackingEnabled(
+                environment: [SentryRuntimeConfiguration.appHangTrackingEnvironmentKey: "true"],
+                infoDictionary: [:]
+            ),
+            "local validation can opt into app hang tracking through environment"
+        )
+        assertTrue(
+            SentryRuntimeConfiguration.appHangTrackingEnabled(
+                environment: [:],
+                infoDictionary: [SentryRuntimeConfiguration.appHangTrackingInfoKey: true]
+            ),
+            "bundle config can opt into app hang tracking when we intentionally want it"
+        )
+        assertFalse(
+            SentryRuntimeConfiguration.appHangTrackingEnabled(
+                environment: [SentryRuntimeConfiguration.appHangTrackingEnvironmentKey: "not-a-bool"],
+                infoDictionary: [SentryRuntimeConfiguration.appHangTrackingInfoKey: true]
+            ),
+            "invalid environment override should fail closed"
+        )
+    }
 }
