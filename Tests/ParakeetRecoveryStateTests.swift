@@ -174,6 +174,18 @@ func testParakeetRecoveryState() {
         assertTrue(state.canStartRecording, "format-ready should unblock recording after a failed start")
     }
 
+    runSuite("ParakeetRecoveryState.reset — clears cancellation leftovers and supersedes older recovery tasks") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+
+        state.reset()
+
+        assertFalse(state.isRecovering, "reset should clear recovering state")
+        assertTrue(state.inputFormatReady, "reset should restore ready state for a fresh start")
+        assertTrue(state.canStartRecording, "reset should allow a new start attempt")
+        assertTrue(state.isStale(generation: staleGeneration), "reset should supersede in-flight recovery tasks")
+    }
+
     runSuite("ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure — retries only normal first failures") {
         assertTrue(
             ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: false, failedAttempts: 1, retryBudget: 1),

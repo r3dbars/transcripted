@@ -2346,6 +2346,14 @@ class ParakeetEngine: ObservableObject {
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        recoveryState.reset()
+        publishRecoveryState()
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
