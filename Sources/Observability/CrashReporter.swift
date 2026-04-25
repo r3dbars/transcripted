@@ -31,6 +31,7 @@ final class CrashReporter {
         options.sendDefaultPii = false
         options.enableCrashHandler = true
         options.enableUncaughtNSExceptionReporting = true
+        options.enableAppHangTracking = SentryRuntimeConfiguration.appHangTrackingEnabled()
         options.enableAutoSessionTracking = false
         options.enableNetworkBreadcrumbs = false
         options.maxBreadcrumbs = 0
