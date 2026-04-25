@@ -12,7 +12,7 @@ happened and help you use it later.
 [Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
 
-## The Aha
+## Why Spoken Work Matters
 
 Your agents can only help with the context they can see.
 
@@ -51,7 +51,7 @@ Transcripted captures spoken context and turns it into files you own.
 That is the whole idea: your spoken work stops being throwaway audio and becomes
 useful memory.
 
-## Why It Matters
+## What You Can Ask
 
 Transcripted is for the moments where you need to remember, decide, and follow
 through.
@@ -78,13 +78,13 @@ Not another place where your context gets trapped.
 
 Just local files your tools can read.
 
-Use Transcripted with:
+Use Transcripted with the tools people already reach for:
 
-- Obsidian as a second brain
-- Claude or Claude Code for meeting recall
-- Codex for project context
+- Claude for meeting recall and everyday questions
+- Codex for project context and repo work
 - Cursor for engineering and product memory
-- Any agent that can read local files
+- Obsidian as your second brain
+- Any agent that can read local Markdown files or connect to MCP
 
 ## How It Works
 
