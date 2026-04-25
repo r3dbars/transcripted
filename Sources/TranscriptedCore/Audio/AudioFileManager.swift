@@ -16,18 +16,24 @@ extension Audio {
 
         let (engine, inputNode) = try ensureEngineInitialized()
 
-        // Use system default microphone (whatever macOS has configured)
-        // CRITICAL: Must use inputFormat(forBus: 1) to get ACTUAL hardware format
-        // outputFormat(forBus: 0) returns the converter format, not hardware format
-        let hardwareFormat = inputNode.inputFormat(forBus: 1)
-        AppLogger.audioMic.info("Hardware format", ["sampleRate": "\(hardwareFormat.sampleRate)", "channels": "\(hardwareFormat.channelCount)"])
+        // Use system default microphone (whatever macOS has configured).
+        // recordingFormat(for:) returns:
+        //   - VPIO output format when armVoiceProcessing enabled it (mono
+        //     Float32 at the unit's preferred rate), which matches what the
+        //     tap on bus 0 will actually deliver.
+        //   - Hardware format via inputFormat(forBus: 1) otherwise — required
+        //     because outputFormat(forBus: 0) returns the converter format on
+        //     stock AVAudioEngine, which breaks Bluetooth capture.
+        let recordingFormat = self.recordingFormat(for: inputNode)
+        AppLogger.audioMic.info("Mic input format", [
+            "sampleRate": "\(recordingFormat.sampleRate)",
+            "channels": "\(recordingFormat.channelCount)",
+            "voiceProcessing": "\(voiceProcessingEnabled)"
+        ])
 
-        guard hardwareFormat.sampleRate > 0 && hardwareFormat.channelCount > 0 else {
+        guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
             throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
         }
-
-        // Use the HARDWARE format for the tap (critical for Bluetooth devices)
-        let recordingFormat = hardwareFormat
 
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
