@@ -68,38 +68,38 @@ struct JSONSidecarValidator {
             if let utterances = json["utterances"] as? [[String: Any]] {
                 if utterances.isEmpty {
                     results.append(.fail("artifact/json-utterances-present", target: name, detail: "No utterances found"))
-                    continue
-                }
-
-                var sorted = true
-                var prevStart: Double = -1
-                var missingStartCount = 0
-                for utt in utterances {
-                    if let start = utt["start"] as? Double {
-                        if start < prevStart { sorted = false; break }
-                        prevStart = start
-                    } else {
-                        missingStartCount += 1
+                } else {
+                    var sorted = true
+                    var prevStart: Double = -1
+                    var missingStartCount = 0
+                    for utt in utterances {
+                        if let start = utt["start"] as? Double {
+                            if start < prevStart { sorted = false; break }
+                            prevStart = start
+                        } else {
+                            missingStartCount += 1
+                        }
                     }
-                }
-                if missingStartCount > 0 {
-                    results.append(.warn("artifact/json-utterance-start-times", target: name, detail: "\(missingStartCount) utterance(s) missing start time"))
-                }
-                if sorted {
-                    results.append(.pass("artifact/json-utterances-sorted", target: name))
-                } else {
-                    results.append(.fail("artifact/json-utterances-sorted", target: name, detail: "Utterances not sorted by start time"))
-                }
 
-                // Speaker refs valid
-                let speakers = json["speakers"] as? [[String: Any]] ?? []
-                let speakerIds = Set(speakers.compactMap { $0["id"] as? String })
-                let uttSpeakerIds = Set(utterances.compactMap { $0["speaker_id"] as? String })
-                let missing = uttSpeakerIds.subtracting(speakerIds)
-                if missing.isEmpty {
-                    results.append(.pass("artifact/json-speaker-refs", target: name))
-                } else {
-                    results.append(.fail("artifact/json-speaker-refs", target: name, detail: "Utterances reference unknown speakers: \(missing)"))
+                    if missingStartCount > 0 {
+                        results.append(.warn("artifact/json-utterance-start-times", target: name, detail: "\(missingStartCount) utterance(s) missing start time"))
+                    }
+                    if sorted {
+                        results.append(.pass("artifact/json-utterances-sorted", target: name))
+                    } else {
+                        results.append(.fail("artifact/json-utterances-sorted", target: name, detail: "Utterances not sorted by start time"))
+                    }
+
+                    // Speaker refs valid
+                    let speakers = json["speakers"] as? [[String: Any]] ?? []
+                    let speakerIds = Set(speakers.compactMap { $0["id"] as? String })
+                    let uttSpeakerIds = Set(utterances.compactMap { $0["speaker_id"] as? String })
+                    let missing = uttSpeakerIds.subtracting(speakerIds)
+                    if missing.isEmpty {
+                        results.append(.pass("artifact/json-speaker-refs", target: name))
+                    } else {
+                        results.append(.fail("artifact/json-speaker-refs", target: name, detail: "Utterances reference unknown speakers: \(missing)"))
+                    }
                 }
             } else {
                 results.append(.warn("artifact/json-utterances", target: name, detail: "utterances block missing — sort and speaker ref checks skipped"))
