@@ -61,8 +61,6 @@ Ask your agent things like:
 - What did I promise to follow up on this week?
 - What did we decide in the pricing call?
 - Find every time we talked about onboarding.
-- Turn my last three dictations into a plan.
-- Pull the strongest product ideas from my recent meetings.
 - What am I repeating across conversations?
 
 The point is not just transcription. The point is that your tools can finally
