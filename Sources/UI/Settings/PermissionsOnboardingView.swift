@@ -44,16 +44,7 @@ struct PermissionsOnboardingView: View {
     @State private var pollTask: Task<Void, Never>?
     @FocusState private var demoEditorFocused: Bool
 
-    init(
-        sttRouter: STTRouter,
-        canStartDictation: Bool = false,
-        onStartDictation: ((NSRect?) -> Void)? = nil,
-        onStopDictation: (() -> Void)? = nil,
-        onStartMeetingDryRun: (() async -> Bool)? = nil,
-        onStopMeetingDryRun: (() async -> Bool)? = nil,
-        onOpenAgentSettings: (() -> Void)? = nil,
-        onComplete: @escaping () -> Void
-    ) {
+    init(onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
     }
 
@@ -94,7 +85,6 @@ struct PermissionsOnboardingView: View {
         .frame(width: Self.preferredSize.width, height: Self.preferredSize.height)
         .background(OnboardingTheme.canvas)
         .onAppear {
-            HotkeyPreferences.setRightOptionDictation(enabled: true)
             checkAllPermissions()
             startPolling()
         }
@@ -187,7 +177,6 @@ struct PermissionsOnboardingView: View {
                 }
                 .padding(.top, 6)
                 .onAppear {
-                    HotkeyPreferences.setRightOptionDictation(enabled: true)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         demoEditorFocused = true
                     }
@@ -366,9 +355,8 @@ struct PermissionsOnboardingView: View {
             // user has the System Settings menu open. A Task-driven loop keeps
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard !Task.isCancelled else { return }
                 checkAllPermissions()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }

@@ -96,15 +96,7 @@ final class ClipboardRestoringTextPaster {
 
         let changeCountAfterSet = pasteboard.changeCount
         clipboardRestoreTask = Task { @MainActor [weak self] in
-            let startTime = CFAbsoluteTimeGetCurrent()
-            while CFAbsoluteTimeGetCurrent() - startTime < TranscriptedConstants.clipboardRestoreTimeout {
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardPollInterval)
-                guard !Task.isCancelled else { return }
-                if pasteboard.changeCount != changeCountAfterSet {
-                    return
-                }
-            }
-
+            try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardRestoreDelay)
             guard !Task.isCancelled else { return }
             self?.restorePasteboardItems(
                 savedItems,

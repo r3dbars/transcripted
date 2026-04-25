@@ -20,6 +20,16 @@ import Combine
 import Foundation
 import TranscriptedCore
 
+/// Result of a stop request. `didTimeOut == true` means we did not receive
+/// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
+/// at the returned URLs may not be fully finalized — the controller should
+/// route the audio to the failed queue rather than enqueuing for transcription.
+struct CaptureStopResult {
+    let micURL: URL?
+    let systemURL: URL?
+    let didTimeOut: Bool
+}
+
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingCaptureBridge: ObservableObject {
@@ -43,7 +53,7 @@ final class MeetingCaptureBridge: ObservableObject {
 
     /// Fulfilled when Core's Audio reports recording completed. Cleared each
     /// time `startRecording` runs so back-to-back sessions do not leak state.
-    private var completionContinuation: CheckedContinuation<(micURL: URL?, systemURL: URL?), Never>?
+    private var completionContinuation: CheckedContinuation<CaptureStopResult, Never>?
     private var completionAttemptID: UUID?
     private var completionTimeoutTask: Task<Void, Never>?
     private var startContinuation: CheckedContinuation<Bool, Never>?
@@ -60,7 +70,11 @@ final class MeetingCaptureBridge: ObservableObject {
         startTimeoutTask?.cancel()
         startContinuation?.resume(returning: false)
         completionTimeoutTask?.cancel()
-        completionContinuation?.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
+        completionContinuation?.resume(returning: CaptureStopResult(
+            micURL: audio.micAudioFileURL,
+            systemURL: audio.systemAudioFileURL,
+            didTimeOut: false
+        ))
         // Combine cancellables auto-release. Audio's own deinit tears down CoreAudio.
     }
 
@@ -74,7 +88,11 @@ final class MeetingCaptureBridge: ObservableObject {
             completionAttemptID = nil
             completionTimeoutTask?.cancel()
             completionTimeoutTask = nil
-            continuation.resume(returning: (audio.micAudioFileURL, audio.systemAudioFileURL))
+            continuation.resume(returning: CaptureStopResult(
+                micURL: audio.micAudioFileURL,
+                systemURL: audio.systemAudioFileURL,
+                didTimeOut: false
+            ))
         }
         if audio.isRecording { return true }
 
@@ -110,11 +128,18 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     /// Stop the current recording and wait for Core's Audio to finish writing
-    /// the mic + system WAV files to disk. Returns the URLs of both files (system
-    /// may be nil if capture failed or was disabled).
-    func stopAndAwaitFiles() async -> (micURL: URL?, systemURL: URL?) {
+    /// the mic + system WAV files to disk. Returns a result that distinguishes
+    /// natural completion (`didTimeOut == false`) from `meetingStopTimeout`
+    /// expiry (`didTimeOut == true`). On timeout the WAV header may not be
+    /// fully patched, so the caller should treat the audio as failed-but-
+    /// recoverable rather than enqueuing it for transcription directly.
+    func stopAndAwaitFiles() async -> CaptureStopResult {
         guard audio.isRecording else {
-            return (audio.micAudioFileURL, audio.systemAudioFileURL)
+            return CaptureStopResult(
+                micURL: audio.micAudioFileURL,
+                systemURL: audio.systemAudioFileURL,
+                didTimeOut: false
+            )
         }
 
         return await withCheckedContinuation { continuation in
@@ -143,7 +168,11 @@ final class MeetingCaptureBridge: ObservableObject {
                         "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
                     ]
                 )
-                continuation.resume(returning: (self.audio.micAudioFileURL, self.audio.systemAudioFileURL))
+                continuation.resume(returning: CaptureStopResult(
+                    micURL: self.audio.micAudioFileURL,
+                    systemURL: self.audio.systemAudioFileURL,
+                    didTimeOut: true
+                ))
             }
         }
     }
@@ -151,11 +180,11 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Stop the current recording, wait for file handles to close, then remove
     /// the just-captured scratch audio instead of handing it to transcription.
     func stopAndDiscardFiles() async -> (micURL: URL?, systemURL: URL?) {
-        let files = await stopAndAwaitFiles()
-        MeetingRecordingCleanup.discardFiles(micURL: files.micURL, systemURL: files.systemURL)
+        let result = await stopAndAwaitFiles()
+        MeetingRecordingCleanup.discardFiles(micURL: result.micURL, systemURL: result.systemURL)
         audio.micAudioFileURL = nil
         audio.systemAudioFileURL = nil
-        return files
+        return (result.micURL, result.systemURL)
     }
 
     /// Snapshot of Core's recording health metadata for transcript frontmatter.
@@ -228,7 +257,11 @@ final class MeetingCaptureBridge: ObservableObject {
                 self.completionAttemptID = nil
                 self.completionTimeoutTask?.cancel()
                 self.completionTimeoutTask = nil
-                continuation?.resume(returning: (micURL, systemURL))
+                continuation?.resume(returning: CaptureStopResult(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    didTimeOut: false
+                ))
             }
         }
 

@@ -30,8 +30,22 @@ struct FirstRunModelCardState: Equatable {
 }
 
 struct MenuBarPrimaryActionState: Equatable {
+    let title: String
+    let symbolName: String
     let isEnabled: Bool
     let subtitle: String
+
+    init(
+        title: String,
+        symbolName: String,
+        isEnabled: Bool,
+        subtitle: String
+    ) {
+        self.title = title
+        self.symbolName = symbolName
+        self.isEnabled = isEnabled
+        self.subtitle = subtitle
+    }
 }
 
 enum FirstRunOnboardingStep: Int, CaseIterable, Identifiable, Equatable {
@@ -329,12 +343,27 @@ enum FirstRunExperience {
         }
 
         return MenuBarPrimaryActionState(
+            title: "Start Dictation",
+            symbolName: "mic.fill",
             isEnabled: true,
             subtitle: subtitle
         )
     }
 
-    static func meetingAction(dictationReady: Bool, meetingsStatus: String) -> MenuBarPrimaryActionState {
+    static func meetingAction(
+        dictationReady: Bool,
+        meetingsStatus: String,
+        isRecording: Bool = false
+    ) -> MenuBarPrimaryActionState {
+        if isRecording {
+            return MenuBarPrimaryActionState(
+                title: "Stop Meeting",
+                symbolName: "stop.circle.fill",
+                isEnabled: true,
+                subtitle: "Recording now"
+            )
+        }
+
         let subtitle: String
         switch meetingsStatus {
         case "Ready":
@@ -348,6 +377,8 @@ enum FirstRunExperience {
         }
 
         return MenuBarPrimaryActionState(
+            title: "Start Meeting",
+            symbolName: "record.circle.fill",
             isEnabled: true,
             subtitle: subtitle
         )

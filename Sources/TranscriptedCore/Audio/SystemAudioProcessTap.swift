@@ -91,64 +91,48 @@ extension SystemAudioCapture {
             throw "Failed to create AVAudioFormat from tap description"
         }
 
-        // Track callback count for debugging (thread-safe via atomic-like access)
-        var callbackCount = 0
-
-        // Create I/O proc to receive audio buffers
+        // Create I/O proc to receive audio buffers.
+        //
+        // CRITICAL: this closure runs on the CoreAudio I/O thread. It must be
+        // real-time safe — NO logging, NO allocations beyond AVAudioPCMBuffer
+        // wrapper construction, NO blocking work. Counter increments use short
+        // NSLock acquisitions which are acceptable here; anything heavier must
+        // be deferred. cleanup()/logStats() surface counters off the RT thread.
         var err = AudioDeviceCreateIOProcIDWithBlock(&deviceProcID, aggregateDeviceID, queue) { [weak self] inNow, inInputData, inInputTime, outOutputData, inOutputTime in
             guard let self = self, let bufferCallback = self.bufferCallback else {
-                AppLogger.audioSystem.warning("I/O Proc: self or bufferCallback is nil")
                 return
             }
 
-            callbackCount += 1
-            if callbackCount <= 3 {
-                AppLogger.audioSystem.debug("I/O Proc callback", ["count": "\(callbackCount)"])
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: inInputData, deallocator: nil) else {
+                return
             }
 
-            do {
-                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: inInputData, deallocator: nil) else {
-                    AppLogger.audioSystem.error("I/O Proc: Failed to create PCM buffer")
-                    throw "Failed to create PCM buffer"
-                }
+            // Track total buffers received
+            self.incrementStats(hasData: false)
 
-                // Track total buffers received
-                self.incrementStats(hasData: false)
-
-                // CRITICAL FIX: Check for zero-frame buffers BEFORE updating watchdog
-                // Zero-frame buffers were defeating the watchdog by updating lastBufferTime
-                // even though no actual audio was being captured (device switch scenario)
-                let frameLength = buffer.frameLength
-                if frameLength == 0 {
-                    // Log throttled: first 10, then every 100th
-                    if callbackCount <= 10 || callbackCount % 100 == 0 {
-                        AppLogger.audioSystem.warning("Zero-frame buffer", ["callbackCount": "\(callbackCount)"])
-                    }
-                    self.incrementDropped()
-                    // Do NOT update lastBufferTime - let watchdog detect silence
-                    return
-                }
-
-                if callbackCount <= 3 {
-                    AppLogger.audioSystem.debug("Buffer created", ["frames": "\(frameLength)"])
-                }
-
-                // Only update watchdog timestamp for buffers with actual data
-                // CACurrentMediaTime() is allocation-free and safe for real-time threads
-                self.lastBufferTime = CACurrentMediaTime()
-                if !self.hasReceivedFirstBuffer {
-                    self.hasReceivedFirstBuffer = true
-                }
-                if self.recoveryAttempts > 0 {
-                    self.recoveryAttempts = 0
-                }
-                self.markBufferHasData()
-
-                // Send buffer to callback
-                bufferCallback(buffer)
-            } catch {
-                AppLogger.audioSystem.error("I/O Proc error", ["error": "\(error)"])
+            // CRITICAL FIX: Check for zero-frame buffers BEFORE updating watchdog.
+            // Zero-frame buffers were defeating the watchdog by updating lastBufferTime
+            // even though no actual audio was being captured (device switch scenario).
+            let frameLength = buffer.frameLength
+            if frameLength == 0 {
+                self.incrementDropped()
+                // Do NOT update lastBufferTime — let watchdog detect silence
+                return
             }
+
+            // Only update watchdog timestamp for buffers with actual data.
+            // CACurrentMediaTime() is allocation-free and safe for real-time threads.
+            self.lastBufferTime = CACurrentMediaTime()
+            if !self.hasReceivedFirstBuffer {
+                self.hasReceivedFirstBuffer = true
+            }
+            if self.recoveryAttempts > 0 {
+                self.recoveryAttempts = 0
+            }
+            self.markBufferHasData()
+
+            // Send buffer to callback
+            bufferCallback(buffer)
         }
 
         guard err == noErr else {
