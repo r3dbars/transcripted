@@ -6,8 +6,8 @@ Turn spoken work into local memory for your agents.
 
 Transcripted is a local Mac app for meetings, dictation, and audio files. It
 turns the things you say out loud into clean Markdown files on your Mac, so
-Claude, Codex, Cursor, Obsidian, or any file-reading agent can understand what
-happened and help you use it later.
+Claude, Codex, and Obsidian can understand what happened and help you use it
+later.
 
 [Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
