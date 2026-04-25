@@ -80,7 +80,6 @@ Use Transcripted with the tools people already reach for:
 
 - Claude for meeting recall and everyday questions
 - Codex for project context and repo work
-- Cursor for engineering and product memory
 - Obsidian as your second brain
 - Any agent that can read local Markdown files or connect to MCP
 
