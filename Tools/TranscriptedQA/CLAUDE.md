@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22 files under `Sources/TranscriptedQA/`.
+QA testing suite for Transcripted. 24 Swift files total: `Package.swift`, 22 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
 
 ## File Index
 
@@ -60,7 +60,13 @@ QA testing suite for Transcripted. 23 Swift files total: `Package.swift` plus 22
 
 | File | Purpose |
 |------|---------|
-| `ValidationResult.swift` | Validation outcome: success/failure, error details, warnings, and metrics |
+| `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
+
+### Tests/ (1 file)
+
+| File | Purpose |
+|------|---------|
+| `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
 
@@ -88,11 +94,13 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 
 ## Validation Results
 
-`ValidationResult` / `ValidationReport` capture:
-- `success: Bool` - Overall validation status
-- `errors: [String]` - List of errors found
-- `warnings: [String]` - Non-critical warnings
-- `metrics` - Validation metrics (record counts, file sizes, etc.)
+`ValidationResult` captures one structured check row with:
+- `check` - validator check name
+- `status` - `PASS`, `WARN`, or `FAIL`
+- `target` - the file, database, or subsystem that was checked
+- `detail` - optional human-readable detail when more context is useful
+
+`ValidationReport` wraps all rows, computes a pass/fail/warn summary, exposes the CLI exit code, and can print either aligned text output or pretty JSON.
 
 ## Key Features
 
@@ -110,7 +118,7 @@ transcripted-qa stress-test --transcripts 100 --speakers-per-transcript 4 --utte
 
 - All validators run synchronously on background threads
 - SQLite readers use dedicated utility queues for thread safety
-- Validation results are structured for programmatic consumption
+- Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
 - Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
 - If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
