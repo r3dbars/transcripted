@@ -60,8 +60,8 @@ final class MenuBarPrimaryActionsView: NSView {
 
         dictationRow.isHidden = !showStartDictation
         dictationRow.update(
-            symbolName: "mic.fill",
-            title: "Start Dictation",
+            symbolName: dictationState.symbolName,
+            title: dictationState.title,
             detail: dictationState.subtitle,
             trailingText: dictationKey,
             tone: .accent,
@@ -71,8 +71,8 @@ final class MenuBarPrimaryActionsView: NSView {
 
         meetingRow.isHidden = !showStartMeeting
         meetingRow.update(
-            symbolName: "record.circle.fill",
-            title: "Start Meeting",
+            symbolName: meetingState.symbolName,
+            title: meetingState.title,
             detail: meetingState.subtitle,
             trailingText: meetingKey,
             tone: .accent,

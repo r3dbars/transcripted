@@ -30,8 +30,18 @@ final class MenuBarShortcutsView: NSView {
     private var recordingTarget: RecordingTarget?
     private var pendingDictationModifier: PhysicalDictationTriggerBinding?
     private var pendingDictationModifierKeyCode: UInt32?
-    private var currentDictationState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Paste spoken text anywhere")
-    private var currentMeetingState = MenuBarPrimaryActionState(isEnabled: true, subtitle: "Capture mic and system audio")
+    private var currentDictationState = MenuBarPrimaryActionState(
+        title: "Start Dictation",
+        symbolName: "mic.fill",
+        isEnabled: true,
+        subtitle: "Paste spoken text anywhere"
+    )
+    private var currentMeetingState = MenuBarPrimaryActionState(
+        title: "Start Meeting",
+        symbolName: "record.circle.fill",
+        isEnabled: true,
+        subtitle: "Capture mic and system audio"
+    )
     private var canImportAudioFiles = true
 
     private enum RecordingTarget {
