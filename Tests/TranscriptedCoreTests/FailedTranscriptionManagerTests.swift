@@ -97,6 +97,29 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted, [safeEntry])
     }
 
+    func testAddFailedTranscriptionRejectsOutOfSandboxAudioPaths() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let safeMicURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: safeMicURL.path, contents: Data("mic".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        manager.addFailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/transcripted-unsafe-mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        manager.addFailedTranscription(
+            micAudioURL: safeMicURL,
+            systemAudioURL: URL(fileURLWithPath: "/tmp/transcripted-unsafe-system.wav"),
+            errorMessage: "Temporary transcription failure"
+        )
+
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.failedQueue.path))
+    }
+
     func testFailedTranscriptionRetryabilityDoesNotOvermatchGenericMinimumLanguage() {
         let failure = FailedTranscription(
             micAudioURL: testRoot.appendingPathComponent("mic.wav"),
