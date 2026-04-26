@@ -36,6 +36,20 @@ func testAnalyticsPayloadSanitizer() {
         assertTrue(value.contains("[redacted-host]"), "host marker should remain")
     }
 
+    runSuite("AnalyticsPayloadSanitizer redacts synthetic-root macOS paths from values") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "Saved to /System/Volumes/Data/Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl before retry",
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("/System/Volumes/Data/Users/redbars/"), "synthetic-root home paths should be redacted")
+        assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "synthetic-root app support path should be fully redacted")
+        assertTrue(value.contains("[redacted-path]"), "path marker should remain")
+    }
+
     runSuite("AnalyticsPayloadSanitizer drops authorization-like keys even if allowlisted") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [

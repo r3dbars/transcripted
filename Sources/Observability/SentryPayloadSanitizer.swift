@@ -40,7 +40,9 @@ enum SentryPayloadSanitizer {
 
     private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\s"]*)?"#)
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
-    private static let absolutePathRegex = makeRegex(#"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
+    private static let absolutePathRegex = makeRegex(
+        #"(?<!https:)(?<!http:)/(?:System/Volumes/Data/)?(?:Users|private|var|tmp|Volumes|Applications|Library|opt)[^\s"]*"#
+    )
     private static let rawURLRegex = makeRegex(#"https?://[^\s"]+"#, options: [.caseInsensitive])
     private static let apiKeyRegex = makeRegex(#"sk-[A-Za-z0-9_-]+"#)
     private static let commonSecretRegex = makeRegex(
