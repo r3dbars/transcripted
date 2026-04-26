@@ -83,24 +83,13 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() async -> Bool {
-        if let continuation = completionContinuation {
-            completionContinuation = nil
-            completionAttemptID = nil
-            completionTimeoutTask?.cancel()
-            completionTimeoutTask = nil
-            continuation.resume(returning: CaptureStopResult(
-                micURL: audio.micAudioFileURL,
-                systemURL: audio.systemAudioFileURL,
-                didTimeOut: false
-            ))
-        }
+        resetCompletionAttempt()?.resume(returning: currentStopResult())
         if audio.isRecording { return true }
 
         errorMessage = nil
 
         return await withCheckedContinuation { continuation in
-            startTimeoutTask?.cancel()
-            startContinuation?.resume(returning: false)
+            resetStartAttempt()?.resume(returning: false)
 
             let attemptID = UUID()
             startAttemptID = attemptID
@@ -116,9 +105,7 @@ final class MeetingCaptureBridge: ObservableObject {
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage
                 )
-                self.startContinuation = nil
-                self.startAttemptID = nil
-                self.startTimeoutTask = nil
+                _ = self.resetStartAttempt()
                 if self.audio.isRecording {
                     self.audio.stop()
                 }
@@ -135,11 +122,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// recoverable rather than enqueuing it for transcription directly.
     func stopAndAwaitFiles() async -> CaptureStopResult {
         guard audio.isRecording else {
-            return CaptureStopResult(
-                micURL: audio.micAudioFileURL,
-                systemURL: audio.systemAudioFileURL,
-                didTimeOut: false
-            )
+            return currentStopResult()
         }
 
         return await withCheckedContinuation { continuation in
@@ -155,9 +138,7 @@ final class MeetingCaptureBridge: ObservableObject {
                       self.completionAttemptID == attemptID,
                       let continuation = self.completionContinuation else { return }
 
-                self.completionContinuation = nil
-                self.completionAttemptID = nil
-                self.completionTimeoutTask = nil
+                _ = self.resetCompletionAttempt()
                 EventReporter.shared.capture(
                     level: .warning,
                     engine: "meeting",
@@ -168,11 +149,7 @@ final class MeetingCaptureBridge: ObservableObject {
                         "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
                     ]
                 )
-                continuation.resume(returning: CaptureStopResult(
-                    micURL: self.audio.micAudioFileURL,
-                    systemURL: self.audio.systemAudioFileURL,
-                    didTimeOut: true
-                ))
+                continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             }
         }
     }
@@ -228,16 +205,10 @@ final class MeetingCaptureBridge: ObservableObject {
         case .waiting:
             return
         case .ready:
-            startContinuation = nil
-            startAttemptID = nil
-            startTimeoutTask?.cancel()
-            startTimeoutTask = nil
+            _ = resetStartAttempt()
             continuation.resume(returning: true)
         case .failed(let message):
-            startContinuation = nil
-            startAttemptID = nil
-            startTimeoutTask?.cancel()
-            startTimeoutTask = nil
+            _ = resetStartAttempt()
             errorMessage = message
             if audio.isRecording {
                 audio.stop()
@@ -252,11 +223,7 @@ final class MeetingCaptureBridge: ObservableObject {
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let continuation = self.completionContinuation
-                self.completionContinuation = nil
-                self.completionAttemptID = nil
-                self.completionTimeoutTask?.cancel()
-                self.completionTimeoutTask = nil
+                let continuation = self.resetCompletionAttempt()
                 continuation?.resume(returning: CaptureStopResult(
                     micURL: micURL,
                     systemURL: systemURL,
@@ -318,19 +285,43 @@ final class MeetingCaptureBridge: ObservableObject {
             }
             .store(in: &cancellables)
 
-        audio.$isRecording
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                self.finishPendingStartAttemptIfPossible()
-            }
-            .store(in: &cancellables)
+        sinkStartAttemptTriggers(from: audio.$isRecording)
+        sinkStartAttemptTriggers(from: audio.$systemAudioFileURL)
+    }
 
-        audio.$systemAudioFileURL
+    private func currentStopResult(didTimeOut: Bool = false) -> CaptureStopResult {
+        CaptureStopResult(
+            micURL: audio.micAudioFileURL,
+            systemURL: audio.systemAudioFileURL,
+            didTimeOut: didTimeOut
+        )
+    }
+
+    private func resetStartAttempt() -> CheckedContinuation<Bool, Never>? {
+        let continuation = startContinuation
+        startTimeoutTask?.cancel()
+        startTimeoutTask = nil
+        startContinuation = nil
+        startAttemptID = nil
+        return continuation
+    }
+
+    private func resetCompletionAttempt() -> CheckedContinuation<CaptureStopResult, Never>? {
+        let continuation = completionContinuation
+        completionTimeoutTask?.cancel()
+        completionTimeoutTask = nil
+        completionContinuation = nil
+        completionAttemptID = nil
+        return continuation
+    }
+
+    private func sinkStartAttemptTriggers<Output>(
+        from publisher: Published<Output>.Publisher
+    ) {
+        publisher
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                self.finishPendingStartAttemptIfPossible()
+                self?.finishPendingStartAttemptIfPossible()
             }
             .store(in: &cancellables)
     }
