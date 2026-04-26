@@ -118,9 +118,7 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
 
 ## Gotchas
 
-- The current implementation is consolidated into one source file, so keep the
-  subcommand list in `TranscriptedQA.configuration` in sync with the validator
-  types defined below it.
+- The package is now split across `Commands/`, `Validators/`, `Utilities/`, `Generators/`, and `Models/`, so keep `TranscriptedQA.configuration` in sync when adding or removing subcommands.
 - All validators run synchronously on background threads
 - SQLite readers use dedicated utility queues for thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
