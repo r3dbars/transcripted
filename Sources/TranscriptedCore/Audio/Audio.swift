@@ -470,8 +470,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         do {
             try inputNode.setVoiceProcessingEnabled(true)
+            inputNode.isVoiceProcessingAGCEnabled = true
+            if #available(macOS 14.0, *) {
+                inputNode.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false,
+                    duckingLevel: .min
+                )
+            }
             voiceProcessingEnabled = true
             AppLogger.audioMic.info("Voice processing enabled on meeting mic", [
+                "agc": "\(inputNode.isVoiceProcessingAGCEnabled)",
+                "ducking": "min",
                 "reason": "issue_500_safari_firefox_vpio_contention"
             ])
         } catch {
