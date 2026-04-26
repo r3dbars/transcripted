@@ -34,6 +34,18 @@ func testRepoCommandContract() {
 
         assertEqual(disallowedMatches, [], "live docs/scripts should reference bash build.sh, not the historical Xcode project")
     }
+
+    runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
+        let contents = readRepoTextFile("scripts/entrypoints/build.sh")
+        assertTrue(
+            contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3-coreml\""),
+            "build.sh should bundle the CoreML Parakeet directory loaded by ParakeetEngine"
+        )
+        assertFalse(
+            contents.contains("\"parakeet-tdt-0.6b-v3\""),
+            "build.sh should not bundle the legacy Parakeet directory as a second 461 MB copy"
+        )
+    }
 }
 
 private func repoRootURL() -> URL {
