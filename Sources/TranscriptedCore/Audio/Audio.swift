@@ -425,10 +425,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             AppLogger.audioMic.info("Using system default microphone")
         }
 
-        if let inputNode {
-            armVoiceProcessing(on: inputNode)
-        }
-
         guard let engine, let inputNode else {
             throw NSError(
                 domain: "Audio",
@@ -484,6 +480,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 "error": error.localizedDescription
             ])
         }
+    }
+
+    /// Disable VPIO once active meeting capture ends. Leaving it armed after
+    /// capture can keep the shared input device in a processed mode, which can
+    /// make other mic apps sound quieter.
+    func disarmVoiceProcessing(on inputNode: AVAudioInputNode) {
+        guard voiceProcessingEnabled || inputNode.isVoiceProcessingEnabled else { return }
+        if let engine, engine.isRunning { return }
+
+        do {
+            try inputNode.setVoiceProcessingEnabled(false)
+        } catch {
+            AppLogger.audioMic.warning("Voice processing disable failed", [
+                "error": error.localizedDescription
+            ])
+        }
+        voiceProcessingEnabled = false
     }
 
     func prepareForNewRecordingStart() {
@@ -628,6 +641,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 inputNode.removeTap(onBus: 0)
                 engine.stop()
             }
+            disarmVoiceProcessing(on: inputNode)
         }
 
         // Stop system audio capture
@@ -760,6 +774,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 inputNode.removeTap(onBus: 0)
                 engine.stop()
             }
+            disarmVoiceProcessing(on: inputNode)
         }
 
         systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap

@@ -1272,14 +1272,7 @@ class ParakeetEngine: ObservableObject {
                 guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
                 self.lastLevelUpdate = now
 
-                var sumOfSquares: Float = 0
-                for sample in monoSamples {
-                    let s = sample
-                    sumOfSquares += s * s
-                }
-                let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
-                let dB = rms > 0.0001 ? 20.0 * log10(rms) : -60.0
-                let normalized = max(0.0, min(1.0, (dB - TranscriptedConstants.audioLevelFloorDB) / (TranscriptedConstants.audioLevelCeilingDB - TranscriptedConstants.audioLevelFloorDB)))
+                let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
 
                 Task { @MainActor [weak self] in
                     self?.audioLevel = normalized

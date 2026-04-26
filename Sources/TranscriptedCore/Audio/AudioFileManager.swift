@@ -14,6 +14,7 @@ extension Audio {
         ensureCaptureInfrastructureConfigured()
 
         let (engine, inputNode) = try ensureEngineInitialized()
+        armVoiceProcessing(on: inputNode)
 
         // Use system default microphone (whatever macOS has configured).
         // recordingFormat(for:) returns:

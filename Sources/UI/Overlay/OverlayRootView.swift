@@ -123,6 +123,8 @@ final class OverlayRootView: NSView {
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         isTranscribing: Bool,
+        isRecording: Bool,
+        audioLevel: Float,
         liveTranscript: String
     ) {
         currentState = state
@@ -137,7 +139,12 @@ final class OverlayRootView: NSView {
             state: state,
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? loadingPresentation.title : nil,
-            isError: showError
+            isError: showError,
+            meterPresentation: DictationMeterPolicy.presentation(
+                isListening: state == .listening,
+                sttIsRecording: isRecording,
+                rawLevel: audioLevel
+            )
         )
 
         contentContainer.isHidden = !showContent
