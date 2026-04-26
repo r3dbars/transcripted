@@ -111,6 +111,17 @@ public class FailedTranscriptionManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String
     ) {
+        // Security: only persist cleanup targets that stay inside Transcripted-owned
+        // audio roots. Without this guard, a buggy or malicious caller could enqueue
+        // an arbitrary file path and later trick retry/cleanup flows into deleting it.
+        guard isSafeAudioURL(micAudioURL), systemAudioURL.map(isSafeAudioURL) ?? true else {
+            AppLogger.pipeline.error("Rejected failed transcription with out-of-sandbox audio path", [
+                "micURL": micAudioURL.path,
+                "systemURL": systemAudioURL?.path ?? "none"
+            ])
+            return
+        }
+
         let failed = FailedTranscription(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
@@ -223,6 +234,16 @@ public class FailedTranscriptionManager: ObservableObject {
     }
 
     private func removeAudioFile(_ url: URL, label: String) {
+        // Security: re-check the path immediately before deletion so tampered in-memory
+        // state or future callers cannot redirect cleanup at arbitrary filesystem targets.
+        guard isSafeAudioURL(url) else {
+            AppLogger.pipeline.error("Refused to delete out-of-sandbox audio file", [
+                "label": label,
+                "path": url.path
+            ])
+            return
+        }
+
         do {
             try FileManager.default.removeItem(at: url)
             AppLogger.pipeline.info("Deleted audio file", [
