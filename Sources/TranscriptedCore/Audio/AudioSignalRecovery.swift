@@ -88,14 +88,25 @@ enum AudioSignalRecovery {
         sampleRate: Double,
         analysis: AudioSignalAnalysis? = nil,
         targetPeak: Float = 0.45,
-        maxGain: Float = 12.0
+        maxGain: Float = 12.0,
+        minPeak: Float = 0.0008
     ) -> AudioNormalizationResult {
         let resolvedAnalysis = analysis ?? analyze(samples: samples, sampleRate: sampleRate)
-        guard resolvedAnalysis.hasSpeechCandidate, resolvedAnalysis.peak > 0.0001 else {
+        // Issue #500: WebRTC-attenuated meeting mic audio routinely peaks below
+        // the legacy hasSpeechCandidate gate (peak >= 0.004). The previous
+        // short-circuit returned gain=1.0 for exactly the case we needed to
+        // recover. Now we only bail when the buffer is essentially silence,
+        // and otherwise let normalizationGain (clamped by maxGain) do its job.
+        guard resolvedAnalysis.peak >= minPeak else {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }
 
-        let gain = normalizationGain(for: resolvedAnalysis, targetPeak: targetPeak, maxGain: maxGain)
+        let gain = normalizationGain(
+            for: resolvedAnalysis,
+            targetPeak: targetPeak,
+            maxGain: maxGain,
+            minPeak: minPeak
+        )
         guard gain > 1.0 else {
             return AudioNormalizationResult(samples: samples, analysis: resolvedAnalysis, gain: 1.0)
         }
@@ -115,9 +126,10 @@ enum AudioSignalRecovery {
     static func normalizationGain(
         for analysis: AudioSignalAnalysis,
         targetPeak: Float = 0.45,
-        maxGain: Float = 12.0
+        maxGain: Float = 12.0,
+        minPeak: Float = 0.0008
     ) -> Float {
-        guard analysis.hasSpeechCandidate, analysis.peak > 0.0001 else { return 1.0 }
+        guard analysis.peak >= minPeak else { return 1.0 }
         return max(1.0, min(maxGain, targetPeak / analysis.peak))
     }
 

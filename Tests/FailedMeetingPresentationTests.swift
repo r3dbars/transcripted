@@ -56,4 +56,15 @@ func testFailedMeetingPresentation() {
             "microphone failures should point to the recovery step"
         )
     }
+
+    runSuite("FailedMeetingPresentation save failures keep the short error detail") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Failed to save transcript: Could not write transcript to meetings",
+            shortErrorMessage: "Could not write transcript to meetings",
+            isRetryable: false
+        )
+
+        assertEqual(copy.title, "Couldn't save the transcript", "save failures should keep the save-specific title")
+        assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
+    }
 }

@@ -83,6 +83,25 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
+        let idle = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: false
+        )
+        let recording = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Ready",
+            isRecording: true
+        )
+
+        assertEqual(idle.title, "Start Meeting", "idle menu action should invite starting a meeting")
+        assertEqual(idle.symbolName, "record.circle.fill", "idle menu action should use the record icon")
+        assertEqual(recording.title, "Stop Meeting", "recording menu action should not keep saying Start Meeting")
+        assertEqual(recording.symbolName, "stop.circle.fill", "recording menu action should use the stop icon")
+        assertEqual(recording.subtitle, "Recording now", "recording menu detail should explain the current state")
+    }
+
     runSuite("FirstRunExperience.primaryAction — explains only dictation-critical permissions are required up front") {
         let action = FirstRunExperience.primaryAction(
             hasRequiredPermissions: false,

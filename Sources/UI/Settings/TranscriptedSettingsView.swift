@@ -1840,7 +1840,10 @@ private struct AgentConnectionSettingsPage: View {
 
                         HStack(spacing: 10) {
                             Button {
-                                copyClaudeDesktopConfig()
+                                copyText(
+                                    ClaudeDesktopIntegrationInstaller.configSnippet(),
+                                    showingCopiedFeedback: $copiedClaudeDesktopConfig
+                                )
                             } label: {
                                 Label(copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config", systemImage: "doc.on.doc")
                             }
@@ -1886,14 +1889,20 @@ private struct AgentConnectionSettingsPage: View {
 
                             HStack(spacing: 10) {
                                 Button {
-                                    copyFolderAccessPrompt()
+                                    copyText(
+                                        AgentConnectionGuide.folderAccessPrompt,
+                                        showingCopiedFeedback: $copiedFolderPrompt
+                                    )
                                 } label: {
                                     Label(copiedFolderPrompt ? "Copied" : "Copy Folder Prompt", systemImage: "doc.on.doc")
                                 }
                                 .buttonStyle(.bordered)
 
                                 Button {
-                                    copyFolderPaths()
+                                    copyText(
+                                        AgentConnectionGuide.folderPathsText,
+                                        showingCopiedFeedback: $copiedFolderPaths
+                                    )
                                 } label: {
                                     Label(copiedFolderPaths ? "Copied" : "Copy Paths", systemImage: "folder")
                                 }
@@ -1932,7 +1941,10 @@ private struct AgentConnectionSettingsPage: View {
                     tint: Color(nsColor: .systemBlue),
                     isEnabled: true
                 ) {
-                    copyLocalAgentPrompt()
+                    copyText(
+                        AgentConnectionGuide.starterPrompt(filename: nil),
+                        showingCopiedFeedback: $copiedLocalAgentPrompt
+                    )
                 }
             }
 
@@ -2047,46 +2059,17 @@ private struct AgentConnectionSettingsPage: View {
         }
     }
 
-    private func copyLocalAgentPrompt() {
-        copyText(AgentConnectionGuide.starterPrompt(filename: nil))
-        copiedLocalAgentPrompt = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            copiedLocalAgentPrompt = false
-        }
-    }
-
-    private func copyFolderAccessPrompt() {
-        copyText(AgentConnectionGuide.folderAccessPrompt)
-        copiedFolderPrompt = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            copiedFolderPrompt = false
-        }
-    }
-
-    private func copyFolderPaths() {
-        copyText(AgentConnectionGuide.folderPathsText)
-        copiedFolderPaths = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            copiedFolderPaths = false
-        }
-    }
-
-    private func copyClaudeDesktopConfig() {
-        copyText(ClaudeDesktopIntegrationInstaller.configSnippet())
-        copiedClaudeDesktopConfig = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            copiedClaudeDesktopConfig = false
-        }
-    }
-
-    private func copyText(_ text: String) {
+    private func copyText(_ text: String, showingCopiedFeedback copiedFlag: Binding<Bool>? = nil) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+
+        guard let copiedFlag else { return }
+        copiedFlag.wrappedValue = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            copiedFlag.wrappedValue = false
+        }
     }
 
     private func revealClaudeDesktopConfig() {

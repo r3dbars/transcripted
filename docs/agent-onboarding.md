@@ -12,12 +12,18 @@ historical, and which local doc to read before editing a subsystem.
 4. `docs/agent-onboarding.md`
 5. `Sources/CLAUDE.md`
 6. the nearest local `CLAUDE.md`
-7. `Tests/README.md` when touching verification or package seams
-8. `docs/storage-paths.md` when touching persisted output or path resolution
-9. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
-10. `Sources/Observability/CLAUDE.md` when touching crash reporting, analytics, or Sparkle plumbing
-11. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-12. source comments
+7. `Sources/Speech/CLAUDE.md` when touching STT, audio recovery, or device handling
+8. `Sources/Support/CLAUDE.md` when touching shared preferences, paths, permissions, or install flows
+9. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
+10. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
+11. `Tests/README.md` when touching verification or package seams
+12. `docs/storage-paths.md` when touching persisted output or path resolution
+13. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
+14. `Sources/Observability/CLAUDE.md` when touching crash reporting, analytics, or Sparkle plumbing
+15. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+16. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
+17. `scripts/README.md` when touching the shell entrypoints or release helpers
+18. source comments
 
 For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
@@ -35,6 +41,8 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Local subsystem docs.
 - `Tools/*/CLAUDE.md`
   Standalone tool package docs where present.
+- `scripts/README.md`
+  Canonical map for thin root wrappers vs script implementations.
 - `Tests/README.md`
   Verification surfaces and fast-test runner rules.
 - `docs/storage-paths.md`
@@ -72,6 +80,8 @@ Rule of thumb:
 - after Swift edits, run `bash build.sh` and `bash run-tests.sh`
 - if you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
   `bash run-integration-smoke.sh`
+- if you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public
+  core package seam, also run `swift test`
 
 ## Highest-Value Local Docs
 
@@ -81,6 +91,14 @@ Rule of thumb:
   App/Core bridge, meeting storage, runtime lifecycle.
 - `Sources/TranscriptedCore/CLAUDE.md`
   Library boundary, pipeline layout, embedder seams.
+- `Sources/Speech/CLAUDE.md`
+  Dictation STT ownership, recovery policy, and audio-device guardrails.
+- `Sources/Support/CLAUDE.md`
+  Shared preferences, permissions, app paths, and Claude Desktop install flow.
+- `Sources/UI/CLAUDE.md`
+  Overlay, menubar, onboarding, settings, and agent-connect ownership.
+- `Sources/Capture/CLAUDE.md`
+  Global trigger and hotkey routing behavior.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone local-context and offline diarization CLI.
 

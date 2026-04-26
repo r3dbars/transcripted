@@ -13,6 +13,10 @@ There is no separate beta-only off-device telemetry path anymore. Beta builds
 keep the updater flow, but diagnostics still go through the same Sentry and
 PostHog controls described below.
 
+Sentry DSNs should stay on `https://`. Non-HTTPS overrides are ignored so local
+or bundled config cannot silently downgrade crash reports to plaintext
+transport.
+
 ## Privacy contract
 
 - never send transcript text

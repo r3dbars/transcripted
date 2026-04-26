@@ -238,7 +238,8 @@ final class OverlayHeaderView: NSView {
         state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
         loadingTitle: String?,
-        isError: Bool = false
+        isError: Bool = false,
+        meterPresentation: DictationMeterPolicy.Presentation
     ) {
         // Mode label text + color
         switch state {
@@ -265,9 +266,9 @@ final class OverlayHeaderView: NSView {
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
-        let showWaveform = state == .listening
-        waveformHost.isHidden = !showWaveform
-        waveformHost.isActive = showWaveform
+        waveformHost.isHidden = !meterPresentation.isVisible
+        waveformHost.isActive = meterPresentation.isVisible
+        waveformHost.level = meterPresentation.level
         stopButton.isHidden = state != .listening
 
         // Shortcut hint

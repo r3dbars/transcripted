@@ -23,6 +23,35 @@ func testSentryRuntimeConfiguration() {
         )
     }
 
+    runSuite("SentryRuntimeConfiguration rejects insecure DSNs and falls back to a secure source") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",
+        ]
+        let environment = [
+            SentryRuntimeConfiguration.dsnEnvironmentKey: "http://local@example.invalid/2",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.dsn(environment: environment, infoDictionary: info),
+            "https://plist@example.invalid/1",
+            "non-HTTPS env DSNs should be ignored so crash reports do not downgrade to plaintext transport"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration returns nil when every DSN source is insecure") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.dsnInfoKey: "ftp://plist@example.invalid/1",
+        ]
+        let environment = [
+            SentryRuntimeConfiguration.dsnEnvironmentKey: "http://local@example.invalid/2",
+        ]
+
+        assertNil(
+            SentryRuntimeConfiguration.dsn(environment: environment, infoDictionary: info),
+            "Sentry should stay disabled when only insecure DSN values are available"
+        )
+    }
+
     runSuite("SentryRuntimeConfiguration falls back to plist then production defaults") {
         let info: [String: Any] = [
             SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",

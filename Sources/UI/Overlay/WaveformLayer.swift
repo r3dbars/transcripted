@@ -229,7 +229,12 @@ final class WaveformHostView: NSView {
 
     /// Current audio level (0.0–1.0). Set by the controller from sttRouter.audioLevel.
     var level: Float = 0 {
-        didSet { drawingLayer.currentLevel = level }
+        didSet {
+            drawingLayer.currentLevel = Self.clampedLevel(level)
+            if isActive {
+                drawingLayer.setNeedsDisplay()
+            }
+        }
     }
 
     var tintColor: NSColor = .white {
@@ -271,7 +276,9 @@ final class WaveformHostView: NSView {
         didSet {
             guard isActive != oldValue else { return }
             if isActive {
+                drawingLayer.lastSampleTime = 0
                 startTimer()
+                drawingLayer.setNeedsDisplay()
             } else {
                 stopTimer()
                 drawingLayer.buffer.clear()
@@ -319,13 +326,15 @@ final class WaveformHostView: NSView {
 
     private func startTimer() {
         guard renderTimer == nil else { return }
-        renderTimer = Timer.scheduledTimer(
+        let timer = Timer(
             timeInterval: 1.0 / 30.0,
             target: self,
             selector: #selector(handleRenderTick),
             userInfo: nil,
             repeats: true
         )
+        RunLoop.main.add(timer, forMode: .common)
+        renderTimer = timer
     }
 
     private func stopTimer() {
@@ -335,6 +344,11 @@ final class WaveformHostView: NSView {
 
     @objc private func handleRenderTick() {
         drawingLayer.setNeedsDisplay()
+    }
+
+    private static func clampedLevel(_ level: Float) -> Float {
+        guard level.isFinite else { return 0 }
+        return max(0, min(1, level))
     }
 }
 
@@ -467,11 +481,21 @@ final class DualWaveformHostView: NSView {
     private var renderTimer: Timer?
 
     var primaryLevel: Float = 0 {
-        didSet { drawingLayer.primaryLevel = primaryLevel }
+        didSet {
+            drawingLayer.primaryLevel = Self.clampedLevel(primaryLevel)
+            if isActive {
+                drawingLayer.setNeedsDisplay()
+            }
+        }
     }
 
     var secondaryLevel: Float = 0 {
-        didSet { drawingLayer.secondaryLevel = secondaryLevel }
+        didSet {
+            drawingLayer.secondaryLevel = Self.clampedLevel(secondaryLevel)
+            if isActive {
+                drawingLayer.setNeedsDisplay()
+            }
+        }
     }
 
     var primaryTintColor: NSColor = .white {
@@ -486,7 +510,9 @@ final class DualWaveformHostView: NSView {
         didSet {
             guard isActive != oldValue else { return }
             if isActive {
+                drawingLayer.lastSampleTime = 0
                 startTimer()
+                drawingLayer.setNeedsDisplay()
             } else {
                 stopTimer()
                 drawingLayer.reset()
@@ -527,13 +553,15 @@ final class DualWaveformHostView: NSView {
 
     private func startTimer() {
         guard renderTimer == nil else { return }
-        renderTimer = Timer.scheduledTimer(
+        let timer = Timer(
             timeInterval: 1.0 / 30.0,
             target: self,
             selector: #selector(handleRenderTick),
             userInfo: nil,
             repeats: true
         )
+        RunLoop.main.add(timer, forMode: .common)
+        renderTimer = timer
     }
 
     private func stopTimer() {
@@ -543,5 +571,10 @@ final class DualWaveformHostView: NSView {
 
     @objc private func handleRenderTick() {
         drawingLayer.setNeedsDisplay()
+    }
+
+    private static func clampedLevel(_ level: Float) -> Float {
+        guard level.isFinite else { return 0 }
+        return max(0, min(1, level))
     }
 }

@@ -30,6 +30,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` disables `app.jsonl` writes for test and smoke runs so local production logs stay clean
 - Sentry runtime config is resolved by `SentryRuntimeConfiguration` from `Info.plist` (`TranscriptedSentryDSN`, `TranscriptedSentryEnvironment`) or process environment (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`), and crash reports must stay scrubbed of transcript/audio/title/path data
+- `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 
