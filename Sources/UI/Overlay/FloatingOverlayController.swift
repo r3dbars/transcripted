@@ -297,11 +297,6 @@ class FloatingOverlayController {
         installEscapeMonitor()
     }
 
-    func enterDraftingState() {
-        state = .drafting
-        resizePanelToCompact()
-    }
-
     func resizePanelToCompact() {
         resizePanelInstant(to: NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight))
     }
