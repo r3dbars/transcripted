@@ -127,11 +127,30 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var sleepTimestamp: Date?
 
     /// Create a snapshot of recording health info for transcript metadata
-    /// Call this when stopping recording to capture health metrics.
+    /// using the live `systemAudioStatus`. Used by callers that snapshot
+    /// BEFORE calling `stop()` (and by the `AudioCaptureEngine` protocol
+    /// conformance, which doesn't model the override path).
     /// `systemAudioCapture` stays type-erased here; the `RecordingHealthInfo`
     /// factory downcasts under `#available(macOS 14.2, *)` internally.
     public func createHealthInfo() -> RecordingHealthInfo {
         return RecordingHealthInfo.from(audio: self, systemCapture: systemAudioCapture)
+    }
+
+    /// Create a snapshot of recording health info using a pre-captured
+    /// `systemAudioStatus`. Use this when snapshotting AFTER `stop()` —
+    /// the live status has been reset to `.unknown`, but a real `.failed`
+    /// outcome captured before stop must still drive `captureQuality`.
+    /// Lock-protected fields (gaps, deviceSwitchCount, recoveryAttemptCount)
+    /// are not reset by stop, so they read correctly post-stop without
+    /// contending with the audio thread.
+    public func createHealthInfo(
+        overrideSystemAudioStatus: SystemAudioStatus?
+    ) -> RecordingHealthInfo {
+        return RecordingHealthInfo.from(
+            audio: self,
+            systemCapture: systemAudioCapture,
+            overrideSystemAudioStatus: overrideSystemAudioStatus
+        )
     }
 
     var engine: AVAudioEngine?
@@ -672,36 +691,30 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // MARK: - Stop Recording
 
     public func stop() {
+        // Bump generation synchronously on the calling thread so any
+        // concurrent recovery work that checks the generation immediately
+        // sees the new session boundary.
         recordingSessionGeneration &+= 1
-        if let engine, let inputNode {
-            AppLogger.audio.info("Stopping audio capture")
 
-            // Stop audio engine FIRST (prevents new buffers from arriving)
-            if engine.isRunning {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
-            }
-            disarmVoiceProcessing(on: inputNode)
-        }
-
-        // Drop the AGC reference so gain history doesn't carry into the
-        // next recording. A fresh RealtimeAGC is created on the next
-        // start in `startAudioCapture`.
-        realtimeAGC = nil
-
-        // Stop system audio capture
-        systemAudioCapture?.stop()
-
+        // Snapshot every reference the teardown will need so the
+        // background queue closure isn't reading mutable instance state
+        // while UI updates happen in parallel.
+        let engineRef = self.engine
+        let inputNodeRef = self.inputNode
+        let systemCaptureRef = self.systemAudioCapture
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
         let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
-        let micSegments = self.micSegments
+        let micSegmentsSnapshot = self.micSegments
         let finalSystemURL = systemAudioFileURL
-
-        // Update UI immediately - don't wait for file cleanup
-        // This makes the app feel instant
         let cueHandler = self.onCaptureLifecycleCue
+
+        // Update UI state immediately so the meeting widget unfreezes
+        // before any of the slow CoreAudio teardown begins. Without this
+        // dispatch, the user-visible "still spinning" state could last
+        // hundreds of ms while AVAudioEngine drains in-flight callbacks
+        // — the freeze Taylor reported on the meeting widget.
         DispatchQueue.main.async {
             self.isRecording = false
             self.audioLevel = 0.0
@@ -712,37 +725,66 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cueHandler?(.recordingStopped)
         }
 
-        // Close audio files asynchronously - use DispatchGroup to coordinate
-        // This does NOT block the main thread
-        let cleanupGroup = DispatchGroup()
-
-        cleanupGroup.enter()
-        micAudioFileQueue.async { [weak self] in
-            if let self, self.micAudioFile != nil {
-                self.micAudioFile = nil
-                AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
-            }
-            cleanupGroup.leave()
-        }
-
-        cleanupGroup.enter()
-        systemAudioFileQueue.async { [weak self] in
-            if self?.systemAudioFile != nil {
-                self?.systemAudioFile = nil
-                AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
-            }
-            cleanupGroup.leave()
-        }
-
-        // Notify completion AFTER files are closed (but don't block main thread waiting)
-        cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+        // Move the synchronous AVFoundation teardown off the main thread.
+        // `engine.stop()` blocks until the audio thread has drained its
+        // current buffer; if voice processing was active, the disarm step
+        // can take 5–30ms more. Running these on a background queue keeps
+        // the main run loop responsive so widget interactions during
+        // shutdown stay clickable.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegments)
-            DispatchQueue.main.async {
-                self.originalMicAudioFileURL = nil
-                self.micSegments = []
-                self.micAudioFileURL = finalMicURL
-                self.onRecordingComplete?(finalMicURL, finalSystemURL)
+
+            if let engineRef, let inputNodeRef {
+                AppLogger.audio.info("Stopping audio capture")
+                if engineRef.isRunning {
+                    inputNodeRef.removeTap(onBus: 0)
+                    engineRef.stop()
+                }
+                self.disarmVoiceProcessing(on: inputNodeRef)
+            }
+
+            // Drop the RealtimeAGC reference so gain history doesn't
+            // carry into the next recording. Safe here because the
+            // engine has stopped — no more tap callbacks can fire.
+            self.realtimeAGC = nil
+
+            // System audio capture's `stop()` is non-blocking (vs `stopSync`),
+            // but we keep it ordered after engine teardown so a single
+            // "stopping" log block stays readable.
+            systemCaptureRef?.stop()
+
+            // Coordinate file close. With the engine fully stopped above,
+            // no new buffers will arrive on these queues — closing here is
+            // safe and the cleanup notify will fire onRecordingComplete.
+            let cleanupGroup = DispatchGroup()
+
+            cleanupGroup.enter()
+            self.micAudioFileQueue.async { [weak self] in
+                if let self, self.micAudioFile != nil {
+                    self.micAudioFile = nil
+                    AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
+                }
+                cleanupGroup.leave()
+            }
+
+            cleanupGroup.enter()
+            self.systemAudioFileQueue.async { [weak self] in
+                if self?.systemAudioFile != nil {
+                    self?.systemAudioFile = nil
+                    AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
+                }
+                cleanupGroup.leave()
+            }
+
+            cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
+                guard let self else { return }
+                let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
+                DispatchQueue.main.async {
+                    self.originalMicAudioFileURL = nil
+                    self.micSegments = []
+                    self.micAudioFileURL = finalMicURL
+                    self.onRecordingComplete?(finalMicURL, finalSystemURL)
+                }
             }
         }
     }

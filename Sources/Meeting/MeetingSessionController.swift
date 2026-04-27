@@ -494,10 +494,16 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        // Snapshot capture health before stop resets system-audio status/stats during cleanup.
-        let healthInfo = capture.healthInfo()
+        // Snapshot the system-audio status BEFORE stop, since `Audio.stop()`
+        // resets it to `.unknown`. The lock-protected health fields
+        // (gaps, deviceSwitchCount, recoveryAttemptCount) are NOT reset by
+        // stop, so we read them AFTER `stopAndAwaitFiles()` returns —
+        // that way we don't contend with the audio thread for those NSLocks
+        // while it's still draining buffers, which used to add a few ms of
+        // main-thread stall to the meeting widget's stop interaction.
         let finalSystemAudioStatus = capture.systemAudioStatus
         let stopResult = await capture.stopAndAwaitFiles()
+        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let durationMs = Int(recordingDuration * 1000)
         activeRecordingTrigger = .unknown
