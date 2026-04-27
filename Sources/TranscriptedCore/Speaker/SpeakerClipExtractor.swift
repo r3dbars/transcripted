@@ -213,7 +213,7 @@ public enum SpeakerClipExtractor {
         // app tmp directory instead of the process-wide temp folder, so sensitive
         // voice samples do not spill into a broader shared scratch location.
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tempDir.path)
+        FileManager.default.restrictDirectoryToOwnerOnly(atPath: tempDir.path)
         let clipFilename = "speaker_\(channel.rawValue)_\(speakerId)_\(UUID().uuidString.prefix(8)).wav"
         let clipURL = tempDir.appendingPathComponent(clipFilename)
 

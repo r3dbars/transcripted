@@ -8,6 +8,13 @@ extension FileManager {
         try? setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
     }
 
+    /// Restrict directory to owner-only access (chmod 700).
+    /// Directories holding sensitive captures (logs, speaker clips, recording archives)
+    /// use this so siblings on multi-user systems cannot list or traverse the contents.
+    func restrictDirectoryToOwnerOnly(atPath path: String) {
+        try? setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+    }
+
     /// SQLite writes sensitive state into `-wal` and `-shm` sidecars alongside the
     /// main database file. Harden all three artifacts together so write-ahead data
     /// does not drift to broader default permissions than the primary database.
