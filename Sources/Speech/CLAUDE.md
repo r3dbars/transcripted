@@ -6,8 +6,9 @@
 
 ## Key Files
 
-- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, permission-aware input-readiness checks, audio-device handling, short-audio gating, wake-recovery support, and sanitized failure reporting for model init errors
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, live transcript state, model initialization, permission-aware input-readiness checks, audio-device handling, short-audio gating, wake-recovery support, live level metering, and sanitized failure reporting for model init errors
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
+- `DictationAudioLevelMeter.swift` — normalizes live PCM buffers into a 0...1 level used by the dictation waveform UI
 - `DictationAudioRecovery.swift` — analyzes recorded dictation audio for usable speech signal and extracts focused, gain-normalized retry segments when an initial transcription attempt returns empty
 - `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades
 - `DictationReadinessWaitPolicy.swift` — tiny policy that decides whether dictation should keep waiting for recovery, refresh input readiness, or start recording immediately
@@ -29,6 +30,7 @@
 - `ParakeetEngine` consults `ParakeetStartRecordingFailurePolicy` when startup fails so format-reset, engine rebuild, and prewarm-retry behavior stay consistent across direct starts and recovery attempts.
 - `ParakeetEngine` stays `@MainActor` for app state, published UI state, and event reporting, but all `AVAudioEngine` graph work runs through its private serial audio-engine queue. Keep recording start/stop/readiness APIs async so callers do not block the main actor while CoreAudio settles, starts, stops, or rebuilds.
 - `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.
+- `DictationAudioLevelMeter` converts live audio buffers into normalized meter levels using `TranscriptedConstants` floor and ceiling thresholds. Keep waveform calibration changes here instead of burying them in overlay code.
 - `DictationAudioRecovery` analyzes buffered audio for usable speech signal (peak, RMS, active ratio) and can produce a focused, gain-normalized retry segment. `ParakeetEngine` uses it to retry transcription when an initial attempt returns empty rather than silently dropping audio that contained real speech.
 - The meeting pipeline reuses the same app-owned `STTRouter` through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - Do not assume a separate local-LLM drafting path exists in this tree.
@@ -52,6 +54,7 @@ Manual checks:
 
 Relevant direct coverage:
 
+- `Tests/DictationAudioLevelMeterTests.swift`
 - `Tests/DictationAudioRecoveryTests.swift`
 - `Tests/DictationInputDeviceSelectionPolicyTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
