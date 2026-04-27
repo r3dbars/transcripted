@@ -32,6 +32,12 @@ struct ParakeetRecoveryState: Equatable {
         inputFormatReady = true
     }
 
+    mutating func reset() {
+        generation &+= 1
+        isRecovering = false
+        inputFormatReady = true
+    }
+
     mutating func finishRecovery(success: Bool, generation: UInt64) -> Bool {
         guard generation == self.generation else { return false }
         isRecovering = false

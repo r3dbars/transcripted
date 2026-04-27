@@ -100,6 +100,15 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeText redacts synthetic-root macOS paths") {
+        let input = "Retry after checking /System/Volumes/Data/Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl"
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("/System/Volumes/Data/Users/redbars/"), "synthetic-root home paths should be redacted")
+        assertFalse(sanitized.contains("Application Support/Transcripted/logs/app.jsonl"), "synthetic-root app support path should be fully redacted")
+        assertTrue(sanitized.contains("[redacted-path]"), "redacted path marker should remain")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts raw URLs and common token formats") {
         let input = "Download failed at https://example.com/private?token=abc123 with ghp_123456789012345678901234567890123456 phc_abcdefghijklmnopqrstuvwxyz123456 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
@@ -146,6 +155,21 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("Authorization=[redacted-secret]"), "authorization assignments should collapse to a redacted marker")
         assertTrue(sanitized.contains("Proxy-Authorization=[redacted-secret]"), "proxy authorization assignments should collapse to a redacted marker")
         assertTrue(sanitized.contains("Basic ****"), "standalone basic auth marker should remain")
+    }
+
+    runSuite("SentryPayloadSanitizer redacts PEM private key material") {
+        let input = """
+        Failed to parse key:
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAlwAAAAdzc2gtcn
+        -----END OPENSSH PRIVATE KEY-----
+        """
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("BEGIN OPENSSH PRIVATE KEY"), "private key header should be redacted")
+        assertFalse(sanitized.contains("b3BlbnNzaC1rZXkt"), "private key body should be redacted")
+        assertFalse(sanitized.contains("END OPENSSH PRIVATE KEY"), "private key footer should be redacted")
+        assertTrue(sanitized.contains("[redacted-secret]"), "private key content should collapse to a secret marker")
     }
 
     runSuite("SentryPayloadSanitizer.sanitizeAnyDictionary redacts nested free-form values") {

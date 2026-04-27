@@ -47,21 +47,29 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastSavedSpeakerCount, 5)
     }
 
-    func testCurrentRetainedAudioDirectoryUsesLiveProviderWhenAvailable() {
-        let initialDirectory = tempDirectory.appendingPathComponent("audio-archive-a", isDirectory: true)
-        let updatedDirectory = tempDirectory.appendingPathComponent("audio-archive-b", isDirectory: true)
-        var currentDirectory = initialDirectory
+    func testResolvedRetainedAudioDirectoryFollowsProvider() {
+        var providerCallCount = 0
+        var nextDirectory = tempDirectory.appendingPathComponent("first")
+        let manager = makeManager(retainedAudioDirectoryProvider: {
+            providerCallCount += 1
+            return nextDirectory
+        })
 
-        let manager = makeManager(
-            retainedAudioDirectory: initialDirectory,
-            retainedAudioDirectoryProvider: { currentDirectory }
-        )
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), tempDirectory.appendingPathComponent("first"))
+        XCTAssertEqual(providerCallCount, 1, "resolver should call provider on each lookup")
 
-        XCTAssertEqual(manager.currentRetainedAudioDirectory(), initialDirectory)
+        nextDirectory = tempDirectory.appendingPathComponent("second")
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), tempDirectory.appendingPathComponent("second"),
+                       "resolver should reflect provider changes between calls (e.g. user moves capture library)")
+        XCTAssertEqual(providerCallCount, 2)
+    }
 
-        currentDirectory = updatedDirectory
+    func testResolvedRetainedAudioDirectoryFallsBackToStaticValue() {
+        let staticDirectory = tempDirectory.appendingPathComponent("static")
+        let manager = makeManager(retainedAudioDirectory: staticDirectory)
 
-        XCTAssertEqual(manager.currentRetainedAudioDirectory(), updatedDirectory)
+        XCTAssertEqual(manager.resolvedRetainedAudioDirectory(), staticDirectory,
+                       "embedders that pass only the static value should still get a valid resolver result")
     }
 
     private func makeManager(

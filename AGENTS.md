@@ -4,8 +4,11 @@
 
 - `main` is the current Transcripted product, derived from the earlier Draft codebase.
 - The current app on `main` supports **dictation** and **meetings**.
+- Meeting capture includes local mic + system audio, imported-audio transcription, optional local-speaker review, and agent-readable Markdown output.
 - The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` keeps compatibility stubs for removed draft-mode entry points.
 - `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
+- `Sources/Speech/` owns the app-owned local STT path. Meetings reuse that path through `Sources/Meeting/MeetingSTTAdapter.swift`.
+- `Sources/Reliability/` owns wake / sleep recovery for hotkeys and active capture flows.
 - `build.sh` builds the app target. The root `Package.swift` exists for `TranscriptedCore` package tests and smoke coverage, not as the main app build.
 
 ## Response voice
@@ -28,16 +31,23 @@
 2. `AGENTS.md`
 3. `docs/repo-layout.md`
 4. `docs/agent-onboarding.md`
-5. `Sources/CLAUDE.md`
-6. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
-7. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
-8. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
-9. `Tests/README.md`
-10. `docs/storage-paths.md`
-11. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-12. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
-13. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-14. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+5. `CLAUDE.md`
+6. `Sources/CLAUDE.md`
+7. the nearest local `CLAUDE.md` for the area you are changing
+8. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
+9. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
+10. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
+11. `Sources/Speech/CLAUDE.md` when touching dictation STT, audio recovery, or device handling
+12. `Sources/Support/CLAUDE.md` when touching shared preferences, permissions, paths, or Claude Desktop install flow
+13. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
+14. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
+15. `Tests/README.md`
+16. `docs/storage-paths.md`
+17. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+18. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
+19. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+20. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+21. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
 
 Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 
@@ -89,29 +99,42 @@ Rules:
    - `bash run-tests.sh`
    - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
-## Observability and Sentry
+## Observability, Sentry, and Analytics
 
-Treat Sentry as an explicitly bounded integration, not a generic log sink.
+Treat Sentry and PostHog as explicitly bounded integrations, not generic log
+sinks.
 
 Rules:
 
-1. Read `Sources/Observability/CLAUDE.md` before changing crash reporting, event forwarding, or update plumbing.
+1. Read `Sources/Observability/CLAUDE.md` before changing crash reporting, event forwarding, anonymous analytics, file logging, or update plumbing.
 2. Runtime Sentry config lives in `Info.plist` under:
    - `TranscriptedSentryDSN`
    - `TranscriptedSentryEnvironment`
+   - `TranscriptedSentryAppHangTrackingEnabled`
 3. Local overrides for testing can come from process environment:
    - `SENTRY_DSN`
    - `SENTRY_ENVIRONMENT`
-4. The user-facing crash reporting preference is stored by `CrashReportingPreferences` and defaults to enabled until the user changes it in Settings.
-5. `EventReporter` does not forward every `.error` event to Sentry. Off-device forwarding is gated by the explicit allowlist in `Sources/Observability/SentryEventPolicy.swift`.
-6. Keep Sentry payloads privacy-safe. Do not send raw transcript text, audio references, meeting titles, speaker names, emails, tokens, or absolute file paths. If payload shape changes, update `SentryPayloadSanitizer.swift` and its tests in the same change.
-7. Preserve the user verification path when touching the integration:
+4. Runtime PostHog config lives in `Info.plist` under:
+   - `TranscriptedPostHogAPIKey`
+   - `TranscriptedPostHogHost`
+5. Local overrides for analytics testing can come from process environment:
+   - `POSTHOG_API_KEY`
+   - `POSTHOG_HOST`
+6. The user-facing crash reporting and anonymous analytics preferences are stored by `CrashReportingPreferences` and `AnalyticsPreferences`. Both default to enabled until the user changes them in Settings or onboarding.
+7. `EventReporter` does not forward every `.error` event to Sentry. Off-device forwarding is gated by the explicit allowlist in `Sources/Observability/SentryEventPolicy.swift`.
+8. PostHog events and properties are gated by `Sources/Observability/AnalyticsEventPolicy.swift`.
+9. Keep off-device payloads privacy-safe. Do not send raw transcript text, audio references, meeting titles, speaker names, emails, tokens, or absolute file paths. If payload shape changes, update the relevant sanitizer and tests in the same change:
+   - `Sources/Observability/SentryPayloadSanitizer.swift`
+   - `Sources/Observability/AnalyticsPayloadSanitizer.swift`
+10. Test and smoke runs should keep local production logs clean with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when invoking binaries directly.
+11. Preserve the user verification path when touching the integrations:
    - Settings should still expose the crash-reporting toggle
+   - Settings should still expose the anonymous analytics toggle
    - Settings should still expose the `Send Test Sentry Event` action when Sentry is configured
-8. Preferred verification for Sentry-related changes:
+12. Preferred verification for observability-related changes:
    - `bash build.sh`
    - `bash run-tests.sh`
-   - confirm `Tests/SentryEventPolicyTests.swift` and `Tests/SentryPayloadSanitizerTests.swift` still pass through `run-tests.sh`
+   - confirm Sentry, analytics, and observability preference tests still pass through `run-tests.sh`
 
 ## Testing gotchas
 

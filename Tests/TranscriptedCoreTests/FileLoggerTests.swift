@@ -137,4 +137,39 @@ final class FileLoggerTests: XCTestCase {
         let firstObject = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(trimmedLines[0].utf8)) as? [String: Any])
         XCTAssertEqual(firstObject["m"] as? String, "line-605")
     }
+
+    func testLoggerTrimKeepsOwnerOnlyPermissionsAfterAtomicRewrite() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FileLoggerTrimPermissionsTests-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let logURL = logs.appendingPathComponent("app.jsonl")
+        let lines = (0..<2105).map { index in
+            #"{"t":"2026-04-14T00:00:00.000Z","l":"info","s":"app","m":"line-\#(index)"}"#
+        }
+        try (lines.joined(separator: "\n") + "\n").write(to: logURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: logURL.path)
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: logs
+        )
+
+        _ = FileLogger(paths: paths, isDisabledOverride: false)
+
+        let attributes = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: logURL.path) as [FileAttributeKey: Any]?)
+        let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(
+            permissions,
+            NSNumber(value: 0o600),
+            "trimmed log should stay owner-only after the atomic rewrite path"
+        )
+    }
 }

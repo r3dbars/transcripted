@@ -424,9 +424,7 @@ extension TranscriptionTaskManager {
         systemURL: URL,
         savedURL: URL
     ) async -> Bool {
-        let retainedAudioDirectory = await MainActor.run {
-            self.currentRetainedAudioDirectory()
-        }
+        let retainedAudioDirectory = await MainActor.run { self.resolvedRetainedAudioDirectory() }
         guard let retainedAudioDirectory else { return true }
 
         do {

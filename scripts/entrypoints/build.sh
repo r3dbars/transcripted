@@ -210,27 +210,20 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
-# Bundle Parakeet model directories used by FluidAudio.
-# The runtime loader can resolve files from both the `-coreml` and legacy
-# `parakeet-tdt-0.6b-v3` layouts, so ship both when present.
+# Bundle the Parakeet model directory used by the runtime loader.
 PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
 PARAKEET_BUNDLE_DIR="$APP_BUNDLE/Contents/Resources/parakeet-models"
-PARAKEET_MODEL_DIRS=(
-    "parakeet-tdt-0.6b-v3-coreml"
-    "parakeet-tdt-0.6b-v3"
-)
+PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3-coreml"
 
 bundled_parakeet_models=false
 mkdir -p "$PARAKEET_BUNDLE_DIR"
-for model_dir in "${PARAKEET_MODEL_DIRS[@]}"; do
-    model_src="$PARAKEET_MODELS_ROOT/$model_dir"
-    if [ -d "$model_src/Encoder.mlmodelc" ]; then
-        echo "Bundling Parakeet models from $model_dir..."
-        rm -rf "$PARAKEET_BUNDLE_DIR/$model_dir"
-        ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$model_dir"
-        bundled_parakeet_models=true
-    fi
-done
+model_src="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
+if [ -d "$model_src/Encoder.mlmodelc" ]; then
+    echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
+    rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+    ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+    bundled_parakeet_models=true
+fi
 
 if [ "$bundled_parakeet_models" = false ]; then
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"

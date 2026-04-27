@@ -36,6 +36,20 @@ func testAnalyticsPayloadSanitizer() {
         assertTrue(value.contains("[redacted-host]"), "host marker should remain")
     }
 
+    runSuite("AnalyticsPayloadSanitizer redacts synthetic-root macOS paths from values") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "Saved to /System/Volumes/Data/Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl before retry",
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("/System/Volumes/Data/Users/redbars/"), "synthetic-root home paths should be redacted")
+        assertFalse(value.contains("Application Support/Transcripted/logs/app.jsonl"), "synthetic-root app support path should be fully redacted")
+        assertTrue(value.contains("[redacted-path]"), "path marker should remain")
+    }
+
     runSuite("AnalyticsPayloadSanitizer drops authorization-like keys even if allowlisted") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -109,6 +123,26 @@ func testAnalyticsPayloadSanitizer() {
         assertFalse(value.contains("ZGVtbzpwYXNz"), "standalone basic auth values should be redacted")
         assertTrue(value.contains("Authorization=[redacted-secret]"), "authorization assignments should collapse to a redacted marker")
         assertTrue(value.contains("Basic ****"), "standalone basic auth marker should remain")
+    }
+
+    runSuite("AnalyticsPayloadSanitizer redacts PEM private key material") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": """
+                Failure included:
+                -----BEGIN RSA PRIVATE KEY-----
+                MIIEpAIBAAKCAQEAz7i9W5tQ3k3FdemoKeyMaterial
+                -----END RSA PRIVATE KEY-----
+                """,
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("BEGIN RSA PRIVATE KEY"), "private key header should be redacted")
+        assertFalse(value.contains("MIIEpAIBAAKCAQEA"), "private key body should be redacted")
+        assertFalse(value.contains("END RSA PRIVATE KEY"), "private key footer should be redacted")
+        assertTrue(value.contains("[redacted-secret]"), "private key content should collapse to a secret marker")
     }
 
     runSuite("AnalyticsPayloadSanitizer.redact scrubs without the analytics length cap") {

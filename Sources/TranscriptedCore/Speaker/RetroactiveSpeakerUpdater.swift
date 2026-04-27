@@ -10,50 +10,24 @@ extension TranscriptSaver {
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
     /// Satisfies the `TranscriptStorage` protocol — uses `defaultSaveDirectory`.
     public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
-        retroactivelyUpdateSpeaker(
-            dbId: dbId,
-            newName: newName,
-            directory: nil,
-            speakerStoreForIndex: nil
-        )
+        fileUpdateQueue.sync {
+            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: defaultSaveDirectory)
+        }
     }
 
     /// Internal overload for tests — scans a specific directory instead of `defaultSaveDirectory`.
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String, in directory: URL) {
-        retroactivelyUpdateSpeaker(
-            dbId: dbId,
-            newName: newName,
-            directory: directory,
-            speakerStoreForIndex: nil
-        )
-    }
-
-    /// Extended overload for app embedders that supply an explicit directory.
-    /// Not part of the `TranscriptStorage` protocol.
-    public static func retroactivelyUpdateSpeaker(
-        dbId: UUID,
-        newName: String,
-        directory: URL? = nil,
-        speakerStoreForIndex _: (any SpeakerStore)? = nil
-    ) {
         fileUpdateQueue.sync {
-            _retroactivelyUpdateSpeakerImpl(
-                dbId: dbId,
-                newName: newName,
-                directory: directory ?? defaultSaveDirectory,
-                speakerStoreForIndex: nil
-            )
+            _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: directory)
         }
     }
 
     private static func _retroactivelyUpdateSpeakerImpl(
         dbId: UUID,
         newName: String,
-        directory: URL,
-        speakerStoreForIndex _: (any SpeakerStore)?
+        directory: URL
     ) {
-        let dir = directory
-        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter({ $0.pathExtension == "md" }) else { return }
 
         let dbIdString = dbId.uuidString
@@ -100,90 +74,6 @@ extension TranscriptSaver {
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
         }
     }
-
-    /// When two speaker profiles are merged in Settings, rewrite all transcripts that referenced
-    /// the source speaker so they use the target's name instead.
-    /// Thread-safe: serialized via fileUpdateQueue.
-    public static func retroactivelyMergeSpeaker(
-        sourceDbId: UUID,
-        into targetDbId: UUID,
-        newName: String,
-        directory: URL? = nil,
-        speakerStoreForIndex _: (any SpeakerStore)? = nil
-    ) {
-        fileUpdateQueue.sync {
-            _retroactivelyMergeSpeakerImpl(
-                sourceDbId: sourceDbId,
-                targetDbId: targetDbId,
-                newName: newName,
-                directory: directory ?? defaultSaveDirectory,
-                speakerStoreForIndex: nil
-            )
-        }
-    }
-
-    private static func _retroactivelyMergeSpeakerImpl(
-        sourceDbId: UUID,
-        targetDbId: UUID,
-        newName: String,
-        directory: URL,
-        speakerStoreForIndex _: (any SpeakerStore)?
-    ) {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" }) else { return }
-
-        let sourceDbIdString = sourceDbId.uuidString
-        let targetDbIdString = targetDbId.uuidString
-        var updatedCount = 0
-
-        for fileURL in files {
-            guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
-                  content.contains(#"db_id: "\#(sourceDbIdString)""#) else { continue }
-
-            let lines = content.components(separatedBy: "\n")
-            var oldNames: [String] = []
-            for (index, line) in lines.enumerated() {
-                guard line.contains(#"db_id: "\#(sourceDbIdString)""#) else { continue }
-                if index + 1 < lines.count {
-                    let nameLine = lines[index + 1]
-                    if let oldName = extractYAMLQuotedString(from: nameLine, prefix: "name: "),
-                       oldName != newName,
-                       !oldNames.contains(oldName) {
-                        oldNames.append(oldName)
-                    }
-                }
-            }
-
-            content = content.replacingOccurrences(
-                of: #"db_id: "\#(sourceDbIdString)""#,
-                with: #"db_id: "\#(targetDbIdString)""#
-            )
-            for oldName in oldNames {
-                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
-            }
-
-            do {
-                try content.write(to: fileURL, atomically: true, encoding: .utf8)
-                updatedCount += 1
-            } catch {
-                AppLogger.pipeline.warning("Failed to merge speaker in transcript", [
-                    "file": fileURL.lastPathComponent,
-                    "error": error.localizedDescription
-                ])
-            }
-        }
-
-        if updatedCount > 0 {
-            AppLogger.pipeline.info("Retroactively merged speaker in transcripts", [
-                "sourceDbId": sourceDbIdString,
-                "targetDbId": targetDbIdString,
-                "name": newName,
-                "files": "\(updatedCount)"
-            ])
-        }
-    }
-
-    // MARK: - Retroactive Title Update
 
     // MARK: - Speaker Name Updating (Post-Naming Flow)
 

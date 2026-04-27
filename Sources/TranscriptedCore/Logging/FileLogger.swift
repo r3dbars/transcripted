@@ -130,11 +130,16 @@ final class FileLogger: @unchecked Sendable {
         fileHandle?.closeFile()
 
         try? newContent.write(to: logFileURL, atomically: true, encoding: .utf8)
+        // Security: atomic rewrite creates a replacement inode that may inherit default
+        // permissions (for example 0644). Re-tighten after every trim so sensitive logs
+        // never drift from owner-only access.
+        FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
 
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         if fileHandle == nil {
             // File may have been deleted during atomic write — recreate and retry
             FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
+            FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
             fileHandle = try? FileHandle(forWritingTo: logFileURL)
         }
         fileHandle?.seekToEndOfFile()
