@@ -9,7 +9,7 @@
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles and retry metadata
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio`, converts callback-based stop into `async`
-- `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
+- `MeetingFailureCopy.swift` — takes raw error messages, classifies them through `MeetingFailureKind`, and produces user-facing titles and recovery copy
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
@@ -102,6 +102,7 @@ Relevant direct coverage:
 - `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
+- `Tests/MeetingPromptDetectorTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`

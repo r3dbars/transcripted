@@ -29,6 +29,11 @@ bash build.sh
 bash run-tests.sh
 ```
 
+Relevant direct coverage:
+
+- `Tests/WakeRecoveryCoordinatorTests.swift`
+- `Tests/Integration/WakeRecoveryIntegrationSmoke.swift`
+
 Manual check:
 
 - sleep and wake the Mac, then confirm hotkeys still work and the app does not enter duplicate recovery loops
