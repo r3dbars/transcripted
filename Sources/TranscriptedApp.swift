@@ -66,12 +66,23 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var workspaceObservers: [NSObjectProtocol] = []
     private var terminationCleanupStarted = false
 
+    /// Switches NSApp's activation policy between `.accessory` (idle) and
+    /// `.regular` (during a meeting/dictation recording) so the app appears
+    /// in the macOS force-quit dialog while a session is active. Initialized
+    /// in `applicationDidFinishLaunching` after AppKit is ready.
+    private var activationPolicyController: ActivationPolicyController?
+    private var activationPolicySubscriptions: Set<AnyCancellable> = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Crash reporting
         CrashReporter.setup()
 
-        // Dock icon + menubar
-        NSApp.setActivationPolicy(.accessory)
+        // Dock icon + menubar — start `.accessory` for the menubar-only
+        // feel; the controller will swap to `.regular` while a recording
+        // session runs so the app shows up in Cmd+Option+Esc.
+        let activationController = ActivationPolicyController()
+        activationPolicyController = activationController
+        wireActivationPolicy(controller: activationController)
 
         // Wire session controller
         sessionController.appState = appState
@@ -425,6 +436,32 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         return nil
+    }
+
+    /// Subscribe to meeting and dictation `isRecording` flags so the
+    /// activation-policy controller can swap the app between `.accessory`
+    /// (idle) and `.regular` (recording) — the latter makes the app appear
+    /// in the macOS force-quit dialog so a frozen recording session can be
+    /// killed without Activity Monitor.
+    private func wireActivationPolicy(controller: ActivationPolicyController) {
+        // Dictation: STTRouter publishes its own isRecording flag.
+        appState.sttRouter.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak controller] isRecording in
+                controller?.setDictationRecording(isRecording)
+            }
+            .store(in: &activationPolicySubscriptions)
+
+        // Meeting: the @MainActor MeetingSessionController owns the flag.
+        // Only available on macOS 14+, matching where MeetingSession lives.
+        if #available(macOS 14.0, *) {
+            appState.meetingSession.$isRecording
+                .receive(on: DispatchQueue.main)
+                .sink { [weak controller] isRecording in
+                    controller?.setMeetingRecording(isRecording)
+                }
+                .store(in: &activationPolicySubscriptions)
+        }
     }
 
     private func startDictationFromSettings() {
