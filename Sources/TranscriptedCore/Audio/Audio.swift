@@ -147,6 +147,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // gives us our own AGC'd copy.
     var voiceProcessingEnabled: Bool = false
 
+    /// Whether to arm Apple's AUVoiceProcessingIO (VPIO) on the meeting mic
+    /// engine. Default off because VPIO causes macOS to duck audio output
+    /// from other apps (Zoom plays Katie's voice quieter while we're
+    /// recording — observed in production after PR #523). Set this BEFORE
+    /// calling `start()`; toggling mid-session has no effect until the next
+    /// recording begins. The app reads `MicrophoneProcessingPreferences`
+    /// and assigns this property; `TranscriptedCore` itself never reaches
+    /// into UserDefaults.
+    public var enableVoiceProcessing: Bool = false
+
+    /// Real-time gain control for the mic tap callback. Used when VPIO is
+    /// disabled (the default) to recover attenuated streams (e.g. Safari/
+    /// Firefox WebRTC contention from issue #500) without engaging Apple's
+    /// system-wide voice-comms ducking. Lazily created at start, reset on
+    /// device recovery, deinit'd at stop.
+    var realtimeAGC: RealtimeAGC?
+
     // Device change watchdog - thread-safe access via lock
     // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
     // Matches SystemAudioCapture.swift which also uses CACurrentMediaTime().
@@ -453,11 +470,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// on the same physical device, plain AVAudioEngine taps see attenuated
     /// audio and meeting recordings come out very quiet.
     ///
+    /// VPIO has a documented side effect: macOS treats any VPIO holder as a
+    /// voice-comms app and ducks output from other apps (Zoom playback,
+    /// Spotify, etc.). For most users that's worse than the original quiet-
+    /// recording bug, so VPIO is now opt-in via `enableVoiceProcessing`. The
+    /// software AGC in `RealtimeAGC` (installed in the tap callback when
+    /// VPIO is off) handles issue #500 for everyone else without engaging
+    /// the system ducking.
+    ///
     /// Idempotent and safe to call repeatedly. Skips when the engine is
     /// already running (toggling VPIO requires a stopped engine). Falls back
     /// silently when the device cannot host VPIO (rare, e.g. unusual
     /// aggregate devices) so a VPIO failure never blocks recording.
     func armVoiceProcessing(on inputNode: AVAudioInputNode) {
+        guard enableVoiceProcessing else {
+            // Opt-in toggle is off — leave VPIO untouched. The mic tap
+            // callback will run RealtimeAGC instead.
+            return
+        }
+
         if voiceProcessingEnabled, inputNode.isVoiceProcessingEnabled {
             return
         }
@@ -653,6 +684,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
             disarmVoiceProcessing(on: inputNode)
         }
 
+        // Drop the AGC reference so gain history doesn't carry into the
+        // next recording. A fresh RealtimeAGC is created on the next
+        // start in `startAudioCapture`.
+        realtimeAGC = nil
+
         // Stop system audio capture
         systemAudioCapture?.stop()
 
@@ -785,6 +821,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
             }
             disarmVoiceProcessing(on: inputNode)
         }
+
+        // Monitoring shares the engine but not the AGC; drop it here so a
+        // monitoring session followed by a recording session both start
+        // with a fresh gain history.
+        realtimeAGC = nil
 
         systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
 

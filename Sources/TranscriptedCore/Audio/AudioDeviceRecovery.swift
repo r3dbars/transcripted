@@ -118,8 +118,21 @@ extension Audio {
         // Re-enable VPIO after the HAL settles so setVoiceProcessingEnabled
         // queries a stable device. Skips silently if VPIO can't engage on the
         // new device, in which case recordingFormat(for:) falls back to the
-        // hardware format and recording continues without AGC.
+        // hardware format and recording continues without AGC. When VPIO is
+        // disabled by preference, this is a no-op and the software
+        // RealtimeAGC keeps running across the device change.
         armVoiceProcessing(on: newInputNode)
+
+        // Re-evaluate software AGC: if VPIO armed (rare here), drop AGC; if
+        // VPIO didn't arm, reset gain history so the new device starts at
+        // unity gain instead of inheriting the previous device's level.
+        if voiceProcessingEnabled {
+            realtimeAGC = nil
+        } else if let existing = realtimeAGC {
+            existing.reset()
+        } else {
+            realtimeAGC = RealtimeAGC()
+        }
 
         // Read the format the tap will actually deliver (VPIO-aware when
         // armVoiceProcessing succeeded above, hardware format otherwise).

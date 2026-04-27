@@ -16,6 +16,13 @@ extension Audio {
         let (engine, inputNode) = try ensureEngineInitialized()
         armVoiceProcessing(on: inputNode)
 
+        // When VPIO is off (the default — see `enableVoiceProcessing`), run
+        // a software AGC in the mic tap callback to recover attenuated
+        // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
+        // would do this in hardware but engages system-wide ducking of
+        // other apps' audio output; software AGC has no such side effect.
+        realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
+
         // Use system default microphone (whatever macOS has configured).
         // recordingFormat(for:) returns:
         //   - VPIO output format when armVoiceProcessing enabled it (mono
@@ -28,7 +35,8 @@ extension Audio {
         AppLogger.audioMic.info("Mic input format", [
             "sampleRate": "\(recordingFormat.sampleRate)",
             "channels": "\(recordingFormat.channelCount)",
-            "voiceProcessing": "\(voiceProcessingEnabled)"
+            "voiceProcessing": "\(voiceProcessingEnabled)",
+            "softwareAGC": "\(realtimeAGC != nil)"
         ])
 
         guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
@@ -269,16 +277,38 @@ extension Audio {
 
     /// Shared mic buffer handler used by both initial tap (startAudioCapture) and recovery tap (recoverFromDeviceChange).
     /// Dispatches mono downmix + file write to micAudioFileQueue.
+    ///
+    /// When `realtimeAGC` is non-nil (i.e. VPIO is off — the default), gain
+    /// is applied to the deep-copied buffer before it reaches the live-
+    /// preview consumer and the file write. The level meter intentionally
+    /// reads the raw (pre-AGC) buffer so the meter shows actual mic
+    /// activity and the silence/inactivity detector still fires when the
+    /// room is genuinely quiet. (AGC would otherwise amplify ambient noise
+    /// up to "speech-looking" levels and defeat the inactivity prompt.)
     func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
         lastBufferTime = CACurrentMediaTime()
+
+        // Meter + silence detection see the RAW signal so the user's
+        // visible level reflects their actual mic input, and the
+        // "Still recording?" prompt still triggers in a quiet room.
         calculateLevel(buffer: buffer)
 
-        self.onMicPCMBuffer?(buffer)
-
+        // The tap-callback buffer is borrowed memory; modify a copy so the
+        // CoreAudio-owned original stays untouched. The copy is what the
+        // STT consumer callback and the file write see, both of which
+        // benefit from AGC's normalized loudness.
         guard let bufferForAsyncUse = deepCopyBuffer(buffer) else {
             AppLogger.audioMic.warning("Failed to copy mic buffer for async write")
+            // Fallback: still notify consumer from the original buffer so a
+            // one-off allocation failure doesn't stall live preview.
+            self.onMicPCMBuffer?(buffer)
             return
         }
+
+        // Apply real-time AGC to the working copy. No-op when VPIO is on.
+        realtimeAGC?.process(buffer: bufferForAsyncUse)
+
+        self.onMicPCMBuffer?(bufferForAsyncUse)
 
         micAudioFileQueue.async { [weak self] in
             guard let self = self,
