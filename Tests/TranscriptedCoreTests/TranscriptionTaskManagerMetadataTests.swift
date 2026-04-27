@@ -47,7 +47,27 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastSavedSpeakerCount, 5)
     }
 
-    private func makeManager() -> TranscriptionTaskManager {
+    func testCurrentRetainedAudioDirectoryUsesLiveProviderWhenAvailable() {
+        let initialDirectory = tempDirectory.appendingPathComponent("audio-archive-a", isDirectory: true)
+        let updatedDirectory = tempDirectory.appendingPathComponent("audio-archive-b", isDirectory: true)
+        var currentDirectory = initialDirectory
+
+        let manager = makeManager(
+            retainedAudioDirectory: initialDirectory,
+            retainedAudioDirectoryProvider: { currentDirectory }
+        )
+
+        XCTAssertEqual(manager.currentRetainedAudioDirectory(), initialDirectory)
+
+        currentDirectory = updatedDirectory
+
+        XCTAssertEqual(manager.currentRetainedAudioDirectory(), updatedDirectory)
+    }
+
+    private func makeManager(
+        retainedAudioDirectory: URL? = nil,
+        retainedAudioDirectoryProvider: (() -> URL?)? = nil
+    ) -> TranscriptionTaskManager {
         let paths = CoreStoragePaths(
             transcripts: tempDirectory.appendingPathComponent("transcripts"),
             speakerDB: tempDirectory.appendingPathComponent("speakers.sqlite"),
@@ -66,7 +86,9 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             failedTranscriptionManager: FailedTranscriptionManager(paths: paths),
             speechToText: MetadataStubSpeechToTextEngine(),
             diarization: MetadataStubDiarizationEngine(),
-            speakerStore: SpeakerDatabase(path: paths.speakerDB.path)
+            speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
+            retainedAudioDirectory: retainedAudioDirectory,
+            retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
         )
     }
 }
