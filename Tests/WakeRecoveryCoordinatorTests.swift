@@ -235,4 +235,62 @@ func testWakeRecoveryCoordinator() async {
         let registerCalls = await MainActor.run { hotkeys.registerCalls }
         assertEqual(registerCalls, 2, "second wake should perform a fresh hotkey registration")
     }
+
+    await runSuite("WakeRecoveryCoordinator.cancel — stale completions do not clear a newer in-flight recovery") {
+        let hotkeys = await MainActor.run { HotkeyScript(scriptedErrors: [nil, nil, nil]) }
+        let readinessPhase = await MainActor.run { CountBox() }
+        let firstReadinessStarted = AsyncSignal()
+        let firstReadinessContinue = AsyncSignal()
+        let secondReadinessStarted = AsyncSignal()
+        let secondReadinessContinue = AsyncSignal()
+
+        let coordinator = await MainActor.run {
+            WakeRecoveryCoordinator(
+                hotkeyRetryAttempts: 3,
+                hotkeyRetryDelay: 1,
+                unregisterHotkeys: { hotkeys.unregister() },
+                registerHotkeys: { hotkeys.register() },
+                currentHotkeyError: { hotkeys.currentError },
+                waitForRuntimeReadiness: {
+                    await MainActor.run { readinessPhase.increment() }
+                    let phase = await MainActor.run { readinessPhase.count }
+                    if phase == 1 {
+                        await firstReadinessStarted.open()
+                        await firstReadinessContinue.wait()
+                    } else {
+                        await secondReadinessStarted.open()
+                        await secondReadinessContinue.wait()
+                    }
+                }
+            )
+        }
+
+        let first = Task { await coordinator.handleSystemWake() }
+        await firstReadinessStarted.wait()
+
+        await MainActor.run { coordinator.cancel() }
+
+        let second = Task { await coordinator.handleSystemWake() }
+        await secondReadinessStarted.wait()
+
+        await firstReadinessContinue.open()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let third = Task { await coordinator.handleSystemWake() }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await secondReadinessContinue.open()
+
+        let firstResult = await first.value
+        let secondResult = await second.value
+        let thirdResult = await third.value
+
+        assertTrue(firstResult.hotkeysRecovered, "released cancelled recovery should still finish cleanly")
+        assertTrue(secondResult.hotkeysRecovered, "replacement recovery should finish cleanly")
+        assertTrue(thirdResult.hotkeysRecovered, "joined recovery should observe the replacement result")
+        assertTrue(firstResult.performedRecovery, "original task still owned its work before cancellation")
+        assertTrue(secondResult.performedRecovery, "replacement task should perform the new recovery")
+        assertFalse(thirdResult.performedRecovery, "follow-up wake should join the replacement task instead of starting a third recovery")
+        let registerCalls = await MainActor.run { hotkeys.registerCalls }
+        assertEqual(registerCalls, 2, "stale completion should not clear the active recovery task")
+    }
 }
