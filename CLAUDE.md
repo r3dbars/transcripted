@@ -24,11 +24,12 @@ Read these before making assumptions about the codebase:
 3. `docs/repo-layout.md`
 4. `docs/agent-onboarding.md`
 5. `Sources/CLAUDE.md`
-6. `Sources/Dictation/CLAUDE.md`
-7. `Sources/Meeting/CLAUDE.md`
-8. `Sources/TranscriptedCore/CLAUDE.md`
-9. `Tests/README.md`
-10. `docs/storage-paths.md`
+6. the nearest local `CLAUDE.md` for the area you are changing
+7. `Sources/Dictation/CLAUDE.md`
+8. `Sources/Meeting/CLAUDE.md`
+9. `Sources/TranscriptedCore/CLAUDE.md`
+10. `Tests/README.md`
+11. `docs/storage-paths.md`
 
 ## Build and test
 

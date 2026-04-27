@@ -13,10 +13,11 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (46 Swift files)
+## Files (47 Swift files)
 
 ### Overlay/
 
+- `Overlay/DictationMeterPolicy.swift` — tiny presentation policy that decides when the dictation waveform meter should render and clamps its displayed level
 - `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
@@ -30,6 +31,9 @@ Draft-mode UI is not an active product path in this worktree.
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
+`DictationMeterPolicy` keeps the live meter visibility rule out of view code, so
+UI tweaks to when the waveform shows up should land there instead of being
+re-implemented in controllers or views.
 
 ### MenuBar/
 

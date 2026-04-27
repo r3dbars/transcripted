@@ -624,8 +624,17 @@ class ParakeetEngine: ObservableObject {
             } else {
                 // Download from HuggingFace (~120MB) and cache locally
                 // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
-                let cacheBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-                    .appendingPathComponent("FluidAudio/Models", isDirectory: true)
+                guard let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                    print("⚠️ PARAKEET EOU | application support directory unavailable")
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "eou_app_support_unavailable",
+                        message: "Application support directory lookup returned no results; cannot resolve EOU model cache"
+                    )
+                    return
+                }
+                let cacheBase = appSupportRoot.appendingPathComponent("FluidAudio/Models", isDirectory: true)
                 let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
                 let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
                 if FileManager.default.fileExists(atPath: checkFile.path) {
@@ -1263,14 +1272,7 @@ class ParakeetEngine: ObservableObject {
                 guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
                 self.lastLevelUpdate = now
 
-                var sumOfSquares: Float = 0
-                for sample in monoSamples {
-                    let s = sample
-                    sumOfSquares += s * s
-                }
-                let rms = sqrt(sumOfSquares / Float(max(1, frameLength)))
-                let dB = rms > 0.0001 ? 20.0 * log10(rms) : -60.0
-                let normalized = max(0.0, min(1.0, (dB - TranscriptedConstants.audioLevelFloorDB) / (TranscriptedConstants.audioLevelCeilingDB - TranscriptedConstants.audioLevelFloorDB)))
+                let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
 
                 Task { @MainActor [weak self] in
                     self?.audioLevel = normalized
@@ -2346,6 +2348,14 @@ class ParakeetEngine: ObservableObject {
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        recoveryState.reset()
+        publishRecoveryState()
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Meeting Menu Row Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #15161a;
+      --panel: #202227;
+      --panel-border: #343740;
+      --row: #2a2d34;
+      --row-hover: #323641;
+      --text: #f3f4f6;
+      --muted: #a6acb8;
+      --key: #d2d6df;
+      --accent: #59b6ff;
+      --stop: #ff6b63;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #101114;
+      color: var(--text);
+    }
+
+    main {
+      width: min(760px, calc(100vw - 32px));
+      display: grid;
+      gap: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .panel {
+      width: 360px;
+      max-width: 100%;
+      padding: 12px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 62px;
+      padding: 10px 12px;
+      border-radius: 7px;
+      background: var(--row);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .row:hover {
+      background: var(--row-hover);
+    }
+
+    .icon {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: #081018;
+      background: var(--accent);
+    }
+
+    .icon.stop {
+      background: var(--stop);
+    }
+
+    .icon svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    .copy {
+      min-width: 0;
+    }
+
+    .title {
+      margin: 0 0 3px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0;
+      color: var(--text);
+    }
+
+    .detail {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.25;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .key {
+      min-width: 54px;
+      padding: 5px 8px;
+      text-align: center;
+      color: var(--key);
+      font-size: 12px;
+      font-weight: 650;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .label {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    @media (max-width: 760px) {
+      .comparison {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Meeting Menu Row</h1>
+      <p>The row now changes state while a meeting is recording, so it no longer sits there saying “Start Meeting.”</p>
+    </header>
+
+    <section class="comparison" aria-label="Meeting row states">
+      <div>
+        <p class="label">Idle</p>
+        <div class="panel">
+          <div class="stack">
+            <div class="row">
+              <div class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 3.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6Zm0 2.2a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z"/>
+                </svg>
+              </div>
+              <div class="copy">
+                <p class="title">Start Meeting</p>
+                <p class="detail">Capture mic and system audio</p>
+              </div>
+              <div class="key">⌥M</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="label">Recording</p>
+        <div class="panel">
+          <div class="stack">
+            <div class="row">
+              <div class="icon stop" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-3 6.4c0-.22.18-.4.4-.4h5.2c.22 0 .4.18.4.4v5.2c0 .22-.18.4-.4.4H9.4a.4.4 0 0 1-.4-.4V9.4Z"/>
+                </svg>
+              </div>
+              <div class="copy">
+                <p class="title">Stop Meeting</p>
+                <p class="detail">Recording now</p>
+              </div>
+              <div class="key">⌥M</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

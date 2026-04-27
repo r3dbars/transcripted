@@ -33,6 +33,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .diarizationFailed, "diarization-specific failures should be preserved for analytics")
     }
 
+    runSuite("MeetingFailureKind classifies broader microphone-access wording") {
+        let kind = MeetingFailureKind.classify(
+            message: "Turn on Microphone access in System Settings before recording a meeting."
+        )
+
+        assertEqual(kind, .microphonePermission, "microphone access wording should stay centralized in the canonical classifier")
+    }
+
     runSuite("MeetingFailureKind classifies save failures") {
         let kind = MeetingFailureKind.classify(
             message: "Failed to save transcript: Could not write transcript to meetings"
@@ -47,6 +55,24 @@ func testMeetingFailureKind() {
         )
 
         assertEqual(kind, .pipelineBusy, "pipeline-busy rejections from TranscriptionTaskManager should not fall to unexpected_error")
+    }
+
+    runSuite("MeetingFailureKind classifies stop-timeout errors") {
+        let kind = MeetingFailureKind.classify(
+            message: "Recording stop timed out before audio files were finalized."
+        )
+
+        assertEqual(kind, .stopTimeout, "stop-timeout failures should keep their own bucket so retry copy can target them")
+    }
+
+    runSuite("MeetingFailureCopy surfaces stop-timeout retry guidance") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Recording stop timed out before audio files were finalized.",
+            shortErrorMessage: "Recording stop timed out.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Recording didn't close cleanly", "stop-timeout users should see specific copy, not generic retry phrasing")
     }
 
     runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {

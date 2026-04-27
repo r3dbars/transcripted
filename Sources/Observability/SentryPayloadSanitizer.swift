@@ -40,7 +40,9 @@ enum SentryPayloadSanitizer {
 
     private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\s"]*)?"#)
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
-    private static let absolutePathRegex = makeRegex(#"(?<!https:)(?<!http:)/(?:Users|private|var|tmp|Volumes|Applications)[^\s"]*"#)
+    private static let absolutePathRegex = makeRegex(
+        #"(?<!https:)(?<!http:)/(?:System/Volumes/Data/)?(?:Users|private|var|tmp|Volumes|Applications|Library|opt)[^\s"]*"#
+    )
     private static let rawURLRegex = makeRegex(#"https?://[^\s"]+"#, options: [.caseInsensitive])
     private static let apiKeyRegex = makeRegex(#"sk-[A-Za-z0-9_-]+"#)
     private static let commonSecretRegex = makeRegex(
@@ -49,6 +51,14 @@ enum SentryPayloadSanitizer {
     private static let authSchemeRegex = makeRegex(#"(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+"#, options: [.caseInsensitive])
     private static let authorizationAssignmentRegex = makeRegex(
         #"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*(?:basic|bearer)\s+[^\s,;]+"#
+    )
+    private static let privateKeyBlockRegex = makeRegex(
+        #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
+    )
+    private static let privateKeyMarkerRegex = makeRegex(
+        #"-----((?:BEGIN|END)) [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
     )
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
@@ -128,6 +138,10 @@ enum SentryPayloadSanitizer {
         result = authorizationAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = authSchemeRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1 ****")
+        range = NSRange(result.startIndex..., in: result)
+        result = privateKeyBlockRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
+        range = NSRange(result.startIndex..., in: result)
+        result = privateKeyMarkerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)

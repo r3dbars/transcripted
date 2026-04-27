@@ -7,6 +7,29 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>Version 1.1.24</title>
+      <pubDate>Sat, 25 Apr 2026 02:34:53 GMT</pubDate>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.24</link>
+      <sparkle:version>1.1.24</sparkle:version>
+      <sparkle:shortVersionString>1.1.24</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.24</sparkle:releaseNotesLink>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.24/Transcripted-1.1.24.dmg" length="528065393" type="application/octet-stream" sparkle:edSignature="uIo35PPcM3882Ggz7J4xQbsleTpKzw7sekIThwK9YV/U9rMQ5iBdxRak5bb8IRi72XVu3dd9HkXd/HXBwajvAQ=="/>
+    </item>
+    <item>
+      <title>1.1.23</title>
+      <pubDate>Sat, 25 Apr 2026 00:48:58 GMT</pubDate>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.23</link>
+      <sparkle:version>1.1.23</sparkle:version>
+      <sparkle:shortVersionString>1.1.23</sparkle:shortVersionString>
+      <sparkle:fullReleaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.23</sparkle:fullReleaseNotesLink>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <sparkle:criticalUpdate/>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.23/Transcripted-1.1.23.dmg" length="528064411" type="application/octet-stream" sparkle:edSignature="RsIqBbb5KkhYpCXABJ6XSu3cP4EYc8vls37imIP54Rk5YDIgDzM641HlBywdsRvBoBGmfttLEZ7v4C0g5GmOCw=="/>
+    </item>
+    <item>
       <title>1.1.22</title>
       <pubDate>Fri, 24 Apr 2026 20:43:36 GMT</pubDate>
       <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.22</link>

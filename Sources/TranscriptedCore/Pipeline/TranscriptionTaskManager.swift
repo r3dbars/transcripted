@@ -83,10 +83,21 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
 
-        // Gate: reject recordings shorter than 2 seconds (they'll fail in Parakeet anyway)
+        // Gate: reject only when every available capture track is too short.
+        // Meeting recovery can produce a very short mic stub while system audio is still
+        // intact and fully transcribable, so don't throw away the whole recording just
+        // because the mic side is below Parakeet's minimum length.
         let minDuration: TimeInterval = 2.0
-        if let micDuration = audioDuration(url: micURL), micDuration < minDuration {
-            AppLogger.pipeline.info("Recording too short, skipping transcription", ["duration": String(format: "%.1fs", micDuration)])
+        let micDuration = audioDuration(url: micURL)
+        let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
+        let hasUsableMicAudio = (micDuration ?? 0) >= minDuration
+        let hasUsableSystemAudio = (systemDuration ?? 0) >= minDuration
+
+        guard hasUsableMicAudio || hasUsableSystemAudio else {
+            AppLogger.pipeline.info("Recording too short, skipping transcription", [
+                "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? "unknown",
+                "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "none"
+            ])
 
             removeRecordingFile(micURL, label: "short mic recording")
             if let systemURL {
@@ -96,6 +107,13 @@ public class TranscriptionTaskManager: ObservableObject {
             self.displayStatus = .failed(message: "Recording too short")
             self.scheduleStatusReset(delay: 3)
             return
+        }
+
+        if !hasUsableMicAudio, hasUsableSystemAudio {
+            AppLogger.pipeline.warning("Proceeding with short mic capture because system audio is still usable", [
+                "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? "unknown",
+                "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "unknown"
+            ])
         }
 
         let task = TranscriptionTask(
@@ -456,12 +474,16 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    func resolvedRetainedAudioDirectory() -> URL? {
+        retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
+    }
+
     private func archiveFailedRecordingAudioIfConfigured(
         micURL: URL?,
         systemURL: URL?,
         taskId: UUID
     ) {
-        guard let retainedAudioDirectory = retainedAudioDirectoryProvider?() ?? retainedAudioDirectory else { return }
+        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return }
 
         let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
         let placeholderTranscriptURL = retainedAudioDirectory

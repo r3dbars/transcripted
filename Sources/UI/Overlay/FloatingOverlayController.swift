@@ -160,7 +160,20 @@ class FloatingOverlayController {
         sttRouter.$audioLevel
             .receive(on: RunLoop.main)
             .sink { [weak self] level in
-                self?.rootView?.headerView.updateWaveformLevel(level)
+                guard let self else { return }
+                let presentation = DictationMeterPolicy.presentation(
+                    isListening: self.state == .listening,
+                    sttIsRecording: sttRouter.isRecording,
+                    rawLevel: level
+                )
+                self.rootView?.headerView.updateWaveformLevel(presentation.level)
+            }
+            .store(in: &subscriptions)
+
+        sttRouter.$isRecording
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.pushStateToViews()
             }
             .store(in: &subscriptions)
 
@@ -185,6 +198,8 @@ class FloatingOverlayController {
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
+            isRecording: sttRouter?.isRecording ?? false,
+            audioLevel: sttRouter?.audioLevel ?? 0,
             liveTranscript: sttRouter?.liveTranscript ?? ""
         )
     }
@@ -295,11 +310,6 @@ class FloatingOverlayController {
         isVisible = true
         pushStateToViews()
         installEscapeMonitor()
-    }
-
-    func enterDraftingState() {
-        state = .drafting
-        resizePanelToCompact()
     }
 
     func resizePanelToCompact() {

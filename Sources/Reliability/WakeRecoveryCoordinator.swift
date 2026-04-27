@@ -32,6 +32,7 @@ final class WakeRecoveryCoordinator {
     private let sleep: Sleep
 
     private var wakeRecoveryTask: Task<(Bool, String?), Never>?
+    private var wakeRecoveryTaskID: UUID?
     private var lastCompletedRecovery: CompletedWakeRecovery?
 
     init(
@@ -70,6 +71,7 @@ final class WakeRecoveryCoordinator {
         onStart()
         lastCompletedRecovery = nil
 
+        let taskID = UUID()
         let task: Task<(Bool, String?), Never> = Task { @MainActor [weak self] in
             let hotkeyResult = await self?.recoverHotkeysAfterWake() ?? (false, "Wake recovery coordinator deallocated")
             await self?.waitForRuntimeReadiness()
@@ -77,7 +79,15 @@ final class WakeRecoveryCoordinator {
         }
 
         wakeRecoveryTask = task
+        wakeRecoveryTaskID = taskID
         let (hotkeysRecovered, hotkeyError) = await task.value
+        guard wakeRecoveryTaskID == taskID else {
+            return WakeRecoveryResult(
+                hotkeysRecovered: hotkeysRecovered,
+                performedRecovery: true,
+                hotkeyError: hotkeyError
+            )
+        }
         lastCompletedRecovery = hotkeysRecovered
             ? CompletedWakeRecovery(
                 task: task,
@@ -86,6 +96,7 @@ final class WakeRecoveryCoordinator {
             )
             : nil
         wakeRecoveryTask = nil
+        wakeRecoveryTaskID = nil
         return WakeRecoveryResult(
             hotkeysRecovered: hotkeysRecovered,
             performedRecovery: true,
@@ -96,6 +107,7 @@ final class WakeRecoveryCoordinator {
     func cancel() {
         wakeRecoveryTask?.cancel()
         wakeRecoveryTask = nil
+        wakeRecoveryTaskID = nil
         lastCompletedRecovery = nil
     }
 

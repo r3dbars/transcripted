@@ -14,6 +14,7 @@ enum MeetingFailureKind: String {
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
     case pipelineBusy = "pipeline_busy"
+    case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
     static func isRecordingTooShortMessage(_ message: String) -> Bool {
@@ -32,15 +33,27 @@ enum MeetingFailureKind: String {
     static func classify(message: String) -> MeetingFailureKind {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        if normalized.contains("system audio is required")
-            || normalized.contains("system audio recording")
-            || normalized.contains("screen recording") {
+        if normalized.contains(anyOf: [
+            "stop timed out",
+            "recording stop timed out",
+        ]) {
+            return .stopTimeout
+        }
+
+        if normalized.contains(anyOf: [
+            "system audio is required",
+            "system audio recording",
+            "screen recording",
+        ]) {
             return .systemAudioPermission
         }
 
-        if normalized.contains("microphone access denied")
-            || normalized.contains("microphone permission")
-            || normalized.contains("mic_not_authorized") {
+        if normalized.contains(anyOf: [
+            "microphone access",
+            "microphone access denied",
+            "microphone permission",
+            "mic_not_authorized",
+        ]) {
             return .microphonePermission
         }
 
@@ -48,9 +61,11 @@ enum MeetingFailureKind: String {
             return .microphoneMissing
         }
 
-        if normalized.contains("audio device unavailable")
-            || normalized.contains("microphone unavailable")
-            || normalized.contains("microphone recovery failed") {
+        if normalized.contains(anyOf: [
+            "audio device unavailable",
+            "microphone unavailable",
+            "microphone recovery failed",
+        ]) {
             return .audioDeviceUnavailable
         }
 
@@ -58,19 +73,25 @@ enum MeetingFailureKind: String {
             return .recordingTooShort
         }
 
-        if normalized.contains("invalid audio format")
-            || normalized.contains("invalid audio data") {
+        if normalized.contains(anyOf: [
+            "invalid audio format",
+            "invalid audio data",
+        ]) {
             return .invalidAudioFormat
         }
 
-        if normalized.contains("empty audio file")
-            || normalized.contains("no samples recorded")
-            || normalized.contains("empty audio") {
+        if normalized.contains(anyOf: [
+            "empty audio file",
+            "no samples recorded",
+            "empty audio",
+        ]) {
             return .emptyAudio
         }
 
-        if normalized.contains("failed to save")
-            || normalized.contains("could not write transcript") {
+        if normalized.contains(anyOf: [
+            "failed to save",
+            "could not write transcript",
+        ]) {
             return .saveFailed
         }
 
@@ -86,19 +107,29 @@ enum MeetingFailureKind: String {
             return .modelDownloadFailed
         }
 
-        if normalized.contains("pyannote")
-            || normalized.contains("sortformer")
-            || normalized.contains("wespeaker")
-            || normalized.contains("diarization") {
+        if normalized.contains(anyOf: [
+            "pyannote",
+            "sortformer",
+            "wespeaker",
+            "diarization",
+        ]) {
             return .diarizationFailed
         }
 
-        if normalized.contains("parakeet")
-            || normalized.contains("inference failed")
-            || normalized.contains("transcription failed") {
+        if normalized.contains(anyOf: [
+            "parakeet",
+            "inference failed",
+            "transcription failed",
+        ]) {
             return .transcriptionInferenceFailed
         }
 
         return .unexpectedError
+    }
+}
+
+private extension String {
+    func contains(anyOf fragments: [String]) -> Bool {
+        fragments.contains(where: contains)
     }
 }

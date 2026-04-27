@@ -155,6 +155,29 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(normalized.samples, samples)
     }
 
+    func testAudioSignalRecoveryNormalizesAttenuatedSpeechBelowLegacyGate() {
+        // Issue #500 reproduction: WebRTC attenuation in Safari/Firefox can
+        // pull mic peaks below the old hasSpeechCandidate gate (peak >= 0.004),
+        // and the previous normalizer short-circuited to gain=1.0 on exactly
+        // this case. Now we should still apply gain.
+        var samples = [Float](repeating: 0.0, count: 64_000)
+        let attenuatedSpeech = alternatingSamples(amplitude: 0.002, count: 24_000)
+        samples.replaceSubrange(20_000..<44_000, with: attenuatedSpeech)
+
+        let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: 16_000)
+        let normalized = AudioSignalRecovery.normalizeForSpeech(
+            samples: samples,
+            sampleRate: 16_000,
+            analysis: analysis
+        )
+
+        XCTAssertFalse(analysis.hasSpeechCandidate, "Peak 0.002 must remain below the legacy candidate threshold")
+        XCTAssertTrue(normalized.wasNormalized, "Attenuated speech should still be amplified")
+        XCTAssertGreaterThan(normalized.gain, 1.0)
+        XCTAssertLessThanOrEqual(normalized.gain, 12.0)
+        XCTAssertGreaterThan(normalized.samples.map(abs).max() ?? 0, analysis.peak)
+    }
+
     func testPrepareMicSegmentPadsShortQuietSpeechForParakeet() {
         let samples = alternatingSamples(amplitude: 0.006, count: 8_000)
 

@@ -138,9 +138,9 @@ final class FileLoggerTests: XCTestCase {
         XCTAssertEqual(firstObject["m"] as? String, "line-605")
     }
 
-    func testLoggerTrimReappliesOwnerOnlyPermissionsAfterAtomicRewrite() throws {
+    func testLoggerTrimKeepsOwnerOnlyPermissionsAfterAtomicRewrite() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FileLoggerPermissionsTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("FileLoggerTrimPermissionsTests-\(UUID().uuidString)", isDirectory: true)
         let logs = root.appendingPathComponent("logs", isDirectory: true)
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -150,7 +150,7 @@ final class FileLoggerTests: XCTestCase {
             #"{"t":"2026-04-14T00:00:00.000Z","l":"info","s":"app","m":"line-\#(index)"}"#
         }
         try (lines.joined(separator: "\n") + "\n").write(to: logURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: logURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: logURL.path)
 
         let paths = CoreStoragePaths(
             transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
@@ -164,8 +164,12 @@ final class FileLoggerTests: XCTestCase {
 
         _ = FileLogger(paths: paths, isDisabledOverride: false)
 
-        let attrs = try FileManager.default.attributesOfItem(atPath: logURL.path)
-        let permissions = try XCTUnwrap(attrs[.posixPermissions] as? NSNumber)
-        XCTAssertEqual(permissions.intValue, 0o600)
+        let attributes = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: logURL.path) as [FileAttributeKey: Any]?)
+        let permissions = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(
+            permissions,
+            NSNumber(value: 0o600),
+            "trimmed log should stay owner-only after the atomic rewrite path"
+        )
     }
 }
