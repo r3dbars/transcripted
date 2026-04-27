@@ -157,6 +157,21 @@ func testSentryPayloadSanitizer() {
         assertTrue(sanitized.contains("Basic ****"), "standalone basic auth marker should remain")
     }
 
+    runSuite("SentryPayloadSanitizer redacts PEM private key material") {
+        let input = """
+        Failed to parse key:
+        -----BEGIN OPENSSH PRIVATE KEY-----
+        b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAlwAAAAdzc2gtcn
+        -----END OPENSSH PRIVATE KEY-----
+        """
+        let sanitized = SentryPayloadSanitizer.sanitizeText(input)
+
+        assertFalse(sanitized.contains("BEGIN OPENSSH PRIVATE KEY"), "private key header should be redacted")
+        assertFalse(sanitized.contains("b3BlbnNzaC1rZXkt"), "private key body should be redacted")
+        assertFalse(sanitized.contains("END OPENSSH PRIVATE KEY"), "private key footer should be redacted")
+        assertTrue(sanitized.contains("[redacted-secret]"), "private key content should collapse to a secret marker")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeAnyDictionary redacts nested free-form values") {
         let sanitized = SentryPayloadSanitizer.sanitizeAnyDictionary([
             "safe_count": 3,

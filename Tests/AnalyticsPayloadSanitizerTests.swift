@@ -125,6 +125,26 @@ func testAnalyticsPayloadSanitizer() {
         assertTrue(value.contains("Basic ****"), "standalone basic auth marker should remain")
     }
 
+    runSuite("AnalyticsPayloadSanitizer redacts PEM private key material") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": """
+                Failure included:
+                -----BEGIN RSA PRIVATE KEY-----
+                MIIEpAIBAAKCAQEAz7i9W5tQ3k3FdemoKeyMaterial
+                -----END RSA PRIVATE KEY-----
+                """,
+            ],
+            allowedKeys: ["failure_kind"]
+        )
+
+        let value = sanitized["failure_kind"] ?? ""
+        assertFalse(value.contains("BEGIN RSA PRIVATE KEY"), "private key header should be redacted")
+        assertFalse(value.contains("MIIEpAIBAAKCAQEA"), "private key body should be redacted")
+        assertFalse(value.contains("END RSA PRIVATE KEY"), "private key footer should be redacted")
+        assertTrue(value.contains("[redacted-secret]"), "private key content should collapse to a secret marker")
+    }
+
     runSuite("AnalyticsPayloadSanitizer.redact scrubs without the analytics length cap") {
         // Build a multi-line log blob longer than maxValueLength (80 chars) so
         // the feedback path can verify redaction happens but length is preserved.
