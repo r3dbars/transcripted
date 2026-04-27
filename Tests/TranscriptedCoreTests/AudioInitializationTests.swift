@@ -26,6 +26,39 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertNil(audio.systemAudioCapture)
     }
 
+    func testStopOnIdleAudioDoesNotCrashAndBumpsGeneration() {
+        // The stop refactor moves engine teardown to a background queue.
+        // On a fresh Audio with no engine, stop() should still:
+        //   - synchronously bump the recordingSessionGeneration so any
+        //     concurrent recovery work observes the new boundary
+        //   - return immediately to the caller
+        //   - not crash on the missing engine reference
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+
+        let audio = Audio(paths: paths)
+        let initialGeneration = audio.recordingSessionGeneration
+
+        audio.stop()
+
+        XCTAssertEqual(
+            audio.recordingSessionGeneration,
+            initialGeneration &+ 1,
+            "stop() must synchronously bump the recording session generation so concurrent recovery work invalidates correctly"
+        )
+    }
+
     func testPrepareForNewRecordingStartClearsStaleCaptureArtifacts() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)

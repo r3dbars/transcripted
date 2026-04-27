@@ -33,9 +33,21 @@ public struct RecordingHealthInfo: Sendable {
     }
 
     /// Create health info from Audio instance.
-    public static func from(audio: Audio, systemCapture: (any SystemAudioCaptureEngine)?) -> RecordingHealthInfo {
+    /// Build a health snapshot from the live `Audio` object.
+    ///
+    /// `overrideSystemAudioStatus` lets the caller pass a status value that
+    /// was captured BEFORE `Audio.stop()` reset live UI state. Callers that
+    /// snapshot health AFTER stop must pass the pre-stop status here, or
+    /// the `.failed` check below will silently miss real system-audio
+    /// failures (because stop sets status to `.unknown`).
+    public static func from(
+        audio: Audio,
+        systemCapture: (any SystemAudioCaptureEngine)?,
+        overrideSystemAudioStatus: SystemAudioStatus? = nil
+    ) -> RecordingHealthInfo {
+        let effectiveSystemAudioStatus = overrideSystemAudioStatus ?? audio.systemAudioStatus
         let successRate: Double = {
-            if audio.systemAudioFailed || audio.systemAudioStatus == .failed {
+            if audio.systemAudioFailed || effectiveSystemAudioStatus == .failed {
                 return 0.0
             }
             return systemCapture?.bufferSuccessRate ?? 1.0
