@@ -121,6 +121,7 @@ APP_SOURCES=(
     "Sources/Support/HotkeyPreferences.swift"
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
+    "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
