@@ -52,6 +52,7 @@ struct TranscriptedSettingsView: View {
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
+    @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
 
     init(
         appState: TranscriptedAppState,
@@ -732,6 +733,31 @@ struct TranscriptedSettingsView: View {
                         )
                     }
                 }
+            }
+
+            SettingsSection(
+                title: "Microphone Processing",
+                detail: "How Transcripted cleans up your mic for meetings."
+            ) {
+                Toggle("Use macOS voice processing on the meeting mic", isOn: Binding(
+                    get: { meetingVoiceProcessingEnabled },
+                    set: { newValue in
+                        meetingVoiceProcessingEnabled = newValue
+                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .meetings)
+                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                    }
+                ))
+
+                Text(meetingVoiceProcessingEnabled
+                    ? "macOS voice processing is on. This restores volume in Safari/Firefox WebRTC meetings (Google Meet etc.) but quiets audio from other apps like Zoom while you record."
+                    : "Off — Transcripted boosts quiet mic input in software without affecting other apps. Turn this on only if you record meetings via Safari or Firefox and the recording still comes out too quiet."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Text("Takes effect on the next recording.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             SettingsSection(

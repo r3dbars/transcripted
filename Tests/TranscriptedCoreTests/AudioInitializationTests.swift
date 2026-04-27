@@ -26,6 +26,30 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertNil(audio.systemAudioCapture)
     }
 
+    func testAudioDefaultsVoiceProcessingOff() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+
+        let audio = Audio(paths: paths)
+
+        // Default off: existing users on v1.1.24 (where VPIO was
+        // unconditionally on) should land on the no-Zoom-ducking path
+        // after upgrade unless they explicitly opt in via Settings.
+        XCTAssertFalse(audio.enableVoiceProcessing,
+                       "enableVoiceProcessing must default to false to avoid the system-wide ducking regression")
+    }
+
     func testStopOnIdleAudioDoesNotCrashAndBumpsGeneration() {
         // The stop refactor moves engine teardown to a background queue.
         // On a fresh Audio with no engine, stop() should still:

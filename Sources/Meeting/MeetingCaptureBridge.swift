@@ -88,6 +88,13 @@ final class MeetingCaptureBridge: ObservableObject {
 
         errorMessage = nil
 
+        // Apply the user's microphone-processing choice before each
+        // recording. VPIO defaults off (no Zoom ducking); enable only when
+        // the user has explicitly opted in for Safari/Firefox WebRTC
+        // calls. Read once at start; mid-session changes don't take effect
+        // until the next recording.
+        audio.enableVoiceProcessing = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+
         return await withCheckedContinuation { continuation in
             resetStartAttempt()?.resume(returning: false)
 

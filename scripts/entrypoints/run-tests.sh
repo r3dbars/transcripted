@@ -111,6 +111,7 @@ $manifest_entries
 EOF
 
 APP_SOURCES=(
+    "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
@@ -121,6 +122,7 @@ APP_SOURCES=(
     "Sources/Support/HotkeyPreferences.swift"
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
+    "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
