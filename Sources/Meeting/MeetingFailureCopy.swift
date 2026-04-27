@@ -11,16 +11,6 @@ struct MeetingFailureCopy: Equatable {
     ) -> MeetingFailureCopy {
         let message = errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        // Keep the broader "microphone access" wording that some meeting-start
-        // errors use even though the analytics classifier keys off more specific
-        // permission phrases.
-        if message.contains("microphone access") {
-            return MeetingFailureCopy(
-                title: "Turn on Microphone",
-                detail: "Turn on Microphone access in System Settings, then retry the meeting."
-            )
-        }
-
         switch MeetingFailureKind.classify(message: message) {
         case .systemAudioPermission:
             return MeetingFailureCopy(
