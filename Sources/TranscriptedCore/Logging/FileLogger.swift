@@ -34,7 +34,10 @@ final class FileLogger: @unchecked Sendable {
         self.isDisabled = isDisabledOverride ?? isTestRun
 
         let logsDir = paths.logs
+        // Security: embedders may inject a custom logs directory outside the default
+        // Transcripted-owned path, so tighten it here as well to avoid world-readable log folders.
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: logsDir.path)
 
         logFileURL = logsDir.appendingPathComponent("app.jsonl")
 
