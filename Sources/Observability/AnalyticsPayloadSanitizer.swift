@@ -52,6 +52,14 @@ enum AnalyticsPayloadSanitizer {
     private static let authorizationAssignmentRegex = makeRegex(
         #"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*(?:basic|bearer)\s+[^\s,;]+"#
     )
+    private static let privateKeyBlockRegex = makeRegex(
+        #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
+    )
+    private static let privateKeyMarkerRegex = makeRegex(
+        #"-----((?:BEGIN|END)) [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
+    )
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
     )
@@ -112,6 +120,10 @@ enum AnalyticsPayloadSanitizer {
         result = authorizationAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = authSchemeRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1 ****")
+        range = NSRange(result.startIndex..., in: result)
+        result = privateKeyBlockRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
+        range = NSRange(result.startIndex..., in: result)
+        result = privateKeyMarkerRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
