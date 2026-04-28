@@ -12,14 +12,26 @@ struct RecentMeetingItem: Identifiable, Sendable {
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]
+    let dictationCounts: DictationTranscriptCounts
 }
 
 enum RecentCaptureLoader {
     static func load(limit: Int = 5) async -> RecentCaptureSnapshot {
+        await load(dictationLimit: limit, meetingLimit: limit, includeDictationCounts: false)
+    }
+
+    static func load(
+        dictationLimit: Int,
+        meetingLimit: Int,
+        includeDictationCounts: Bool = false
+    ) async -> RecentCaptureSnapshot {
         await Task.detached(priority: .utility) {
             RecentCaptureSnapshot(
-                meetings: RecentMeetingsScanner.loadRecent(limit: limit),
-                dictations: DictationTranscriptStore.recentSavedDictations(limit: limit)
+                meetings: RecentMeetingsScanner.loadRecent(limit: meetingLimit),
+                dictations: DictationTranscriptStore.recentSavedDictations(limit: dictationLimit),
+                dictationCounts: includeDictationCounts
+                    ? DictationTranscriptStore.savedDictationCounts()
+                    : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
             )
         }.value
     }

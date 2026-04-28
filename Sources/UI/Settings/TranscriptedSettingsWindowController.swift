@@ -33,6 +33,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
             defer: false
         )
         window.title = "Transcripted Settings"
+        window.titleVisibility = .hidden
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
         window.center()

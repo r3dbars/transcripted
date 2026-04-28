@@ -11,6 +11,7 @@ extension Notification.Name {
 
 struct SavedDictationEntry: Identifiable, Sendable {
     let url: URL
+    let entryID: String?
     let title: String
     let text: String
     let createdAt: Date
@@ -19,8 +20,17 @@ struct SavedDictationEntry: Identifiable, Sendable {
     let sourceAppBundleID: String?
 
     var id: String {
-        "\(url.path)#\(createdAt.timeIntervalSince1970)#\(title)"
+        if let entryID, !entryID.isEmpty {
+            return "\(url.path)#\(entryID)"
+        }
+        return "\(url.path)#\(createdAt.timeIntervalSince1970)#\(title)"
     }
+}
+
+struct DictationTranscriptCounts: Sendable {
+    let total: Int
+    let today: Int
+    let totalWords: Int
 }
 
 enum DictationTranscriptStore {
@@ -64,6 +74,36 @@ enum DictationTranscriptStore {
         recentSavedDictations(limit: 1, directory: directory).first
     }
 
+    static func savedDictationCounts(directory: URL? = nil, today: Date = Date()) -> DictationTranscriptCounts {
+        let folder = directory ?? DictationStoragePaths.transcriptsFolder
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+        }
+
+        let todayURL = DictationTranscriptWriter.dailyFileURL(for: today, in: folder)
+        var total = 0
+        var todayCount = 0
+        var totalWords = 0
+
+        for file in files where isDictationDayFile(file) {
+            let stats = fileStats(in: file)
+            total += stats.entries
+            totalWords += stats.words
+            if file.lastPathComponent == todayURL.lastPathComponent {
+                todayCount = stats.entries
+            }
+        }
+
+        return DictationTranscriptCounts(total: total, today: todayCount, totalWords: totalWords)
+    }
+
     static func recentSavedDictations(limit: Int = 5, directory: URL? = nil) -> [SavedDictationEntry] {
         guard limit > 0 else { return [] }
 
@@ -85,7 +125,8 @@ enum DictationTranscriptStore {
 
         var collectedEntries: [SavedDictationEntry] = []
         for file in dayFiles {
-            collectedEntries.append(contentsOf: entries(in: file))
+            let remaining = limit - collectedEntries.count
+            collectedEntries.append(contentsOf: entries(in: file, limit: remaining))
             if collectedEntries.count >= limit {
                 break
             }
@@ -102,13 +143,118 @@ enum DictationTranscriptStore {
         url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
     }
 
-    private static func entries(in url: URL) -> [SavedDictationEntry] {
+    /// Removes a single dictation entry by matching on its stable saved entry ID.
+    /// If the day file has no remaining entries, the file is deleted.
+    static func deleteEntry(_ entry: SavedDictationEntry) throws {
+        let url = entry.url
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
+        }
+
+        let sections = splitSections(in: content)
+        var removedCount = 0
+        let kept: [String] = sections.filter { section in
+            guard let parsed = parseEntry(from: section, in: url) else { return true }
+            if isSameEntry(parsed, as: entry) {
+                removedCount += 1
+                return false
+            }
+            return true
+        }
+
+        guard removedCount > 0 else {
+            throw NSError(
+                domain: "DictationTranscriptStore",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
+            )
+        }
+
+        if kept.isEmpty {
+            try FileManager.default.removeItem(at: url)
+        } else {
+            let header = headerPreface(in: content)
+            let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+            try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: url)
+    }
+
+    private static func isSameEntry(_ lhs: SavedDictationEntry, as rhs: SavedDictationEntry) -> Bool {
+        if let lhsEntryID = lhs.entryID, let rhsEntryID = rhs.entryID {
+            return lhs.url == rhs.url && lhsEntryID == rhsEntryID
+        }
+
+        return lhs.url == rhs.url
+            && lhs.createdAt == rhs.createdAt
+            && lhs.title == rhs.title
+    }
+
+    private static func headerPreface(in content: String) -> String {
+        var preface: [String] = []
+        for line in content.components(separatedBy: "\n") {
+            if isEntryHeading(line) { break }
+            preface.append(line)
+        }
+        let joined = preface.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? "" : joined + "\n\n"
+    }
+
+    private static func entries(in url: URL, limit: Int? = nil) -> [SavedDictationEntry] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             return []
         }
 
+        if let limit, limit > 0 {
+            return splitRecentSections(in: content, limit: limit)
+                .compactMap { parseEntry(from: $0, in: url) }
+        }
+
         return splitSections(in: content)
             .compactMap { parseEntry(from: $0, in: url) }
+    }
+
+    private struct DictationFileStats {
+        let entries: Int
+        let words: Int
+    }
+
+    private static func fileStats(in url: URL) -> DictationFileStats {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return DictationFileStats(entries: 0, words: 0)
+        }
+
+        var entries = 0
+        var words = 0
+        var scanningMetadata = false
+        var sawMetadataLine = false
+
+        for line in content.components(separatedBy: "\n") {
+            if isEntryHeading(line) {
+                entries += 1
+                scanningMetadata = true
+                sawMetadataLine = false
+                continue
+            }
+
+            guard scanningMetadata else { continue }
+
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                if sawMetadataLine {
+                    scanningMetadata = false
+                }
+                continue
+            }
+
+            sawMetadataLine = true
+            if trimmed.hasPrefix("Words:") {
+                words += intMetadataValue(from: trimmed, prefix: "Words:")
+            }
+        }
+
+        return DictationFileStats(entries: entries, words: words)
     }
 
     private static func splitSections(in content: String) -> [String] {
@@ -134,6 +280,35 @@ enum DictationTranscriptStore {
         return sections
     }
 
+    private static func splitRecentSections(in content: String, limit: Int) -> [String] {
+        let lines = content.components(separatedBy: "\n")
+        var recentSections: [String] = []
+        var currentSection: [String] = []
+
+        for line in lines {
+            if isEntryHeading(line) {
+                if !currentSection.isEmpty {
+                    recentSections.append(currentSection.joined(separator: "\n"))
+                    if recentSections.count > limit {
+                        recentSections.removeFirst(recentSections.count - limit)
+                    }
+                }
+                currentSection = [line]
+            } else if !currentSection.isEmpty {
+                currentSection.append(line)
+            }
+        }
+
+        if !currentSection.isEmpty {
+            recentSections.append(currentSection.joined(separator: "\n"))
+            if recentSections.count > limit {
+                recentSections.removeFirst(recentSections.count - limit)
+            }
+        }
+
+        return recentSections
+    }
+
     private static func isEntryHeading(_ line: String) -> Bool {
         line.range(
             of: #"^## \d{1,2}:\d{2} [AP]M - .+"#,
@@ -148,6 +323,7 @@ enum DictationTranscriptStore {
         }
 
         let title = parseTitle(from: heading)
+        var entryID: String?
         var createdAtText = ""
         var sourceAppName = "Unknown"
         var sourceAppBundleID: String?
@@ -172,7 +348,11 @@ enum DictationTranscriptStore {
                 continue
             }
 
-            if trimmed.hasPrefix("Captured:") {
+            if trimmed.hasPrefix("Entry ID:") {
+                sawMetadata = true
+                entryID = metadataValue(from: trimmed, prefix: "Entry ID:")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+            } else if trimmed.hasPrefix("Captured:") {
                 sawMetadata = true
                 createdAtText = metadataValue(from: trimmed, prefix: "Captured:")
             } else if trimmed.hasPrefix("Timestamp:") {
@@ -189,7 +369,7 @@ enum DictationTranscriptStore {
                 sawMetadata = true
                 let rawDelivery = metadataValue(from: trimmed, prefix: "Delivery:")
                 delivery = DictationDelivery(rawValue: rawDelivery) ?? .failed
-            } else if trimmed.hasPrefix("Entry ID:") || trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
+            } else if trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
                 sawMetadata = true
             } else if !sawMetadata {
                 inBody = true
@@ -205,6 +385,7 @@ enum DictationTranscriptStore {
 
         return SavedDictationEntry(
             url: url,
+            entryID: entryID,
             title: title,
             text: text,
             createdAt: createdAt,
@@ -227,6 +408,12 @@ enum DictationTranscriptStore {
         line
             .replacingOccurrences(of: prefix, with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func intMetadataValue(from line: String, prefix: String) -> Int {
+        let value = metadataValue(from: line, prefix: prefix)
+            .replacingOccurrences(of: ",", with: "")
+        return Int(value) ?? 0
     }
 
     private static func parseCreatedAt(_ value: String) -> Date? {
