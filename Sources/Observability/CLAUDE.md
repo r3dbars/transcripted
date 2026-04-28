@@ -43,6 +43,16 @@ bash build.sh
 bash run-tests.sh
 ```
 
+Relevant direct coverage:
+
+- `Tests/AnalyticsEventPolicyTests.swift`
+- `Tests/AnalyticsPayloadSanitizerTests.swift`
+- `Tests/AnalyticsReporterTests.swift`
+- `Tests/ObservabilityPreferencesTests.swift`
+- `Tests/SentryEventPolicyTests.swift`
+- `Tests/SentryPayloadSanitizerTests.swift`
+- `Tests/SentryRuntimeConfigurationTests.swift`
+
 Useful files while testing:
 
 - `~/Library/Application Support/Transcripted/logs/debug.log`
