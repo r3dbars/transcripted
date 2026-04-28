@@ -1,20 +1,14 @@
 // Support/ActivationPolicyController.swift
-// Dynamically switches NSApp's activation policy so an active recording
-// session shows up in the macOS force-quit dialog (Cmd+Option+Esc).
+// Locks NSApp's activation policy to `.regular` so the app has a
+// permanent Dock presence (and shows up in Cmd+Option+Esc).
 //
-// Background: Transcripted is a menubar app, so it normally runs with
-// activation policy `.accessory` and `LSUIElement = true`. macOS hides
-// `.accessory` apps from the force-quit dialog; if the app freezes during
-// a recording, the user has to open Activity Monitor to kill it. Reported
-// pain: Taylor's meeting widget froze and the only recovery was Activity
-// Monitor.
-//
-// Fix shape: while a recording is active (meeting OR dictation), switch
-// to `.regular` so the app appears in the force-quit dialog. When all
-// sessions stop, switch back to `.accessory`. The Dock icon flickers in
-// for the duration of the recording — acceptable trade for a recovery
-// path. The menubar `NSStatusItem` is independent of activation policy
-// and stays visible the whole time.
+// History: this controller used to flip between `.accessory` (menubar
+// only) and `.regular` (during a recording) so the app would appear in
+// the force-quit dialog only when needed. The product now ships with a
+// permanent Dock icon, so the dynamic flip is gone and the recording
+// flags are no-ops. Force-quit visibility comes for free as a side
+// effect of the always-regular policy. The menubar `NSStatusItem` is
+// independent of activation policy and stays visible the whole time.
 //
 // Thread-safety: this type is `@MainActor` because `NSApplication`
 // state is main-thread-only. Callers update the recording flags from
@@ -29,17 +23,16 @@ import Foundation
 /// policy the app should have.
 enum ActivationPolicyDecision {
 
-    /// Returns `.regular` if any session is active so the app shows in
-    /// the force-quit dialog. Otherwise returns `.accessory` to keep
-    /// the Dock clean.
+    /// Always `.regular` — the app keeps a permanent Dock presence
+    /// regardless of recording state. The recording-flag parameters are
+    /// retained so existing callers and tests continue to compile.
     static func desiredPolicy(
         isMeetingRecording: Bool,
         isDictationRecording: Bool
     ) -> NSApplication.ActivationPolicy {
-        if isMeetingRecording || isDictationRecording {
-            return .regular
-        }
-        return .accessory
+        _ = isMeetingRecording
+        _ = isDictationRecording
+        return .regular
     }
 }
 
@@ -59,7 +52,7 @@ final class ActivationPolicyController {
     private let applyPolicy: (NSApplication.ActivationPolicy) -> Void
 
     init(
-        initialPolicy: NSApplication.ActivationPolicy = .accessory,
+        initialPolicy: NSApplication.ActivationPolicy = .regular,
         applyPolicy: @escaping (NSApplication.ActivationPolicy) -> Void = { policy in
             NSApp.setActivationPolicy(policy)
         }
