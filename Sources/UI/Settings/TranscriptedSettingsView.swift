@@ -301,6 +301,7 @@ struct TranscriptedSettingsView: View {
                         selectedTab: $homeActivityTab,
                         dictationSections: homeViewModel.dictationDaySections,
                         meetingSections: homeViewModel.meetingDaySections,
+                        isLoading: homeViewModel.isLoading,
                         copiedRowID: homeCopiedRowID,
                         onOpenDictation: { entry in
                             trackSettingsAction("open_recent_dictation", page: .home)
@@ -468,7 +469,7 @@ struct TranscriptedSettingsView: View {
         let dictations = homeViewModel.todayDictationCount
         let meetings = homeViewModel.todayMeetingCount
         if dictations == 0 && meetings == 0 {
-            return "Nothing captured yet today. Start a dictation or record a meeting to fill the timeline."
+            return "Ready to capture. Recent activity stays light so this screen opens fast."
         }
 
         var parts: [String] = []
@@ -484,12 +485,12 @@ struct TranscriptedSettingsView: View {
     private var homeStatItems: [HomeStatItem] {
         [
             HomeStatItem(
-                value: homeFormattedWords(homeViewModel.totalDictationWordCount),
-                label: "total words"
+                value: "\(homeViewModel.recentDictationCount)",
+                label: "recent dictations"
             ),
             HomeStatItem(
-                value: "\(homeViewModel.totalDictationCount)",
-                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
+                value: "\(homeViewModel.recentMeetingCount)",
+                label: "recent meetings"
             ),
             HomeStatItem(
                 value: "\(statsService.totalRecordings)",
@@ -505,17 +506,6 @@ struct TranscriptedSettingsView: View {
     private var homeStreak: Int? {
         let streak = statsService.currentStreak
         return streak > 0 ? streak : nil
-    }
-
-    private func homeFormattedWords(_ count: Int) -> String {
-        if count >= 1000 {
-            let thousands = Double(count) / 1000.0
-            if thousands >= 10 {
-                return "\(Int(thousands.rounded()))K"
-            }
-            return String(format: "%.1fK", thousands)
-        }
-        return "\(count)"
     }
 
     private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {

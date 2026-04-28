@@ -6,50 +6,24 @@ import TranscriptedCore
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    @Published private(set) var dictations: [SavedDictationEntry] = []
-    @Published private(set) var meetings: [RecentMeetingItem] = []
+    @Published private(set) var dictationDaySections: [HomeDaySection<SavedDictationEntry>] = []
+    @Published private(set) var meetingDaySections: [HomeDaySection<RecentMeetingItem>] = []
+    @Published private(set) var recentDictationCount: Int = 0
+    @Published private(set) var recentMeetingCount: Int = 0
+    @Published private(set) var todayDictationCount: Int = 0
+    @Published private(set) var todayMeetingCount: Int = 0
     @Published private(set) var isLoading: Bool = false
 
     private var refreshTask: Task<Void, Never>?
 
-    // Generous: dictation files are one per day with multiple entries, parsing is cheap.
-    // This gives us full lifetime aggregates plus enough history for the timeline.
-    private let listLimit = 5000
+    // Settings Home must open instantly, even for users with thousands of dictations.
+    // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
+    private let listLimit = 40
 
     var welcomeName: String {
         let full = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !full.isEmpty else { return "there" }
         return full.split(separator: " ").first.map(String.init) ?? full
-    }
-
-    var todayDictationCount: Int {
-        dictations.lazy.filter { Calendar.current.isDateInToday($0.createdAt) }.count
-    }
-
-    var todayMeetingCount: Int {
-        meetings.lazy.filter { Calendar.current.isDateInToday($0.date) }.count
-    }
-
-    var todayWordCount: Int {
-        dictations
-            .lazy
-            .filter { Calendar.current.isDateInToday($0.createdAt) }
-            .map { Self.wordCount(in: $0.text) }
-            .reduce(0, +)
-    }
-
-    var totalDictationCount: Int { dictations.count }
-
-    var totalDictationWordCount: Int {
-        dictations.lazy.map { Self.wordCount(in: $0.text) }.reduce(0, +)
-    }
-
-    var dictationDaySections: [HomeDaySection<SavedDictationEntry>] {
-        Self.groupByDay(dictations, dateForItem: \.createdAt)
-    }
-
-    var meetingDaySections: [HomeDaySection<RecentMeetingItem>] {
-        Self.groupByDay(meetings, dateForItem: \.date)
     }
 
     func refresh() {
@@ -59,8 +33,13 @@ final class HomeViewModel: ObservableObject {
         refreshTask = Task { @MainActor in
             let snapshot = await RecentCaptureLoader.load(limit: limit)
             guard !Task.isCancelled else { return }
-            self.meetings = snapshot.meetings
-            self.dictations = snapshot.dictations
+            let calendar = Calendar.current
+            self.recentDictationCount = snapshot.dictations.count
+            self.recentMeetingCount = snapshot.meetings.count
+            self.todayDictationCount = snapshot.dictations.lazy.filter { calendar.isDateInToday($0.createdAt) }.count
+            self.todayMeetingCount = snapshot.meetings.lazy.filter { calendar.isDateInToday($0.date) }.count
+            self.dictationDaySections = Self.groupByDay(snapshot.dictations, dateForItem: \.createdAt)
+            self.meetingDaySections = Self.groupByDay(snapshot.meetings, dateForItem: \.date)
             self.isLoading = false
         }
     }
@@ -71,12 +50,6 @@ final class HomeViewModel: ObservableObject {
     }
 
     // MARK: - Helpers
-
-    private static func wordCount(in text: String) -> Int {
-        text
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .count
-    }
 
     private static func groupByDay<Item>(
         _ items: [Item],
@@ -564,7 +537,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             .padding(.vertical, 28)
             .padding(.horizontal, 4)
         } else {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section.label)
@@ -596,6 +569,7 @@ struct HomeActivityTabsCard: View {
     @Binding var selectedTab: HomeActivityTab
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<RecentMeetingItem>]
+    let isLoading: Bool
     let copiedRowID: String?
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
@@ -617,39 +591,51 @@ struct HomeActivityTabsCard: View {
             .labelsHidden()
             .frame(maxWidth: 320, alignment: .leading)
 
-            switch selectedTab {
-            case .dictations:
-                HomeDayGroupedList(
-                    sections: dictationSections,
-                    emptyMessage: "No dictations saved yet.",
-                    getID: { AnyHashable($0.id) },
-                    row: { entry in
-                        HomeDictationRow(
-                            entry: entry,
-                            isCopied: copiedRowID == entry.id,
-                            onOpen: { onOpenDictation(entry) },
-                            onCopy: { onCopyDictation(entry) },
-                            onFlag: { onFlagDictation(entry) },
-                            menuItems: dictationMenuItems(entry)
-                        )
-                    }
-                )
-            case .meetings:
-                HomeDayGroupedList(
-                    sections: meetingSections,
-                    emptyMessage: "No meetings captured yet.",
-                    getID: { AnyHashable($0.id) },
-                    row: { item in
-                        HomeMeetingRow(
-                            item: item,
-                            isCopied: copiedRowID == item.id,
-                            onOpen: { onOpenMeeting(item) },
-                            onCopy: { onCopyMeeting(item) },
-                            onFlag: { onFlagMeeting(item) },
-                            menuItems: meetingMenuItems(item)
-                        )
-                    }
-                )
+            if isLoading {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading recent activity")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 28)
+            } else {
+                switch selectedTab {
+                case .dictations:
+                    HomeDayGroupedList(
+                        sections: dictationSections,
+                        emptyMessage: "No recent dictations.",
+                        getID: { AnyHashable($0.id) },
+                        row: { entry in
+                            HomeDictationRow(
+                                entry: entry,
+                                isCopied: copiedRowID == entry.id,
+                                onOpen: { onOpenDictation(entry) },
+                                onCopy: { onCopyDictation(entry) },
+                                onFlag: { onFlagDictation(entry) },
+                                menuItems: dictationMenuItems(entry)
+                            )
+                        }
+                    )
+                case .meetings:
+                    HomeDayGroupedList(
+                        sections: meetingSections,
+                        emptyMessage: "No recent meetings.",
+                        getID: { AnyHashable($0.id) },
+                        row: { item in
+                            HomeMeetingRow(
+                                item: item,
+                                isCopied: copiedRowID == item.id,
+                                onOpen: { onOpenMeeting(item) },
+                                onCopy: { onCopyMeeting(item) },
+                                onFlag: { onFlagMeeting(item) },
+                                menuItems: meetingMenuItems(item)
+                            )
+                        }
+                    )
+                }
             }
         }
         .padding(20)

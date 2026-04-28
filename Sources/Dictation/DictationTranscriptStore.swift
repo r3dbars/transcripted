@@ -85,7 +85,8 @@ enum DictationTranscriptStore {
 
         var collectedEntries: [SavedDictationEntry] = []
         for file in dayFiles {
-            collectedEntries.append(contentsOf: entries(in: file))
+            let remaining = limit - collectedEntries.count
+            collectedEntries.append(contentsOf: entries(in: file, limit: remaining))
             if collectedEntries.count >= limit {
                 break
             }
@@ -137,12 +138,20 @@ enum DictationTranscriptStore {
         return joined.isEmpty ? "" : joined + "\n\n"
     }
 
-    private static func entries(in url: URL) -> [SavedDictationEntry] {
+    private static func entries(in url: URL, limit: Int? = nil) -> [SavedDictationEntry] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             return []
         }
 
-        return splitSections(in: content)
+        let sections = splitSections(in: content)
+        let limitedSections: ArraySlice<String>
+        if let limit, limit > 0 {
+            limitedSections = sections.suffix(limit)
+        } else {
+            limitedSections = sections[...]
+        }
+
+        return limitedSections
             .compactMap { parseEntry(from: $0, in: url) }
     }
 
