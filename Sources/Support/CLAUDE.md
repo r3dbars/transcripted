@@ -4,8 +4,9 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (16 Swift files)
+## Files (18 Swift files)
 
+- `ActivationPolicyController.swift` — flips the app between `.accessory` and `.regular` while dictation or meeting recording is active so Transcripted stays visible in the macOS force-quit dialog during live capture
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges Claude's config JSON, and runs the helper self-test
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -15,6 +16,7 @@
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
+- `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, and meeting shortcuts, including migration from older right-Option settings
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
@@ -33,6 +35,8 @@
 - `PermissionsOnboardingPreferences` is the canonical completion flag for the guided first-run permissions flow. Keep onboarding state out of view-local storage so forced reruns and completion state stay consistent.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
 - `ClaudeDesktopIntegrationInstaller` owns the Claude Desktop config merge. Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
+- `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
+- `MicrophoneProcessingPreferences` is the canonical switch for meeting-mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording.
 
 ## Verification
 
@@ -46,12 +50,14 @@ bash run-tests.sh
 Relevant direct coverage includes:
 
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
+- `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/MenuBarVisibilityPreferencesTests.swift`
+- `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`
 - `Tests/PhysicalDictationTriggerPreferencesTests.swift`
 - `Tests/TranscriptedConstantsTests.swift`

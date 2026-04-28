@@ -22,8 +22,8 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — drafting/processing state view
-- `Overlay/OverlayHeaderView.swift` — overlay title bar with controls
-- `Overlay/OverlayRootView.swift` — top-level AppKit view switching between overlay states
+- `Overlay/OverlayHeaderView.swift` — overlay title bar with centered listening layout, live waveform host, and inline stop control for active dictation
+- `Overlay/OverlayRootView.swift` — top-level AppKit view that keeps dictation compact in normal listening mode and only expands for loading or error/recovery content
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
@@ -34,6 +34,9 @@ dictation overlay and the meeting prompt / recording overlay.
 `DictationMeterPolicy` keeps the live meter visibility rule out of view code, so
 UI tweaks to when the waveform shows up should land there instead of being
 re-implemented in controllers or views.
+`OverlayHeaderView` owns the inline dictation stop affordance and centered
+listening layout, while `OverlayRootView` decides when the pill should expand
+into a taller loading or error state.
 
 ### MenuBar/
 
