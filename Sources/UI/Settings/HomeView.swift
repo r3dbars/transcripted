@@ -20,13 +20,13 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var canLoadMoreMeetings: Bool = false
 
     private var refreshTask: Task<Void, Never>?
-    private var dictationLimit = 40
-    private var meetingLimit = 25
+    private var dictationLimit = 10
+    private var meetingLimit = 10
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
-    private let initialDictationLimit = 40
-    private let initialMeetingLimit = 25
+    private let initialDictationLimit = 10
+    private let initialMeetingLimit = 10
 
     var welcomeName: String {
         let full = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -197,20 +197,20 @@ struct HomeHeroCard: View {
     let secondaryAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.accentColor.opacity(0.16))
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
                 }
-                .frame(width: 44, height: 44)
+                .frame(width: 38, height: 38)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(subtitle)
@@ -224,11 +224,11 @@ struct HomeHeroCard: View {
                 Button(action: primaryAction) {
                     Label(primaryTitle, systemImage: "mic.fill")
                         .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .controlSize(.regular)
 
                 Button(action: secondaryAction) {
                     Label(secondaryTitle, systemImage: "waveform")
@@ -238,7 +238,7 @@ struct HomeHeroCard: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(22)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -268,14 +268,14 @@ struct HomeStatsRail: View {
     let streak: Int?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(header)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .tracking(0.6)
 
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(stats) { stat in
                     HStack(alignment: .top, spacing: 10) {
                         ZStack {
@@ -290,7 +290,7 @@ struct HomeStatsRail: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(stat.value)
-                                .font(.system(size: 22, weight: .semibold))
+                                .font(.system(size: 20, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                             Text(stat.label)
                                 .font(.caption)
@@ -316,7 +316,7 @@ struct HomeStatsRail: View {
                 }
             }
         }
-        .padding(18)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -661,7 +661,7 @@ struct HomeActivityTabsCard: View {
     let onLoadMoreMeetings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Recent activity")
@@ -752,7 +752,7 @@ struct HomeActivityTabsCard: View {
                 }
             }
         }
-        .padding(20)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -767,9 +767,9 @@ struct HomeActivityTabsCard: View {
     private var activitySubtitle: String {
         switch selectedTab {
         case .dictations:
-            return canLoadMoreDictations ? "Showing the latest 40 dictations" : "Latest dictations"
+            return canLoadMoreDictations ? "Showing the latest 10 dictations" : "Latest dictations"
         case .meetings:
-            return canLoadMoreMeetings ? "Showing the latest 25 meetings" : "Latest meetings"
+            return canLoadMoreMeetings ? "Showing the latest 10 meetings" : "Latest meetings"
         }
     }
 }

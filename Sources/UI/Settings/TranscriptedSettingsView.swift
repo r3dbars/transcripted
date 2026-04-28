@@ -241,9 +241,9 @@ struct TranscriptedSettingsView: View {
         let needsAttention = homeNeedsAttentionIssues
         let useWideLayout = homeShouldUseWideLayout
 
-        return VStack(alignment: .leading, spacing: 24) {
-            HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 22) {
+        return VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 18) {
                     HomeWelcomeHeader(
                         name: homeViewModel.welcomeName,
                         summary: homeWelcomeSummary
