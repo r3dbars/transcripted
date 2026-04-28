@@ -165,7 +165,7 @@ struct TranscriptedSettingsView: View {
             sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
         } label: {
             HStack(spacing: 8) {
-                if sparkleUpdater.updateStatus.availableUpdateVersion != nil {
+                if settingsFooterShowsUpdateBadge {
                     Circle()
                         .fill(Color.orange)
                         .frame(width: 7, height: 7)
@@ -173,8 +173,8 @@ struct TranscriptedSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(settingsFooterTitle)
-                        .font(.caption.weight(settingsFooterIsUpdateAvailable ? .semibold : .regular))
-                        .foregroundStyle(settingsFooterIsUpdateAvailable ? Color.primary : Color.secondary)
+                        .font(.caption.weight(settingsFooterShowsUpdateBadge ? .semibold : .regular))
+                        .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.primary : Color.secondary)
                         .lineLimit(1)
 
                     if let detail = settingsFooterDetail {
@@ -187,18 +187,18 @@ struct TranscriptedSettingsView: View {
 
                 Spacer(minLength: 6)
 
-                Image(systemName: settingsFooterIsUpdateAvailable ? "arrow.down.circle.fill" : "arrow.triangle.2.circlepath")
+                Image(systemName: settingsFooterShowsUpdateBadge ? "arrow.clockwise.circle.fill" : "arrow.triangle.2.circlepath")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(settingsFooterIsUpdateAvailable ? Color.accentColor : Color.secondary)
-                    .opacity(sparkleUpdater.updateStatus.canRunUserUpdateAction ? 1 : 0.45)
+                    .foregroundStyle(settingsFooterShowsUpdateBadge ? Color.accentColor : Color.secondary)
+                    .opacity(settingsFooterActionEnabled ? 1 : 0.45)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, settingsFooterIsUpdateAvailable ? 8 : 10)
+            .padding(.vertical, settingsFooterShowsUpdateBadge ? 8 : 10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!sparkleUpdater.updateStatus.canRunUserUpdateAction)
+        .disabled(!settingsFooterActionEnabled)
         .help(settingsFooterHelp)
     }
 
@@ -1072,7 +1072,7 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction(settingsUpdateActionID, page: .about)
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
-                    .disabled(!sparkleUpdater.updateStatus.canRunUserUpdateAction)
+                    .disabled(!aboutUpdateButtonEnabled)
 
                     Button("Submit Feedback") {
                         trackSettingsAction("submit_feedback", page: .about)
@@ -1083,22 +1083,33 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var settingsFooterIsUpdateAvailable: Bool {
-        sparkleUpdater.updateStatus.availableUpdateVersion != nil
+    private var settingsFooterShowsUpdateBadge: Bool {
+        sparkleUpdater.updateStatus.readyToInstallVersion != nil
+    }
+
+    private var settingsFooterActionEnabled: Bool {
+        switch sparkleUpdater.updateStatus.state {
+        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+            return false
+        default:
+            return sparkleUpdater.updateStatus.canRunUserUpdateAction
+        }
     }
 
     private var settingsFooterTitle: String {
-        if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
-            return "Update \(version) available"
+        if let version = sparkleUpdater.updateStatus.readyToInstallVersion {
+            return "Restart to update \(version)"
         }
 
         switch sparkleUpdater.updateStatus.state {
         case .checking:
             return "Checking for updates"
+        case .updateAvailable(let version) where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+            return "Preparing update \(version)"
         case .downloading(let version):
-            return "Downloading \(version)"
-        case .readyToInstall(let version):
-            return "Restart to update \(version)"
+            return "Preparing update \(version)"
+        case .readyToInstall:
+            return TranscriptedSupportActions.appVersionDescription
         case .noUpdateAvailable, .unknown, .readyToCheck:
             return TranscriptedSupportActions.appVersionDescription
         case .updateAvailable:
@@ -1107,7 +1118,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterDetail: String? {
-        if sparkleUpdater.updateStatus.availableUpdateVersion != nil {
+        if sparkleUpdater.updateStatus.readyToInstallVersion != nil {
             return TranscriptedSupportActions.appVersionDescription
         }
         return nil
@@ -1117,6 +1128,9 @@ struct TranscriptedSettingsView: View {
         if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
             if case .readyToInstall = sparkleUpdater.updateStatus.state {
                 return "Restart to install update \(version)."
+            }
+            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+                return "Transcripted will ask you to restart after update \(version) is downloaded and verified."
             }
             return "Install update \(version)."
         }
@@ -1478,6 +1492,9 @@ struct TranscriptedSettingsView: View {
         case .noUpdateAvailable:
             return "Up to date"
         case .updateAvailable(let version):
+            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+                return "Preparing update (\(version))"
+            }
             return "Update available (\(version))"
         case .downloading(let version):
             return "Downloading update (\(version))"
@@ -1495,6 +1512,9 @@ struct TranscriptedSettingsView: View {
         case .noUpdateAvailable:
             return "This Mac is on the newest visible version."
         case .updateAvailable(let version):
+            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+                return "Transcripted is preparing version \(version). You only need to restart when it is ready."
+            }
             return "Version \(version) is ready."
         case .downloading(let version):
             return "Version \(version) is downloading."
@@ -1511,7 +1531,11 @@ struct TranscriptedSettingsView: View {
             return .working
         case .noUpdateAvailable:
             return .ready
-        case .updateAvailable, .downloading, .readyToInstall:
+        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+            return .working
+        case .downloading:
+            return .working
+        case .updateAvailable, .readyToInstall:
             return .caution
         }
     }
@@ -1519,6 +1543,9 @@ struct TranscriptedSettingsView: View {
     private var aboutUpdateButtonTitle: String {
         switch sparkleUpdater.updateStatus.state {
         case .updateAvailable(let version):
+            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
+                return "Preparing Update…"
+            }
             return "Install \(version)"
         case .downloading:
             return "Downloading…"
@@ -1528,6 +1555,15 @@ struct TranscriptedSettingsView: View {
             return "Checking for Updates…"
         case .unknown, .readyToCheck, .noUpdateAvailable:
             return "Check for Updates"
+        }
+    }
+
+    private var aboutUpdateButtonEnabled: Bool {
+        switch sparkleUpdater.updateStatus.state {
+        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
+            return false
+        default:
+            return sparkleUpdater.updateStatus.canRunUserUpdateAction
         }
     }
 

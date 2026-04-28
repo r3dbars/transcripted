@@ -157,6 +157,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
+    "Sources/Observability/UpdateFailureKind.swift"
     "Sources/Observability/SentryRuntimeConfiguration.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
