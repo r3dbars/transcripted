@@ -131,6 +131,100 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.preview, "I agree, and the product plan still needs a test pass.")
     }
 
+    func testSearchMatchesMeetingTitleWhenTranscriptDoesNotContainQuery() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let meeting = """
+        ---
+        capture_type: meeting
+        title: Strategy sync
+        date: 2026-04-16
+        time: 09:15:00
+        duration: "0:18"
+        ---
+
+        # Strategy sync
+
+        ## Full Transcript
+
+        [00:03] [Mic/You] We should test the onboarding changes before touching pricing.
+        [00:08] [System/Jenny Wen] Agreed.
+        """
+        try meeting.write(
+            to: meetingsDir.appendingPathComponent("Strategy sync.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let items = CLIContextStore.search(
+            query: "strategy",
+            speaker: nil,
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.title, "Strategy sync")
+    }
+
+    func testSearchMatchesMeetingSpeakerNameWhenTranscriptDoesNotContainQuery() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let meeting = """
+        ---
+        capture_type: meeting
+        title: Hardware chat
+        date: 2026-04-16
+        time: 09:15:00
+        duration: "0:18"
+        speakers:
+          - id: "0"
+            name: Linus
+            db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
+        ---
+
+        # Hardware chat
+
+        ## Full Transcript
+
+        [00:03] [System/Linus] Yellow.
+        [00:08] [System/Linus] Touch screen finally shipped.
+        """
+        try meeting.write(
+            to: meetingsDir.appendingPathComponent("Hardware chat.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let items = CLIContextStore.search(
+            query: "Linus",
+            speaker: nil,
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.title, "Hardware chat")
+    }
+
     func testRecentIncludesLegacyMeetingDirectories() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }
