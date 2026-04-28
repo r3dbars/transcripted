@@ -3,12 +3,12 @@ import Foundation
 
 @MainActor
 func testActivationPolicyController() async {
-    runSuite("ActivationPolicyDecision returns .accessory when both sessions are idle") {
+    runSuite("ActivationPolicyDecision returns .regular when both sessions are idle") {
         let policy = ActivationPolicyDecision.desiredPolicy(
             isMeetingRecording: false,
             isDictationRecording: false
         )
-        assertEqual(policy, .accessory, "idle app stays a menubar agent")
+        assertEqual(policy, .regular, "app keeps a permanent Dock presence even when idle")
     }
 
     runSuite("ActivationPolicyDecision returns .regular when a meeting is recording") {
@@ -16,7 +16,7 @@ func testActivationPolicyController() async {
             isMeetingRecording: true,
             isDictationRecording: false
         )
-        assertEqual(policy, .regular, "meeting session promotes the app to .regular for force-quit visibility")
+        assertEqual(policy, .regular, "meeting session keeps the app visible in force-quit / Dock")
     }
 
     runSuite("ActivationPolicyDecision returns .regular when a dictation is recording") {
@@ -24,7 +24,7 @@ func testActivationPolicyController() async {
             isMeetingRecording: false,
             isDictationRecording: true
         )
-        assertEqual(policy, .regular, "dictation session promotes the app the same way")
+        assertEqual(policy, .regular, "dictation session keeps the app visible in force-quit / Dock")
     }
 
     runSuite("ActivationPolicyDecision returns .regular when both sessions are recording") {
@@ -32,76 +32,76 @@ func testActivationPolicyController() async {
             isMeetingRecording: true,
             isDictationRecording: true
         )
-        assertEqual(policy, .regular, "any active session keeps us in .regular")
+        assertEqual(policy, .regular, "any combination of session flags resolves to .regular")
     }
 
-    await runSuite("ActivationPolicyController applies initial policy at init") {
+    await runSuite("ActivationPolicyController applies initial .regular policy at init") {
         let recorder = PolicyRecorder()
         _ = ActivationPolicyController(
-            initialPolicy: .accessory,
+            initialPolicy: .regular,
             applyPolicy: { policy in recorder.append(policy) }
         )
-        assertEqual(recorder.history, [.accessory], "init applies initial policy exactly once")
+        assertEqual(recorder.history, [.regular], "init applies initial policy exactly once")
     }
 
-    await runSuite("ActivationPolicyController switches to .regular when a meeting starts") {
+    await runSuite("ActivationPolicyController stays .regular when a meeting starts") {
         let recorder = PolicyRecorder()
         let controller = ActivationPolicyController(
-            initialPolicy: .accessory,
+            initialPolicy: .regular,
             applyPolicy: { policy in recorder.append(policy) }
         )
 
         controller.setMeetingRecording(true)
 
-        assertEqual(recorder.history, [.accessory, .regular], "meeting on flips to .regular")
-        assertEqual(controller.currentPolicy, .regular, "controller tracks current policy")
+        assertEqual(recorder.history, [.regular], "meeting on does not bounce the activation policy")
+        assertEqual(controller.currentPolicy, .regular, "controller stays .regular")
     }
 
-    await runSuite("ActivationPolicyController returns to .accessory when meeting stops with no other session") {
+    await runSuite("ActivationPolicyController stays .regular when meeting stops") {
         let recorder = PolicyRecorder()
         let controller = ActivationPolicyController(
-            initialPolicy: .accessory,
+            initialPolicy: .regular,
             applyPolicy: { policy in recorder.append(policy) }
         )
 
         controller.setMeetingRecording(true)
         controller.setMeetingRecording(false)
 
-        assertEqual(recorder.history, [.accessory, .regular, .accessory], "stop without overlapping session restores .accessory")
+        assertEqual(recorder.history, [.regular], "session lifecycle never demotes the app from .regular")
     }
 
-    await runSuite("ActivationPolicyController stays .regular while either session is active") {
+    await runSuite("ActivationPolicyController stays .regular across overlapping sessions") {
         let recorder = PolicyRecorder()
         let controller = ActivationPolicyController(
-            initialPolicy: .accessory,
+            initialPolicy: .regular,
             applyPolicy: { policy in recorder.append(policy) }
         )
 
-        controller.setMeetingRecording(true)        // accessory -> regular
-        controller.setDictationRecording(true)      // already regular, no apply
-        controller.setMeetingRecording(false)       // dictation still active, stays regular
-        controller.setDictationRecording(false)     // both off, back to accessory
+        controller.setMeetingRecording(true)
+        controller.setDictationRecording(true)
+        controller.setMeetingRecording(false)
+        controller.setDictationRecording(false)
 
         assertEqual(
             recorder.history,
-            [.accessory, .regular, .accessory],
-            "policy only changes when the OR of sessions flips; intermediate flag changes do not bounce the Dock"
+            [.regular],
+            "no combination of overlapping session flags should demote the activation policy"
         )
     }
 
     await runSuite("ActivationPolicyController coalesces redundant flag updates") {
         let recorder = PolicyRecorder()
         let controller = ActivationPolicyController(
-            initialPolicy: .accessory,
+            initialPolicy: .regular,
             applyPolicy: { policy in recorder.append(policy) }
         )
 
-        controller.setMeetingRecording(false)    // already false; no apply
-        controller.setDictationRecording(false)  // already false; no apply
-        controller.setMeetingRecording(true)     // accessory -> regular
-        controller.setMeetingRecording(true)     // already true; no apply
+        controller.setMeetingRecording(false)
+        controller.setDictationRecording(false)
+        controller.setMeetingRecording(true)
+        controller.setMeetingRecording(true)
 
-        assertEqual(recorder.history, [.accessory, .regular], "redundant updates do not re-apply policy")
+        assertEqual(recorder.history, [.regular], "redundant updates do not re-apply policy")
     }
 }
 

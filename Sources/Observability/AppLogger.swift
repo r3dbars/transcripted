@@ -47,7 +47,7 @@ private actor AppLogFileWriter {
         guard !line.isEmpty else { return }
         openHandleIfNeeded()
         guard let data = line.data(using: .utf8), let handle else { return }
-        handle.write(data)
+        LockedFileAppender.append(data, to: handle)
     }
 
     private func openHandleIfNeeded() {

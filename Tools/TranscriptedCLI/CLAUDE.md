@@ -9,7 +9,7 @@ It does not build or run the app target.
 ### Local Context
 
 - `transcripted-cli context-recent` — list recent meetings and dictations
-- `transcripted-cli context-search <query>` — search across saved meetings and dictations
+- `transcripted-cli context-search <query>` — search across saved meetings and dictations, including meeting titles and speaker names
 - `transcripted-cli list-dictations` — list saved dictation day files
 - `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
 

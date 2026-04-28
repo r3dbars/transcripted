@@ -72,12 +72,15 @@ extension SystemAudioCapture {
         // Security: avoid force-unwrap — a nil crash here is a denial-of-service.
         // tapStreamDescription was assigned via `try` above, but guard defensively in case
         // code flow ever changes and nil reaches this point.
-        if var currentDesc = tapStreamDescription, deviceNominalRate > 0, deviceNominalRate != currentDesc.mSampleRate {
-            AppLogger.audioSystem.warning("Tap format rate (\(Int(currentDesc.mSampleRate))Hz) differs from device nominal rate (\(Int(deviceNominalRate))Hz) — correcting")
+        if var currentDesc = tapStreamDescription,
+           AudioRecordingFormatPolicy.isUsableSampleRate(deviceNominalRate),
+           AudioRecordingFormatPolicy.isUsableSampleRate(currentDesc.mSampleRate),
+           deviceNominalRate != currentDesc.mSampleRate {
+            AppLogger.audioSystem.warning("Tap format rate (\(AudioRecordingFormatPolicy.displaySampleRate(currentDesc.mSampleRate))Hz) differs from device nominal rate (\(AudioRecordingFormatPolicy.displaySampleRate(deviceNominalRate))Hz) — correcting")
             currentDesc.mSampleRate = deviceNominalRate
             tapStreamDescription = currentDesc
         }
-        AppLogger.audioSystem.info("Aggregate device nominal sample rate", ["rate": "\(Int(deviceNominalRate))"])
+        AppLogger.audioSystem.info("Aggregate device nominal sample rate", ["rate": AudioRecordingFormatPolicy.displaySampleRate(deviceNominalRate)])
     }
 
     // MARK: - Audio Device I/O

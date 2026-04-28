@@ -55,7 +55,9 @@ private actor EventFileWriter {
 
         var lineData = data
         lineData.append(0x0A)
-        handle?.write(lineData)
+        if let handle {
+            LockedFileAppender.append(lineData, to: handle)
+        }
     }
 
     private func prepareIfNeeded() -> Bool {

@@ -62,6 +62,7 @@ final class TranscriptLoaderTests: XCTestCase {
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
         try "other file".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("notes.json"))
         try "not json".data(using: .utf8)!.write(to: tempDir.appendingPathComponent("readme.txt"))
+        try "# Notes".write(to: tempDir.appendingPathComponent("CLAUDE.md"), atomically: true, encoding: .utf8)
 
         let artifacts = TranscriptLoader.enumerateArtifacts(in: tempDir)
         XCTAssertEqual(artifacts.count, 3)

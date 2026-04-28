@@ -76,8 +76,31 @@ final class DataDirectoriesTests: XCTestCase {
             .appendingPathComponent("transcripts", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyDraftMeetings, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: legacyDraftDictations, withIntermediateDirectories: true)
-        try "# Old meeting".write(to: legacyDraftMeetings.appendingPathComponent("Call_old.md"), atomically: true, encoding: .utf8)
-        try "# Old dictation".write(to: legacyDraftDictations.appendingPathComponent("Dictations_2026-04-07.md"), atomically: true, encoding: .utf8)
+        try """
+        ---
+        capture_type: meeting
+        date: 2026-04-07
+        time: 09:00:00
+        ---
+
+        # Old meeting
+        """.write(
+            to: legacyDraftMeetings.appendingPathComponent("Call_old.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        capture_type: dictation_day
+        date: 2026-04-07
+        ---
+
+        # Old dictation
+        """.write(
+            to: legacyDraftDictations.appendingPathComponent("Dictations_2026-04-07.md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let directories = TranscriptedDataDirectories.resolve(
             environment: [:],
@@ -105,7 +128,19 @@ final class DataDirectoriesTests: XCTestCase {
             .appendingPathComponent("meetings", isDirectory: true)
             .appendingPathComponent("transcripts", isDirectory: true)
         try FileManager.default.createDirectory(at: legacyDraftMeetings, withIntermediateDirectories: true)
-        try "# Old meeting".write(to: legacyDraftMeetings.appendingPathComponent("Call_old.md"), atomically: true, encoding: .utf8)
+        try """
+        ---
+        capture_type: meeting
+        date: 2026-04-07
+        time: 09:00:00
+        ---
+
+        # Old meeting
+        """.write(
+            to: legacyDraftMeetings.appendingPathComponent("Call_old.md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let directories = TranscriptedDataDirectories.resolve(
             environment: [
@@ -122,5 +157,51 @@ final class DataDirectoriesTests: XCTestCase {
         XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
             overrideDictations.standardizedFileURL.path,
         ])
+    }
+
+    func testResolveSkipsLegacySharedFolderWithoutCaptureMarkdown() throws {
+        let legacyShared = tempHome
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyShared, withIntermediateDirectories: true)
+        try "# Notes".write(to: legacyShared.appendingPathComponent("CLAUDE.md"), atomically: true, encoding: .utf8)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertFalse(directories.meetingDirs.map(\.standardizedFileURL.path).contains(legacyShared.standardizedFileURL.path))
+        XCTAssertFalse(directories.dictationDirs.map(\.standardizedFileURL.path).contains(legacyShared.standardizedFileURL.path))
+    }
+
+    func testResolveIncludesLegacySharedFolderWithCaptureMarkdown() throws {
+        let legacyShared = tempHome
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyShared, withIntermediateDirectories: true)
+        try """
+        ---
+        capture_type: meeting
+        date: 2026-04-20
+        time: 09:00:00
+        ---
+
+        # Shared meeting
+        """.write(
+            to: legacyShared.appendingPathComponent("Shared meeting.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertTrue(directories.meetingDirs.map(\.standardizedFileURL.path).contains(legacyShared.standardizedFileURL.path))
+        XCTAssertTrue(directories.dictationDirs.map(\.standardizedFileURL.path).contains(legacyShared.standardizedFileURL.path))
     }
 }

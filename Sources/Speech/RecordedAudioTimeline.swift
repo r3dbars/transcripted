@@ -5,7 +5,7 @@ struct RecordedAudioSegment: Equatable {
     var samples: [Float]
 
     var durationSeconds: Double {
-        guard sampleRate > 0 else { return 0 }
+        guard ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(sampleRate) else { return 0 }
         return Double(samples.count) / sampleRate
     }
 }
@@ -24,7 +24,8 @@ struct RecordedAudioTimeline {
     }
 
     mutating func append(_ samples: [Float], sampleRate: Double) {
-        guard !samples.isEmpty, sampleRate > 0 else { return }
+        guard !samples.isEmpty,
+              ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(sampleRate) else { return }
 
         if let lastIndex = segments.indices.last, segments[lastIndex].sampleRate == sampleRate {
             segments[lastIndex].samples.append(contentsOf: samples)

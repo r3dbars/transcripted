@@ -51,6 +51,10 @@ enum ParakeetAudioFormatReadiness: String, Equatable {
 enum ParakeetAudioFormatReadinessPolicy {
     private static let likelyBluetoothSpeechRates: Set<Int> = [8_000, 16_000, 24_000]
     static let audioUnitFormatNotSupportedCode = -10_868
+    static let fallbackCaptureSampleRate: Double = 48_000
+    private static let minimumUsableSampleRate: Double = 8_000
+    private static let maximumUsableSampleRate: Double = 384_000
+    private static let maximumBufferCapacitySampleRate: Double = 96_000
 
     static func readiness(
         outputSampleRate: Double,
@@ -60,8 +64,8 @@ enum ParakeetAudioFormatReadinessPolicy {
         selectedInputClass: String,
         selectionOverrodeDefault: Bool
     ) -> ParakeetAudioFormatReadiness {
-        guard outputSampleRate > 0, outputChannelCount > 0,
-              inputSampleRate > 0, inputChannelCount > 0 else {
+        guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
+              isUsableCaptureSampleRate(inputSampleRate), inputChannelCount > 0 else {
             return .invalid
         }
 
@@ -81,4 +85,28 @@ enum ParakeetAudioFormatReadinessPolicy {
         }
         return .audioEngineStartFailed
     }
+
+    static func isUsableCaptureSampleRate(_ sampleRate: Double) -> Bool {
+        sampleRate.isFinite
+            && sampleRate >= minimumUsableSampleRate
+            && sampleRate <= maximumUsableSampleRate
+    }
+
+    static func captureSampleRateOrFallback(_ sampleRate: Double) -> Double {
+        isUsableCaptureSampleRate(sampleRate) ? sampleRate : fallbackCaptureSampleRate
+    }
+
+    static func bufferCapacitySampleCount(sampleRate: Double, seconds: Int) -> Int {
+        let safeRate = captureSampleRateOrFallback(sampleRate)
+        let sampleCount = safeRate * Double(seconds)
+        guard sampleCount.isFinite, sampleCount > 0 else {
+            return Int(fallbackCaptureSampleRate) * max(seconds, 1)
+        }
+        return min(Int(sampleCount), Int(maximumBufferCapacitySampleRate) * max(seconds, 1))
+    }
+}
+
+struct ParakeetAudioFormatSummary: Equatable {
+    let sampleRate: Double
+    let channelCount: UInt32
 }

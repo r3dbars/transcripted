@@ -53,6 +53,16 @@ func testParakeetRecoveryState() {
         assertFalse(state.inputFormatReady, "format should still be unready after stale finish")
     }
 
+    runSuite("ParakeetRecoveryState.finishRecovery — stale failure cannot poison newer ready generation") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+        let currentGeneration = state.beginConfigChange()
+
+        assertTrue(state.finishRecovery(success: true, generation: currentGeneration), "current recovery should mark the graph ready")
+        assertFalse(state.finishRecovery(success: false, generation: staleGeneration), "stale failure must be rejected")
+        assertTrue(state.canStartRecording, "late failure from an old graph must not poison the ready graph")
+    }
+
     runSuite("ParakeetRecoveryState.timeoutRecovery — fails active recovery and supersedes stale tasks") {
         var state = ParakeetRecoveryState()
         let recoveryGeneration = state.beginConfigChange()
@@ -81,6 +91,16 @@ func testParakeetRecoveryState() {
         assertFalse(state.timeoutRecovery(generation: staleGeneration), "stale timeout should not affect newer recovery")
         assertTrue(state.isRecovering, "newer recovery should stay active")
         assertFalse(state.inputFormatReady, "newer recovery should keep input unready")
+    }
+
+    runSuite("ParakeetRecoveryState.timeoutRecovery — stale timeout cannot poison newer ready generation") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+        let currentGeneration = state.beginConfigChange()
+
+        assertTrue(state.finishRecovery(success: true, generation: currentGeneration), "current recovery should mark input ready")
+        assertFalse(state.timeoutRecovery(generation: staleGeneration), "stale timeout must not apply after newer success")
+        assertTrue(state.canStartRecording, "late timeout from an old graph must not block recording")
     }
 
     runSuite("ParakeetRecoveryState.timeoutRecovery — ignores pristine state") {

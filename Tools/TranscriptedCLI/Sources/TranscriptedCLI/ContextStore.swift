@@ -105,7 +105,7 @@ struct CLIContextDirectories {
         var directories = [primary]
         var seen = Set([primary.standardizedFileURL.path])
 
-        for candidate in legacyCandidates where directoryHasMarkdownFiles(candidate, fileManager: fileManager) {
+        for candidate in legacyCandidates where directoryHasCaptureMarkdownFiles(candidate, fileManager: fileManager) {
             let path = candidate.standardizedFileURL.path
             guard !seen.contains(path) else { continue }
             seen.insert(path)
@@ -115,7 +115,7 @@ struct CLIContextDirectories {
         return directories
     }
 
-    private static func directoryHasMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
+    private static func directoryHasCaptureMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
         guard let contents = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -130,8 +130,24 @@ struct CLIContextDirectories {
             else {
                 return false
             }
-            return values.isRegularFile == true && values.isSymbolicLink != true
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                return false
+            }
+            return looksLikeCaptureMarkdown(url)
         }
+    }
+
+    private static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("Dictations_") {
+            return true
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+
+        return content.hasPrefix("---\n") && content.contains("\n---\n")
     }
 }
 
@@ -227,11 +243,14 @@ enum CLIContextStore {
                 if let speaker, !meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(speaker) }) {
                     return nil
                 }
-                let matches = meeting.utterances.filter { utterance in
+                let textMatch = meeting.utterances.first { utterance in
                     utterance.text.localizedCaseInsensitiveContains(normalizedQuery)
                         && (speaker == nil || speakerMatches(filter: speaker!, speakerName: utterance.speakerId))
                 }
-                guard let firstMatch = matches.first else { return nil }
+                let metadataMatch = meeting.title.localizedCaseInsensitiveContains(normalizedQuery)
+                    || meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(normalizedQuery) })
+                guard let preview = textMatch.map({ String($0.text.prefix(220)) })
+                    ?? (metadataMatch ? recentMeetingPreview(for: meeting) : nil) else { return nil }
                 return CLIContextItem(
                     kind: .meeting,
                     title: meeting.title,
@@ -239,7 +258,7 @@ enum CLIContextStore {
                     entryId: nil,
                     date: meeting.date,
                     datetime: meeting.datetime,
-                    preview: String(firstMatch.text.prefix(220)),
+                    preview: preview,
                     wordCount: meeting.wordCount,
                     speakers: meeting.speakers,
                     sourceAppName: nil,
@@ -433,10 +452,24 @@ enum CLIContextStore {
         return files.compactMap { url in
             guard url.pathExtension == "md" else { return nil }
             switch CLIPathSecurity.validateExistingFile(url, under: directory) {
-            case .valid(let safeURL): return safeURL
+            case .valid(let safeURL):
+                return looksLikeCaptureMarkdown(safeURL) ? safeURL : nil
             case .missing, .invalid: return nil
             }
         }
+    }
+
+    private static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("Dictations_") {
+            return true
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+
+        return content.hasPrefix("---\n") && content.contains("\n---\n")
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {

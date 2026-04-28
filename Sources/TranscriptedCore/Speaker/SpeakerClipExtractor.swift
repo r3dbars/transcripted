@@ -43,7 +43,7 @@ public enum SpeakerClipExtractor {
         let format = audioFile.processingFormat
         let sampleRate = format.sampleRate
 
-        guard sampleRate > 0 else {
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             throw ClipError.invalidAudioFormat
         }
 
@@ -207,13 +207,16 @@ public enum SpeakerClipExtractor {
         speakerId: Int,
         channel: UtteranceChannel
     ) throws -> URL {
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
+            throw ClipError.invalidAudioFormat
+        }
 
         let tempDir = defaultClipsDirectory
         // Security: keep temporary speaker clips inside Transcripted's owner-only
         // app tmp directory instead of the process-wide temp folder, so sensitive
         // voice samples do not spill into a broader shared scratch location.
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: tempDir.path)
+        FileManager.default.restrictDirectoryToOwnerOnly(atPath: tempDir.path)
         let clipFilename = "speaker_\(channel.rawValue)_\(speakerId)_\(UUID().uuidString.prefix(8)).wav"
         let clipURL = tempDir.appendingPathComponent(clipFilename)
 
@@ -235,15 +238,30 @@ public enum SpeakerClipExtractor {
 
         for segment in segments {
             guard totalFramesWritten < maxClipFrames else { break }
+            guard segment.start.isFinite, segment.end.isFinite else { continue }
 
-            let startFrame = AVAudioFramePosition(segment.start * sampleRate)
-            let endFrame = AVAudioFramePosition(min(segment.end, segment.start + 8.0) * sampleRate)
-            let frameCount = AVAudioFrameCount(endFrame - startFrame)
+            let rawStartFrame = segment.start * sampleRate
+            let rawEndFrame = min(segment.end, segment.start + 8.0) * sampleRate
+            guard rawStartFrame.isFinite,
+                  rawEndFrame.isFinite,
+                  rawStartFrame >= 0,
+                  rawStartFrame <= Double(AVAudioFramePosition.max),
+                  rawEndFrame <= Double(AVAudioFramePosition.max),
+                  rawEndFrame > rawStartFrame else {
+                continue
+            }
+
+            let rawFrameCount = rawEndFrame - rawStartFrame
+            guard rawFrameCount <= Double(AVAudioFrameCount.max) else { continue }
+
+            let startFrame = AVAudioFramePosition(rawStartFrame)
+            let frameCount = AVAudioFrameCount(rawFrameCount)
 
             guard frameCount > 0, startFrame >= 0, startFrame < audioFile.length else { continue }
 
             // Clamp to file length
-            let actualFrameCount = min(frameCount, AVAudioFrameCount(audioFile.length - startFrame))
+            let availableFrames = min(audioFile.length - startFrame, AVAudioFramePosition(AVAudioFrameCount.max))
+            let actualFrameCount = min(frameCount, AVAudioFrameCount(availableFrames))
             let remainingAllowed = maxClipFrames - totalFramesWritten
             let framesToRead = min(actualFrameCount, remainingAllowed)
 

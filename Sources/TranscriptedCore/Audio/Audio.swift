@@ -43,6 +43,56 @@ public enum SystemAudioStatus: Equatable {
     }
 }
 
+struct AudioRecordingFormatSnapshot: Equatable {
+    let sampleRate: Double
+    let channelCount: AVAudioChannelCount
+}
+
+enum AudioRecordingFormatPolicy {
+    private static let minimumUsableSampleRate: Double = 8_000
+    private static let maximumUsableSampleRate: Double = 384_000
+
+    static func snapshot(_ format: AVAudioFormat) -> AudioRecordingFormatSnapshot? {
+        let sampleRate = format.sampleRate
+        let channelCount = format.channelCount
+        guard isUsableSampleRate(sampleRate), channelCount > 0 else {
+            return nil
+        }
+        return AudioRecordingFormatSnapshot(sampleRate: sampleRate, channelCount: channelCount)
+    }
+
+    static func isUsableSampleRate(_ sampleRate: Double) -> Bool {
+        sampleRate.isFinite
+            && sampleRate >= minimumUsableSampleRate
+            && sampleRate <= maximumUsableSampleRate
+    }
+
+    static func displaySampleRate(_ sampleRate: Double) -> String {
+        isUsableSampleRate(sampleRate) ? "\(Int(sampleRate))" : "invalid"
+    }
+
+    static func makeMonoOutputFormat(sampleRate: Double) throws -> AVAudioFormat {
+        guard isUsableSampleRate(sampleRate) else {
+            throw NSError(domain: "AudioRecordingFormatPolicy", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Refusing to create mic format from invalid sample rate"
+            ])
+        }
+
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: true
+        ) else {
+            throw NSError(domain: "AudioRecordingFormatPolicy", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create mono mic format"
+            ])
+        }
+
+        return monoFormat
+    }
+}
+
 /// Main audio recording class that captures microphone and system audio
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
@@ -155,6 +205,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     var engine: AVAudioEngine?
     var inputNode: AVAudioInputNode?
+    private let audioGraphLock = NSRecursiveLock()
     var startTime: Date?
     var timer: Timer?
 
@@ -251,6 +302,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     let maxRecoveryAttempts = 5
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
+
+    func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
+        audioGraphLock.lock()
+        defer { audioGraphLock.unlock() }
+        return try body()
+    }
 
     // Write error tracking — stop writing after repeated failures
     // Thread-safe: accessed from audio file queues (background) and reset from start() (main thread)
@@ -545,7 +602,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// capture can keep the shared input device in a processed mode, which can
     /// make other mic apps sound quieter.
     func disarmVoiceProcessing(on inputNode: AVAudioInputNode) {
-        guard voiceProcessingEnabled || inputNode.isVoiceProcessingEnabled else { return }
+        guard voiceProcessingEnabled else { return }
         if let engine, engine.isRunning { return }
 
         do {
@@ -734,19 +791,21 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
-            if let engineRef, let inputNodeRef {
-                AppLogger.audio.info("Stopping audio capture")
-                if engineRef.isRunning {
-                    inputNodeRef.removeTap(onBus: 0)
-                    engineRef.stop()
+            self.withAudioGraphLock {
+                if let engineRef, let inputNodeRef {
+                    AppLogger.audio.info("Stopping audio capture")
+                    if engineRef.isRunning {
+                        inputNodeRef.removeTap(onBus: 0)
+                        engineRef.stop()
+                    }
+                    self.disarmVoiceProcessing(on: inputNodeRef)
                 }
-                self.disarmVoiceProcessing(on: inputNodeRef)
-            }
 
-            // Drop the RealtimeAGC reference so gain history doesn't
-            // carry into the next recording. Safe here because the
-            // engine has stopped — no more tap callbacks can fire.
-            self.realtimeAGC = nil
+                // Drop the RealtimeAGC reference so gain history doesn't
+                // carry into the next recording. Safe here because the
+                // engine has stopped — no more tap callbacks can fire.
+                self.realtimeAGC = nil
+            }
 
             // System audio capture's `stop()` is non-blocking (vs `stopSync`),
             // but we keep it ordered after engine teardown so a single
@@ -809,23 +868,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         AppLogger.audio.info("Starting audio level monitoring")
 
-        let monitorFormat = recordingFormat(for: inputNode)
-        guard monitorFormat.sampleRate > 0, monitorFormat.channelCount > 0 else {
+        let monitorFormat = withAudioGraphLock {
+            recordingFormat(for: inputNode)
+        }
+        guard AudioRecordingFormatPolicy.snapshot(monitorFormat) != nil else {
             AppLogger.audio.warning("Cannot start monitoring — invalid input format")
             return
         }
 
-        // Install mic tap for level metering only (no file writing)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
-            self?.calculateLevel(buffer: buffer)
-        }
-
         do {
-            try engine.start()
+            try withAudioGraphLock {
+                // Install mic tap for level metering only (no file writing)
+                inputNode.removeTap(onBus: 0)
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
+                    self?.calculateLevel(buffer: buffer)
+                }
+                try engine.start()
+            }
         } catch {
             AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
-            inputNode.removeTap(onBus: 0)
+            withAudioGraphLock {
+                inputNode.removeTap(onBus: 0)
+            }
             return
         }
 
@@ -856,18 +920,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         AppLogger.audio.info("Stopping audio level monitoring")
 
-        if let engine = engine, let inputNode = inputNode {
-            if engine.isRunning {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
+        withAudioGraphLock {
+            if let engine = engine, let inputNode = inputNode {
+                if engine.isRunning {
+                    inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                }
+                disarmVoiceProcessing(on: inputNode)
             }
-            disarmVoiceProcessing(on: inputNode)
-        }
 
-        // Monitoring shares the engine but not the AGC; drop it here so a
-        // monitoring session followed by a recording session both start
-        // with a fresh gain history.
-        realtimeAGC = nil
+            // Monitoring shares the engine but not the AGC; drop it here so a
+            // monitoring session followed by a recording session both start
+            // with a fresh gain history.
+            realtimeAGC = nil
+        }
 
         systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
 
@@ -892,9 +958,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCancellable?.cancel()
         systemAudioCapture?.stopSync()
 
-        if let engine, let inputNode, engine.isRunning {
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
+        withAudioGraphLock {
+            if let engine, let inputNode, engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
         }
     }
 }

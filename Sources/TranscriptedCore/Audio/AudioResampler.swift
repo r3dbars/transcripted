@@ -12,9 +12,17 @@ public enum AudioResampler {
     /// Uses linear interpolation — sufficient for speech (bandwidth << Nyquist at 16kHz).
     public static func resample(_ samples: [Float], from inputRate: Double, to outputRate: Double = 16000) -> [Float] {
         guard inputRate != outputRate, !samples.isEmpty else { return samples }
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(inputRate),
+              AudioRecordingFormatPolicy.isUsableSampleRate(outputRate) else {
+            return samples
+        }
 
         let ratio = inputRate / outputRate
-        let outputCount = Int(Double(samples.count) / ratio)
+        let rawOutputCount = Double(samples.count) / ratio
+        guard rawOutputCount.isFinite, rawOutputCount > 0, rawOutputCount <= Double(Int.max) else {
+            return []
+        }
+        let outputCount = Int(rawOutputCount)
         guard outputCount > 0 else { return [] }
 
         var output = [Float](repeating: 0, count: outputCount)
@@ -51,6 +59,11 @@ public enum AudioResampler {
 
         let frameLength = Int(buffer.frameLength)
         let channelCount = Int(format.channelCount)
+        guard channelCount > 0 else {
+            throw NSError(domain: "AudioResampler", code: 6, userInfo: [
+                NSLocalizedDescriptionKey: "Audio file has no readable channels"
+            ])
+        }
 
         // Convert to mono Float32 array
         var samples = [Float](repeating: 0, count: frameLength)
@@ -89,12 +102,24 @@ public enum AudioResampler {
     private static func convertToMono(url: URL, targetRate: Double) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
         let srcFormat = file.processingFormat
-        let srcFrames = AVAudioFrameCount(file.length)
 
         // Guard against empty audio files (e.g., mic device thrashing during recording)
-        guard srcFrames > 0 else {
+        guard file.length > 0 else {
             throw PipelineError.emptyAudioFile
         }
+        guard file.length <= Int64(AVAudioFrameCount.max) else {
+            throw NSError(domain: "AudioResampler", code: 7, userInfo: [
+                NSLocalizedDescriptionKey: "Audio file is too large to resample safely"
+            ])
+        }
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(srcFormat.sampleRate),
+              AudioRecordingFormatPolicy.isUsableSampleRate(targetRate),
+              srcFormat.channelCount > 0 else {
+            throw NSError(domain: "AudioResampler", code: 8, userInfo: [
+                NSLocalizedDescriptionKey: "Audio file has an invalid sample rate or channel count"
+            ])
+        }
+        let srcFrames = AVAudioFrameCount(file.length)
 
         // Short-circuit if already at target format
         if srcFormat.sampleRate == targetRate && srcFormat.channelCount == 1 {
@@ -119,9 +144,17 @@ public enum AudioResampler {
         }
 
         let ratio = targetRate / srcFormat.sampleRate
+        let totalDstFrameCount = Double(srcFrames) * ratio + 64
+        guard totalDstFrameCount.isFinite,
+              totalDstFrameCount > 0,
+              totalDstFrameCount <= Double(AVAudioFrameCount.max) else {
+            throw NSError(domain: "AudioResampler", code: 9, userInfo: [
+                NSLocalizedDescriptionKey: "Converted audio frame count is unsafe"
+            ])
+        }
 
         // Allocate output buffer for the entire converted result
-        let totalDstFrames = AVAudioFrameCount(Double(srcFrames) * ratio) + 64
+        let totalDstFrames = AVAudioFrameCount(totalDstFrameCount)
         guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: totalDstFrames) else {
             throw NSError(domain: "AudioResampler", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to create destination audio buffer"
@@ -195,8 +228,23 @@ public enum AudioResampler {
         startTime: Double,
         endTime: Double
     ) -> [Float] {
-        let startSample = max(0, Int(startTime * sampleRate))
-        let endSample = min(samples.count, Int(endTime * sampleRate))
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate),
+              startTime.isFinite,
+              endTime.isFinite else {
+            return []
+        }
+        let rawStartSample = startTime * sampleRate
+        let rawEndSample = endTime * sampleRate
+        guard rawStartSample.isFinite,
+              rawEndSample.isFinite,
+              rawStartSample >= Double(Int.min),
+              rawEndSample >= Double(Int.min),
+              rawStartSample <= Double(Int.max),
+              rawEndSample <= Double(Int.max) else {
+            return []
+        }
+        let startSample = max(0, Int(rawStartSample))
+        let endSample = min(samples.count, Int(rawEndSample))
         guard startSample < endSample else { return [] }
         return Array(samples[startSample..<endSample])
     }

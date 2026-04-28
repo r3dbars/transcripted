@@ -86,20 +86,17 @@ extension Audio {
         recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
-        // Stop engine (but keep recording flag true)
-        inputNode.removeTap(onBus: 0)
-        engine.stop()
-
-        // Reset to system default (ignore UserDefaults preference during recovery)
-        engine.reset()
-        // engine.reset() clears VPIO state on the input node; require re-arm.
-        voiceProcessingEnabled = false
-        self.inputNode = engine.inputNode
-
-        // Get new device format
-        guard let newInputNode = self.inputNode else {
-            AppLogger.audioMic.error("Failed to get input node after reset")
-            return
+        // Stop engine (but keep recording flag true), then reset to system
+        // default. Keep graph mutation serialized with stop/start teardown so
+        // a user stop during device recovery cannot race CoreAudio format
+        // reads or tap replacement.
+        withAudioGraphLock {
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engine.reset()
+            // engine.reset() clears VPIO state on the input node; require re-arm.
+            voiceProcessingEnabled = false
+            self.inputNode = engine.inputNode
         }
 
         // HAL settle time - wait for audio hardware to stabilize after device change
@@ -115,37 +112,49 @@ extension Audio {
             return
         }
 
+        // Get new device format
+        guard let newInputNode = self.inputNode else {
+            AppLogger.audioMic.error("Failed to get input node after reset")
+            return
+        }
+
         // Re-enable VPIO after the HAL settles so setVoiceProcessingEnabled
         // queries a stable device. Skips silently if VPIO can't engage on the
         // new device, in which case recordingFormat(for:) falls back to the
         // hardware format and recording continues without AGC. When VPIO is
         // disabled by preference, this is a no-op and the software
         // RealtimeAGC keeps running across the device change.
-        armVoiceProcessing(on: newInputNode)
+        var recordingFormat = withAudioGraphLock {
+            armVoiceProcessing(on: newInputNode)
 
-        // Re-evaluate software AGC: if VPIO armed (rare here), drop AGC; if
-        // VPIO didn't arm, reset gain history so the new device starts at
-        // unity gain instead of inheriting the previous device's level.
-        if voiceProcessingEnabled {
-            realtimeAGC = nil
-        } else if let existing = realtimeAGC {
-            existing.reset()
-        } else {
-            realtimeAGC = RealtimeAGC()
+            // Re-evaluate software AGC: if VPIO armed (rare here), drop AGC; if
+            // VPIO didn't arm, reset gain history so the new device starts at
+            // unity gain instead of inheriting the previous device's level.
+            if voiceProcessingEnabled {
+                realtimeAGC = nil
+            } else if let existing = realtimeAGC {
+                existing.reset()
+            } else {
+                realtimeAGC = RealtimeAGC()
+            }
+
+            // Read the format the tap will actually deliver (VPIO-aware when
+            // armVoiceProcessing succeeded above, hardware format otherwise).
+            return self.recordingFormat(for: newInputNode)
         }
-
-        // Read the format the tap will actually deliver (VPIO-aware when
-        // armVoiceProcessing succeeded above, hardware format otherwise).
-        var recordingFormat = self.recordingFormat(for: newInputNode)
-        if recordingFormat.sampleRate <= 0 || recordingFormat.channelCount <= 0 {
+        var recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
+        if recordingSnapshot == nil {
             AppLogger.audioMic.warning("Recovery format invalid after first read, retrying", [
                 "sampleRate": "\(recordingFormat.sampleRate)",
                 "channels": "\(recordingFormat.channelCount)"
             ])
             Thread.sleep(forTimeInterval: 0.3)
-            recordingFormat = self.recordingFormat(for: newInputNode)
+            recordingFormat = withAudioGraphLock {
+                self.recordingFormat(for: newInputNode)
+            }
+            recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
         }
-        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+        guard let recordingSnapshot else {
             AppLogger.audioMic.error("Recovery format remained invalid", [
                 "sampleRate": "\(recordingFormat.sampleRate)",
                 "channels": "\(recordingFormat.channelCount)"
@@ -153,20 +162,20 @@ extension Audio {
             return
         }
         let oldChannelCount = self.inputChannelCount
-        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingFormat.sampleRate)", "channels": "\(recordingFormat.channelCount)"])
+        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"])
 
         // ALWAYS update channel count for proper downmix handling
         // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work
-        self.inputChannelCount = recordingFormat.channelCount
-        if recordingFormat.channelCount > 1 && oldChannelCount != recordingFormat.channelCount {
-            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
+        self.inputChannelCount = recordingSnapshot.channelCount
+        if recordingSnapshot.channelCount > 1 && oldChannelCount != recordingSnapshot.channelCount {
+            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
         }
 
         // Rotate files only when the sample rate changes. Channel-count-only changes
         // keep writing into the same mono WAV, which avoids unnecessary segment churn.
         // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety.
-        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false }
-        let channelCountChanged = oldChannelCount != recordingFormat.channelCount
+        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingSnapshot.sampleRate != $0.processingFormat.sampleRate } ?? false }
+        let channelCountChanged = oldChannelCount != recordingSnapshot.channelCount
         var recoverySegmentURL: URL?
         var shouldKeepRecoverySegment = false
         defer {
@@ -183,7 +192,7 @@ extension Audio {
         if channelCountChanged && !sampleRateChanged {
             AppLogger.audioMic.info("Input channel count changed, keeping current recording file", [
                 "oldChannels": "\(oldChannelCount)",
-                "newChannels": "\(recordingFormat.channelCount)"
+                "newChannels": "\(recordingSnapshot.channelCount)"
             ])
         }
 
@@ -199,16 +208,9 @@ extension Audio {
             recoverySegmentURL = fileURL
 
             do {
-                // Always create mono format at new sample rate
-                guard let monoFormat = AVAudioFormat(
-                    commonFormat: .pcmFormatFloat32,
-                    sampleRate: recordingFormat.sampleRate,
-                    channels: 1,
-                    interleaved: true
-                ) else {
-                    AppLogger.audioMic.error("Failed to create mono format for recovery")
-                    return
-                }
+                let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
+                    sampleRate: recordingSnapshot.sampleRate
+                )
                 self.monoOutputFormat = monoFormat
 
                 let newFile = try AVAudioFile(
@@ -226,11 +228,6 @@ extension Audio {
             }
         }
 
-        // Reinstall tap using shared buffer handler
-        newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            self?.handleMicBuffer(buffer)
-        }
-
         guard sessionGeneration == recordingSessionGeneration else {
             AppLogger.audioMic.info("Skipping stale recovery before engine restart", [
                 "expectedSession": "\(sessionGeneration)",
@@ -241,7 +238,14 @@ extension Audio {
 
         // Restart engine
         do {
-            try engine.start()
+            try withAudioGraphLock {
+                // Reinstall tap using shared buffer handler
+                newInputNode.removeTap(onBus: 0)
+                newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                    self?.handleMicBuffer(buffer)
+                }
+                try engine.start()
+            }
             lastBufferTime = CACurrentMediaTime() // Reset watchdog
 
             DispatchQueue.main.async { [weak self] in

@@ -12,6 +12,15 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .waitForRecovery, "active recovery should not start or refresh")
     }
 
+    runSuite("DictationReadinessWaitPolicy — recovery flag wins over stale ready flag") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: true,
+            inputFormatReady: true
+        )
+
+        assertEqual(action, .waitForRecovery, "active recovery should block recording even if a stale ready flag leaks through")
+    }
+
     runSuite("DictationReadinessWaitPolicy — refreshes after failed recovery leaves input unready") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,

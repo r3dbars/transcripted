@@ -64,4 +64,19 @@ func testDictationAudioRecovery() {
             "short bursts should not be retried"
         )
     }
+
+    runSuite("DictationAudioRecovery — rejects non-finite sample rates") {
+        let samples = [Float](repeating: 0.02, count: 32_000)
+
+        for sampleRate in [Double.nan, Double.infinity, -Double.infinity, 0.0, 7_999.0, 384_001.0] {
+            let analysis = DictationAudioRecovery.analyze(samples: samples, sampleRate: sampleRate)
+
+            assertEqual(analysis.durationSeconds, 0, "invalid sample rates should not compute duration")
+            assertFalse(analysis.hasUsableSpeechSignal, "invalid sample rates should not look recoverable")
+            assertNil(
+                DictationAudioRecovery.retrySamples(from: samples, sampleRate: sampleRate, analysis: analysis),
+                "invalid sample rates should not request retry samples"
+            )
+        }
+    }
 }

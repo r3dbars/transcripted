@@ -64,7 +64,9 @@ func testDictationTranscriptStore() {
         """
         try? legacyMarkdown.write(to: legacyFile, atomically: true, encoding: .utf8)
 
-        assertEqual(DictationTranscriptStore.latestSavedText(directory: outputDir), "legacy text", "legacy dictation text")
+        let latest = DictationTranscriptStore.latestSavedDictation(directory: outputDir)
+        assertEqual(latest?.text, "legacy text", "legacy dictation text")
+        assertEqual(latest?.entryID, "dictation-legacy", "legacy dictation entry ID")
     }
 
     runSuite("DictationTranscriptStore.recentSavedDictations — returns the newest entries across day files and same-day sections") {
@@ -138,6 +140,96 @@ func testDictationTranscriptStore() {
             text,
             "body headings should not split one saved dictation into multiple entries"
         )
+    }
+
+    runSuite("DictationTranscriptStore.savedDictationCounts — totals entries and dictated words") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let today = isoDate("2026-04-11T12:00:00-0500")
+        _ = try? DictationTranscriptStore.save(
+            text: "one two three",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-10T11:20:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "four five",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: today,
+            directory: outputDir
+        )
+
+        let counts = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+
+        assertEqual(counts.total, 2, "total dictation count")
+        assertEqual(counts.today, 1, "today dictation count")
+        assertEqual(counts.totalWords, 5, "total dictated word count")
+    }
+
+    runSuite("DictationTranscriptStore.deleteEntry — removes only the matching entry ID") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let dayFile = outputDir.appendingPathComponent("Dictations_2026-04-12.md")
+        let markdown = """
+        ---
+        title: "Dictations for April 12, 2026"
+        date: 2026-04-12
+        capture_type: dictation_day
+        ---
+
+        # Dictations for April 12, 2026
+
+        ## 10:05 AM - First duplicate timestamp
+
+        Entry ID: `dictation-first`
+        Captured: 2026-04-12T10:05:00Z
+        Source app: Notes
+        Delivery: pasted
+        Words: 2
+        Characters: 11
+
+        first text
+
+        ## 10:05 AM - Second duplicate timestamp
+
+        Entry ID: `dictation-second`
+        Captured: 2026-04-12T10:05:00Z
+        Source app: Notes
+        Delivery: pasted
+        Words: 2
+        Characters: 12
+
+        second text
+        """
+        try? markdown.write(to: dayFile, atomically: true, encoding: .utf8)
+
+        let entries = DictationTranscriptStore.recentSavedDictations(limit: 2, directory: outputDir)
+        guard let second = entries.first(where: { $0.entryID == "dictation-second" }) else {
+            assertionFailure("Expected second dictation entry")
+            return
+        }
+
+        do {
+            try DictationTranscriptStore.deleteEntry(second)
+        } catch {
+            assertionFailure("deleteEntry should not throw: \(error)")
+        }
+
+        let remainingContent = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
+        assertTrue(remainingContent.contains("dictation-first"), "first entry ID remains")
+        assertTrue(remainingContent.contains("first text"), "first entry body remains")
+        assertFalse(remainingContent.contains("dictation-second"), "second entry ID removed")
+        assertFalse(remainingContent.contains("second text"), "second entry body removed")
     }
 }
 

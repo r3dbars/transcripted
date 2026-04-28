@@ -8,7 +8,7 @@ struct AudioSignalAnalysis: Equatable {
     let activeRatio: Double
 
     var durationSeconds: Double {
-        guard sampleRate > 0 else { return 0 }
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return 0 }
         return Double(sampleCount) / sampleRate
     }
 
@@ -49,7 +49,7 @@ enum AudioSignalRecovery {
     static let legacySpeechDetectionThreshold: Float = 0.010
 
     static func analyze(samples: [Float], sampleRate: Double) -> AudioSignalAnalysis {
-        guard !samples.isEmpty, sampleRate > 0 else {
+        guard !samples.isEmpty, AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             return AudioSignalAnalysis(
                 sampleCount: samples.count,
                 sampleRate: sampleRate,

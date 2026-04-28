@@ -191,7 +191,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        togglePopover()
+        if flag {
+            // Let AppKit do its default handling (bring an existing
+            // window to the front).
+            return true
+        }
+
+        if !PermissionsOnboardingPreferences.hasCompleted() {
+            _ = resolvedSourceApp()
+            onboardingWindowController.present()
+            return false
+        }
+
+        showSettingsWindow(page: .home, source: "dock_icon")
         return false
     }
 
@@ -288,11 +300,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
-        let updateVersion = status.availableUpdateVersion
+        let updateVersion = status.readyToInstallVersion
         statusItemUpdateBadge.isHidden = updateVersion == nil
 
         if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - update \(updateVersion) ready"
+            statusItem?.button?.toolTip = "Transcripted - restart to update to \(updateVersion)"
         } else {
             statusItem?.button?.toolTip = "Transcripted"
         }
