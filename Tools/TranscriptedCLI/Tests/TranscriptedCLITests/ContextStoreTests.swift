@@ -161,6 +161,34 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.map(\.title), ["Current meeting", "Legacy meeting"])
     }
 
+    func testRecentSkipsNonCaptureMarkdownInMeetingsDirectory() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        try "# Notes".write(
+            to: meetingsDir.appendingPathComponent("CLAUDE.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try makeMeetingMarkdown(title: "Current meeting", date: "2026-04-18", body: "[00:03] [Mic/You] Current note.")
+            .write(to: meetingsDir.appendingPathComponent("Call_current.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.map(\.title), ["Current meeting"])
+    }
+
     func testRecentMeetingWithDuplicateSpeakerNamesDoesNotCrash() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

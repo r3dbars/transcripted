@@ -105,7 +105,7 @@ struct CLIContextDirectories {
         var directories = [primary]
         var seen = Set([primary.standardizedFileURL.path])
 
-        for candidate in legacyCandidates where directoryHasMarkdownFiles(candidate, fileManager: fileManager) {
+        for candidate in legacyCandidates where directoryHasCaptureMarkdownFiles(candidate, fileManager: fileManager) {
             let path = candidate.standardizedFileURL.path
             guard !seen.contains(path) else { continue }
             seen.insert(path)
@@ -115,7 +115,7 @@ struct CLIContextDirectories {
         return directories
     }
 
-    private static func directoryHasMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
+    private static func directoryHasCaptureMarkdownFiles(_ directory: URL, fileManager: FileManager) -> Bool {
         guard let contents = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -130,8 +130,24 @@ struct CLIContextDirectories {
             else {
                 return false
             }
-            return values.isRegularFile == true && values.isSymbolicLink != true
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                return false
+            }
+            return looksLikeCaptureMarkdown(url)
         }
+    }
+
+    private static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("Dictations_") {
+            return true
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+
+        return content.hasPrefix("---\n") && content.contains("\n---\n")
     }
 }
 
@@ -433,10 +449,24 @@ enum CLIContextStore {
         return files.compactMap { url in
             guard url.pathExtension == "md" else { return nil }
             switch CLIPathSecurity.validateExistingFile(url, under: directory) {
-            case .valid(let safeURL): return safeURL
+            case .valid(let safeURL):
+                return looksLikeCaptureMarkdown(safeURL) ? safeURL : nil
             case .missing, .invalid: return nil
             }
         }
+    }
+
+    private static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("Dictations_") {
+            return true
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+
+        return content.hasPrefix("---\n") && content.contains("\n---\n")
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {

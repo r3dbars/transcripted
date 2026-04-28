@@ -151,7 +151,7 @@ enum TranscriptLoader {
     }
 
     static func artifactKind(for url: URL) -> ContextArtifactKind? {
-        guard url.pathExtension == "md" else { return nil }
+        guard url.pathExtension == "md", looksLikeCaptureMarkdown(url) else { return nil }
 
         let filename = url.deletingPathExtension().lastPathComponent
         if filename.hasPrefix("Dictations_") {
@@ -176,6 +176,19 @@ enum TranscriptLoader {
                 .contentModificationDate?.timeIntervalSince1970) ?? 0
             return ContextArtifactFile(url: safeURL, modDate: modDate, kind: kind)
         }
+    }
+
+    private static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("Dictations_") {
+            return true
+        }
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+
+        return content.hasPrefix("---\n") && content.contains("\n---\n")
     }
 
     static func speakerLookup(from transcript: AgentTranscript) -> [String: (name: String, persistentId: String?)] {
