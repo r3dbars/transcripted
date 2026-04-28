@@ -16,6 +16,7 @@ func testSentryPayloadSanitizer() {
     runSuite("SentryPayloadSanitizer.sanitizeContext drops obviously sensitive keys") {
         let sanitized = SentryPayloadSanitizer.sanitizeContext([
             "client_secret": "plain-secret",
+            "context": "Customer transcript line that should stay local",
             "dsn": "https://example@sentry.invalid/1",
             "duration_ms": "123",
             "meeting_state": "transcribing",
@@ -31,6 +32,7 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["duration_ms"], "123", "coarse numeric values should remain")
         assertEqual(sanitized["meeting_state"], "transcribing", "non-sensitive state should remain")
         assertNil(sanitized["client_secret"], "client secrets should be dropped")
+        assertNil(sanitized["context"], "free-form context strings should be dropped")
         assertNil(sanitized["dsn"], "DSNs should be dropped")
         assertNil(sanitized["meeting_name"], "meeting names should be dropped")
         assertNil(sanitized["name"], "generic names should be dropped")

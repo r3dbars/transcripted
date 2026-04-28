@@ -7,6 +7,7 @@ enum SentryPayloadSanitizer {
         "authorization",
         "bearer",
         "bundle",
+        "context",
         "credential",
         "dsn",
         "email",
