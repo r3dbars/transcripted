@@ -1,4 +1,5 @@
 import XCTest
+@preconcurrency import AVFoundation
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -48,6 +49,37 @@ final class AudioInitializationTests: XCTestCase {
         // after upgrade unless they explicitly opt in via Settings.
         XCTAssertFalse(audio.enableVoiceProcessing,
                        "enableVoiceProcessing must default to false to avoid the system-wide ducking regression")
+    }
+
+    func testAudioRecordingFormatPolicyRejectsInvalidSampleRatesBeforeCreatingFormats() throws {
+        for sampleRate in [0, -1, Double.nan, Double.infinity, -Double.infinity, 7_999, 384_001] {
+            XCTAssertFalse(
+                AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate),
+                "sample rate \(sampleRate) should not be accepted for CoreAudio format creation"
+            )
+            XCTAssertThrowsError(
+                try AudioRecordingFormatPolicy.makeMonoOutputFormat(sampleRate: sampleRate),
+                "invalid sample rates must throw before AVAudioFormat is asked to build a format"
+            )
+        }
+
+        let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(sampleRate: 48_000)
+        XCTAssertEqual(monoFormat.sampleRate, 48_000, accuracy: 0.1)
+        XCTAssertEqual(monoFormat.channelCount, 1)
+    }
+
+    func testAudioRecordingFormatPolicySnapshotsOnlyUsableFormats() throws {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ))
+
+        let snapshot = try XCTUnwrap(AudioRecordingFormatPolicy.snapshot(format))
+
+        XCTAssertEqual(snapshot.sampleRate, 48_000, accuracy: 0.1)
+        XCTAssertEqual(snapshot.channelCount, 2)
     }
 
     func testStopOnIdleAudioDoesNotCrashAndBumpsGeneration() {

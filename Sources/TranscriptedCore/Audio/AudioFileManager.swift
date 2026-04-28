@@ -13,35 +13,42 @@ extension Audio {
     func startAudioCapture() async throws {
         ensureCaptureInfrastructureConfigured()
 
-        let (engine, inputNode) = try ensureEngineInitialized()
-        armVoiceProcessing(on: inputNode)
+        let (engine, inputNode, recordingFormat, recordingSnapshot) = try withAudioGraphLock { () throws -> (AVAudioEngine, AVAudioInputNode, AVAudioFormat, AudioRecordingFormatSnapshot) in
+            let (engine, inputNode) = try ensureEngineInitialized()
+            armVoiceProcessing(on: inputNode)
 
-        // When VPIO is off (the default — see `enableVoiceProcessing`), run
-        // a software AGC in the mic tap callback to recover attenuated
-        // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
-        // would do this in hardware but engages system-wide ducking of
-        // other apps' audio output; software AGC has no such side effect.
-        realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
+            // When VPIO is off (the default — see `enableVoiceProcessing`), run
+            // a software AGC in the mic tap callback to recover attenuated
+            // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
+            // would do this in hardware but engages system-wide ducking of
+            // other apps' audio output; software AGC has no such side effect.
+            realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
 
-        // Use system default microphone (whatever macOS has configured).
-        // recordingFormat(for:) returns:
-        //   - VPIO output format when armVoiceProcessing enabled it (mono
-        //     Float32 at the unit's preferred rate), which matches what the
-        //     tap on bus 0 will actually deliver.
-        //   - Hardware format via inputFormat(forBus: 1) otherwise — required
-        //     because outputFormat(forBus: 0) returns the converter format on
-        //     stock AVAudioEngine, which breaks Bluetooth capture.
-        let recordingFormat = self.recordingFormat(for: inputNode)
+            // Use system default microphone (whatever macOS has configured).
+            // recordingFormat(for:) returns:
+            //   - VPIO output format when armVoiceProcessing enabled it (mono
+            //     Float32 at the unit's preferred rate), which matches what the
+            //     tap on bus 0 will actually deliver.
+            //   - Hardware format via inputFormat(forBus: 1) otherwise — required
+            //     because outputFormat(forBus: 0) returns the converter format on
+            //     stock AVAudioEngine, which breaks Bluetooth capture.
+            let recordingFormat = self.recordingFormat(for: inputNode)
+            guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
+                AppLogger.audioMic.error("Mic input format invalid", [
+                    "sampleRate": "\(recordingFormat.sampleRate)",
+                    "channels": "\(recordingFormat.channelCount)"
+                ])
+                throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
+            }
+
+            return (engine, inputNode, recordingFormat, recordingSnapshot)
+        }
         AppLogger.audioMic.info("Mic input format", [
-            "sampleRate": "\(recordingFormat.sampleRate)",
-            "channels": "\(recordingFormat.channelCount)",
+            "sampleRate": "\(recordingSnapshot.sampleRate)",
+            "channels": "\(recordingSnapshot.channelCount)",
             "voiceProcessing": "\(voiceProcessingEnabled)",
             "softwareAGC": "\(realtimeAGC != nil)"
         ])
-
-        guard recordingFormat.sampleRate > 0 && recordingFormat.channelCount > 0 else {
-            throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
-        }
 
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
@@ -95,7 +102,11 @@ extension Audio {
                         throw NSError(domain: "Audio", code: 10, userInfo: [NSLocalizedDescriptionKey: "Failed to get tap format"])
                     }
                     let sampleRate = tapFormat.sampleRate
-                    AppLogger.audioSystem.info("System audio format", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)", "interleaved": "\(tapFormat.isInterleaved)"])
+                    guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate),
+                          tapFormat.channelCount > 0 else {
+                        throw NSError(domain: "Audio", code: 11, userInfo: [NSLocalizedDescriptionKey: "Invalid system audio format"])
+                    }
+                    AppLogger.audioSystem.info("System audio format", ["sampleRate": AudioRecordingFormatPolicy.displaySampleRate(sampleRate), "channels": "\(tapFormat.channelCount)", "interleaved": "\(tapFormat.isInterleaved)"])
 
                     // Step 3: Create audio file BEFORE starting I/O proc (critical!)
                     let settings: [String: Any] = [
@@ -116,7 +127,7 @@ extension Audio {
                     )
                     FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                     strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
-                    AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": "\(Int(sampleRate))", "channels": "\(tapFormat.channelCount)"])
+                    AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": AudioRecordingFormatPolicy.displaySampleRate(sampleRate), "channels": "\(tapFormat.channelCount)"])
 
                     guard sessionIsCurrent() else {
                         cleanupAbandonedSetup()
@@ -153,7 +164,8 @@ extension Audio {
                         // Debug: Log format details on first few buffers
                         if currentBufferCount <= 3 {
                             let fmt = bufferForAsyncUse.format
-                            AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": "\(Int(fmt.sampleRate))", "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
+                            let bufferSampleRate = AudioRecordingFormatPolicy.displaySampleRate(fmt.sampleRate)
+                            AppLogger.audioSystem.debug("System buffer", ["number": "\(currentBufferCount)", "sampleRate": bufferSampleRate, "channels": "\(fmt.channelCount)", "frames": "\(bufferForAsyncUse.frameLength)"])
                         }
 
                         self.onSystemPCMBuffer?(bufferForAsyncUse)
@@ -223,20 +235,15 @@ extension Audio {
             }
 
             // Always create mono output format at the hardware sample rate
-            guard let monoFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: recordingFormat.sampleRate,
-                channels: 1,
-                interleaved: true
-            ) else {
-                throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mono format"])
-            }
+            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
+                sampleRate: recordingSnapshot.sampleRate
+            )
             self.monoOutputFormat = monoFormat
 
             // Track channel count for manual downmix
-            self.inputChannelCount = recordingFormat.channelCount
-            if recordingFormat.channelCount > 1 {
-                AppLogger.audioMic.debug("Will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
+            self.inputChannelCount = recordingSnapshot.channelCount
+            if recordingSnapshot.channelCount > 1 {
+                AppLogger.audioMic.debug("Will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
             }
 
             // Save as mono WAV file
@@ -247,20 +254,22 @@ extension Audio {
                 interleaved: monoFormat.isInterleaved
             )
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingFormat.sampleRate)"])
+            AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
-        // Remove any existing tap (safety check)
-        inputNode.removeTap(onBus: 0)
+        try withAudioGraphLock {
+            // Remove any existing tap (safety check)
+            inputNode.removeTap(onBus: 0)
 
-        // Install tap on microphone
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            self?.handleMicBuffer(buffer)
+            // Install tap on microphone
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                self?.handleMicBuffer(buffer)
+            }
+
+            try engine.start()
         }
-
-        try engine.start()
 
         let cueHandler = self.onCaptureLifecycleCue
         await MainActor.run {

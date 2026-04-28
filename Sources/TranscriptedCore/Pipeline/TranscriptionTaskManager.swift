@@ -450,7 +450,7 @@ public class TranscriptionTaskManager: ObservableObject {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let frames = Double(file.length)
         let sampleRate = file.processingFormat.sampleRate
-        guard sampleRate > 0 else { return nil }
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return nil }
         return frames / sampleRate
     }
 

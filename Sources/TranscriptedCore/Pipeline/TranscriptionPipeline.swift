@@ -862,7 +862,8 @@ extension Transcription {
         samples: [Float],
         sampleRate: Double
     ) -> PreparedMicSegment? {
-        guard !samples.isEmpty, sampleRate > 0 else { return nil }
+        guard !samples.isEmpty,
+              AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return nil }
 
         let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
         if samples.count < AudioSignalRecovery.parakeetMinimumInferenceSamples, !analysis.hasSpeechCandidate {
@@ -902,7 +903,8 @@ extension Transcription {
         samples: [Float],
         sampleRate: Double
     ) -> [SpeechSegment] {
-        guard !samples.isEmpty else { return [] }
+        guard !samples.isEmpty,
+              AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return [] }
 
         let frameSamples = Int(sampleRate * 0.025)  // 25ms frames (400 samples at 16kHz)
         let hopSamples = Int(sampleRate * 0.010)    // 10ms hop
