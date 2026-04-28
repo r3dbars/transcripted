@@ -58,6 +58,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeActivityTab: HomeActivityTab = .dictations
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
+    @State private var homeDeleteFailure: HomeDeleteFailure?
 
     init(
         appState: TranscriptedAppState,
@@ -367,6 +368,13 @@ struct TranscriptedSettingsView: View {
                 secondaryButton: .cancel()
             )
         }
+        .alert(item: $homeDeleteFailure) { failure in
+            Alert(
+                title: Text(failure.title),
+                message: Text(failure.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -421,9 +429,12 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("delete_dictation_confirm", page: .home)
                     do {
                         try DictationTranscriptStore.deleteEntry(entry)
-                        homeViewModel.refresh()
+                        refreshRecentCaptures()
                     } catch {
-                        NSSound.beep()
+                        presentHomeDeleteFailure(
+                            title: "Could not delete dictation",
+                            error: error
+                        )
                     }
                 }
             }
@@ -464,13 +475,31 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
-        let fm = FileManager.default
-        try? fm.removeItem(at: item.transcriptURL)
-        if let audio = item.audio {
-            try? fm.removeItem(at: audio.directoryURL)
+        do {
+            try removeItemIfPresent(at: item.transcriptURL)
+            if let audio = item.audio {
+                try removeItemIfPresent(at: audio.directoryURL)
+            }
+            refreshRecentCaptures()
+        } catch {
+            presentHomeDeleteFailure(
+                title: "Could not delete meeting",
+                error: error
+            )
         }
-        homeViewModel.refresh()
-        refreshRecentCaptures()
+    }
+
+    private func removeItemIfPresent(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    private func presentHomeDeleteFailure(title: String, error: Error) {
+        NSSound.beep()
+        homeDeleteFailure = HomeDeleteFailure(
+            title: title,
+            message: error.localizedDescription
+        )
     }
 
     private var homeShouldUseWideLayout: Bool {
@@ -1453,9 +1482,12 @@ struct TranscriptedSettingsView: View {
             recentDictations = snapshot.dictations
             recentCapturesLoading = false
         }
-        homeViewModel.refresh()
-        Task { @MainActor in
-            await StatsService.shared.refreshStats()
+
+        if navigation.selectedPage == .home {
+            homeViewModel.refresh()
+            Task { @MainActor in
+                await StatsService.shared.refreshStats()
+            }
         }
     }
 

@@ -63,7 +63,8 @@ final class HomeViewModel: ObservableObject {
         refreshTask = Task { @MainActor in
             let snapshot = await RecentCaptureLoader.load(
                 dictationLimit: requestedDictationLimit + 1,
-                meetingLimit: requestedMeetingLimit + 1
+                meetingLimit: requestedMeetingLimit + 1,
+                includeDictationCounts: true
             )
             guard !Task.isCancelled else { return }
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
@@ -143,6 +144,12 @@ struct HomeDeleteConfirmation: Identifiable {
     let title: String
     let message: String
     let perform: () -> Void
+}
+
+struct HomeDeleteFailure: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 enum HomeActivityTab: String, CaseIterable, Identifiable {

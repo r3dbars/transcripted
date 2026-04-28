@@ -11,6 +11,7 @@ extension Notification.Name {
 
 struct SavedDictationEntry: Identifiable, Sendable {
     let url: URL
+    let entryID: String?
     let title: String
     let text: String
     let createdAt: Date
@@ -19,7 +20,10 @@ struct SavedDictationEntry: Identifiable, Sendable {
     let sourceAppBundleID: String?
 
     var id: String {
-        "\(url.path)#\(createdAt.timeIntervalSince1970)#\(title)"
+        if let entryID, !entryID.isEmpty {
+            return "\(url.path)#\(entryID)"
+        }
+        return "\(url.path)#\(createdAt.timeIntervalSince1970)#\(title)"
     }
 }
 
@@ -139,7 +143,7 @@ enum DictationTranscriptStore {
         url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
     }
 
-    /// Removes a single dictation entry by matching on `createdAt` within its day file.
+    /// Removes a single dictation entry by matching on its stable saved entry ID.
     /// If the day file has no remaining entries, the file is deleted.
     static func deleteEntry(_ entry: SavedDictationEntry) throws {
         let url = entry.url
@@ -148,9 +152,22 @@ enum DictationTranscriptStore {
         }
 
         let sections = splitSections(in: content)
+        var removedCount = 0
         let kept: [String] = sections.filter { section in
             guard let parsed = parseEntry(from: section, in: url) else { return true }
-            return parsed.createdAt != entry.createdAt
+            if isSameEntry(parsed, as: entry) {
+                removedCount += 1
+                return false
+            }
+            return true
+        }
+
+        guard removedCount > 0 else {
+            throw NSError(
+                domain: "DictationTranscriptStore",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
+            )
         }
 
         if kept.isEmpty {
@@ -162,6 +179,16 @@ enum DictationTranscriptStore {
         }
 
         NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: url)
+    }
+
+    private static func isSameEntry(_ lhs: SavedDictationEntry, as rhs: SavedDictationEntry) -> Bool {
+        if let lhsEntryID = lhs.entryID, let rhsEntryID = rhs.entryID {
+            return lhs.url == rhs.url && lhsEntryID == rhsEntryID
+        }
+
+        return lhs.url == rhs.url
+            && lhs.createdAt == rhs.createdAt
+            && lhs.title == rhs.title
     }
 
     private static func headerPreface(in content: String) -> String {
@@ -296,6 +323,7 @@ enum DictationTranscriptStore {
         }
 
         let title = parseTitle(from: heading)
+        var entryID: String?
         var createdAtText = ""
         var sourceAppName = "Unknown"
         var sourceAppBundleID: String?
@@ -320,7 +348,11 @@ enum DictationTranscriptStore {
                 continue
             }
 
-            if trimmed.hasPrefix("Captured:") {
+            if trimmed.hasPrefix("Entry ID:") {
+                sawMetadata = true
+                entryID = metadataValue(from: trimmed, prefix: "Entry ID:")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+            } else if trimmed.hasPrefix("Captured:") {
                 sawMetadata = true
                 createdAtText = metadataValue(from: trimmed, prefix: "Captured:")
             } else if trimmed.hasPrefix("Timestamp:") {
@@ -337,7 +369,7 @@ enum DictationTranscriptStore {
                 sawMetadata = true
                 let rawDelivery = metadataValue(from: trimmed, prefix: "Delivery:")
                 delivery = DictationDelivery(rawValue: rawDelivery) ?? .failed
-            } else if trimmed.hasPrefix("Entry ID:") || trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
+            } else if trimmed.hasPrefix("Words:") || trimmed.hasPrefix("Characters:") {
                 sawMetadata = true
             } else if !sawMetadata {
                 inBody = true
@@ -353,6 +385,7 @@ enum DictationTranscriptStore {
 
         return SavedDictationEntry(
             url: url,
+            entryID: entryID,
             title: title,
             text: text,
             createdAt: createdAt,
