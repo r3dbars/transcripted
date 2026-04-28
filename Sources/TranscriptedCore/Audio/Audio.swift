@@ -43,6 +43,56 @@ public enum SystemAudioStatus: Equatable {
     }
 }
 
+struct AudioRecordingFormatSnapshot: Equatable {
+    let sampleRate: Double
+    let channelCount: AVAudioChannelCount
+}
+
+enum AudioRecordingFormatPolicy {
+    private static let minimumUsableSampleRate: Double = 8_000
+    private static let maximumUsableSampleRate: Double = 384_000
+
+    static func snapshot(_ format: AVAudioFormat) -> AudioRecordingFormatSnapshot? {
+        let sampleRate = format.sampleRate
+        let channelCount = format.channelCount
+        guard isUsableSampleRate(sampleRate), channelCount > 0 else {
+            return nil
+        }
+        return AudioRecordingFormatSnapshot(sampleRate: sampleRate, channelCount: channelCount)
+    }
+
+    static func isUsableSampleRate(_ sampleRate: Double) -> Bool {
+        sampleRate.isFinite
+            && sampleRate >= minimumUsableSampleRate
+            && sampleRate <= maximumUsableSampleRate
+    }
+
+    static func displaySampleRate(_ sampleRate: Double) -> String {
+        isUsableSampleRate(sampleRate) ? "\(Int(sampleRate))" : "invalid"
+    }
+
+    static func makeMonoOutputFormat(sampleRate: Double) throws -> AVAudioFormat {
+        guard isUsableSampleRate(sampleRate) else {
+            throw NSError(domain: "AudioRecordingFormatPolicy", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Refusing to create mic format from invalid sample rate"
+            ])
+        }
+
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: true
+        ) else {
+            throw NSError(domain: "AudioRecordingFormatPolicy", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create mono mic format"
+            ])
+        }
+
+        return monoFormat
+    }
+}
+
 /// Main audio recording class that captures microphone and system audio
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
@@ -253,6 +303,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     let maxRecoveryAttempts = 5
     let recoveryCooldown: TimeInterval = 5.0  // Min seconds between recovery attempts
 
+    func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
+        audioGraphLock.lock()
+        defer { audioGraphLock.unlock() }
+        return try body()
+    }
+
     // Write error tracking — stop writing after repeated failures
     // Thread-safe: accessed from audio file queues (background) and reset from start() (main thread)
     private var _consecutiveMicWriteErrors: Int = 0
@@ -292,12 +348,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var inputChannelCount: AVAudioChannelCount {
         get { formatLock.lock(); defer { formatLock.unlock() }; return _inputChannelCount }
         set { formatLock.lock(); defer { formatLock.unlock() }; _inputChannelCount = newValue }
-    }
-
-    func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
-        audioGraphLock.lock()
-        defer { audioGraphLock.unlock() }
-        return try body()
     }
 
     // Throttle system audio visualizer updates (skip every other callback)
@@ -821,7 +871,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let monitorFormat = withAudioGraphLock {
             recordingFormat(for: inputNode)
         }
-        guard monitorFormat.sampleRate > 0, monitorFormat.channelCount > 0 else {
+        guard AudioRecordingFormatPolicy.snapshot(monitorFormat) != nil else {
             AppLogger.audio.warning("Cannot start monitoring — invalid input format")
             return
         }

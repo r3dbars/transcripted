@@ -35,4 +35,16 @@ func testRecordedAudioTimeline() {
         assertTrue(timeline.isEmpty, "drain should clear the in-memory timeline")
         assertEqual(timeline.totalSourceSampleCount, 0, "cleared timelines should report zero samples")
     }
+
+    runSuite("RecordedAudioTimeline.append — drops invalid and non-finite sample rates") {
+        var timeline = RecordedAudioTimeline()
+
+        for sampleRate in [0, -1, Double.nan, Double.infinity, -Double.infinity, 1, 7_999, 384_001] {
+            timeline.append([0.1, 0.2], sampleRate: sampleRate)
+        }
+
+        assertTrue(timeline.isEmpty, "invalid sample rates should not create timeline segments")
+        timeline.append([0.3], sampleRate: 48_000)
+        assertEqual(timeline.segments.count, 1, "valid sample rates should still append")
+    }
 }

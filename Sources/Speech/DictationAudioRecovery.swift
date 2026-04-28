@@ -8,7 +8,7 @@ struct DictationAudioAnalysis: Equatable {
     let activeRatio: Double
 
     var durationSeconds: Double {
-        guard sampleRate > 0 else { return 0 }
+        guard ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(sampleRate) else { return 0 }
         return Double(sampleCount) / sampleRate
     }
 
@@ -34,7 +34,8 @@ struct DictationAudioAnalysis: Equatable {
 
 enum DictationAudioRecovery {
     static func analyze(samples: [Float], sampleRate: Double) -> DictationAudioAnalysis {
-        guard !samples.isEmpty, sampleRate > 0 else {
+        guard !samples.isEmpty,
+              ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(sampleRate) else {
             return DictationAudioAnalysis(
                 sampleCount: samples.count,
                 sampleRate: sampleRate,
@@ -74,6 +75,7 @@ enum DictationAudioRecovery {
         analysis: DictationAudioAnalysis? = nil
     ) -> [Float]? {
         let resolvedAnalysis = analysis ?? analyze(samples: samples, sampleRate: sampleRate)
+        guard ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(sampleRate) else { return nil }
         guard resolvedAnalysis.hasUsableSpeechSignal else { return nil }
 
         let threshold = activeThreshold(forPeak: resolvedAnalysis.peak)

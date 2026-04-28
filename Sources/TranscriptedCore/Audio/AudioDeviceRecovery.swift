@@ -142,7 +142,8 @@ extension Audio {
             // armVoiceProcessing succeeded above, hardware format otherwise).
             return self.recordingFormat(for: newInputNode)
         }
-        if recordingFormat.sampleRate <= 0 || recordingFormat.channelCount <= 0 {
+        var recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
+        if recordingSnapshot == nil {
             AppLogger.audioMic.warning("Recovery format invalid after first read, retrying", [
                 "sampleRate": "\(recordingFormat.sampleRate)",
                 "channels": "\(recordingFormat.channelCount)"
@@ -151,8 +152,9 @@ extension Audio {
             recordingFormat = withAudioGraphLock {
                 self.recordingFormat(for: newInputNode)
             }
+            recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
         }
-        guard recordingFormat.sampleRate > 0, recordingFormat.channelCount > 0 else {
+        guard let recordingSnapshot else {
             AppLogger.audioMic.error("Recovery format remained invalid", [
                 "sampleRate": "\(recordingFormat.sampleRate)",
                 "channels": "\(recordingFormat.channelCount)"
@@ -160,20 +162,20 @@ extension Audio {
             return
         }
         let oldChannelCount = self.inputChannelCount
-        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingFormat.sampleRate)", "channels": "\(recordingFormat.channelCount)"])
+        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"])
 
         // ALWAYS update channel count for proper downmix handling
         // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work
-        self.inputChannelCount = recordingFormat.channelCount
-        if recordingFormat.channelCount > 1 && oldChannelCount != recordingFormat.channelCount {
-            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingFormat.channelCount)"])
+        self.inputChannelCount = recordingSnapshot.channelCount
+        if recordingSnapshot.channelCount > 1 && oldChannelCount != recordingSnapshot.channelCount {
+            AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
         }
 
         // Rotate files only when the sample rate changes. Channel-count-only changes
         // keep writing into the same mono WAV, which avoids unnecessary segment churn.
         // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety.
-        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingFormat.sampleRate != $0.processingFormat.sampleRate } ?? false }
-        let channelCountChanged = oldChannelCount != recordingFormat.channelCount
+        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingSnapshot.sampleRate != $0.processingFormat.sampleRate } ?? false }
+        let channelCountChanged = oldChannelCount != recordingSnapshot.channelCount
         var recoverySegmentURL: URL?
         var shouldKeepRecoverySegment = false
         defer {
@@ -190,7 +192,7 @@ extension Audio {
         if channelCountChanged && !sampleRateChanged {
             AppLogger.audioMic.info("Input channel count changed, keeping current recording file", [
                 "oldChannels": "\(oldChannelCount)",
-                "newChannels": "\(recordingFormat.channelCount)"
+                "newChannels": "\(recordingSnapshot.channelCount)"
             ])
         }
 
@@ -206,16 +208,9 @@ extension Audio {
             recoverySegmentURL = fileURL
 
             do {
-                // Always create mono format at new sample rate
-                guard let monoFormat = AVAudioFormat(
-                    commonFormat: .pcmFormatFloat32,
-                    sampleRate: recordingFormat.sampleRate,
-                    channels: 1,
-                    interleaved: true
-                ) else {
-                    AppLogger.audioMic.error("Failed to create mono format for recovery")
-                    return
-                }
+                let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
+                    sampleRate: recordingSnapshot.sampleRate
+                )
                 self.monoOutputFormat = monoFormat
 
                 let newFile = try AVAudioFile(

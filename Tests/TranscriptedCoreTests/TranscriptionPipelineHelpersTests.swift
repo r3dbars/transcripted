@@ -122,6 +122,17 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(segments[0].end, 1.0, accuracy: 0.000_1)
     }
 
+    func testDetectSpeechSegmentsRejectsInvalidSampleRates() {
+        let samples = alternatingSamples(amplitude: 0.02, count: 16_000)
+
+        for sampleRate in [Double.nan, Double.infinity, -Double.infinity, 0.0, 7_999.0, 384_001.0] {
+            XCTAssertEqual(
+                Transcription.detectSpeechSegments(samples: samples, sampleRate: sampleRate).count,
+                0
+            )
+        }
+    }
+
     func testAudioSignalRecoveryNormalizesQuietSpeechCandidate() {
         var samples = [Float](repeating: 0.0, count: 64_000)
         let quietSpeech = alternatingSamples(amplitude: 0.008, count: 24_000)
@@ -153,6 +164,17 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertFalse(analysis.hasSpeechCandidate)
         XCTAssertFalse(normalized.wasNormalized)
         XCTAssertEqual(normalized.samples, samples)
+    }
+
+    func testAudioSignalRecoveryRejectsInvalidSampleRates() {
+        let samples = alternatingSamples(amplitude: 0.02, count: 16_000)
+
+        for sampleRate in [Double.nan, Double.infinity, -Double.infinity, 0.0, 7_999.0, 384_001.0] {
+            let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
+
+            XCTAssertEqual(analysis.durationSeconds, 0)
+            XCTAssertFalse(analysis.hasSpeechCandidate)
+        }
     }
 
     func testAudioSignalRecoveryNormalizesAttenuatedSpeechBelowLegacyGate() {
@@ -201,6 +223,41 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
 
         XCTAssertNil(prepared)
+    }
+
+    func testPrepareMicSegmentRejectsInvalidSampleRates() {
+        let samples = alternatingSamples(amplitude: 0.02, count: 16_000)
+
+        for sampleRate in [Double.nan, Double.infinity, -Double.infinity, 0.0, 7_999.0, 384_001.0] {
+            XCTAssertNil(
+                Transcription.prepareMicSegmentForTranscription(samples: samples, sampleRate: sampleRate)
+            )
+        }
+    }
+
+    func testAudioResamplerRejectsUnsafeSliceMath() {
+        let samples = [Float](repeating: 0.1, count: 16_000)
+
+        XCTAssertEqual(
+            AudioResampler.resample(samples, from: Double.infinity, to: 16_000),
+            samples
+        )
+        XCTAssertEqual(
+            AudioResampler.resample(samples, from: 48_000, to: Double.nan),
+            samples
+        )
+        XCTAssertEqual(
+            AudioResampler.extractSlice(from: samples, sampleRate: Double.infinity, startTime: 0, endTime: 1),
+            []
+        )
+        XCTAssertEqual(
+            AudioResampler.extractSlice(from: samples, sampleRate: 16_000, startTime: Double.nan, endTime: 1),
+            []
+        )
+        XCTAssertEqual(
+            AudioResampler.extractSlice(from: samples, sampleRate: 16_000, startTime: 0, endTime: Double.greatestFiniteMagnitude),
+            []
+        )
     }
 
     private func alternatingSamples(amplitude: Float, count: Int) -> [Float] {

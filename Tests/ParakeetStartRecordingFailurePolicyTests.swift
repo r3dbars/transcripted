@@ -145,6 +145,60 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(zeroInputChannels.startFailureReason, .invalidAudioFormat, "zero input channels should map to invalidAudioFormat")
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy rejects non-finite sample rates") {
+        for sampleRate in [Double.nan, Double.infinity, -Double.infinity] {
+            let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+                outputSampleRate: sampleRate,
+                outputChannelCount: 1,
+                inputSampleRate: 48_000,
+                inputChannelCount: 1,
+                selectedInputClass: "built_in",
+                selectionOverrodeDefault: false
+            )
+
+            assertEqual(readiness, .invalid, "non-finite output sample rates must not become ready")
+        }
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy rejects implausible capture sample rates") {
+        for sampleRate in [-1.0, 1.0, 7_999.0, 384_001.0] {
+            let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+                outputSampleRate: sampleRate,
+                outputChannelCount: 1,
+                inputSampleRate: 48_000,
+                inputChannelCount: 1,
+                selectedInputClass: "built_in",
+                selectionOverrodeDefault: false
+            )
+
+            assertEqual(readiness, .invalid, "implausible output sample rates must wait for recovery")
+        }
+
+        assertTrue(
+            ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(48_000),
+            "normal capture rates should remain usable"
+        )
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy uses bounded fallback buffer sizing") {
+        let fallbackCapacity = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: .nan,
+            seconds: 10
+        )
+        let cappedCapacity = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: 384_000,
+            seconds: 10
+        )
+        let normalCapacity = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: 48_000,
+            seconds: 10
+        )
+
+        assertEqual(fallbackCapacity, 480_000, "invalid rates should fall back to 48k for buffer math")
+        assertEqual(cappedCapacity, 960_000, "high valid rates should be capped for memory sizing")
+        assertEqual(normalCapacity, 480_000, "normal rates should size buffers normally")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy maps CoreAudio format-not-supported") {
         let error = NSError(
             domain: "com.apple.coreaudio.avfaudio",

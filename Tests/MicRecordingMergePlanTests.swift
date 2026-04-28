@@ -37,10 +37,41 @@ func testMicRecordingMergePlan() {
             gapBeforeDuration: 0.5
         )
 
+        for sampleRate in [0.0, -1.0, Double.nan, Double.infinity, -Double.infinity, 7_999.0, 384_001.0] {
+            assertEqual(
+                MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: sampleRate),
+                0,
+                "invalid sample rates should not request silence samples"
+            )
+        }
+    }
+
+    runSuite("MicRecordingSegment — clamps non-finite gap durations") {
+        for gap in [Double.nan, Double.infinity, -Double.infinity] {
+            let segment = MicRecordingSegment(
+                url: URL(fileURLWithPath: "/tmp/recovery.wav"),
+                gapBeforeDuration: gap
+            )
+
+            assertEqual(segment.gapBeforeDuration, 0, "non-finite recovery gaps should clamp to zero")
+            assertEqual(
+                MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 16_000),
+                0,
+                "non-finite gaps should not insert silence"
+            )
+        }
+    }
+
+    runSuite("MicRecordingMergePlan.silenceSampleCount — rejects unsafe gap math") {
+        let segment = MicRecordingSegment(
+            url: URL(fileURLWithPath: "/tmp/recovery.wav"),
+            gapBeforeDuration: Double.greatestFiniteMagnitude
+        )
+
         assertEqual(
-            MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 0),
+            MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 16_000),
             0,
-            "invalid sample rates should not request silence samples"
+            "overflowing silence math should fail closed"
         )
     }
 }

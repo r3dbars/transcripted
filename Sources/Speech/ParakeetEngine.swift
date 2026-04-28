@@ -333,8 +333,8 @@ struct RecordedSpeechSamples {
 }
 
 private struct ParakeetAudioInputSnapshot {
-    let outputFormat: AVAudioFormat
-    let hwFormat: AVAudioFormat
+    let outputFormat: ParakeetAudioFormatSummary
+    let hwFormat: ParakeetAudioFormatSummary
     let selection: DictationInputDeviceSelection?
     let selectionApplication: ParakeetInputDeviceApplication?
     let engineWasRunning: Bool
@@ -782,11 +782,11 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
-        nativeSampleRate = snapshot.outputFormat.sampleRate
+        updateNativeSampleRate(snapshot.outputFormat.sampleRate)
 
         prewarmRetryCount = 0
         markFormatReadyAndPublish()
-        print("🔥 PARAKEET | input ready (\(inputDeviceName), \(nativeSampleRate)Hz)")
+        print("🔥 PARAKEET | input ready (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
     }
 
     private func canContinuePrewarm(generation: Int) -> Bool {
@@ -1007,9 +1007,9 @@ class ParakeetEngine: ObservableObject {
                     throw NSError(domain: "ParakeetEngine", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Audio route not settled after device change"])
                 }
-                self.nativeSampleRate = snapshot.outputFormat.sampleRate
+                self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
                 self.prewarmRetryCount = 0
-                print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(snapshot.outputFormat.sampleRate)Hz), input ready")
+                print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
 
                 guard !Task.isCancelled else { return }
                 guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
@@ -1033,7 +1033,7 @@ class ParakeetEngine: ObservableObject {
                                 message: "Recording recovered after device change",
                                 context: [
                                     "audio_device": self.inputDeviceName,
-                                    "sample_rate": "\(self.nativeSampleRate)",
+                                    "sample_rate": "\(self.safeNativeSampleRate())",
                                     "attempts": "\(attempt)"
                                 ])
                             break
@@ -1138,9 +1138,33 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    private nonisolated static func audioFormatSummary(_ format: AVAudioFormat) -> ParakeetAudioFormatSummary {
+        ParakeetAudioFormatSummary(
+            sampleRate: format.sampleRate,
+            channelCount: format.channelCount
+        )
+    }
+
+    private func safeNativeSampleRate() -> Double {
+        ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(nativeSampleRate)
+    }
+
+    private func updateNativeSampleRate(_ sampleRate: Double) {
+        nativeSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(sampleRate)
+    }
+
+    private func reserveNativeSampleBufferCapacity() {
+        sampleBuffer.reserveCapacity(
+            ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+                sampleRate: safeNativeSampleRate(),
+                seconds: TranscriptedConstants.audioBufferCapacitySeconds
+            )
+        )
+    }
+
     private func audioFormatReadiness(
-        outputFormat: AVAudioFormat,
-        hwFormat: AVAudioFormat,
+        outputFormat: ParakeetAudioFormatSummary,
+        hwFormat: ParakeetAudioFormatSummary,
         selection: DictationInputDeviceSelection?
     ) -> ParakeetAudioFormatReadiness {
         ParakeetAudioFormatReadinessPolicy.readiness(
@@ -1161,8 +1185,8 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func audioFormatContext(
-        outputFormat: AVAudioFormat,
-        hwFormat: AVAudioFormat,
+        outputFormat: ParakeetAudioFormatSummary,
+        hwFormat: ParakeetAudioFormatSummary,
         selection: DictationInputDeviceSelection?,
         readiness: ParakeetAudioFormatReadiness
     ) -> [String: String] {
@@ -1206,8 +1230,8 @@ class ParakeetEngine: ObservableObject {
             let inputNode = self.audioEngine.inputNode
             let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
             return ParakeetAudioInputSnapshot(
-                outputFormat: inputNode.outputFormat(forBus: 0),
-                hwFormat: inputNode.inputFormat(forBus: 0),
+                outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
+                hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
                 selection: selection,
                 selectionApplication: selectionApplication,
                 engineWasRunning: self.audioEngine.isRunning
@@ -1227,6 +1251,9 @@ class ParakeetEngine: ObservableObject {
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
                 let frameLength = monoSamples.count
                 guard frameLength > 0 else { return }
+                let bufferFormat = Self.audioFormatSummary(buffer.format)
+                let effectiveSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(bufferFormat.sampleRate)
+                self.nativeSampleRate = effectiveSampleRate
 
                 if !self.didReceiveAudioSamples && frameLength > 0 {
                     self.didReceiveAudioSamples = true
@@ -1234,15 +1261,15 @@ class ParakeetEngine: ObservableObject {
                         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_samples_detected",
                             message: "Audio samples started flowing",
                             context: [
-                                "sample_rate": "\(self.nativeSampleRate)",
-                                "channels": "\(buffer.format.channelCount)",
+                                "sample_rate": "\(effectiveSampleRate)",
+                                "channels": "\(bufferFormat.channelCount)",
                                 "frames": "\(frameLength)"
                             ])
                     }
                 }
 
                 if self.liveDisplayEnabled, let eou = self.eouManager {
-                    let resampled = AudioResampler.resample(monoSamples, from: self.nativeSampleRate, to: 16000)
+                    let resampled = AudioResampler.resample(monoSamples, from: effectiveSampleRate, to: 16000)
                     self.streamingSamplesLock.lock()
                     self.streamingSampleBuffer.append(contentsOf: resampled)
                     var chunk: [Float]? = nil
@@ -1262,8 +1289,12 @@ class ParakeetEngine: ObservableObject {
 
                 self.pendingSamplesLock.lock()
                 self.pendingSamples.append(contentsOf: monoSamples)
-                let maxSamples = Int(self.nativeSampleRate) * TranscriptedConstants.audioBufferCapacitySeconds
-                if self.pendingSamples.count > maxSamples + Int(self.nativeSampleRate) {
+                let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+                    sampleRate: effectiveSampleRate,
+                    seconds: TranscriptedConstants.audioBufferCapacitySeconds
+                )
+                let overflowMargin = Int(effectiveSampleRate)
+                if self.pendingSamples.count > maxSamples + overflowMargin {
                     self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
                 }
                 self.pendingSamplesLock.unlock()
@@ -1512,8 +1543,8 @@ class ParakeetEngine: ObservableObject {
         attempt: Int,
         isRecoveryAttempt: Bool,
         engineWasRunning: Bool,
-        outputFormat: AVAudioFormat,
-        hwFormat: AVAudioFormat,
+        outputFormat: ParakeetAudioFormatSummary,
+        hwFormat: ParakeetAudioFormatSummary,
         error: Error? = nil
     ) -> [String: String] {
         var context = [
@@ -1630,7 +1661,7 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
         }
         sampleBuffer.removeAll(keepingCapacity: true)
-        sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
+        reserveNativeSampleBufferCapacity()
 
         let maxAttempts = isRecoveryAttempt ? 1 : 1 + TranscriptedConstants.audioStartRecoveryAttempts
         for attempt in 1...maxAttempts {
@@ -1722,8 +1753,8 @@ class ParakeetEngine: ObservableObject {
                 return false
             }
 
-            nativeSampleRate = snapshot.outputFormat.sampleRate
-            sampleBuffer.reserveCapacity(Int(nativeSampleRate * Double(TranscriptedConstants.audioBufferCapacitySeconds)))
+            updateNativeSampleRate(snapshot.outputFormat.sampleRate)
+            reserveNativeSampleBufferCapacity()
 
             do {
                 let startSnapshot = try await installTapAndStartEngine(isRecoveryAttempt: isRecoveryAttempt)
@@ -1852,7 +1883,7 @@ class ParakeetEngine: ObservableObject {
             }
             Task { await eouManager?.reset() }
         }
-        print("🎤 PARAKEET | recording started (\(inputDeviceName), \(nativeSampleRate)Hz)")
+        print("🎤 PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
         // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
@@ -1981,7 +2012,8 @@ class ParakeetEngine: ObservableObject {
         drainPendingSamplesIntoSampleBuffer()
         isRecording = false
         audioLevel = 0
-        print("⏹️ PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / nativeSampleRate))s)")
+        let stopSampleRate = safeNativeSampleRate()
+        print("⏹️ PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
     }
 
     // MARK: - EOU Streaming (live display)
@@ -2043,7 +2075,7 @@ class ParakeetEngine: ObservableObject {
         isTranscribing = true
         var samples: [Float] = []
         swap(&samples, &sampleBuffer)
-        let inputRate = nativeSampleRate
+        let inputRate = safeNativeSampleRate()
         let nativeCount = samples.count
         let samplesForResampling = samples
         samples.removeAll(keepingCapacity: false)
@@ -2106,7 +2138,7 @@ class ParakeetEngine: ObservableObject {
         // sampleBuffer is cleared immediately, freeing capacity before resampling.
         var samples: [Float] = []
         swap(&samples, &sampleBuffer)
-        let inputRate = nativeSampleRate
+        let inputRate = safeNativeSampleRate()
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
