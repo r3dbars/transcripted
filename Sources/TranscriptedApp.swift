@@ -191,7 +191,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        togglePopover()
+        if flag {
+            // Let AppKit do its default handling (bring an existing
+            // window to the front).
+            return true
+        }
+
+        if !PermissionsOnboardingPreferences.hasCompleted() {
+            _ = resolvedSourceApp()
+            onboardingWindowController.present()
+            return false
+        }
+
+        showSettingsWindow(page: .home, source: "dock_icon")
         return false
     }
 
