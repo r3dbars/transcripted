@@ -13,15 +13,18 @@ extension Audio {
     func startAudioCapture() async throws {
         ensureCaptureInfrastructureConfigured()
 
-        let (engine, inputNode) = try ensureEngineInitialized()
-        armVoiceProcessing(on: inputNode)
+        let (engine, inputNode) = try withAudioGraphLock {
+            let initialized = try ensureEngineInitialized()
+            armVoiceProcessing(on: initialized.1)
 
-        // When VPIO is off (the default — see `enableVoiceProcessing`), run
-        // a software AGC in the mic tap callback to recover attenuated
-        // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
-        // would do this in hardware but engages system-wide ducking of
-        // other apps' audio output; software AGC has no such side effect.
-        realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
+            // When VPIO is off (the default — see `enableVoiceProcessing`), run
+            // a software AGC in the mic tap callback to recover attenuated
+            // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
+            // would do this in hardware but engages system-wide ducking of
+            // other apps' audio output; software AGC has no such side effect.
+            realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
+            return initialized
+        }
 
         // Use system default microphone (whatever macOS has configured).
         // recordingFormat(for:) returns:
@@ -31,7 +34,9 @@ extension Audio {
         //   - Hardware format via inputFormat(forBus: 1) otherwise — required
         //     because outputFormat(forBus: 0) returns the converter format on
         //     stock AVAudioEngine, which breaks Bluetooth capture.
-        let recordingFormat = self.recordingFormat(for: inputNode)
+        let recordingFormat = withAudioGraphLock {
+            self.recordingFormat(for: inputNode)
+        }
         AppLogger.audioMic.info("Mic input format", [
             "sampleRate": "\(recordingFormat.sampleRate)",
             "channels": "\(recordingFormat.channelCount)",
@@ -252,15 +257,17 @@ extension Audio {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
         }
 
-        // Remove any existing tap (safety check)
-        inputNode.removeTap(onBus: 0)
+        try withAudioGraphLock {
+            // Remove any existing tap (safety check)
+            inputNode.removeTap(onBus: 0)
 
-        // Install tap on microphone
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            self?.handleMicBuffer(buffer)
+            // Install tap on microphone
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+                self?.handleMicBuffer(buffer)
+            }
+
+            try engine.start()
         }
-
-        try engine.start()
 
         let cueHandler = self.onCaptureLifecycleCue
         await MainActor.run {

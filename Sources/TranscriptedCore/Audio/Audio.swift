@@ -155,6 +155,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     var engine: AVAudioEngine?
     var inputNode: AVAudioInputNode?
+    private let audioGraphLock = NSRecursiveLock()
     var startTime: Date?
     var timer: Timer?
 
@@ -291,6 +292,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var inputChannelCount: AVAudioChannelCount {
         get { formatLock.lock(); defer { formatLock.unlock() }; return _inputChannelCount }
         set { formatLock.lock(); defer { formatLock.unlock() }; _inputChannelCount = newValue }
+    }
+
+    func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
+        audioGraphLock.lock()
+        defer { audioGraphLock.unlock() }
+        return try body()
     }
 
     // Throttle system audio visualizer updates (skip every other callback)
@@ -545,7 +552,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// capture can keep the shared input device in a processed mode, which can
     /// make other mic apps sound quieter.
     func disarmVoiceProcessing(on inputNode: AVAudioInputNode) {
-        guard voiceProcessingEnabled || inputNode.isVoiceProcessingEnabled else { return }
+        guard voiceProcessingEnabled else { return }
         if let engine, engine.isRunning { return }
 
         do {
@@ -734,19 +741,21 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
-            if let engineRef, let inputNodeRef {
-                AppLogger.audio.info("Stopping audio capture")
-                if engineRef.isRunning {
-                    inputNodeRef.removeTap(onBus: 0)
-                    engineRef.stop()
+            self.withAudioGraphLock {
+                if let engineRef, let inputNodeRef {
+                    AppLogger.audio.info("Stopping audio capture")
+                    if engineRef.isRunning {
+                        inputNodeRef.removeTap(onBus: 0)
+                        engineRef.stop()
+                    }
+                    self.disarmVoiceProcessing(on: inputNodeRef)
                 }
-                self.disarmVoiceProcessing(on: inputNodeRef)
-            }
 
-            // Drop the RealtimeAGC reference so gain history doesn't
-            // carry into the next recording. Safe here because the
-            // engine has stopped — no more tap callbacks can fire.
-            self.realtimeAGC = nil
+                // Drop the RealtimeAGC reference so gain history doesn't
+                // carry into the next recording. Safe here because the
+                // engine has stopped — no more tap callbacks can fire.
+                self.realtimeAGC = nil
+            }
 
             // System audio capture's `stop()` is non-blocking (vs `stopSync`),
             // but we keep it ordered after engine teardown so a single
@@ -809,23 +818,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         AppLogger.audio.info("Starting audio level monitoring")
 
-        let monitorFormat = recordingFormat(for: inputNode)
+        let monitorFormat = withAudioGraphLock {
+            recordingFormat(for: inputNode)
+        }
         guard monitorFormat.sampleRate > 0, monitorFormat.channelCount > 0 else {
             AppLogger.audio.warning("Cannot start monitoring — invalid input format")
             return
         }
 
-        // Install mic tap for level metering only (no file writing)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
-            self?.calculateLevel(buffer: buffer)
-        }
-
         do {
-            try engine.start()
+            try withAudioGraphLock {
+                // Install mic tap for level metering only (no file writing)
+                inputNode.removeTap(onBus: 0)
+                inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
+                    self?.calculateLevel(buffer: buffer)
+                }
+                try engine.start()
+            }
         } catch {
             AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
-            inputNode.removeTap(onBus: 0)
+            withAudioGraphLock {
+                inputNode.removeTap(onBus: 0)
+            }
             return
         }
 
@@ -856,18 +870,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         AppLogger.audio.info("Stopping audio level monitoring")
 
-        if let engine = engine, let inputNode = inputNode {
-            if engine.isRunning {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
+        withAudioGraphLock {
+            if let engine = engine, let inputNode = inputNode {
+                if engine.isRunning {
+                    inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                }
+                disarmVoiceProcessing(on: inputNode)
             }
-            disarmVoiceProcessing(on: inputNode)
-        }
 
-        // Monitoring shares the engine but not the AGC; drop it here so a
-        // monitoring session followed by a recording session both start
-        // with a fresh gain history.
-        realtimeAGC = nil
+            // Monitoring shares the engine but not the AGC; drop it here so a
+            // monitoring session followed by a recording session both start
+            // with a fresh gain history.
+            realtimeAGC = nil
+        }
 
         systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
 
@@ -892,9 +908,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCancellable?.cancel()
         systemAudioCapture?.stopSync()
 
-        if let engine, let inputNode, engine.isRunning {
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
+        withAudioGraphLock {
+            if let engine, let inputNode, engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
         }
     }
 }
