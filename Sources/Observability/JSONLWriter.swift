@@ -26,15 +26,16 @@ actor JSONLWriter {
             handle = nil
         }
 
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            if handle == nil {
-                handle = try? FileHandle(forWritingTo: fileURL)
-            }
-            handle?.seekToEndOfFile()
-            handle?.write(lineData)
-        } else {
-            try? lineData.write(to: fileURL)
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+
+        if handle == nil {
             handle = try? FileHandle(forWritingTo: fileURL)
+        }
+
+        if let handle {
+            LockedFileAppender.append(lineData, to: handle)
         }
     }
 
