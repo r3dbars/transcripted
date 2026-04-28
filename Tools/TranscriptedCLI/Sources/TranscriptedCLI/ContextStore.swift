@@ -227,11 +227,14 @@ enum CLIContextStore {
                 if let speaker, !meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(speaker) }) {
                     return nil
                 }
-                let matches = meeting.utterances.filter { utterance in
+                let textMatch = meeting.utterances.first { utterance in
                     utterance.text.localizedCaseInsensitiveContains(normalizedQuery)
                         && (speaker == nil || speakerMatches(filter: speaker!, speakerName: utterance.speakerId))
                 }
-                guard let firstMatch = matches.first else { return nil }
+                let metadataMatch = meeting.title.localizedCaseInsensitiveContains(normalizedQuery)
+                    || meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(normalizedQuery) })
+                guard let preview = textMatch.map({ String($0.text.prefix(220)) })
+                    ?? (metadataMatch ? recentMeetingPreview(for: meeting) : nil) else { return nil }
                 return CLIContextItem(
                     kind: .meeting,
                     title: meeting.title,
@@ -239,7 +242,7 @@ enum CLIContextStore {
                     entryId: nil,
                     date: meeting.date,
                     datetime: meeting.datetime,
-                    preview: String(firstMatch.text.prefix(220)),
+                    preview: preview,
                     wordCount: meeting.wordCount,
                     speakers: meeting.speakers,
                     sourceAppName: nil,
