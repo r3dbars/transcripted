@@ -350,12 +350,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         set { formatLock.lock(); defer { formatLock.unlock() }; _inputChannelCount = newValue }
     }
 
-    func withAudioGraphLock<T>(_ body: () throws -> T) rethrows -> T {
-        audioGraphLock.lock()
-        defer { audioGraphLock.unlock() }
-        return try body()
-    }
-
     // Throttle system audio visualizer updates (skip every other callback)
     // Protected by systemLevelLock — accessed from I/O callback thread
     var systemLevelUpdateCounter: Int = 0
