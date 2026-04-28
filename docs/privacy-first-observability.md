@@ -25,6 +25,7 @@ transport.
 - never send speaker names
 - never send source app names or bundle IDs
 - never send absolute file paths
+- never send free-form context strings
 - never send emails, tokens, or raw URLs
 - keep analytics to allowlisted events and coarse buckets only
 - keep crash reporting separately user-controllable from anonymous analytics
