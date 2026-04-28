@@ -57,6 +57,7 @@ Relevant direct coverage:
 - `Tests/DictationAudioLevelMeterTests.swift`
 - `Tests/DictationAudioRecoveryTests.swift`
 - `Tests/DictationInputDeviceSelectionPolicyTests.swift`
+- `Tests/DictationReadinessWaitPolicyTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
 - `Tests/ParakeetRecoveryStateTests.swift`
