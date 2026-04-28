@@ -62,6 +62,8 @@ private final class OverlayPrimaryButton: NSButton {
 
 @MainActor
 final class OverlayHeaderView: NSView {
+    private let dockGlyphContainer = NSView()
+    private let dockGlyph = NSImageView()
     private let modeLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     let waveformHost = WaveformHostView(frame: .zero)
@@ -78,6 +80,21 @@ final class OverlayHeaderView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
+        dockGlyphContainer.wantsLayer = true
+        dockGlyphContainer.layer?.cornerRadius = 9
+        dockGlyphContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        dockGlyphContainer.layer?.borderWidth = 1
+        dockGlyphContainer.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        dockGlyphContainer.isHidden = true
+        addSubview(dockGlyphContainer)
+
+        if let image = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Dictation") {
+            dockGlyph.image = image
+            dockGlyph.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            dockGlyph.contentTintColor = OverlayTokens.accentGreen
+        }
+        dockGlyphContainer.addSubview(dockGlyph)
+
         // Mode label
         modeLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         modeLabel.textColor = OverlayTokens.textSecondary
@@ -123,6 +140,14 @@ final class OverlayHeaderView: NSView {
         let labelSize = modeLabel.fittingSize
         let hintSize = shortcutHint.fittingSize
         let stopSize = stopButton.fittingSize
+        if !dockGlyphContainer.isHidden {
+            layoutDockShelf(
+                height: h,
+                labelSize: labelSize,
+                stopSize: stopSize
+            )
+            return
+        }
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
 
         if isCenteredListeningLayout {
@@ -158,6 +183,8 @@ final class OverlayHeaderView: NSView {
             shortcutHint.frame = .zero
             return
         }
+
+        dockGlyphContainer.frame = .zero
 
         // Mode label — left aligned, vertically centered
         modeLabel.frame = NSRect(
@@ -223,6 +250,70 @@ final class OverlayHeaderView: NSView {
         }
     }
 
+    private func layoutDockShelf(
+        height: CGFloat,
+        labelSize: NSSize,
+        stopSize: NSSize
+    ) {
+        let pad: CGFloat = 10
+        let glyphSize: CGFloat = 36
+        let spacing: CGFloat = 9
+        let stopWidth = stopButton.isHidden ? 0 : stopSize.width
+        let spinnerSize: CGFloat = 16
+        let labelWidth = min(max(labelSize.width, 62), 82)
+
+        dockGlyphContainer.frame = NSRect(
+            x: pad,
+            y: (height - glyphSize) / 2,
+            width: glyphSize,
+            height: glyphSize
+        )
+        dockGlyph.frame = NSRect(x: 9, y: 9, width: 18, height: 18)
+
+        modeLabel.frame = NSRect(
+            x: dockGlyphContainer.frame.maxX + spacing,
+            y: (height - labelSize.height) / 2,
+            width: labelWidth,
+            height: labelSize.height
+        )
+
+        var rightEdge = bounds.width - pad
+        if !stopButton.isHidden {
+            stopButton.frame = NSRect(
+                x: rightEdge - stopWidth,
+                y: (height - stopSize.height) / 2,
+                width: stopWidth,
+                height: stopSize.height
+            )
+            rightEdge = stopButton.frame.minX - spacing
+        } else {
+            stopButton.frame = .zero
+        }
+
+        if !spinner.isHidden {
+            spinner.frame = NSRect(
+                x: rightEdge - spinnerSize,
+                y: (height - spinnerSize) / 2,
+                width: spinnerSize,
+                height: spinnerSize
+            )
+            rightEdge = spinner.frame.minX - spacing
+        } else {
+            spinner.frame = .zero
+        }
+
+        let waveLeft = modeLabel.frame.maxX + spacing
+        waveformHost.frame = waveformHost.isHidden
+            ? .zero
+            : NSRect(
+                x: waveLeft,
+                y: (height - 28) / 2,
+                width: max(0, rightEdge - waveLeft),
+                height: 28
+            )
+        shortcutHint.frame = .zero
+    }
+
     // MARK: - Update Methods
 
     @objc
@@ -236,6 +327,7 @@ final class OverlayHeaderView: NSView {
 
     func update(
         state: FloatingOverlayController.OverlayState,
+        presentation: DictationOverlayPresentation,
         dictationShortcutHint: String,
         loadingTitle: String?,
         isError: Bool = false,
@@ -269,6 +361,20 @@ final class OverlayHeaderView: NSView {
         waveformHost.isHidden = !meterPresentation.isVisible
         waveformHost.isActive = meterPresentation.isVisible
         waveformHost.level = meterPresentation.level
+        if presentation == .dockShelf {
+            waveformHost.tintColor = OverlayTokens.accentGreen
+            waveformHost.visualizationStyle = .mirrored(anchor: .fromBottom, phaseOffset: 0)
+            waveformHost.mirroredBarCount = 34
+            waveformHost.mirroredBarWidth = 2.4
+            waveformHost.mirroredBarSpacing = 2
+        } else {
+            waveformHost.tintColor = .white
+            waveformHost.visualizationStyle = .scrolling
+            waveformHost.mirroredBarCount = 26
+            waveformHost.mirroredBarWidth = 2
+            waveformHost.mirroredBarSpacing = 1.5
+        }
+        dockGlyphContainer.isHidden = presentation != .dockShelf
         stopButton.isHidden = state != .listening
 
         // Shortcut hint

@@ -53,6 +53,7 @@ struct TranscriptedSettingsView: View {
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+    @State private var dictationDockShelfEnabled = DictationOverlayPreferences.isDockShelfEnabled()
 
     init(
         appState: TranscriptedAppState,
@@ -830,6 +831,27 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Experimental Visualizer",
+                detail: "Try a small Dock-side dictation surface."
+            ) {
+                Toggle("Use Dock shelf while dictating", isOn: Binding(
+                    get: { dictationDockShelfEnabled },
+                    set: { newValue in
+                        dictationDockShelfEnabled = newValue
+                        trackSettingsToggle("dictation_dock_shelf", enabled: newValue, page: .dictations)
+                        DictationOverlayPreferences.setPresentation(newValue ? .dockShelf : .nearText)
+                    }
+                ))
+
+                Text(dictationDockShelfEnabled
+                    ? "The live dictation meter hugs the Dock. Loading and error messages still use the normal panel."
+                    : "Dictation appears near the current text area."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
                 title: "Recent",
                 detail: "The newest saved dictations."
             ) {
@@ -1238,6 +1260,7 @@ struct TranscriptedSettingsView: View {
         refreshAutoEnterAppCandidates()
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+        dictationDockShelfEnabled = DictationOverlayPreferences.isDockShelfEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
             sparkleUpdater.refreshUpdateStatus()
         }

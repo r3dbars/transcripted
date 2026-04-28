@@ -39,6 +39,7 @@ final class OverlayRootView: NSView {
 
     private var currentState: FloatingOverlayController.OverlayState = .idle
     private var currentErrorMessage: String = ""
+    private var currentPresentation: DictationOverlayPresentation = .nearText
 
     // MARK: - Init
 
@@ -72,7 +73,9 @@ final class OverlayRootView: NSView {
         super.layout()
 
         let w = bounds.width
-        let headerH = OverlayTokens.headerHeight
+        let headerH = currentPresentation == .dockShelf
+            ? bounds.height
+            : OverlayTokens.headerHeight
         let dividerH = OverlayTokens.dividerHeight
         let showContent = shouldShowContent()
 
@@ -116,6 +119,7 @@ final class OverlayRootView: NSView {
 
     func updateForState(
         _ state: FloatingOverlayController.OverlayState,
+        presentation: DictationOverlayPresentation,
         dictationShortcutHint: String,
         errorMessage: String,
         errorActionTitle: String?,
@@ -129,6 +133,7 @@ final class OverlayRootView: NSView {
     ) {
         currentState = state
         currentErrorMessage = errorMessage
+        currentPresentation = presentation
 
         let showLoading = state == .loading
         let showError = state == .drafting && !errorMessage.isEmpty
@@ -137,6 +142,7 @@ final class OverlayRootView: NSView {
         // Update header
         headerView.update(
             state: state,
+            presentation: presentation,
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? loadingPresentation.title : nil,
             isError: showError,

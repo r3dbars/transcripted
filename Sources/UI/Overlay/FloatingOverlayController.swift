@@ -74,6 +74,13 @@ class FloatingOverlayController {
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
 
+    private enum DockShelfEdge {
+        case bottom
+        case left
+        case right
+        case floating
+    }
+
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
     private var hideGeneration: UInt64 = 0
 
@@ -183,6 +190,13 @@ class FloatingOverlayController {
                 self?.pushStateToViews()
             }
             .store(in: &subscriptions)
+
+        NotificationCenter.default.publisher(for: .dictationOverlayPreferencesDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshPresentation()
+            }
+            .store(in: &subscriptions)
     }
 
     // MARK: - State → View Push
@@ -191,6 +205,7 @@ class FloatingOverlayController {
     private func pushStateToViews() {
         rootView?.updateForState(
             state,
+            presentation: activePresentation(for: state),
             dictationShortcutHint: dictationShortcutHint,
             errorMessage: errorMessage,
             errorActionTitle: errorActionTitle,
@@ -245,7 +260,9 @@ class FloatingOverlayController {
         }
 
         var origin: NSPoint
-        if let rect = anchorTargetRect {
+        if usesDockShelf(for: state) {
+            origin = dockShelfOrigin(for: panelSize, preferredScreen: currentScreen)
+        } else if let rect = anchorTargetRect {
             origin = NSPoint(
                 x: rect.midX - panelSize.width / 2,
                 y: rect.midY - panelSize.height / 2
@@ -264,7 +281,7 @@ class FloatingOverlayController {
         }
 
         // Clamp to current screen
-        if let visibleFrame = currentScreen?.visibleFrame {
+        if let visibleFrame = currentScreen?.visibleFrame, !usesDockShelf(for: state) {
             origin.x = max(visibleFrame.minX + 10,
                            min(origin.x, visibleFrame.maxX - panelSize.width - 10))
             if origin.y + panelSize.height > visibleFrame.maxY {
@@ -282,6 +299,7 @@ class FloatingOverlayController {
             )
         }
 
+        applyChrome(for: activePresentation(for: state))
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
         panel.ignoresMouseEvents = false
@@ -313,7 +331,7 @@ class FloatingOverlayController {
     }
 
     func resizePanelToCompact() {
-        resizePanelInstant(to: NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight))
+        resizePanelInstant(to: compactPanelSize())
     }
 
     // MARK: - Hide Animations
@@ -564,6 +582,12 @@ class FloatingOverlayController {
 
     private func resizePanelInstant(to size: NSSize) {
         guard let panel = panel else { return }
+        applyChrome(for: activePresentation(for: state))
+        guard !usesDockShelf(for: state) else {
+            let origin = dockShelfOrigin(for: size, preferredScreen: panel.screen)
+            panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+            return
+        }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height
@@ -575,6 +599,12 @@ class FloatingOverlayController {
 
     private func resizePanel(to size: NSSize) {
         guard let panel = panel else { return }
+        applyChrome(for: activePresentation(for: state))
+        guard !usesDockShelf(for: state) else {
+            let origin = dockShelfOrigin(for: size, preferredScreen: panel.screen)
+            panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: true)
+            return
+        }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
         let heightDelta = size.height - frame.size.height
@@ -591,7 +621,7 @@ class FloatingOverlayController {
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
         case .idle, .listening, .drafting, .success:
-            return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
+            return compactPanelSize()
         }
     }
 
@@ -600,5 +630,131 @@ class FloatingOverlayController {
             ? OverlayTokens.panelMinHeight
             : OverlayTokens.panelActionErrorHeight
         return NSSize(width: OverlayTokens.panelWidth, height: height)
+    }
+
+    private func compactPanelSize() -> NSSize {
+        if usesDockShelf(for: state) {
+            return NSSize(width: OverlayTokens.dockShelfWidth, height: OverlayTokens.dockShelfHeight)
+        }
+        return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
+    }
+
+    private func refreshPresentation() {
+        pushStateToViews()
+        guard isVisible else {
+            applyChrome(for: activePresentation(for: state))
+            return
+        }
+        resizePanelInstant(to: preferredPanelSize(for: state))
+    }
+
+    private func activePresentation(for state: OverlayState) -> DictationOverlayPresentation {
+        usesDockShelf(for: state) ? .dockShelf : .nearText
+    }
+
+    private func usesDockShelf(for state: OverlayState) -> Bool {
+        guard DictationOverlayPreferences.isDockShelfEnabled() else { return false }
+        switch state {
+        case .listening, .success:
+            return true
+        case .drafting:
+            return errorMessage.isEmpty
+        case .idle, .loading:
+            return false
+        }
+    }
+
+    private func applyChrome(for presentation: DictationOverlayPresentation) {
+        let cornerRadius = presentation == .dockShelf
+            ? OverlayTokens.dockShelfCornerRadius
+            : OverlayTokens.cornerRadius
+        let background = presentation == .dockShelf
+            ? NSColor.black.withAlphaComponent(0.68)
+            : OverlayTokens.panelBg
+        let stroke = presentation == .dockShelf
+            ? NSColor.white.withAlphaComponent(0.16)
+            : OverlayTokens.panelStroke
+
+        blurView?.layer?.cornerRadius = cornerRadius
+        blurView?.layer?.backgroundColor = background.cgColor
+        blurView?.layer?.borderColor = stroke.cgColor
+        panel?.contentView?.layer?.cornerRadius = cornerRadius
+        panel?.contentView?.layer?.borderColor = stroke.cgColor
+        panel?.hasShadow = true
+    }
+
+    private func dockShelfOrigin(for size: NSSize, preferredScreen: NSScreen?) -> NSPoint {
+        guard let screen = dockShelfScreen(preferredScreen: preferredScreen) else {
+            return .zero
+        }
+        let frame = screen.frame
+        let visible = screen.visibleFrame
+        let edge = dockShelfEdge(for: screen)
+        let inset: CGFloat = 12
+
+        switch edge {
+        case .bottom:
+            let dockHeight = max(0, visible.minY - frame.minY)
+            let y: CGFloat
+            if dockHeight >= size.height + inset {
+                y = frame.minY + (dockHeight - size.height) / 2
+            } else {
+                y = visible.minY + inset
+            }
+            return NSPoint(
+                x: visible.minX + inset,
+                y: min(y, visible.maxY - size.height - inset)
+            )
+        case .left:
+            let dockWidth = max(0, visible.minX - frame.minX)
+            let x = dockWidth >= size.width + inset
+                ? frame.minX + (dockWidth - size.width) / 2
+                : visible.minX + inset
+            return NSPoint(
+                x: x,
+                y: visible.minY + inset
+            )
+        case .right:
+            let dockWidth = max(0, frame.maxX - visible.maxX)
+            let x = dockWidth >= size.width + inset
+                ? visible.maxX + (dockWidth - size.width) / 2
+                : visible.maxX - size.width - inset
+            return NSPoint(
+                x: x,
+                y: visible.minY + inset
+            )
+        case .floating:
+            return NSPoint(
+                x: visible.minX + inset,
+                y: visible.minY + inset
+            )
+        }
+    }
+
+    private func dockShelfScreen(preferredScreen: NSScreen?) -> NSScreen? {
+        if let preferredScreen, dockShelfEdge(for: preferredScreen) != .floating {
+            return preferredScreen
+        }
+        if let main = NSScreen.main, dockShelfEdge(for: main) != .floating {
+            return main
+        }
+        return preferredScreen ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private func dockShelfEdge(for screen: NSScreen) -> DockShelfEdge {
+        let frame = screen.frame
+        let visible = screen.visibleFrame
+        let threshold: CGFloat = 8
+
+        if visible.minY - frame.minY > threshold {
+            return .bottom
+        }
+        if visible.minX - frame.minX > threshold {
+            return .left
+        }
+        if frame.maxX - visible.maxX > threshold {
+            return .right
+        }
+        return .floating
     }
 }
