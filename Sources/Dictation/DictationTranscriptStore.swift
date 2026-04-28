@@ -102,6 +102,41 @@ enum DictationTranscriptStore {
         url.pathExtension == "md" && url.lastPathComponent.hasPrefix(dictationDayPrefix)
     }
 
+    /// Removes a single dictation entry by matching on `createdAt` within its day file.
+    /// If the day file has no remaining entries, the file is deleted.
+    static func deleteEntry(_ entry: SavedDictationEntry) throws {
+        let url = entry.url
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
+        }
+
+        let sections = splitSections(in: content)
+        let kept: [String] = sections.filter { section in
+            guard let parsed = parseEntry(from: section, in: url) else { return true }
+            return parsed.createdAt != entry.createdAt
+        }
+
+        if kept.isEmpty {
+            try FileManager.default.removeItem(at: url)
+        } else {
+            let header = headerPreface(in: content)
+            let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+            try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: url)
+    }
+
+    private static func headerPreface(in content: String) -> String {
+        var preface: [String] = []
+        for line in content.components(separatedBy: "\n") {
+            if isEntryHeading(line) { break }
+            preface.append(line)
+        }
+        let joined = preface.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? "" : joined + "\n\n"
+    }
+
     private static func entries(in url: URL) -> [SavedDictationEntry] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             return []

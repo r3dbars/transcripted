@@ -23,6 +23,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
+    @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
     private let sidebarSections = SettingsSidebarSection.defaultSections
@@ -53,6 +54,10 @@ struct TranscriptedSettingsView: View {
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+    @StateObject private var homeViewModel = HomeViewModel()
+    @State private var homeActivityTab: HomeActivityTab = .dictations
+    @State private var homeCopiedRowID: String?
+    @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
 
     init(
         appState: TranscriptedAppState,
@@ -148,6 +153,7 @@ struct TranscriptedSettingsView: View {
         .onDisappear {
             recentCaptureRefreshTask?.cancel()
             recentCaptureRefreshTask = nil
+            homeViewModel.cancel()
         }
     }
 
@@ -231,183 +237,320 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homePage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Home",
-                summary: "Start capture and fix anything marked orange."
-            )
+        let stats = homeStatItems
+        let needsAttention = homeNeedsAttentionIssues
+        let useWideLayout = homeShouldUseWideLayout
 
-            let columns = [
-                GridItem(.flexible(minimum: 260), spacing: 14),
-                GridItem(.flexible(minimum: 260), spacing: 14)
-            ]
+        return VStack(alignment: .leading, spacing: 24) {
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 22) {
+                    HomeWelcomeHeader(
+                        name: homeViewModel.welcomeName,
+                        summary: homeWelcomeSummary
+                    )
 
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-                SettingsActionTile(
-                    symbolName: "mic.fill",
-                    title: "Start Dictation",
-                    detail: "Speak into the app you were using.",
-                    tone: .accent,
-                    menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
-                    actionHelp: "Start dictation now.",
-                    menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover.",
-                    action: {
-                        trackSettingsAction("start_dictation", page: .home)
-                        actions.startDictation()
+                    if !useWideLayout {
+                        HomeStatsStrip(stats: stats, streak: homeStreak)
                     }
-                )
 
-                SettingsActionTile(
-                    symbolName: "record.circle.fill",
-                    title: "Start Meeting",
-                    detail: "Record your mic and computer audio.",
-                    tone: .accent,
-                    menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
-                    actionHelp: "Start a meeting recording now.",
-                    menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover.",
-                    action: {
-                        trackSettingsAction("start_meeting", page: .home)
-                        actions.startMeeting()
-                    }
-                )
-
-                SettingsActionTile(
-                    symbolName: "arrow.turn.down.right",
-                    title: "Paste Last Dictation",
-                    detail: "Paste the newest saved dictation.",
-                    menuBarVisibility: menuBarVisibilityBinding(for: .pasteLastDictation),
-                    actionHelp: "Paste the newest saved dictation into the current app.",
-                    menuBarVisibilityHelp: "Show or hide Paste Last Dictation in the menu bar popover.",
-                    action: {
-                        trackSettingsAction("paste_last_dictation", page: .home)
-                        actions.pasteLastDictation()
-                    }
-                )
-
-                SettingsActionTile(
-                    symbolName: "clock.arrow.circlepath",
-                    title: "Recent Meetings",
-                    detail: "Open saved meeting notes.",
-                    menuBarVisibility: menuBarVisibilityBinding(for: .recentMeetings),
-                    actionHelp: "Open the Meetings page to browse saved meeting notes.",
-                    menuBarVisibilityHelp: "Show or hide Recent Meetings in the menu bar popover.",
-                    action: {
-                        trackSettingsAction("open_recent_meetings", page: .home)
-                        navigation.selectedPage = .meetings
-                    }
-                )
-            }
-
-            if let activity = homeTranscriptionActivity {
-                SettingsActivityCard(
-                    symbolName: activity.symbolName,
-                    title: activity.title,
-                    status: activity.status,
-                    detail: activity.detail,
-                    tone: activity.tone,
-                    progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
-                    action: activity.transcriptURL.map { transcriptURL in
-                        {
-                            trackSettingsAction("open_current_activity", page: .home)
-                            NSWorkspace.shared.open(transcriptURL)
+                    HomeHeroCard(
+                        title: "Capture what you say, anywhere you write",
+                        subtitle: "Press your dictation shortcut and speak. Transcripted pastes the text into the app you were using.",
+                        primaryTitle: "Start Dictation",
+                        primaryAction: {
+                            trackSettingsAction("start_dictation", page: .home)
+                            actions.startDictation()
+                        },
+                        secondaryTitle: "Record a meeting",
+                        secondaryAction: {
+                            trackSettingsAction("start_meeting", page: .home)
+                            actions.startMeeting()
                         }
+                    )
+
+                    if let activity = homeTranscriptionActivity {
+                        SettingsActivityCard(
+                            symbolName: activity.symbolName,
+                            title: activity.title,
+                            status: activity.status,
+                            detail: activity.detail,
+                            tone: activity.tone,
+                            progress: activity.progress,
+                            actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                            action: activity.transcriptURL.map { transcriptURL in
+                                {
+                                    trackSettingsAction("open_current_activity", page: .home)
+                                    NSWorkspace.shared.open(transcriptURL)
+                                }
+                            }
+                        )
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
 
-            SettingsSection(
-                title: "Ready Check",
-                detail: "Green is ready. Orange needs attention."
-            ) {
-                let modelCard = FirstRunExperience.modelCard(
-                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
-                    model: effectiveTranscriptionModel
-                )
+                    if !needsAttention.isEmpty {
+                        HomeNeedsAttentionCard(
+                            issues: needsAttention,
+                            onOpenPrivacy: {
+                                trackSettingsAction("open_needs_attention", page: .home)
+                                navigation.selectedPage = .privacy
+                            }
+                        )
+                    }
 
-                SettingsStatusCard(
-                    title: "Voice model",
-                    status: modelCard.status,
-                    detail: homeModelDetail(from: modelCard),
-                    tone: preferredTranscriptionModel == effectiveTranscriptionModel ? tone(for: modelCard.tone) : .caution
-                )
-
-                SettingsStatusCard(
-                    title: "Meeting tools",
-                    status: meetingSession.warmupStatus.subtitle,
-                    detail: meetingSession.warmupStatus.detail.isEmpty
-                        ? "Ready for live meetings and audio imports."
-                        : meetingSession.warmupStatus.detail,
-                    tone: meetingSession.warmupStatus == .ready ? .ready : .working
-                )
-
-                SettingsStatusCard(
-                    title: "Permissions",
-                    status: permissionsStatusLine,
-                    detail: permissionsDetailLine,
-                    tone: missingRequiredPermissions.isEmpty ? .ready : .caution
-                )
-
-                SettingsStatusCard(
-                    title: "Capture library",
-                    status: isUsingDefaultCaptureLibrary ? "Default location" : "Custom location",
-                    detail: (captureLibraryURL.path as NSString).abbreviatingWithTildeInPath,
-                    tone: .ready
-                )
-            }
-
-            SettingsSection(
-                title: "Useful Pages",
-                detail: "The settings people usually need first."
-            ) {
-                SettingsQuickLinkRow(
-                    symbolName: "keyboard",
-                    title: "Shortcuts",
-                    detail: "Change the keys Transcripted listens for."
-                ) {
-                    trackSettingsAction("quick_link_shortcuts", page: .home)
-                    navigation.selectedPage = .shortcuts
+                    HomeActivityTabsCard(
+                        selectedTab: $homeActivityTab,
+                        dictationSections: homeViewModel.dictationDaySections,
+                        meetingSections: homeViewModel.meetingDaySections,
+                        copiedRowID: homeCopiedRowID,
+                        onOpenDictation: { entry in
+                            trackSettingsAction("open_recent_dictation", page: .home)
+                            NSWorkspace.shared.open(entry.url)
+                        },
+                        onCopyDictation: { entry in
+                            handleCopyDictation(entry)
+                        },
+                        onFlagDictation: { _ in
+                            trackSettingsAction("flag_dictation", page: .home)
+                            actions.sendFeedback()
+                        },
+                        dictationMenuItems: { entry in
+                            dictationRowMenuItems(for: entry)
+                        },
+                        onOpenMeeting: { item in
+                            trackSettingsAction("open_recent_meeting", page: .home)
+                            NSWorkspace.shared.open(item.transcriptURL)
+                        },
+                        onCopyMeeting: { item in
+                            handleCopyMeeting(item)
+                        },
+                        onFlagMeeting: { _ in
+                            trackSettingsAction("flag_meeting", page: .home)
+                            actions.sendFeedback()
+                        },
+                        meetingMenuItems: { item in
+                            meetingRowMenuItems(for: item)
+                        }
+                    )
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                SettingsQuickLinkRow(
-                    symbolName: "person.2.wave.2.fill",
-                    title: "Meetings",
-                    detail: "Record calls and import audio."
-                ) {
-                    trackSettingsAction("quick_link_meetings", page: .home)
-                    navigation.selectedPage = .meetings
-                }
-
-                SettingsQuickLinkRow(
-                    symbolName: "person.2.fill",
-                    title: "People",
-                    detail: "Review saved speakers and duplicates."
-                ) {
-                    trackSettingsAction("quick_link_people", page: .home)
-                    navigation.selectedPage = .people
-                }
-
-                SettingsQuickLinkRow(
-                    symbolName: "externaldrive.fill",
-                    title: "Storage",
-                    detail: "See where Markdown files live."
-                ) {
-                    trackSettingsAction("quick_link_storage", page: .home)
-                    navigation.selectedPage = .storage
-                }
-
-                SettingsQuickLinkRow(
-                    symbolName: "lock.shield.fill",
-                    title: "Privacy",
-                    detail: "Review permissions and reporting."
-                ) {
-                    trackSettingsAction("quick_link_privacy", page: .home)
-                    navigation.selectedPage = .privacy
+                if useWideLayout {
+                    HomeStatsRail(header: "Total", stats: stats, streak: homeStreak)
+                        .frame(width: 200, alignment: .topLeading)
                 }
             }
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
+        .onChange(of: homeActivityTab) { _, newValue in
+            trackSettingsAction("home_tab_\(newValue.rawValue)", page: .home)
+        }
+        .alert(item: $homeDeleteConfirmation) { confirmation in
+            Alert(
+                title: Text(confirmation.title),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text("Delete")) {
+                    confirmation.perform()
+                },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
+    private func handleCopyDictation(_ entry: SavedDictationEntry) {
+        trackSettingsAction("copy_dictation", page: .home)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
+        flashCopied(rowID: entry.id)
+    }
+
+    private func handleCopyMeeting(_ item: RecentMeetingItem) {
+        trackSettingsAction("copy_meeting", page: .home)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if let bundle = AgentConnectionGuide.portableMeetingBundle(
+            title: item.title,
+            date: item.date,
+            transcriptURL: item.transcriptURL
+        ) {
+            pasteboard.setString(bundle, forType: .string)
+        } else if let raw = try? String(contentsOf: item.transcriptURL, encoding: .utf8) {
+            pasteboard.setString(raw, forType: .string)
+        } else {
+            NSSound.beep()
+            return
+        }
+        flashCopied(rowID: item.id)
+    }
+
+    private func flashCopied(rowID: String) {
+        homeCopiedRowID = rowID
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if homeCopiedRowID == rowID {
+                homeCopiedRowID = nil
+            }
+        }
+    }
+
+    private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
+        [
+            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
+                trackSettingsAction("reveal_dictation_in_finder", page: .home)
+                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
+            },
+            HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
+                trackSettingsAction("delete_dictation_request", page: .home)
+                homeDeleteConfirmation = HomeDeleteConfirmation(
+                    title: "Delete this dictation?",
+                    message: "This removes the entry from \(entry.url.lastPathComponent). This cannot be undone."
+                ) {
+                    trackSettingsAction("delete_dictation_confirm", page: .home)
+                    do {
+                        try DictationTranscriptStore.deleteEntry(entry)
+                        homeViewModel.refresh()
+                    } catch {
+                        NSSound.beep()
+                    }
+                }
+            }
+        ]
+    }
+
+    private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
+        var items: [HomeRowMenuItem] = [
+            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
+                trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+            }
+        ]
+
+        if let audio = item.audio, let firstAudio = audio.urls.first {
+            items.append(
+                HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
+                    trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
+                    NSWorkspace.shared.activateFileViewerSelecting([firstAudio])
+                }
+            )
+        }
+
+        items.append(
+            HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
+                trackSettingsAction("delete_meeting_request", page: .home)
+                homeDeleteConfirmation = HomeDeleteConfirmation(
+                    title: "Delete this meeting?",
+                    message: "This removes the transcript and any retained audio. This cannot be undone."
+                ) {
+                    trackSettingsAction("delete_meeting_confirm", page: .home)
+                    deleteMeeting(item)
+                }
+            }
+        )
+
+        return items
+    }
+
+    private func deleteMeeting(_ item: RecentMeetingItem) {
+        let fm = FileManager.default
+        try? fm.removeItem(at: item.transcriptURL)
+        if let audio = item.audio {
+            try? fm.removeItem(at: audio.directoryURL)
+        }
+        homeViewModel.refresh()
+        refreshRecentCaptures()
+    }
+
+    private var homeShouldUseWideLayout: Bool {
+        true
+    }
+
+    private var homeWelcomeSummary: String {
+        let dictations = homeViewModel.todayDictationCount
+        let meetings = homeViewModel.todayMeetingCount
+        if dictations == 0 && meetings == 0 {
+            return "Nothing captured yet today. Start a dictation or record a meeting to fill the timeline."
+        }
+
+        var parts: [String] = []
+        if dictations > 0 {
+            parts.append("\(dictations) dictation\(dictations == 1 ? "" : "s")")
+        }
+        if meetings > 0 {
+            parts.append("\(meetings) meeting\(meetings == 1 ? "" : "s")")
+        }
+        return "\(parts.joined(separator: " and ")) today."
+    }
+
+    private var homeStatItems: [HomeStatItem] {
+        [
+            HomeStatItem(
+                value: homeFormattedWords(homeViewModel.totalDictationWordCount),
+                label: "total words"
+            ),
+            HomeStatItem(
+                value: "\(homeViewModel.totalDictationCount)",
+                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
+            ),
+            HomeStatItem(
+                value: "\(statsService.totalRecordings)",
+                label: statsService.totalRecordings == 1 ? "meeting" : "meetings"
+            ),
+            HomeStatItem(
+                value: statsService.formattedTotalHours,
+                label: "transcribed"
+            )
+        ]
+    }
+
+    private var homeStreak: Int? {
+        let streak = statsService.currentStreak
+        return streak > 0 ? streak : nil
+    }
+
+    private func homeFormattedWords(_ count: Int) -> String {
+        if count >= 1000 {
+            let thousands = Double(count) / 1000.0
+            if thousands >= 10 {
+                return "\(Int(thousands.rounded()))K"
+            }
+            return String(format: "%.1fK", thousands)
+        }
+        return "\(count)"
+    }
+
+    private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {
+        var issues: [HomeNeedsAttentionCard.Issue] = []
+
+        if !missingRequiredPermissions.isEmpty {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    title: "Permissions",
+                    detail: permissionsDetailLine
+                )
+            )
+        }
+
+        let modelCard = FirstRunExperience.modelCard(
+            for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+            model: effectiveTranscriptionModel
+        )
+        if modelCard.tone == .failed {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    title: "Voice model",
+                    detail: modelCard.detail
+                )
+            )
+        } else if preferredTranscriptionModel != effectiveTranscriptionModel {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    title: "Voice model",
+                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used."
+                )
+            )
+        }
+
+        return issues
     }
 
     private var shortcutsPage: some View {
@@ -1302,6 +1445,10 @@ struct TranscriptedSettingsView: View {
             recentMeetings = snapshot.meetings
             recentDictations = snapshot.dictations
             recentCapturesLoading = false
+        }
+        homeViewModel.refresh()
+        Task { @MainActor in
+            await StatsService.shared.refreshStats()
         }
     }
 
