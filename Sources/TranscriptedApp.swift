@@ -288,11 +288,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
-        let updateVersion = status.availableUpdateVersion
+        let updateVersion = status.readyToInstallVersion
         statusItemUpdateBadge.isHidden = updateVersion == nil
 
         if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - update \(updateVersion) ready"
+            statusItem?.button?.toolTip = "Transcripted - restart to update to \(updateVersion)"
         } else {
             statusItem?.button?.toolTip = "Transcripted"
         }

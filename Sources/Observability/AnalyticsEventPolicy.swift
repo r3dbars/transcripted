@@ -190,6 +190,7 @@ struct AnalyticsEventPolicy: Equatable {
             name: "update_check_finished",
             allowedProperties: [
                 "automatic_downloads_enabled",
+                "failure_kind",
                 "result",
                 "state",
                 "version",
@@ -207,6 +208,7 @@ struct AnalyticsEventPolicy: Equatable {
             name: "update_download_finished",
             allowedProperties: [
                 "automatic_downloads_enabled",
+                "failure_kind",
                 "state",
                 "version",
             ]

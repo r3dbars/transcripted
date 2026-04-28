@@ -24,11 +24,16 @@ Future agents should treat this as a release requirement:
 - the app triggers a background update check on launch when automatic checks are enabled
 - scheduled update reminders are handled quietly inside Transcripted instead of
   showing automatic Sparkle pop-ups
-- the menu bar footer includes a manual `Check for updates` action; when
-  Sparkle finds a newer release, a prominent update action appears near the top
-  of the menu
-- the settings sidebar footer also becomes an update-ready action when Sparkle
+- the orange menubar badge is reserved for a downloaded, Sparkle-verified update
+  that is ready to install on restart
+- when automatic downloads are enabled, Transcripted keeps available/downloading
+  states quiet; the user-facing action appears only when the update is ready as
+  `Restart to Update`
+- the menu bar footer includes a manual `Check for updates` action; without
+  automatic downloads, a prominent install action can still appear when Sparkle
   finds a newer release
+- the settings sidebar footer becomes an update-ready restart action only after
+  Sparkle has staged the update
 - the About settings page exposes `Check automatically` and `Download
   automatically`; if Sparkle has already downloaded an update, the primary
   action becomes `Restart to Update`
@@ -54,9 +59,15 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 
 4. The script copies the generated `appcast.xml` back into `docs/appcast.xml`.
 5. Upload the release archive to GitHub Releases.
-6. Commit and push the updated `docs/appcast.xml`.
+6. Verify the published update path:
 
-If step 6 has not happened yet, Sparkle clients will keep seeing the old
+```bash
+bash scripts/release/verify-sparkle-release.sh <version>
+```
+
+7. Commit and push the updated `docs/appcast.xml`.
+
+If the final push has not happened yet, Sparkle clients will keep seeing the old
 version.
 
 Sparkle will then discover the new version from the appcast URL on the next app launch.

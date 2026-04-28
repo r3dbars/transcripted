@@ -67,7 +67,10 @@ final class MenuBarPanelController: NSViewController {
             meetingsStatus: warmupStatus.meetingsStatus,
             isRecording: appState.meetingSession.isRecording
         )
-        let updatePresentation = menuUpdatePresentation(for: appState.sparkleUpdater.updateStatus)
+        let updatePresentation = menuUpdatePresentation(
+            for: appState.sparkleUpdater.updateStatus,
+            automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
+        )
         let menuVisibility = MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
@@ -267,7 +270,8 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func menuUpdatePresentation(
-        for status: SparkleUpdaterController.UpdateStatus
+        for status: SparkleUpdaterController.UpdateStatus,
+        automaticDownloadsEnabled: Bool
     ) -> (
         symbolName: String,
         title: String,
@@ -305,6 +309,17 @@ final class MenuBarPanelController: NSViewController {
                 false
             )
         case .updateAvailable(let version):
+            if automaticDownloadsEnabled {
+                return (
+                    "arrow.down.circle",
+                    "Preparing Update",
+                    "Transcripted will ask you to restart when \(version) is ready",
+                    nil,
+                    .standard,
+                    false
+                )
+            }
+
             return (
                 "arrow.down.circle.fill",
                 "Install \(version)",
@@ -316,11 +331,11 @@ final class MenuBarPanelController: NSViewController {
         case .downloading(let version):
             return (
                 "arrow.down.circle",
-                "Downloading \(version)",
-                "Update will be ready soon",
+                "Preparing Update",
+                "Transcripted will ask you to restart when \(version) is ready",
                 nil,
-                .warning,
-                true
+                .standard,
+                false
             )
         case .readyToInstall(let version):
             return (

@@ -33,6 +33,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             }
         }
 
+        var readyToInstallVersion: String? {
+            guard case .readyToInstall(let version) = state else { return nil }
+            return version
+        }
+
         var canRunUserUpdateAction: Bool {
             switch state {
             case .checking, .downloading:
@@ -65,6 +70,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var hasPerformedStartupCheck = false
     private var pendingImmediateInstallHandler: (() -> Void)?
     private var pendingImmediateInstallVersion: String?
+    private var didTrackCurrentUpdateCycleFailure = false
 
     override init() {
         super.init()
@@ -216,6 +222,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return false
         }
 
+        didTrackCurrentUpdateCycleFailure = false
         beginObservedUpdateCheck()
         return true
     }
@@ -266,6 +273,14 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private func markUpdateCheckFailed(from updater: SPUUpdater) {
+        markUpdateCheckFailed(from: updater, error: nil)
+    }
+
+    private func markUpdateCheckFailed(from updater: SPUUpdater, error: (any Error)?) {
+        if error != nil {
+            didTrackCurrentUpdateCycleFailure = true
+        }
+
         if updateStatus.availableUpdateVersion == nil {
             let state: UpdateStatus.State = updater.canCheckForUpdates ? .readyToCheck : .unknown
             setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
@@ -274,7 +289,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         trackUpdateCheckFinished(
             result: "error",
             state: updateStatus.state,
-            version: updateStatus.availableUpdateVersion
+            version: updateStatus.availableUpdateVersion,
+            failureKind: UpdateFailureKind.classify(error).rawValue
         )
     }
 
@@ -326,17 +342,31 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         )
     }
 
-    private func trackUpdateCheckFinished(result: String, state: UpdateStatus.State, version: String?) {
+    private func trackUpdateCheckFinished(
+        result: String,
+        state: UpdateStatus.State,
+        version: String?,
+        failureKind: String? = nil
+    ) {
         var properties = baseUpdateTelemetryProperties(state: state, version: version)
         properties["result"] = result
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
         AnalyticsReporter.track("update_check_finished", properties: properties)
     }
 
-    private func trackUpdateLifecycleEvent(_ event: String, state: UpdateStatus.State, version: String) {
-        AnalyticsReporter.track(
-            event,
-            properties: baseUpdateTelemetryProperties(state: state, version: version)
-        )
+    private func trackUpdateLifecycleEvent(
+        _ event: String,
+        state: UpdateStatus.State,
+        version: String,
+        failureKind: String? = nil
+    ) {
+        var properties = baseUpdateTelemetryProperties(state: state, version: version)
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        AnalyticsReporter.track(event, properties: properties)
     }
 
     private func baseUpdateTelemetryProperties(state: UpdateStatus.State, version: String?) -> [String: String] {
@@ -392,7 +422,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
-        markUpdateCheckFailed(from: updater)
+        markUpdateCheckFailed(from: updater, error: error)
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -416,8 +446,20 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: any Error) {
         let version = versionString(for: item)
         let state = UpdateStatus.State.updateAvailable(version: version)
+        let failureKind = UpdateFailureKind.classify(error, fallback: .downloadFailed).rawValue
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
-        trackUpdateCheckFinished(result: "download_failed", state: state, version: version)
+        trackUpdateLifecycleEvent(
+            "update_download_finished",
+            state: state,
+            version: version,
+            failureKind: failureKind
+        )
+        trackUpdateCheckFinished(
+            result: "download_failed",
+            state: state,
+            version: version,
+            failureKind: failureKind
+        )
     }
 
     func updater(
@@ -435,6 +477,13 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        if let error {
+            guard !didTrackCurrentUpdateCycleFailure else { return }
+            markUpdateCheckFailed(from: updater, error: error)
+            return
+        }
+
+        didTrackCurrentUpdateCycleFailure = false
         let fallbackState: UpdateStatus.State
         switch updateStatus.state {
         case .checking, .unknown:
