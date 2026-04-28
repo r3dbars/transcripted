@@ -139,6 +139,36 @@ func testDictationTranscriptStore() {
             "body headings should not split one saved dictation into multiple entries"
         )
     }
+
+    runSuite("DictationTranscriptStore.savedDictationCounts — totals entries and dictated words") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let today = isoDate("2026-04-11T12:00:00-0500")
+        _ = try? DictationTranscriptStore.save(
+            text: "one two three",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-10T11:20:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "four five",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: today,
+            directory: outputDir
+        )
+
+        let counts = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+
+        assertEqual(counts.total, 2, "total dictation count")
+        assertEqual(counts.today, 1, "today dictation count")
+        assertEqual(counts.totalWords, 5, "total dictated word count")
+    }
 }
 
 private func isoDate(_ string: String) -> Date {

@@ -297,60 +297,61 @@ struct TranscriptedSettingsView: View {
                         )
                     }
 
-                    HomeActivityTabsCard(
-                        selectedTab: $homeActivityTab,
-                        dictationSections: homeViewModel.dictationDaySections,
-                        meetingSections: homeViewModel.meetingDaySections,
-                        isLoading: homeViewModel.isLoading,
-                        isLoadingMore: homeViewModel.isLoadingMore,
-                        canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
-                        canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
-                        copiedRowID: homeCopiedRowID,
-                        onOpenDictation: { entry in
-                            trackSettingsAction("open_recent_dictation", page: .home)
-                            NSWorkspace.shared.open(entry.url)
-                        },
-                        onCopyDictation: { entry in
-                            handleCopyDictation(entry)
-                        },
-                        onFlagDictation: { _ in
-                            trackSettingsAction("flag_dictation", page: .home)
-                            actions.sendFeedback()
-                        },
-                        dictationMenuItems: { entry in
-                            dictationRowMenuItems(for: entry)
-                        },
-                        onOpenMeeting: { item in
-                            trackSettingsAction("open_recent_meeting", page: .home)
-                            NSWorkspace.shared.open(item.transcriptURL)
-                        },
-                        onCopyMeeting: { item in
-                            handleCopyMeeting(item)
-                        },
-                        onFlagMeeting: { _ in
-                            trackSettingsAction("flag_meeting", page: .home)
-                            actions.sendFeedback()
-                        },
-                        meetingMenuItems: { item in
-                            meetingRowMenuItems(for: item)
-                        },
-                        onLoadMoreDictations: {
-                            trackSettingsAction("load_more_dictations", page: .home)
-                            homeViewModel.loadMoreDictations()
-                        },
-                        onLoadMoreMeetings: {
-                            trackSettingsAction("load_more_meetings", page: .home)
-                            homeViewModel.loadMoreMeetings()
-                        }
-                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if useWideLayout {
-                    HomeStatsRail(header: "Total", stats: stats, streak: homeStreak)
+                    HomeStatsRail(header: "Overall", stats: stats, streak: homeStreak)
                         .frame(width: 200, alignment: .topLeading)
                 }
             }
+
+            HomeActivityTabsCard(
+                selectedTab: $homeActivityTab,
+                dictationSections: homeViewModel.dictationDaySections,
+                meetingSections: homeViewModel.meetingDaySections,
+                isLoading: homeViewModel.isLoading,
+                isLoadingMore: homeViewModel.isLoadingMore,
+                canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
+                canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
+                copiedRowID: homeCopiedRowID,
+                onOpenDictation: { entry in
+                    trackSettingsAction("open_recent_dictation", page: .home)
+                    NSWorkspace.shared.open(entry.url)
+                },
+                onCopyDictation: { entry in
+                    handleCopyDictation(entry)
+                },
+                onFlagDictation: { _ in
+                    trackSettingsAction("flag_dictation", page: .home)
+                    actions.sendFeedback()
+                },
+                dictationMenuItems: { entry in
+                    dictationRowMenuItems(for: entry)
+                },
+                onOpenMeeting: { item in
+                    trackSettingsAction("open_recent_meeting", page: .home)
+                    NSWorkspace.shared.open(item.transcriptURL)
+                },
+                onCopyMeeting: { item in
+                    handleCopyMeeting(item)
+                },
+                onFlagMeeting: { _ in
+                    trackSettingsAction("flag_meeting", page: .home)
+                    actions.sendFeedback()
+                },
+                meetingMenuItems: { item in
+                    meetingRowMenuItems(for: item)
+                },
+                onLoadMoreDictations: {
+                    trackSettingsAction("load_more_dictations", page: .home)
+                    homeViewModel.loadMoreDictations()
+                },
+                onLoadMoreMeetings: {
+                    trackSettingsAction("load_more_meetings", page: .home)
+                    homeViewModel.loadMoreMeetings()
+                }
+            )
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
         .onChange(of: homeActivityTab) { _, newValue in
@@ -478,41 +479,42 @@ struct TranscriptedSettingsView: View {
 
     private var homeWelcomeSummary: String {
         let dictations = homeViewModel.todayDictationCount
-        let meetings = homeViewModel.todayMeetingCount
-        if dictations == 0 && meetings == 0 {
-            return "Ready to capture. Recent activity stays light so this screen opens fast."
-        }
-
-        var parts: [String] = []
-        if dictations > 0 {
-            parts.append("\(dictations) dictation\(dictations == 1 ? "" : "s")")
-        }
-        if meetings > 0 {
-            parts.append("\(meetings) meeting\(meetings == 1 ? "" : "s")")
-        }
-        return "\(parts.joined(separator: " and ")) today."
+        let meetings = statsService.todayRecordings
+        let dictationLabel = dictations == 1 ? "dictation" : "dictations"
+        let meetingLabel = meetings == 1 ? "meeting" : "meetings"
+        return "\(formattedInteger(dictations)) \(dictationLabel) today, \(formattedInteger(meetings)) \(meetingLabel) today."
     }
 
     private var homeStatItems: [HomeStatItem] {
         [
             HomeStatItem(
-                value: "\(homeViewModel.recentDictationCount)",
-                label: "recent dictations"
+                value: formattedInteger(homeViewModel.totalDictationCount),
+                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
-                value: "\(homeViewModel.recentMeetingCount)",
-                label: "recent meetings"
+                value: formattedInteger(homeViewModel.totalDictationWordCount),
+                label: "words dictated"
             ),
             HomeStatItem(
-                value: "\(statsService.totalRecordings)",
+                value: formattedInteger(statsService.totalRecordings),
                 label: statsService.totalRecordings == 1 ? "meeting" : "meetings"
             ),
             HomeStatItem(
                 value: statsService.formattedTotalHours,
-                label: "transcribed"
+                label: "meeting hours"
             )
         ]
     }
+
+    private func formattedInteger(_ value: Int) -> String {
+        Self.homeIntegerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private static let homeIntegerFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
 
     private var homeStreak: Int? {
         let streak = statsService.currentStreak

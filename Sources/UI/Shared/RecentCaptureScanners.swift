@@ -12,6 +12,7 @@ struct RecentMeetingItem: Identifiable, Sendable {
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]
+    let dictationCounts: DictationTranscriptCounts
 }
 
 enum RecentCaptureLoader {
@@ -23,7 +24,8 @@ enum RecentCaptureLoader {
         await Task.detached(priority: .utility) {
             RecentCaptureSnapshot(
                 meetings: RecentMeetingsScanner.loadRecent(limit: meetingLimit),
-                dictations: DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
+                dictations: DictationTranscriptStore.recentSavedDictations(limit: dictationLimit),
+                dictationCounts: DictationTranscriptStore.savedDictationCounts()
             )
         }.value
     }

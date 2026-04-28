@@ -10,6 +10,8 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var meetingDaySections: [HomeDaySection<RecentMeetingItem>] = []
     @Published private(set) var recentDictationCount: Int = 0
     @Published private(set) var recentMeetingCount: Int = 0
+    @Published private(set) var totalDictationCount: Int = 0
+    @Published private(set) var totalDictationWordCount: Int = 0
     @Published private(set) var todayDictationCount: Int = 0
     @Published private(set) var todayMeetingCount: Int = 0
     @Published private(set) var isLoading: Bool = false
@@ -69,7 +71,9 @@ final class HomeViewModel: ObservableObject {
             let calendar = Calendar.current
             self.recentDictationCount = visibleDictations.count
             self.recentMeetingCount = visibleMeetings.count
-            self.todayDictationCount = visibleDictations.lazy.filter { calendar.isDateInToday($0.createdAt) }.count
+            self.totalDictationCount = snapshot.dictationCounts.total
+            self.totalDictationWordCount = snapshot.dictationCounts.totalWords
+            self.todayDictationCount = snapshot.dictationCounts.today
             self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.date) }.count
             self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
             self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.date)
@@ -645,7 +649,7 @@ struct HomeActivityTabsCard: View {
             } else {
                 switch selectedTab {
                 case .dictations:
-                    VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HomeDayGroupedList(
                             sections: dictationSections,
                             emptyMessage: "No recent dictations.",
@@ -670,8 +674,9 @@ struct HomeActivityTabsCard: View {
                             )
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 case .meetings:
-                    VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HomeDayGroupedList(
                             sections: meetingSections,
                             emptyMessage: "No recent meetings.",
@@ -696,6 +701,7 @@ struct HomeActivityTabsCard: View {
                             )
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
