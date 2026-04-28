@@ -163,6 +163,7 @@ enum HomeActivityTab: String, CaseIterable, Identifiable {
 
 struct HomeStatItem: Identifiable {
     let id = UUID()
+    let symbolName: String
     let value: String
     let label: String
 }
@@ -196,15 +197,27 @@ struct HomeHeroCard: View {
     let secondaryAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.16))
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             HStack(spacing: 14) {
@@ -218,7 +231,7 @@ struct HomeHeroCard: View {
                 .controlSize(.large)
 
                 Button(action: secondaryAction) {
-                    Text(secondaryTitle)
+                    Label(secondaryTitle, systemImage: "waveform")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -232,8 +245,8 @@ struct HomeHeroCard: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.accentColor.opacity(0.18),
-                            Color.accentColor.opacity(0.05)
+                            Color(nsColor: .controlBackgroundColor).opacity(0.94),
+                            Color.accentColor.opacity(0.11)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -264,13 +277,25 @@ struct HomeStatsRail: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(stats) { stat in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(stat.value)
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                        Text(stat.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 10) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.primary.opacity(0.06))
+                            Image(systemName: stat.symbolName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(width: 26, height: 26)
+                        .padding(.top, 1)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(stat.value)
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                            Text(stat.label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -314,7 +339,7 @@ struct HomeStatsStrip: View {
         HStack(spacing: 22) {
             ForEach(stats) { stat in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(stat.value)
+                    Label(stat.value, systemImage: stat.symbolName)
                         .font(.system(size: 18, weight: .semibold))
                     Text(stat.label)
                         .font(.caption)
@@ -473,7 +498,12 @@ struct HomeDictationRow: View {
             .opacity(isHovering ? 1 : 0.55)
             .animation(.easeOut(duration: 0.12), value: isHovering)
         }
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+        )
         .onHover { isHovering = $0 }
     }
 
@@ -542,7 +572,12 @@ struct HomeMeetingRow: View {
             .opacity(isHovering ? 1 : 0.55)
             .animation(.easeOut(duration: 0.12), value: isHovering)
         }
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+        )
         .onHover { isHovering = $0 }
     }
 
@@ -626,15 +661,27 @@ struct HomeActivityTabsCard: View {
     let onLoadMoreMeetings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker("", selection: $selectedTab) {
-                ForEach(HomeActivityTab.allCases) { tab in
-                    Text(tab.label).tag(tab)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Recent activity")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(activitySubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+
+                Spacer(minLength: 12)
+
+                Picker("", selection: $selectedTab) {
+                    ForEach(HomeActivityTab.allCases) { tab in
+                        Text(tab.label).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 190, alignment: .trailing)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 320, alignment: .leading)
 
             if isLoading {
                 HStack {
@@ -715,6 +762,15 @@ struct HomeActivityTabsCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    private var activitySubtitle: String {
+        switch selectedTab {
+        case .dictations:
+            return canLoadMoreDictations ? "Showing the latest 40 dictations" : "Latest dictations"
+        case .meetings:
+            return canLoadMoreMeetings ? "Showing the latest 25 meetings" : "Latest meetings"
+        }
     }
 }
 
