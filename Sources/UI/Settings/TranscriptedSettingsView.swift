@@ -302,6 +302,9 @@ struct TranscriptedSettingsView: View {
                         dictationSections: homeViewModel.dictationDaySections,
                         meetingSections: homeViewModel.meetingDaySections,
                         isLoading: homeViewModel.isLoading,
+                        isLoadingMore: homeViewModel.isLoadingMore,
+                        canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
+                        canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
                         copiedRowID: homeCopiedRowID,
                         onOpenDictation: { entry in
                             trackSettingsAction("open_recent_dictation", page: .home)
@@ -330,6 +333,14 @@ struct TranscriptedSettingsView: View {
                         },
                         meetingMenuItems: { item in
                             meetingRowMenuItems(for: item)
+                        },
+                        onLoadMoreDictations: {
+                            trackSettingsAction("load_more_dictations", page: .home)
+                            homeViewModel.loadMoreDictations()
+                        },
+                        onLoadMoreMeetings: {
+                            trackSettingsAction("load_more_meetings", page: .home)
+                            homeViewModel.loadMoreMeetings()
                         }
                     )
                 }

@@ -13,12 +13,18 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var todayDictationCount: Int = 0
     @Published private(set) var todayMeetingCount: Int = 0
     @Published private(set) var isLoading: Bool = false
+    @Published private(set) var isLoadingMore: Bool = false
+    @Published private(set) var canLoadMoreDictations: Bool = false
+    @Published private(set) var canLoadMoreMeetings: Bool = false
 
     private var refreshTask: Task<Void, Never>?
+    private var dictationLimit = 40
+    private var meetingLimit = 25
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
-    private let listLimit = 40
+    private let initialDictationLimit = 40
+    private let initialMeetingLimit = 25
 
     var welcomeName: String {
         let full = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,19 +34,49 @@ final class HomeViewModel: ObservableObject {
 
     func refresh() {
         refreshTask?.cancel()
+        dictationLimit = initialDictationLimit
+        meetingLimit = initialMeetingLimit
         isLoading = true
-        let limit = listLimit
+        loadCurrentLimits(isInitialLoad: true)
+    }
+
+    func loadMoreDictations() {
+        guard !isLoading, !isLoadingMore, canLoadMoreDictations else { return }
+        dictationLimit += initialDictationLimit
+        loadCurrentLimits(isInitialLoad: false)
+    }
+
+    func loadMoreMeetings() {
+        guard !isLoading, !isLoadingMore, canLoadMoreMeetings else { return }
+        meetingLimit += initialMeetingLimit
+        loadCurrentLimits(isInitialLoad: false)
+    }
+
+    private func loadCurrentLimits(isInitialLoad: Bool) {
+        refreshTask?.cancel()
+        isLoading = isInitialLoad
+        isLoadingMore = !isInitialLoad
+        let requestedDictationLimit = dictationLimit
+        let requestedMeetingLimit = meetingLimit
         refreshTask = Task { @MainActor in
-            let snapshot = await RecentCaptureLoader.load(limit: limit)
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: requestedDictationLimit + 1,
+                meetingLimit: requestedMeetingLimit + 1
+            )
             guard !Task.isCancelled else { return }
+            let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
+            let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
-            self.recentDictationCount = snapshot.dictations.count
-            self.recentMeetingCount = snapshot.meetings.count
-            self.todayDictationCount = snapshot.dictations.lazy.filter { calendar.isDateInToday($0.createdAt) }.count
-            self.todayMeetingCount = snapshot.meetings.lazy.filter { calendar.isDateInToday($0.date) }.count
-            self.dictationDaySections = Self.groupByDay(snapshot.dictations, dateForItem: \.createdAt)
-            self.meetingDaySections = Self.groupByDay(snapshot.meetings, dateForItem: \.date)
+            self.recentDictationCount = visibleDictations.count
+            self.recentMeetingCount = visibleMeetings.count
+            self.todayDictationCount = visibleDictations.lazy.filter { calendar.isDateInToday($0.createdAt) }.count
+            self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.date) }.count
+            self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
+            self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.date)
+            self.canLoadMoreDictations = snapshot.dictations.count > requestedDictationLimit
+            self.canLoadMoreMeetings = snapshot.meetings.count > requestedMeetingLimit
             self.isLoading = false
+            self.isLoadingMore = false
         }
     }
 
@@ -570,6 +606,9 @@ struct HomeActivityTabsCard: View {
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<RecentMeetingItem>]
     let isLoading: Bool
+    let isLoadingMore: Bool
+    let canLoadMoreDictations: Bool
+    let canLoadMoreMeetings: Bool
     let copiedRowID: String?
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
@@ -579,6 +618,8 @@ struct HomeActivityTabsCard: View {
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onFlagMeeting: (RecentMeetingItem) -> Void
     let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
+    let onLoadMoreDictations: () -> Void
+    let onLoadMoreMeetings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -604,37 +645,57 @@ struct HomeActivityTabsCard: View {
             } else {
                 switch selectedTab {
                 case .dictations:
-                    HomeDayGroupedList(
-                        sections: dictationSections,
-                        emptyMessage: "No recent dictations.",
-                        getID: { AnyHashable($0.id) },
-                        row: { entry in
-                            HomeDictationRow(
-                                entry: entry,
-                                isCopied: copiedRowID == entry.id,
-                                onOpen: { onOpenDictation(entry) },
-                                onCopy: { onCopyDictation(entry) },
-                                onFlag: { onFlagDictation(entry) },
-                                menuItems: dictationMenuItems(entry)
+                    VStack(spacing: 12) {
+                        HomeDayGroupedList(
+                            sections: dictationSections,
+                            emptyMessage: "No recent dictations.",
+                            getID: { AnyHashable($0.id) },
+                            row: { entry in
+                                HomeDictationRow(
+                                    entry: entry,
+                                    isCopied: copiedRowID == entry.id,
+                                    onOpen: { onOpenDictation(entry) },
+                                    onCopy: { onCopyDictation(entry) },
+                                    onFlag: { onFlagDictation(entry) },
+                                    menuItems: dictationMenuItems(entry)
+                                )
+                            }
+                        )
+
+                        if canLoadMoreDictations {
+                            HomeLoadMoreButton(
+                                title: "Load more dictations",
+                                isLoading: isLoadingMore,
+                                action: onLoadMoreDictations
                             )
                         }
-                    )
+                    }
                 case .meetings:
-                    HomeDayGroupedList(
-                        sections: meetingSections,
-                        emptyMessage: "No recent meetings.",
-                        getID: { AnyHashable($0.id) },
-                        row: { item in
-                            HomeMeetingRow(
-                                item: item,
-                                isCopied: copiedRowID == item.id,
-                                onOpen: { onOpenMeeting(item) },
-                                onCopy: { onCopyMeeting(item) },
-                                onFlag: { onFlagMeeting(item) },
-                                menuItems: meetingMenuItems(item)
+                    VStack(spacing: 12) {
+                        HomeDayGroupedList(
+                            sections: meetingSections,
+                            emptyMessage: "No recent meetings.",
+                            getID: { AnyHashable($0.id) },
+                            row: { item in
+                                HomeMeetingRow(
+                                    item: item,
+                                    isCopied: copiedRowID == item.id,
+                                    onOpen: { onOpenMeeting(item) },
+                                    onCopy: { onCopyMeeting(item) },
+                                    onFlag: { onFlagMeeting(item) },
+                                    menuItems: meetingMenuItems(item)
+                                )
+                            }
+                        )
+
+                        if canLoadMoreMeetings {
+                            HomeLoadMoreButton(
+                                title: "Load more meetings",
+                                isLoading: isLoadingMore,
+                                action: onLoadMoreMeetings
                             )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -648,6 +709,30 @@ struct HomeActivityTabsCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+}
+
+struct HomeLoadMoreButton: View {
+    let title: String
+    let isLoading: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Text(isLoading ? "Loading" : title)
+                    .font(.subheadline.weight(.medium))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+        }
+        .buttonStyle(.borderless)
+        .disabled(isLoading)
     }
 }
 

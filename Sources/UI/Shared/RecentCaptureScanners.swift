@@ -16,10 +16,14 @@ struct RecentCaptureSnapshot: Sendable {
 
 enum RecentCaptureLoader {
     static func load(limit: Int = 5) async -> RecentCaptureSnapshot {
+        await load(dictationLimit: limit, meetingLimit: limit)
+    }
+
+    static func load(dictationLimit: Int, meetingLimit: Int) async -> RecentCaptureSnapshot {
         await Task.detached(priority: .utility) {
             RecentCaptureSnapshot(
-                meetings: RecentMeetingsScanner.loadRecent(limit: limit),
-                dictations: DictationTranscriptStore.recentSavedDictations(limit: limit)
+                meetings: RecentMeetingsScanner.loadRecent(limit: meetingLimit),
+                dictations: DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
             )
         }.value
     }
