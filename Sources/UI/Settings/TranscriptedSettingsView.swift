@@ -35,7 +35,7 @@ struct TranscriptedSettingsView: View {
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
-    @State private var customDictionaryPreviewInput = "post hog notes from r three d bars"
+    @State private var customDictionaryPreviewInput = "review the okay ours before the q four meeting"
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
@@ -862,7 +862,7 @@ struct TranscriptedSettingsView: View {
                     }
                     .padding(.top, 4)
 
-                    Text("Example: `post hog` becomes `PostHog`, or `r three d bars` becomes `r3dbars`.")
+                    Text("Examples: `okay ours` becomes `OKRs`, or `q four roadmap` becomes `Q4 roadmap`.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2033,10 +2033,10 @@ private struct CorrectionEditorRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            TextField("post hog", text: $spoken)
+            TextField("okay ours", text: $spoken)
                 .textFieldStyle(.roundedBorder)
 
-            TextField("PostHog", text: $replacement)
+            TextField("OKRs", text: $replacement)
                 .textFieldStyle(.roundedBorder)
 
             Button(role: .destructive, action: onRemove) {
