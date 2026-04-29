@@ -86,6 +86,10 @@ bash scripts/ops/agent-todo-launchagent.sh restart
 
 Codex is expected to commit, push, open a draft PR, update the workpad, and move the issue to `human review`.
 
+## Agent Review Packet
+
+The packet is meant to make GitHub review easier before pulling the branch locally.
+
 ## Safety Notes
 
 This is a trusted local runner. Codex runs in an isolated clone, but the default command in `WORKFLOW.md` uses unattended execution so it can finish without prompts.
