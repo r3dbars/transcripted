@@ -90,6 +90,51 @@ Codex is expected to commit, push, open a draft PR, update the workpad, and move
 
 The packet is meant to make GitHub review easier before pulling the branch locally.
 
+After Codex exits, the runner adds an **Agent Review Packet** to the PR. That
+packet gives Justin review signal without having to pull the branch first:
+
+- change classification, such as `ui change` or `new feature/change`
+- changed files
+- visual evidence for UI changes when the agent wrote files into `.agent-review/visuals/`
+- Transcripted QA output from `transcripted-qa check-health`, plus deeper `validate-all` for meeting/storage/core paths
+- an automated PR review pass from Codex
+
+The runner also adds or updates a **Human Review Ready** comment on the issue.
+That issue comment is the one-click review hub:
+
+- PR link
+- Agent Review Packet link
+- screenshot or GIF preview when present
+- QA summary
+- automated review summary
+- changed files
+- next action instructions
+
+If the packet finds a problem, the runner adds labels that make the issue easier
+to scan:
+
+- `qa failed`
+- `visual missing`
+- `packet failed`
+
+Visual artifacts are embedded from files committed under `.agent-review/visuals/` on the PR branch.
+
+## Revision Loop
+
+If Justin wants changes after review, he can comment on the issue or PR and add
+`agent todo` again. The runner will remove `human review`, move the issue back
+to `agent in progress`, reuse the existing workspace, and Codex should update
+the existing branch and PR instead of opening a duplicate.
+
+For UI work, the agent should save sanitized screenshots or GIFs in:
+
+```text
+.agent-review/visuals/
+```
+
+Screenshots must use fake or empty state. Do not capture private transcripts,
+tokens, personal paths, customer data, or real user content.
+
 ## Safety Notes
 
 This is a trusted local runner. Codex runs in an isolated clone, but the default command in `WORKFLOW.md` uses unattended execution so it can finish without prompts.

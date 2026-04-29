@@ -261,14 +261,14 @@ struct TranscriptedSettingsView: View {
                     }
 
                     HomeHeroCard(
-                        title: "Capture what you say, anywhere you write",
-                        subtitle: "Press your dictation shortcut and speak. Transcripted pastes the text into the app you were using.",
                         primaryTitle: "Start Dictation",
+                        primarySubtitle: "Press your dictation shortcut and speak. Transcripted pastes the text into any app you're using. Capture what you say anywhere you write.",
                         primaryAction: {
                             trackSettingsAction("start_dictation", page: .home)
                             actions.startDictation()
                         },
-                        secondaryTitle: "Record a meeting",
+                        secondaryTitle: "Record a Meeting",
+                        secondarySubtitle: "Record a meeting to capture the conversation, transcribe it, and save notes you can review or reuse later.",
                         secondaryAction: {
                             trackSettingsAction("start_meeting", page: .home)
                             actions.startMeeting()
