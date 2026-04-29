@@ -25,6 +25,7 @@ class AgentTodoRunner
     @watch = options[:watch]
     @issue_number = options[:issue]
     @ensure_labels_requested = options[:ensure_labels]
+    @labels_only = options[:labels_only]
 
     @config, @template = load_workflow(@workflow_path)
     @tracker = @config.fetch("tracker", {})
@@ -37,6 +38,7 @@ class AgentTodoRunner
   def run
     validate!
     ensure_labels if @ensure_labels_requested
+    return if @labels_only
 
     loop do
       count = run_once
@@ -428,6 +430,10 @@ parser = OptionParser.new do |opts|
   opts.on("--once", "Run one polling pass. This is the default.") { options[:watch] = false }
   opts.on("--watch", "Poll forever.") { options[:watch] = true }
   opts.on("--ensure-labels", "Create missing agent labels.") { options[:ensure_labels] = true }
+  opts.on("--labels-only", "Create missing agent labels and exit.") do
+    options[:ensure_labels] = true
+    options[:labels_only] = true
+  end
   opts.on("--dry-run", "Print actions without changing GitHub or launching Codex.") { options[:dry_run] = true }
 end
 

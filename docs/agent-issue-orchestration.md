@@ -21,7 +21,7 @@ The runner treats labels as state:
 Create the labels once:
 
 ```bash
-ruby scripts/ops/agent-todo-runner.rb --ensure-labels
+ruby scripts/ops/agent-todo-runner.rb --labels-only
 ```
 
 Run one pass:
@@ -40,6 +40,25 @@ Run a specific issue:
 
 ```bash
 ruby scripts/ops/agent-todo-runner.rb --issue 123
+```
+
+## Run It In The Background
+
+Install the macOS LaunchAgent:
+
+```bash
+bash scripts/ops/agent-todo-launchagent.sh install
+```
+
+After that, your Mac watches GitHub in the background. To hand work to Codex,
+add `agent todo` to an issue.
+
+Useful commands:
+
+```bash
+bash scripts/ops/agent-todo-launchagent.sh status
+bash scripts/ops/agent-todo-launchagent.sh logs
+bash scripts/ops/agent-todo-launchagent.sh uninstall
 ```
 
 ## What The Runner Does
