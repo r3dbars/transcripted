@@ -15,20 +15,9 @@
 //      for preview/testing without touching CoreAudio.
 
 import AppKit
-import AVFoundation
 import Combine
 import Foundation
 import TranscriptedCore
-
-/// Result of a stop request. `didTimeOut == true` means we did not receive
-/// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
-/// at the returned URLs may not be fully finalized — the controller should
-/// route the audio to the failed queue rather than enqueuing for transcription.
-struct CaptureStopResult {
-    let micURL: URL?
-    let systemURL: URL?
-    let didTimeOut: Bool
-}
 
 @available(macOS 14.0, *)
 @MainActor
@@ -50,15 +39,8 @@ final class MeetingCaptureBridge: ObservableObject {
     let audio: Audio
 
     private var cancellables: Set<AnyCancellable> = []
-
-    /// Fulfilled when Core's Audio reports recording completed. Cleared each
-    /// time `startRecording` runs so back-to-back sessions do not leak state.
-    private var completionContinuation: CheckedContinuation<CaptureStopResult, Never>?
-    private var completionAttemptID: UUID?
-    private var completionTimeoutTask: Task<Void, Never>?
-    private var startContinuation: CheckedContinuation<Bool, Never>?
-    private var startAttemptID: UUID?
-    private var startTimeoutTask: Task<Void, Never>?
+    private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
+    private let startAttempt = MeetingCaptureAttempt<Bool>()
 
     init(audio: Audio = Audio()) {
         self.audio = audio
@@ -67,10 +49,8 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     deinit {
-        startTimeoutTask?.cancel()
-        startContinuation?.resume(returning: false)
-        completionTimeoutTask?.cancel()
-        completionContinuation?.resume(returning: CaptureStopResult(
+        startAttempt.reset()?.resume(returning: false)
+        completionAttempt.reset()?.resume(returning: CaptureStopResult(
             micURL: audio.micAudioFileURL,
             systemURL: audio.systemAudioFileURL,
             didTimeOut: false
@@ -83,7 +63,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() async -> Bool {
-        resetCompletionAttempt()?.resume(returning: currentStopResult())
+        completionAttempt.reset()?.resume(returning: currentStopResult())
         if audio.isRecording { return true }
 
         errorMessage = nil
@@ -96,28 +76,23 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.enableVoiceProcessing = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
 
         return await withCheckedContinuation { continuation in
-            resetStartAttempt()?.resume(returning: false)
-
-            let attemptID = UUID()
-            startAttemptID = attemptID
-            startContinuation = continuation
+            startAttempt.reset()?.resume(returning: false)
+            let attemptID = startAttempt.begin(continuation)
 
             audio.start()
 
-            startTimeoutTask = Task { @MainActor [weak self] in
+            startAttempt.setTimeoutTask(Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStartTimeout)
                 guard let self,
-                      self.startAttemptID == attemptID,
-                      let continuation = self.startContinuation else { return }
+                      let continuation = self.startAttempt.resetIfCurrent(attemptID) else { return }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage
                 )
-                _ = self.resetStartAttempt()
                 if self.audio.isRecording {
                     self.audio.stop()
                 }
                 continuation.resume(returning: false)
-            }
+            })
         }
     }
 
@@ -133,19 +108,14 @@ final class MeetingCaptureBridge: ObservableObject {
         }
 
         return await withCheckedContinuation { continuation in
-            completionTimeoutTask?.cancel()
-            let attemptID = UUID()
-            completionAttemptID = attemptID
-            self.completionContinuation = continuation
-            self.audio.stop()
+            let attemptID = completionAttempt.begin(continuation)
+            audio.stop()
 
-            completionTimeoutTask = Task { @MainActor [weak self] in
+            completionAttempt.setTimeoutTask(Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStopTimeout)
                 guard let self,
-                      self.completionAttemptID == attemptID,
-                      let continuation = self.completionContinuation else { return }
+                      let continuation = self.completionAttempt.resetIfCurrent(attemptID) else { return }
 
-                _ = self.resetCompletionAttempt()
                 EventReporter.shared.capture(
                     level: .warning,
                     engine: "meeting",
@@ -157,7 +127,7 @@ final class MeetingCaptureBridge: ObservableObject {
                     ]
                 )
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
-            }
+            })
         }
     }
 
@@ -171,48 +141,9 @@ final class MeetingCaptureBridge: ObservableObject {
         return (result.micURL, result.systemURL)
     }
 
-    /// Snapshot of Core's recording health metadata for transcript
-    /// frontmatter.
-    ///
-    /// `overrideSystemAudioStatus` lets the caller pass the system-audio
-    /// status they captured BEFORE `stopAndAwaitFiles()` ran — useful
-    /// because `Audio.stop()` resets `systemAudioStatus` to `.unknown` as
-    /// part of its UI cleanup, which would otherwise mask a real `.failed`
-    /// outcome in the resulting `captureQuality`.
-    func healthInfo(
-        overrideSystemAudioStatus: SystemAudioStatus? = nil
-    ) -> RecordingHealthInfo {
-        audio.createHealthInfo(overrideSystemAudioStatus: overrideSystemAudioStatus)
-    }
-
-    // MARK: - Live PCM buffer routing (dual-stream preview)
-    //
-    // These forward TranscriptedCore's new live-buffer hooks through the
-    // bridge so MeetingSessionController can route mic + system buffers to
-    // a pair of StreamingEouAsrManager instances without touching the
-    // Audio class directly. Fired on the CoreAudio capture thread — the
-    // handler MUST be real-time safe (no I/O, no locks held across async,
-    // no allocations beyond small copies). See Audio.swift's
-    // `onMicPCMBuffer` docstring in TranscriptedCore for the full contract.
-
-    /// Install a live-preview handler for mic buffers, or clear with `nil`.
-    /// Call once before `startRecording()`; do not reassign mid-session.
-    func setMicLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
-        audio.onMicPCMBuffer = handler
-    }
-
-    /// Install a live-preview handler for system-audio buffers, or clear
-    /// with `nil`. Call once before `startRecording()`; do not reassign
-    /// mid-session.
-    func setSystemLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
-        audio.onSystemPCMBuffer = handler
-    }
-
     // MARK: - Private
 
     private func finishPendingStartAttemptIfPossible() {
-        guard let continuation = startContinuation else { return }
-
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
             systemAudioFileURL: audio.systemAudioFileURL,
@@ -221,10 +152,9 @@ final class MeetingCaptureBridge: ObservableObject {
         case .waiting:
             return
         case .ready:
-            _ = resetStartAttempt()
-            continuation.resume(returning: true)
+            startAttempt.reset()?.resume(returning: true)
         case .failed(let message):
-            _ = resetStartAttempt()
+            guard let continuation = startAttempt.reset() else { return }
             errorMessage = message
             if audio.isRecording {
                 audio.stop()
@@ -239,8 +169,7 @@ final class MeetingCaptureBridge: ObservableObject {
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let continuation = self.resetCompletionAttempt()
-                continuation?.resume(returning: CaptureStopResult(
+                self.completionAttempt.reset()?.resume(returning: CaptureStopResult(
                     micURL: micURL,
                     systemURL: systemURL,
                     didTimeOut: false
@@ -311,24 +240,6 @@ final class MeetingCaptureBridge: ObservableObject {
             systemURL: audio.systemAudioFileURL,
             didTimeOut: didTimeOut
         )
-    }
-
-    private func resetStartAttempt() -> CheckedContinuation<Bool, Never>? {
-        let continuation = startContinuation
-        startTimeoutTask?.cancel()
-        startTimeoutTask = nil
-        startContinuation = nil
-        startAttemptID = nil
-        return continuation
-    }
-
-    private func resetCompletionAttempt() -> CheckedContinuation<CaptureStopResult, Never>? {
-        let continuation = completionContinuation
-        completionTimeoutTask?.cancel()
-        completionTimeoutTask = nil
-        completionContinuation = nil
-        completionAttemptID = nil
-        return continuation
     }
 
     private func sinkStartAttemptTriggers<Output>(

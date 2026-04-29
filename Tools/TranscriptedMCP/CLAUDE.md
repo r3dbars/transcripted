@@ -70,6 +70,15 @@ All tools are read-only.
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
 
+## Common Agent Retrieval Shapes
+
+Use these tool patterns for the most common questions:
+
+- latest meeting: `list_meetings` with `{"count": 3}` or `recent_context` with `{"kind":"meeting","count":3}`
+- meetings by speaker: `search` with `{"query":"topic","speaker":"Name"}` or `who_is` with `{"speaker":"Name"}`
+- recent mixed context: `recent_context` with `{"count":10}`
+- dictations by day: `list_dictations` with `{"date":"2026-04-29"}`, then `read_dictation` with the returned filename
+
 ## Data Flow
 
 ```text
@@ -142,5 +151,6 @@ The in-app Claude Desktop installer copies that helper into:
 - direct file reads are path-validated and reject traversal or symlink escapes
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
+- `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer
