@@ -528,9 +528,9 @@ struct TranscriptedSettingsView: View {
                 label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
-                symbolName: "textformat",
-                value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "words dictated"
+                symbolName: "keyboard",
+                value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
+                label: "typing saved"
             ),
             HomeStatItem(
                 symbolName: "person.2.wave.2.fill",
@@ -547,6 +547,23 @@ struct TranscriptedSettingsView: View {
 
     private func formattedInteger(_ value: Int) -> String {
         Self.homeIntegerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
+        guard wordCount > 0 else { return "0h" }
+
+        let hours = Double(wordCount) / 40.0 / 60.0
+        guard hours >= 1 else { return "<1h" }
+
+        if hours < 10 {
+            let roundedTenths = (hours * 10).rounded() / 10
+            if roundedTenths >= 10 {
+                return "\(Int(roundedTenths.rounded()))h"
+            }
+            return String(format: "%.1fh", roundedTenths)
+        }
+
+        return "\(Int(hours.rounded()))h"
     }
 
     private static let homeIntegerFormatter: NumberFormatter = {
