@@ -1,6 +1,8 @@
 import Foundation
 
 func testSentryPayloadSanitizer() {
+    let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts paths and secrets") {
         let input = "Saved to /Users/redbars/Private/notes.md with token sk-ant-secret and header Bearer abc123"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
@@ -189,5 +191,23 @@ func testSentryPayloadSanitizer() {
         let nested = sanitized["nested"] as? [String: Any]
         assertNil(nested?["path"], "nested sensitive keys should be dropped")
         assertEqual(nested?["state"] as? String, "recording", "safe nested values should remain")
+    }
+
+    runSuite("SentryPayloadSanitizer matches the shared regression corpus") {
+        for testCase in corpus.cases {
+            let sanitized = SentryPayloadSanitizer.sanitizeText(testCase.input)
+            for forbidden in testCase.mustNotContain {
+                assertFalse(
+                    sanitized.contains(forbidden),
+                    "shared case \(testCase.id) should redact \(forbidden)"
+                )
+            }
+            for required in testCase.mustContain {
+                assertTrue(
+                    sanitized.contains(required),
+                    "shared case \(testCase.id) should keep marker \(required)"
+                )
+            }
+        }
     }
 }
