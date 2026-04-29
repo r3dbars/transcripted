@@ -86,6 +86,10 @@ bash scripts/ops/agent-todo-launchagent.sh restart
 
 Codex is expected to commit, push, open a draft PR, update the workpad, and move the issue to `human review`.
 
+## Agent Review Packet
+
+The packet is meant to make GitHub review easier before pulling the branch locally.
+
 After Codex exits, the runner adds an **Agent Review Packet** to the PR. That
 packet gives Justin review signal without having to pull the branch first:
 
