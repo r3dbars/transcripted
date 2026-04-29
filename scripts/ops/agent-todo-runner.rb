@@ -2,9 +2,11 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "cgi"
 require "json"
 require "open3"
 require "optparse"
+require "pathname"
 require "shellwords"
 require "tempfile"
 require "time"
@@ -271,7 +273,7 @@ class AgentTodoRunner
     changed_files = changed_files_for(workspace)
     classification = classify_change(changed_files)
     visual_files = visual_artifacts_for(workspace)
-    visual_links = publish_visual_artifacts(number, pr, visual_files)
+    visual_links = publish_visual_artifacts(number, pr, visual_files, workspace)
     qa_results = run_qa_packet(workspace, changed_files)
     automated_review = run_automated_pr_review(issue, workspace, pr, changed_files, qa_results)
     comment = review_packet_comment(
@@ -337,25 +339,24 @@ class AgentTodoRunner
     Dir.glob(File.join(root, "**", "*.{png,jpg,jpeg,gif}"), File::FNM_CASEFOLD).sort
   end
 
-  def publish_visual_artifacts(issue_number, pr, files)
+  def publish_visual_artifacts(_issue_number, pr, files, workspace)
     return [] if files.empty?
 
-    gist_url = run_command(
-      "gh", "gist", "create",
-      *files,
-      "--desc", "Transcripted agent visual review for #{repo}##{issue_number} / PR ##{pr.fetch("number")}"
-    ).strip.lines.last.to_s.strip
-    return files.map { |file| local_visual_link(file) } if gist_url.empty?
-
-    gist_id = File.basename(gist_url)
-    raw_files = capture_json("gh", "api", "gists/#{gist_id}", "--jq", ".files")
     files.map do |file|
       name = File.basename(file)
-      raw_url = raw_files.dig(name, "raw_url")
-      raw_url ? "![#{name}](#{raw_url})" : "[#{name}](#{gist_url})"
+      raw_url = raw_visual_url(pr, file, workspace)
+      raw_url ? "![#{name}](#{raw_url})" : local_visual_link(file)
     end
   rescue StandardError => error
-    files.map { |file| "#{local_visual_link(file)} _(upload failed: #{error.message.lines.first&.strip})_" }
+    files.map { |file| "#{local_visual_link(file)} _(embed failed: #{error.message.lines.first&.strip})_" }
+  end
+
+  def raw_visual_url(pr, file, workspace)
+    relative_path = Pathname.new(file).relative_path_from(Pathname.new(workspace)).to_s
+    return nil if relative_path.start_with?("..")
+
+    encoded_path = relative_path.split("/").map { |part| CGI.escape(part).gsub("+", "%20") }.join("/")
+    "https://raw.githubusercontent.com/#{repo}/#{pr.fetch("headRefName")}/#{encoded_path}"
   end
 
   def local_visual_link(file)
