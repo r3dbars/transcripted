@@ -369,7 +369,7 @@ class AgentTodoRunner
   end
 
   def codex_command
-    @codex_command ||= @codex_config.fetch("command", "codex exec --dangerously-bypass-approvals-and-sandbox --search -").to_s
+    @codex_command ||= @codex_config.fetch("command", "codex exec --dangerously-bypass-approvals-and-sandbox -").to_s
   end
 
   def max_concurrent_agents
