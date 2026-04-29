@@ -285,7 +285,7 @@ class AgentTodoRunner
     puts "Creating review packet for PR ##{pr.fetch("number")}"
     changed_files = changed_files_for(workspace)
     classification = classify_change(changed_files)
-    visual_files = visual_artifacts_for(workspace)
+    visual_files = visual_artifacts_for(workspace, changed_files)
     visual_links = publish_visual_artifacts(number, pr, visual_files, workspace)
     qa_results = run_qa_packet(workspace, changed_files)
     automated_review = run_automated_pr_review(issue, workspace, pr, changed_files, qa_results)
@@ -358,11 +358,16 @@ class AgentTodoRunner
     end
   end
 
-  def visual_artifacts_for(workspace)
+  def visual_artifacts_for(workspace, changed_files)
     root = File.join(workspace, ".agent-review", "visuals")
     return [] unless File.directory?(root)
 
-    Dir.glob(File.join(root, "**", "*.{png,jpg,jpeg,gif}"), File::FNM_CASEFOLD).sort
+    changed_visuals = changed_files.select do |path|
+      path.start_with?(".agent-review/visuals/") &&
+        path.match?(/\.(png|jpg|jpeg|gif)$/i)
+    end
+
+    changed_visuals.map { |path| File.join(workspace, path) }.select { |path| File.file?(path) }.sort
   end
 
   def publish_visual_artifacts(_issue_number, pr, files, workspace)
