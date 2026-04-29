@@ -86,6 +86,24 @@ bash scripts/ops/agent-todo-launchagent.sh restart
 
 Codex is expected to commit, push, open a draft PR, update the workpad, and move the issue to `human review`.
 
+After Codex exits, the runner adds an **Agent Review Packet** to the PR. That
+packet gives Justin review signal without having to pull the branch first:
+
+- change classification, such as `ui change` or `new feature/change`
+- changed files
+- visual evidence for UI changes when the agent wrote files into `.agent-review/visuals/`
+- Transcripted QA output from `transcripted-qa check-health`, plus deeper `validate-all` for meeting/storage/core paths
+- an automated PR review pass from Codex
+
+For UI work, the agent should save sanitized screenshots or GIFs in:
+
+```text
+.agent-review/visuals/
+```
+
+Screenshots must use fake or empty state. Do not capture private transcripts,
+tokens, personal paths, customer data, or real user content.
+
 ## Safety Notes
 
 This is a trusted local runner. Codex runs in an isolated clone, but the default command in `WORKFLOW.md` uses unattended execution so it can finish without prompts.

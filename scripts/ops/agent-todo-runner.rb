@@ -2,11 +2,15 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "cgi"
 require "json"
 require "open3"
 require "optparse"
+require "pathname"
 require "shellwords"
+require "tempfile"
 require "time"
+require "timeout"
 require "yaml"
 
 class AgentTodoRunner
@@ -137,6 +141,12 @@ class AgentTodoRunner
     prepare_workspace(number, workspace)
     ensure_workpad(issue, workspace)
     run_codex(issue, workspace)
+    begin
+      post_review_packet(issue, workspace)
+    rescue StandardError => error
+      warn "Review packet failed for ##{number}: #{error.message}"
+      comment_review_packet_failure(number, error.message)
+    end
   rescue StandardError => error
     warn "Issue ##{number || "?"} failed: #{error.message}"
     mark_blocked(number, error.message) if number
@@ -249,6 +259,332 @@ class AgentTodoRunner
     end
   end
 
+  def post_review_packet(issue, workspace)
+    return if @dry_run
+
+    number = issue.fetch("number")
+    branch = run_command("git", "branch", "--show-current", chdir: workspace).strip
+    raise "Codex completed but no branch was active in #{workspace}" if branch.empty?
+
+    pr = find_pull_request(branch)
+    raise "Codex completed but no PR was found for branch #{branch}" if pr.nil?
+
+    puts "Creating review packet for PR ##{pr.fetch("number")}"
+    changed_files = changed_files_for(workspace)
+    classification = classify_change(changed_files)
+    visual_files = visual_artifacts_for(workspace)
+    visual_links = publish_visual_artifacts(number, pr, visual_files, workspace)
+    qa_results = run_qa_packet(workspace, changed_files)
+    automated_review = run_automated_pr_review(issue, workspace, pr, changed_files, qa_results)
+    comment = review_packet_comment(
+      issue: issue,
+      pr: pr,
+      branch: branch,
+      changed_files: changed_files,
+      classification: classification,
+      visual_files: visual_files,
+      visual_links: visual_links,
+      qa_results: qa_results,
+      automated_review: automated_review
+    )
+
+    write_review_packet_comment(pr.fetch("number"), comment)
+  end
+
+  def find_pull_request(branch)
+    prs = capture_json(
+      "gh", "pr", "list",
+      "--repo", repo,
+      "--head", branch,
+      "--state", "all",
+      "--limit", "1",
+      "--json", "number,url,title,isDraft,state,headRefName,baseRefName"
+    )
+    prs.first
+  end
+
+  def changed_files_for(workspace)
+    run_command("git", "fetch", "origin", "main", chdir: workspace)
+    output = run_command("git", "diff", "--name-only", "origin/main...HEAD", chdir: workspace)
+    output.lines.map(&:strip).reject(&:empty?)
+  end
+
+  def classify_change(files)
+    flags = []
+    flags << "ui change" if ui_change?(files)
+    flags << "new feature/change" if feature_change?(files)
+    flags << "tests/docs only" if flags.empty? && files.any? { |path| path.start_with?("Tests/", "docs/") || path.end_with?(".md") }
+    flags << "unknown" if flags.empty?
+    flags
+  end
+
+  def ui_change?(files)
+    files.any? do |path|
+      path.start_with?("Sources/UI/", "Resources/", "docs/assets/", "docs/screenshots/") ||
+        path.match?(/\.(astro|css|html|js|jsx|ts|tsx|swiftui)$/)
+    end
+  end
+
+  def feature_change?(files)
+    files.any? do |path|
+      path.start_with?("Sources/", "Tools/", "scripts/") &&
+        !path.start_with?("Tests/")
+    end
+  end
+
+  def visual_artifacts_for(workspace)
+    root = File.join(workspace, ".agent-review", "visuals")
+    return [] unless File.directory?(root)
+
+    Dir.glob(File.join(root, "**", "*.{png,jpg,jpeg,gif}"), File::FNM_CASEFOLD).sort
+  end
+
+  def publish_visual_artifacts(_issue_number, pr, files, workspace)
+    return [] if files.empty?
+
+    files.map do |file|
+      name = File.basename(file)
+      raw_url = raw_visual_url(pr, file, workspace)
+      raw_url ? "![#{name}](#{raw_url})" : local_visual_link(file)
+    end
+  rescue StandardError => error
+    files.map { |file| "#{local_visual_link(file)} _(embed failed: #{error.message.lines.first&.strip})_" }
+  end
+
+  def raw_visual_url(pr, file, workspace)
+    relative_path = Pathname.new(file).relative_path_from(Pathname.new(workspace)).to_s
+    return nil if relative_path.start_with?("..")
+
+    encoded_path = relative_path.split("/").map { |part| CGI.escape(part).gsub("+", "%20") }.join("/")
+    "https://raw.githubusercontent.com/#{repo}/#{pr.fetch("headRefName")}/#{encoded_path}"
+  end
+
+  def local_visual_link(file)
+    "`#{file}`"
+  end
+
+  def run_qa_packet(workspace, changed_files)
+    results = []
+    if File.directory?(File.join(workspace, "Tools", "TranscriptedQA"))
+      results << run_packet_command(
+        "Transcripted QA health",
+        ["swift", "run", "transcripted-qa", "check-health"],
+        chdir: File.join(workspace, "Tools", "TranscriptedQA"),
+        timeout_seconds: 240
+      )
+
+      if deep_transcripted_qa?(changed_files)
+        results << run_packet_command(
+          "Transcripted QA validate-all",
+          ["swift", "run", "transcripted-qa", "validate-all"],
+          chdir: File.join(workspace, "Tools", "TranscriptedQA"),
+          timeout_seconds: 900
+        )
+      end
+    else
+      results << {
+        "name" => "Transcripted QA",
+        "command" => "swift run transcripted-qa check-health",
+        "status" => "skipped",
+        "output" => "Tools/TranscriptedQA was not present."
+      }
+    end
+    results
+  end
+
+  def deep_transcripted_qa?(files)
+    files.any? do |path|
+      path.start_with?(
+        "Sources/Meeting/",
+        "Sources/TranscriptedCore/",
+        "Sources/Dictation/",
+        "Sources/Support/TranscriptedStoragePaths",
+        "Tools/TranscriptedQA/"
+      )
+    end
+  end
+
+  def run_packet_command(name, command, chdir:, timeout_seconds:)
+    attempts = 0
+    loop do
+      attempts += 1
+      output = +""
+      status = nil
+
+      begin
+        Timeout.timeout(timeout_seconds) do
+          stdout, stderr, process_status = Open3.capture3(*command, chdir: chdir)
+          output = [stdout, stderr].reject(&:empty?).join("\n")
+          status = process_status.success? ? "passed" : "failed"
+        end
+      rescue Timeout::Error
+        return {
+          "name" => name,
+          "command" => command.shelljoin,
+          "status" => "timed out",
+          "output" => "Timed out after #{timeout_seconds}s.",
+          "attempts" => attempts
+        }
+      rescue StandardError => error
+        return {
+          "name" => name,
+          "command" => command.shelljoin,
+          "status" => "failed",
+          "output" => error.message,
+          "attempts" => attempts
+        } if attempts >= 2
+
+        sleep 2
+        next
+      end
+
+      return {
+        "name" => name,
+        "command" => command.shelljoin,
+        "status" => status,
+        "output" => truncate_packet_output(output),
+        "attempts" => attempts
+      } unless status == "failed" && attempts < 2
+
+      sleep 2
+    end
+  end
+
+  def run_automated_pr_review(issue, workspace, pr, changed_files, qa_results)
+    review_dir = File.join(workspace, ".agent-review")
+    FileUtils.mkdir_p(review_dir)
+    review_path = File.join(review_dir, "automated-review.md")
+    diff_path = File.join(review_dir, "pr.diff")
+    File.write(diff_path, run_command("git", "diff", "--stat", "origin/main...HEAD", chdir: workspace) + "\n\n" + run_command("git", "diff", "origin/main...HEAD", chdir: workspace))
+
+    prompt = <<~PROMPT
+      You are doing an automated code review for Transcripted PR ##{pr.fetch("number")}.
+
+      Issue: #{issue.fetch("url")}
+      PR: #{pr.fetch("url")}
+      Title: #{pr.fetch("title")}
+
+      Changed files:
+      #{changed_files.map { |path| "- #{path}" }.join("\n")}
+
+      QA results:
+      #{qa_results.map { |result| "- #{result.fetch("name")}: #{result.fetch("status")} (`#{result.fetch("command")}`)" }.join("\n")}
+
+      Review the diff in .agent-review/pr.diff.
+      The final Agent Review Packet comment is posted after this review finishes, so do not flag that comment as missing.
+
+      Output concise Markdown only:
+      - Findings first, ordered by severity, with file/line references when possible.
+      - If you find no issues, say "No blocking issues found."
+      - Then list residual risks/manual checks.
+      - Do not modify files.
+    PROMPT
+
+    command = Shellwords.split(review_command(review_path))
+    Open3.popen2e(*command, chdir: workspace) do |stdin, output, wait_thread|
+      stdin.write(prompt)
+      stdin.close
+      output.each { |line| print line }
+      status = wait_thread.value
+      unless status.success?
+        return {
+          "status" => "failed",
+          "body" => "Automated review command failed with status #{status.exitstatus}."
+        }
+      end
+    end
+
+    {
+      "status" => "completed",
+      "body" => File.exist?(review_path) ? File.read(review_path).strip : "Automated review completed but did not write output."
+    }
+  rescue StandardError => error
+    {
+      "status" => "failed",
+      "body" => error.message
+    }
+  end
+
+  def review_command(output_path)
+    "codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox --output-last-message #{Shellwords.escape(output_path)} -"
+  end
+
+  def review_packet_comment(issue:, pr:, branch:, changed_files:, classification:, visual_files:, visual_links:, qa_results:, automated_review:)
+    visual_section = if visual_files.empty?
+                       if classification.include?("ui change")
+                         "UI change detected, but no visual artifact was found at `.agent-review/visuals/`.\n\nAgent follow-up: add a sanitized screenshot or GIF for this PR before merge."
+                       else
+                         "No UI visual required for this change."
+                       end
+                     else
+                       visual_links.join("\n\n")
+                     end
+
+    qa_section = qa_results.map do |result|
+      output = result.fetch("output", "").to_s
+      output_block = if output.empty?
+                       ""
+                     else
+                       escaped = output.gsub("```", "` ` `")
+                       <<~MD
+
+                         <details>
+                         <summary>Output</summary>
+
+                         ```text
+                         #{escaped}
+                         ```
+
+                         </details>
+                       MD
+                     end
+      <<~MD
+        - **#{result.fetch("name")}**: #{result.fetch("status")}
+          - Command: `#{result.fetch("command")}`
+          - Attempts: #{result.fetch("attempts", 1)}
+          #{output_block}
+      MD
+    end.join
+
+    <<~MD
+      ## Agent Review Packet
+
+      Issue: #{issue.fetch("url")}
+      Branch: `#{branch}`
+      Change type: #{classification.join(", ")}
+
+      ### What Changed
+      #{changed_files.empty? ? "- No changed files detected." : changed_files.map { |path| "- `#{path}`" }.join("\n")}
+
+      ### Visual Review
+      #{visual_section}
+
+      ### QA
+      #{qa_section}
+
+      ### Automated PR Review
+      Status: #{automated_review.fetch("status")}
+
+      #{automated_review.fetch("body")}
+    MD
+  end
+
+  def write_review_packet_comment(pr_number, body)
+    Tempfile.create(["agent-review-packet", ".md"]) do |file|
+      file.write(body)
+      file.flush
+      run_command("gh", "pr", "comment", pr_number.to_s, "--repo", repo, "--body-file", file.path)
+    end
+  end
+
+  def truncate_packet_output(output)
+    text = output.to_s.strip
+    return "" if text.empty?
+    return text if text.length <= 4_000
+
+    "[truncated]\n#{text[-4_000..]}"
+  end
+
   def render_prompt(issue, workspace)
     context = {
       "repo" => repo,
@@ -309,6 +645,19 @@ class AgentTodoRunner
 
     body = <<~MD
       Codex runner stopped on a blocker.
+
+      ```text
+      #{message}
+      ```
+    MD
+    run_command("gh", "issue", "comment", number.to_s, "--repo", repo, "--body", body)
+  end
+
+  def comment_review_packet_failure(number, message)
+    return if @dry_run
+
+    body = <<~MD
+      Codex opened or attempted the implementation PR, but the automated review packet failed.
 
       ```text
       #{message}
