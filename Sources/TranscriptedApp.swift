@@ -364,16 +364,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func finishOnboardingAndStartDictation() {
-        let sourceApp = resolvedSourceApp()
-        PermissionsOnboardingPreferences.markCompleted()
-        appState.recoverHotkeysAfterPermissionChange()
-        onboardingWindowController.dismiss()
-        closePopover()
-        sourceApp?.activate(options: [])
-        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
-    }
-
     private func showMainPopover(
         relativeTo button: NSStatusBarButton,
         popover: NSPopover,
