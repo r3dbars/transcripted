@@ -159,8 +159,13 @@ struct FormatOptions: ParsableArguments {
 
 // MARK: - Helper
 
-func runValidation(results: [ValidationResult], format: OutputFormat) throws {
-    let report = ValidationReport(results: results)
+func runValidation(
+    results: [ValidationResult],
+    format: OutputFormat,
+    command: String? = nil,
+    paths: QADataDirectories? = nil
+) throws {
+    let report = ValidationReport(results: results, context: makeValidationContext(command: command, paths: paths))
     switch format {
     case .text: report.printText()
     case .json: report.printJSON()
@@ -168,4 +173,16 @@ func runValidation(results: [ValidationResult], format: OutputFormat) throws {
     if report.exitCode != 0 {
         throw ExitCode(report.exitCode)
     }
+}
+
+private func makeValidationContext(command: String?, paths: QADataDirectories?) -> ValidationContext {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return ValidationContext(
+        command: command,
+        generatedAt: formatter.string(from: Date()),
+        meetingsDir: paths?.meetingsDir.path,
+        stateDir: paths?.stateDir.path,
+        logPath: paths?.logFilePath
+    )
 }

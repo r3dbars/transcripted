@@ -104,6 +104,18 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
 
 `ValidationReport` wraps all rows, computes a pass/fail/warn summary, exposes the CLI exit code, and can print either aligned text output or pretty JSON.
 
+The JSON report now also carries:
+- `context` - command name, generated time, and resolved paths
+- `automation` - overall classification, repo-fix-candidate flag, failure fingerprints, and the suggested next step
+
+Example automation-friendly run:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run transcripted-qa validate-all --format json > /tmp/transcripted-qa-validate-all.json
+```
+
+Use the `automation.failureFingerprints` array as the stable summary surface for repeat-drift detection and inbox reporting.
+
 ## Key Features
 
 - **Health checks**: Quick system status before deep validation
@@ -122,6 +134,7 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
 - All validators run synchronously on background threads
 - SQLite readers use dedicated utility queues for thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
+- The JSON report is the preferred machine-readable surface for nightly automation because it includes classification and fingerprint summaries in addition to raw check rows
 - Error messages are human-readable for CLI output
 - Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
 - If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`

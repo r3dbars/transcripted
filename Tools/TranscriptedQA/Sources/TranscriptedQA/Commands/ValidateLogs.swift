@@ -13,8 +13,9 @@ struct ValidateLogs: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let logPath = path ?? QADataDirectories.resolve().logFilePath
+        let paths = QADataDirectories.resolve(logPath: path)
+        let logPath = paths.logFilePath
         let results = LogValidator(logPath: logPath).validate()
-        try runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format, command: "validate-logs", paths: paths)
     }
 }

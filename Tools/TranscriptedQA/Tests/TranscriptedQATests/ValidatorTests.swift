@@ -105,4 +105,54 @@ final class ValidatorTests: XCTestCase {
             1
         )
     }
+
+    func testValidationReportBuildsStaleArtifactFingerprintForRepeatedLocalDriftShape() {
+        let results: [ValidationResult] = [
+            .fail("artifact/json-utterances-present", target: "Call_2026-04-18_14-43-40.json", detail: "No utterances found"),
+            .fail("artifact/md-match", target: "Call_2026-04-18_14-43-40.json", detail: "No corresponding .md file"),
+            .fail("index/markdown-on-disk", target: "transcripted.json", detail: "Call_2026-04-18_14-43-40.md not found on disk")
+        ]
+
+        let report = ValidationReport(results: results)
+
+        XCTAssertEqual(report.automation.overallStatus, .localDataDrift)
+        XCTAssertFalse(report.automation.repoFixCandidate)
+        XCTAssertEqual(report.automation.failureFingerprints.count, 1)
+        XCTAssertEqual(
+            report.automation.failureFingerprints.first?.id,
+            "stale_legacy_sidecar_missing_markdown_index_drift/Call_2026-04-18_14-43-40"
+        )
+    }
+
+    func testValidationReportMarksContractFailuresAsRepoFixCandidates() {
+        let results: [ValidationResult] = [
+            .fail("transcript/yaml-required-keys", target: "Broken.md", detail: "Missing required YAML keys")
+        ]
+
+        let report = ValidationReport(results: results)
+
+        XCTAssertEqual(report.automation.overallStatus, .repoFixCandidate)
+        XCTAssertTrue(report.automation.repoFixCandidate)
+        XCTAssertEqual(report.automation.failureFingerprints.first?.scope, .sharedContract)
+    }
+
+    func testValidationReportCarriesContextIntoJSON() throws {
+        let report = ValidationReport(
+            results: [.pass("ok", target: "fixture")],
+            context: ValidationContext(
+                command: "validate-all",
+                generatedAt: "2026-04-29T10:00:00Z",
+                meetingsDir: "/tmp/meetings",
+                stateDir: "/tmp/state",
+                logPath: "/tmp/logs/app.jsonl"
+            )
+        )
+
+        let data = try JSONEncoder().encode(report)
+        let decoded = try JSONDecoder().decode(ValidationReport.self, from: data)
+
+        XCTAssertEqual(decoded.context?.command, "validate-all")
+        XCTAssertEqual(decoded.context?.meetingsDir, "/tmp/meetings")
+        XCTAssertEqual(decoded.automation.overallStatus, .green)
+    }
 }

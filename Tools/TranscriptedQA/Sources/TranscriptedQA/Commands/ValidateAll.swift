@@ -22,6 +22,6 @@ struct ValidateAll: ParsableCommand {
         results += IndexValidator(directory: paths.meetingsDir).validate()
         results += HealthChecker(paths: paths).validate()
 
-        try runValidation(results: results, format: formatOpts.format)
+        try runValidation(results: results, format: formatOpts.format, command: "validate-all", paths: paths)
     }
 }
