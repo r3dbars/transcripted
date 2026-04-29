@@ -513,19 +513,15 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        // Snapshot the system-audio status BEFORE stop, since `Audio.stop()`
-        // resets it to `.unknown`. The lock-protected health fields
-        // (gaps, deviceSwitchCount, recoveryAttemptCount) are NOT reset by
-        // stop, so we read them AFTER `stopAndAwaitFiles()` returns —
-        // that way we don't contend with the audio thread for those NSLocks
-        // while it's still draining buffers, which used to add a few ms of
-        // main-thread stall to the meeting widget's stop interaction.
+        // Snapshot capture health BEFORE stop, since the system-audio backend
+        // can clean up buffer counters before file-close completion resumes.
         let finalSystemAudioStatus = capture.systemAudioStatus
-        let stopResult = await capture.stopAndAwaitFiles()
+        let finalRecordingDuration = recordingDuration
         let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
+        let stopResult = await capture.stopAndAwaitFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let durationMs = Int(recordingDuration * 1000)
+        let durationMs = Int(finalRecordingDuration * 1000)
         activeRecordingTrigger = .unknown
         state = .transcribing
 
@@ -553,7 +549,7 @@ final class MeetingSessionController: ObservableObject {
             properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
                 [
                     "capture_quality": healthInfo.captureQuality.rawValue,
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: finalRecordingDuration),
                     "gap_count_bucket": AnalyticsReporter.countBucket(healthInfo.audioGaps),
                     "reason": reason.rawValue,
                     "route_change_count_bucket": AnalyticsReporter.countBucket(healthInfo.deviceSwitches),
@@ -571,7 +567,7 @@ final class MeetingSessionController: ObservableObject {
                 healthInfo: healthInfo,
                 trigger: recordingTrigger.rawValue,
                 reason: reason.rawValue,
-                durationSeconds: recordingDuration,
+                durationSeconds: finalRecordingDuration,
                 systemStreamPresent: files.systemURL != nil,
                 stopTimedOut: stopResult.didTimeOut
             )
@@ -581,7 +577,7 @@ final class MeetingSessionController: ObservableObject {
             healthInfo: healthInfo,
             trigger: recordingTrigger,
             reason: reason,
-            durationSeconds: recordingDuration,
+            durationSeconds: finalRecordingDuration,
             files: files,
             stopTimedOut: stopResult.didTimeOut
         )
@@ -693,8 +689,11 @@ final class MeetingSessionController: ObservableObject {
         audioInactivityWarning = nil
 
         let recordingTrigger = activeRecordingTrigger
-        let durationMs = Int(recordingDuration * 1000)
         let finalSystemAudioStatus = capture.systemAudioStatus
+        let finalRecordingDuration = recordingDuration
+        let durationMs = Int(finalRecordingDuration * 1000)
+        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
+        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -710,8 +709,6 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let files = await capture.stopAndDiscardFiles()
-        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
-        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
