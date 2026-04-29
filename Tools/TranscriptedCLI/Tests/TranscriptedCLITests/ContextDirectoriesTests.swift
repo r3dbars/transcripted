@@ -164,6 +164,33 @@ final class ContextDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveSharedDataDirUsesMeetingsAndDictationsSubfolders() throws {
+        let tempHome = makeTempDir()
+        defer { removeTempDir(tempHome) }
+
+        let sharedRoot = tempHome.appendingPathComponent("shared-context", isDirectory: true)
+        let sharedMeetings = sharedRoot.appendingPathComponent("meetings", isDirectory: true)
+        let sharedDictations = sharedRoot.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sharedDictations, withIntermediateDirectories: true)
+
+        let directories = CLIContextDirectories.resolve(
+            dataDir: nil,
+            meetingsDir: nil,
+            dictationsDir: nil,
+            environment: ["TRANSCRIPTED_DATA_DIR": sharedRoot.path],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            sharedMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            sharedDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveSkipsLegacySharedFolderWithoutCaptureMarkdown() throws {
         let tempHome = makeTempDir()
         defer { removeTempDir(tempHome) }
