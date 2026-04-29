@@ -565,7 +565,9 @@ class DictationSessionController: ObservableObject {
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
-                overlayController.showNoSpeechAndDismiss()
+                overlayController.showNoSpeechAndDismiss(
+                    message: noSpeechMessage(for: currentDictationTrigger)
+                )
                 isDictating = false
                 return
             }
@@ -844,6 +846,15 @@ class DictationSessionController: ObservableObject {
             progress: 0.16,
             status: "Waiting for macOS permission"
         )
+    }
+
+    private func noSpeechMessage(for trigger: DictationTrigger) -> String {
+        switch trigger {
+        case .physicalKey, .rightOptionTap, .keyboardShortcut:
+            return "Nothing was transcribed. Hold the key and speak a little longer before letting go."
+        case .menu, .overlayButton, .onboarding, .unknown:
+            return "Nothing was transcribed. Speak a little longer before stopping."
+        }
     }
 
     private func microphoneTimeoutMessage(
