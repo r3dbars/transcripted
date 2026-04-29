@@ -404,33 +404,49 @@ class AgentTodoRunner
   end
 
   def run_packet_command(name, command, chdir:, timeout_seconds:)
-    output = +""
-    status = nil
-    Timeout.timeout(timeout_seconds) do
-      stdout, stderr, process_status = Open3.capture3(*command, chdir: chdir)
-      output = [stdout, stderr].reject(&:empty?).join("\n")
-      status = process_status.success? ? "passed" : "failed"
+    attempts = 0
+    loop do
+      attempts += 1
+      output = +""
+      status = nil
+
+      begin
+        Timeout.timeout(timeout_seconds) do
+          stdout, stderr, process_status = Open3.capture3(*command, chdir: chdir)
+          output = [stdout, stderr].reject(&:empty?).join("\n")
+          status = process_status.success? ? "passed" : "failed"
+        end
+      rescue Timeout::Error
+        return {
+          "name" => name,
+          "command" => command.shelljoin,
+          "status" => "timed out",
+          "output" => "Timed out after #{timeout_seconds}s.",
+          "attempts" => attempts
+        }
+      rescue StandardError => error
+        return {
+          "name" => name,
+          "command" => command.shelljoin,
+          "status" => "failed",
+          "output" => error.message,
+          "attempts" => attempts
+        } if attempts >= 2
+
+        sleep 2
+        next
+      end
+
+      return {
+        "name" => name,
+        "command" => command.shelljoin,
+        "status" => status,
+        "output" => truncate_packet_output(output),
+        "attempts" => attempts
+      } unless status == "failed" && attempts < 2
+
+      sleep 2
     end
-    {
-      "name" => name,
-      "command" => command.shelljoin,
-      "status" => status,
-      "output" => truncate_packet_output(output)
-    }
-  rescue Timeout::Error
-    {
-      "name" => name,
-      "command" => command.shelljoin,
-      "status" => "timed out",
-      "output" => "Timed out after #{timeout_seconds}s."
-    }
-  rescue StandardError => error
-    {
-      "name" => name,
-      "command" => command.shelljoin,
-      "status" => "failed",
-      "output" => error.message
-    }
   end
 
   def run_automated_pr_review(issue, workspace, pr, changed_files, qa_results)
@@ -454,6 +470,7 @@ class AgentTodoRunner
       #{qa_results.map { |result| "- #{result.fetch("name")}: #{result.fetch("status")} (`#{result.fetch("command")}`)" }.join("\n")}
 
       Review the diff in .agent-review/pr.diff.
+      The final Agent Review Packet comment is posted after this review finishes, so do not flag that comment as missing.
 
       Output concise Markdown only:
       - Findings first, ordered by severity, with file/line references when possible.
@@ -523,6 +540,7 @@ class AgentTodoRunner
       <<~MD
         - **#{result.fetch("name")}**: #{result.fetch("status")}
           - Command: `#{result.fetch("command")}`
+          - Attempts: #{result.fetch("attempts", 1)}
           #{output_block}
       MD
     end.join
