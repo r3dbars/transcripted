@@ -65,6 +65,21 @@ struct SentryEventPolicy: Equatable {
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
         ),
+        "meeting.meeting_start_failed": .init(
+            engine: "meeting",
+            event: "meeting_start_failed",
+            summary: "Meeting recording could not start."
+        ),
+        "meeting.recording_capture_degraded": .init(
+            engine: "meeting",
+            event: "recording_capture_degraded",
+            summary: "Meeting capture health degraded."
+        ),
+        "meeting.recording_stop_timeout": .init(
+            engine: "meeting",
+            event: "recording_stop_timeout",
+            summary: "Meeting recording stop timed out."
+        ),
         "onboarding.first_dictation_start_failed": .init(
             engine: "onboarding",
             event: "first_dictation_start_failed",

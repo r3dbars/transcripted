@@ -19,6 +19,8 @@ import QuartzCore  // CACurrentMediaTime — real-time-safe monotonic clock
 @available(macOS 14.2, *)
 class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
 
+    var diagnosticBackendName: String { "coreaudio_process_tap" }
+
     var errorMessagePublisher: AnyPublisher<String?, Never> {
         $errorMessage.eraseToAnyPublisher()
     }

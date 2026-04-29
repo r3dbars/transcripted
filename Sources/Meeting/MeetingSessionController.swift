@@ -339,12 +339,24 @@ final class MeetingSessionController: ObservableObject {
         let started = await capture.startRecording()
         guard started else {
             let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
+            let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
+            let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+                [
+                    "failure_kind": meetingStartFailureKind(from: failureMessage),
+                    "trigger": trigger.rawValue,
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
                 event: "meeting_start_failed",
                 message: failureMessage,
-                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+                context: baseDiagnosticsContext(extra: failureProperties)
+            )
+            AnalyticsReporter.track(
+                "meeting_recording_start_failed",
+                properties: failureProperties
             )
             state = .error(failureMessage)
             return false
@@ -352,17 +364,24 @@ final class MeetingSessionController: ObservableObject {
 
         activeRecordingTrigger = trigger
         state = .recording
+        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_recording_started",
             message: "Meeting recording started",
-            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            context: baseDiagnosticsContext(
+                extra: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+                    ["trigger": trigger.rawValue],
+                    uniquingKeysWith: { _, new in new }
+                )
+            )
         )
         AnalyticsReporter.track(
             "meeting_recording_started",
-            properties: [
-                "trigger": trigger.rawValue,
-            ]
+            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+                ["trigger": trigger.rawValue],
+                uniquingKeysWith: { _, new in new }
+            )
         )
         return true
     }
@@ -504,6 +523,7 @@ final class MeetingSessionController: ObservableObject {
         let finalSystemAudioStatus = capture.systemAudioStatus
         let stopResult = await capture.stopAndAwaitFiles()
         let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
+        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let durationMs = Int(recordingDuration * 1000)
         activeRecordingTrigger = .unknown
@@ -527,6 +547,43 @@ final class MeetingSessionController: ObservableObject {
                     "device_switches": "\(healthInfo.deviceSwitches)"
                 ]
             )
+        )
+        AnalyticsReporter.track(
+            "meeting_recording_stopped",
+            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+                [
+                    "capture_quality": healthInfo.captureQuality.rawValue,
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                    "gap_count_bucket": AnalyticsReporter.countBucket(healthInfo.audioGaps),
+                    "reason": reason.rawValue,
+                    "route_change_count_bucket": AnalyticsReporter.countBucket(healthInfo.deviceSwitches),
+                    "system_stream_present": boolString(files.systemURL != nil),
+                    "stop_timed_out": boolString(stopResult.didTimeOut),
+                    "trigger": recordingTrigger.rawValue,
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_capture_health_snapshot",
+            properties: meetingCaptureHealthSnapshotProperties(
+                snapshot: pipelineSnapshot,
+                healthInfo: healthInfo,
+                trigger: recordingTrigger.rawValue,
+                reason: reason.rawValue,
+                durationSeconds: recordingDuration,
+                systemStreamPresent: files.systemURL != nil,
+                stopTimedOut: stopResult.didTimeOut
+            )
+        )
+        reportCaptureHealthIfNeeded(
+            snapshot: pipelineSnapshot,
+            healthInfo: healthInfo,
+            trigger: recordingTrigger,
+            reason: reason,
+            durationSeconds: recordingDuration,
+            files: files,
+            stopTimedOut: stopResult.didTimeOut
         )
 
         guard let micURL = files.micURL else {
@@ -587,16 +644,6 @@ final class MeetingSessionController: ObservableObject {
                 ]
             )
         )
-        AnalyticsReporter.track(
-            "meeting_recording_stopped",
-            properties: [
-                "capture_quality": healthInfo.captureQuality.rawValue,
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
-                "reason": reason.rawValue,
-                "system_stream_present": boolString(files.systemURL != nil),
-                "trigger": recordingTrigger.rawValue,
-            ]
-        )
     }
 
     func dismissAudioInactivityWarning() {
@@ -647,6 +694,7 @@ final class MeetingSessionController: ObservableObject {
 
         let recordingTrigger = activeRecordingTrigger
         let durationMs = Int(recordingDuration * 1000)
+        let finalSystemAudioStatus = capture.systemAudioStatus
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -662,6 +710,8 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let files = await capture.stopAndDiscardFiles()
+        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
+        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
@@ -682,12 +732,27 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_recording_cancelled",
-            properties: [
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
-                "reason": reason.rawValue,
-                "system_stream_present": boolString(files.systemURL != nil),
-                "trigger": recordingTrigger.rawValue,
-            ]
+            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+                [
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
+                    "reason": reason.rawValue,
+                    "system_stream_present": boolString(files.systemURL != nil),
+                    "trigger": recordingTrigger.rawValue,
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_capture_health_snapshot",
+            properties: meetingCaptureHealthSnapshotProperties(
+                snapshot: pipelineSnapshot,
+                healthInfo: healthInfo,
+                trigger: recordingTrigger.rawValue,
+                reason: reason.rawValue,
+                durationSeconds: Double(durationMs) / 1000,
+                systemStreamPresent: files.systemURL != nil,
+                stopTimedOut: false
+            )
         )
     }
 
@@ -1302,11 +1367,14 @@ final class MeetingSessionController: ObservableObject {
             )
             AnalyticsReporter.track(
                 "meeting_transcript_failed",
-                properties: [
-                    "failure_kind": analyticsFailureKind(from: message),
-                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
-                    "trigger": transcriptionTrigger.rawValue,
-                ]
+                properties: meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging(
+                    [
+                        "failure_kind": analyticsFailureKind(from: message),
+                        "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                        "trigger": transcriptionTrigger.rawValue,
+                    ],
+                    uniquingKeysWith: { _, new in new }
+                )
             )
             finalizeBackgroundTranscriptionStateIfNeeded()
         case .gettingReady:
@@ -1378,6 +1446,84 @@ final class MeetingSessionController: ObservableObject {
 
     private func analyticsFailureKind(from message: String) -> String {
         MeetingFailureKind.classify(message: message).rawValue
+    }
+
+    private func meetingStartFailureKind(from message: String) -> String {
+        let normalized = message.lowercased()
+        if normalized.contains("permission") { return "permission_missing" }
+        if normalized.contains("timeout") || normalized.contains("timed out") { return "start_timeout" }
+        if normalized.contains("system audio") { return "system_stream_unavailable" }
+        if normalized.contains("microphone") || normalized.contains("mic") { return "mic_unavailable" }
+        return "unexpected"
+    }
+
+    private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
+        var properties = snapshot.privacySafeContext
+        properties["gap_count_bucket"] = AnalyticsReporter.countBucket(snapshot.gapCount)
+        properties["route_change_count_bucket"] = AnalyticsReporter.countBucket(snapshot.routeChangeCount)
+        properties["recovery_attempt_bucket"] = AnalyticsReporter.countBucket(snapshot.recoveryAttemptCount)
+        return properties
+    }
+
+    private func meetingCaptureHealthSnapshotProperties(
+        snapshot: AudioPipelineDiagnosticsSnapshot,
+        healthInfo: RecordingHealthInfo,
+        trigger: String,
+        reason: String,
+        durationSeconds: Double,
+        systemStreamPresent: Bool,
+        stopTimedOut: Bool
+    ) -> [String: String] {
+        meetingCaptureAnalyticsProperties(snapshot: snapshot).merging(
+            [
+                "capture_quality": healthInfo.captureQuality.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
+                "gap_count_bucket": AnalyticsReporter.countBucket(healthInfo.audioGaps),
+                "reason": reason,
+                "route_change_count_bucket": AnalyticsReporter.countBucket(healthInfo.deviceSwitches),
+                "system_stream_present": boolString(systemStreamPresent),
+                "stop_timed_out": boolString(stopTimedOut),
+                "trigger": trigger,
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
+    }
+
+    private func reportCaptureHealthIfNeeded(
+        snapshot: AudioPipelineDiagnosticsSnapshot,
+        healthInfo: RecordingHealthInfo,
+        trigger: StartTrigger,
+        reason: StopReason,
+        durationSeconds: Double,
+        files: (micURL: URL?, systemURL: URL?),
+        stopTimedOut: Bool
+    ) {
+        let shouldReport =
+            stopTimedOut ||
+            files.micURL == nil ||
+            healthInfo.captureQuality == .degraded ||
+            snapshot.systemFailed ||
+            snapshot.systemStatus == "failed"
+        guard shouldReport else { return }
+
+        var context = snapshot.privacySafeContext
+        context["capture_quality"] = healthInfo.captureQuality.rawValue
+        context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
+        context["gap_count"] = "\(healthInfo.audioGaps)"
+        context["mic_file_available"] = boolString(files.micURL != nil)
+        context["reason"] = reason.rawValue
+        context["route_change_count"] = "\(healthInfo.deviceSwitches)"
+        context["stop_timed_out"] = boolString(stopTimedOut)
+        context["system_stream_present"] = boolString(files.systemURL != nil)
+        context["trigger"] = trigger.rawValue
+
+        DiagnosticsTrail.record(
+            level: .error,
+            engine: "meeting",
+            event: "recording_capture_degraded",
+            message: "Meeting capture health degraded",
+            context: baseDiagnosticsContext(extra: context)
+        )
     }
 
     private func savedTranscriptAnalyticsProperties() -> [String: String] {

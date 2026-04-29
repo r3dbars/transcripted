@@ -560,8 +560,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// aggregate devices) so a VPIO failure never blocks recording.
     func armVoiceProcessing(on inputNode: AVAudioInputNode) {
         guard enableVoiceProcessing else {
-            // Opt-in toggle is off — leave VPIO untouched. The mic tap
-            // callback will run RealtimeAGC instead.
+            // Opt-in toggle is off. Be explicit here instead of trusting our
+            // cached flag, because a prior route change can leave VPIO armed
+            // until the input node is told to release it.
+            disarmVoiceProcessing(on: inputNode, reason: "preference_off")
             return
         }
 
@@ -601,12 +603,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Disable VPIO once active meeting capture ends. Leaving it armed after
     /// capture can keep the shared input device in a processed mode, which can
     /// make other mic apps sound quieter.
-    func disarmVoiceProcessing(on inputNode: AVAudioInputNode) {
-        guard voiceProcessingEnabled else { return }
+    func disarmVoiceProcessing(on inputNode: AVAudioInputNode, reason: String = "recording_stopped") {
         if let engine, engine.isRunning { return }
+        let wasMarkedEnabled = voiceProcessingEnabled
+        let wasActuallyEnabled = inputNode.isVoiceProcessingEnabled
+        guard wasMarkedEnabled || wasActuallyEnabled else {
+            voiceProcessingEnabled = false
+            return
+        }
 
         do {
             try inputNode.setVoiceProcessingEnabled(false)
+            AppLogger.audioMic.info("Voice processing disabled on meeting mic", [
+                "reason": reason,
+                "was_marked_enabled": "\(wasMarkedEnabled)",
+                "was_actually_enabled": "\(wasActuallyEnabled)"
+            ])
         } catch {
             AppLogger.audioMic.warning("Voice processing disable failed", [
                 "error": error.localizedDescription

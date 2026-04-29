@@ -117,14 +117,17 @@ final class MeetingCaptureBridge: ObservableObject {
                       let continuation = self.completionAttempt.resetIfCurrent(attemptID) else { return }
 
                 EventReporter.shared.capture(
-                    level: .warning,
+                    level: .error,
                     engine: "meeting",
                     event: "recording_stop_timeout",
                     message: "Meeting recording stop timed out while waiting for audio files to close",
-                    context: [
-                        "mic_file_available": "\(self.audio.micAudioFileURL != nil)",
-                        "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
-                    ]
+                    context: self.audio.createPipelineDiagnosticsSnapshot().privacySafeContext.merging(
+                        [
+                            "mic_file_available": "\(self.audio.micAudioFileURL != nil)",
+                            "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
+                        ],
+                        uniquingKeysWith: { _, new in new }
+                    )
                 )
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
@@ -139,6 +142,12 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.micAudioFileURL = nil
         audio.systemAudioFileURL = nil
         return (result.micURL, result.systemURL)
+    }
+
+    func pipelineDiagnosticsSnapshot(
+        overrideSystemAudioStatus: SystemAudioStatus? = nil
+    ) -> AudioPipelineDiagnosticsSnapshot {
+        audio.createPipelineDiagnosticsSnapshot(overrideSystemAudioStatus: overrideSystemAudioStatus)
     }
 
     // MARK: - Private

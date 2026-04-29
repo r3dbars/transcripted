@@ -52,9 +52,15 @@ func testSentryPayloadSanitizer() {
             "recovering": "false",
             "format_ready": "true",
             "generation": "4",
+            "gap_count": "1",
             "input_rate_hz": "48000",
+            "output_device_class": "built_in",
             "output_rate_hz": "48000",
+            "recovery_attempt_count": "0",
+            "route_change_count": "2",
             "hw_channels": "1",
+            "system_backend": "screen_capture_kit",
+            "system_status": "healthy",
             "start_attempts": "3",
             "readiness_refreshes": "2",
             "status_domain": "com.apple.coreaudio.avfaudio",
@@ -70,9 +76,15 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["recovering"], "false", "recovery flag should remain")
         assertEqual(sanitized["format_ready"], "true", "format readiness should remain")
         assertEqual(sanitized["generation"], "4", "recovery generation should remain")
+        assertEqual(sanitized["gap_count"], "1", "gap counts should remain")
         assertEqual(sanitized["input_rate_hz"], "48000", "input rate should remain")
+        assertEqual(sanitized["output_device_class"], "built_in", "coarse output device class should remain")
         assertEqual(sanitized["output_rate_hz"], "48000", "output rate should remain")
+        assertEqual(sanitized["recovery_attempt_count"], "0", "recovery attempt count should remain")
+        assertEqual(sanitized["route_change_count"], "2", "route change count should remain")
         assertEqual(sanitized["hw_channels"], "1", "hardware channel count should remain")
+        assertEqual(sanitized["system_backend"], "screen_capture_kit", "capture backend should remain")
+        assertEqual(sanitized["system_status"], "healthy", "system status should remain")
         assertEqual(sanitized["start_attempts"], "3", "start attempt count should remain")
         assertEqual(sanitized["readiness_refreshes"], "2", "readiness refresh count should remain")
         assertEqual(sanitized["status_domain"], "com.apple.coreaudio.avfaudio", "status domain should remain")
