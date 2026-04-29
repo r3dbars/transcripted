@@ -95,6 +95,8 @@ packet gives Justin review signal without having to pull the branch first:
 - Transcripted QA output from `transcripted-qa check-health`, plus deeper `validate-all` for meeting/storage/core paths
 - an automated PR review pass from Codex
 
+Visual artifacts are embedded from files committed under `.agent-review/visuals/` on the PR branch.
+
 For UI work, the agent should save sanitized screenshots or GIFs in:
 
 ```text
