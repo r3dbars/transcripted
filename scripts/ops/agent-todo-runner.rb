@@ -581,7 +581,7 @@ class AgentTodoRunner
     return "" if text.empty?
     return text if text.length <= 4_000
 
-    "#{text[-4_000..]}".prepend("[truncated]\n")
+    "[truncated]\n#{text[-4_000..]}"
   end
 
   def render_prompt(issue, workspace)
