@@ -816,7 +816,7 @@ struct TranscriptedSettingsView: View {
                         Text("Try it")
                             .font(.subheadline.weight(.semibold))
 
-                        TextField("Type a sample phrase", text: $customDictionaryPreviewInput)
+                        TextField("Dictate a sample phrase", text: $customDictionaryPreviewInput)
                             .textFieldStyle(.roundedBorder)
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -1645,7 +1645,7 @@ struct TranscriptedSettingsView: View {
 
     private var customDictionaryPreviewOutput: String {
         let sample = customDictionaryPreviewInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sample.isEmpty else { return "Type a sample phrase above to check your corrections." }
+        guard !sample.isEmpty else { return "Dictate a sample phrase above to check your corrections." }
 
         let entries = CustomDictionaryPreferences.entries(from: customDictionaryText)
         guard !entries.isEmpty else { return sample }
