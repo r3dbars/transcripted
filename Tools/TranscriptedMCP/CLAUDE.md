@@ -24,6 +24,11 @@ Path overrides:
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
+When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
+`dictations/` subfolders, the server uses those subfolders automatically. In
+that mode the SQLite index also defaults to the shared root unless
+`TRANSCRIPTED_INDEX_DIR` is set.
+
 ## Package Layout (15 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server

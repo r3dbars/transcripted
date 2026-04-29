@@ -159,6 +159,54 @@ final class DataDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveSharedDataDirUsesMeetingsAndDictationsSubfoldersAndSharedIndex() throws {
+        let sharedRoot = tempHome.appendingPathComponent("shared-context", isDirectory: true)
+        let sharedMeetings = sharedRoot.appendingPathComponent("meetings", isDirectory: true)
+        let sharedDictations = sharedRoot.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sharedDictations, withIntermediateDirectories: true)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: ["TRANSCRIPTED_DATA_DIR": sharedRoot.path],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            sharedMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            sharedDictations.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.indexDir.standardizedFileURL.path, sharedRoot.standardizedFileURL.path)
+    }
+
+    func testResolveSharedDataDirHonorsExplicitIndexOverride() throws {
+        let sharedRoot = tempHome.appendingPathComponent("shared-context", isDirectory: true)
+        let sharedMeetings = sharedRoot.appendingPathComponent("meetings", isDirectory: true)
+        let sharedDictations = sharedRoot.appendingPathComponent("dictations", isDirectory: true)
+        let customIndex = tempHome.appendingPathComponent("custom-index", isDirectory: true)
+        try FileManager.default.createDirectory(at: sharedMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sharedDictations, withIntermediateDirectories: true)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [
+                "TRANSCRIPTED_DATA_DIR": sharedRoot.path,
+                "TRANSCRIPTED_INDEX_DIR": customIndex.path,
+            ],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            sharedMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            sharedDictations.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.indexDir.standardizedFileURL.path, customIndex.standardizedFileURL.path)
+    }
+
     func testResolveSkipsLegacySharedFolderWithoutCaptureMarkdown() throws {
         let legacyShared = tempHome
             .appendingPathComponent("Documents", isDirectory: true)

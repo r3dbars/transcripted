@@ -21,7 +21,7 @@ polling:
 agent:
   max_concurrent_agents: 1
 codex:
-  command: codex exec -m gpt-5.4 --dangerously-bypass-approvals-and-sandbox --output-last-message .codex-agent-last-message.md -
+  command: codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox --output-last-message .codex-agent-last-message.md -
 ---
 
 You are Codex working unattended on GitHub Issue #{{ issue.number }} in {{ repo }}.

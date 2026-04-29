@@ -31,6 +31,7 @@ struct TranscriptedSettingsView: View {
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
+    @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -125,7 +126,6 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear(perform: refreshState)
         .task(id: navigation.presentationID) {
             refreshState()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
@@ -145,6 +145,9 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
             refreshMenuBarVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dockVisibilityPreferencesDidChange)) { _ in
+            refreshDockVisibility()
         }
         .onReceive(NotificationCenter.default.publisher(for: .hotkeysDidChange)) { _ in
             refreshShortcutState()
@@ -525,9 +528,9 @@ struct TranscriptedSettingsView: View {
                 label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
-                symbolName: "textformat",
-                value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "words dictated"
+                symbolName: "keyboard",
+                value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
+                label: "typing saved"
             ),
             HomeStatItem(
                 symbolName: "person.2.wave.2.fill",
@@ -544,6 +547,23 @@ struct TranscriptedSettingsView: View {
 
     private func formattedInteger(_ value: Int) -> String {
         Self.homeIntegerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
+        guard wordCount > 0 else { return "0h" }
+
+        let hours = Double(wordCount) / 40.0 / 60.0
+        guard hours >= 1 else { return "<1h" }
+
+        if hours < 10 {
+            let roundedTenths = (hours * 10).rounded() / 10
+            if roundedTenths >= 10 {
+                return "\(Int(roundedTenths.rounded()))h"
+            }
+            return String(format: "%.1fh", roundedTenths)
+        }
+
+        return "\(Int(hours.rounded()))h"
     }
 
     private static let homeIntegerFormatter: NumberFormatter = {
@@ -738,6 +758,29 @@ struct TranscriptedSettingsView: View {
                 Text(launchAtLoginStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Dock",
+                detail: "Choose whether Transcripted stays visible in the Dock when idle."
+            ) {
+                Toggle("Show Transcripted in Dock", isOn: Binding(
+                    get: { showTranscriptedInDock },
+                    set: { newValue in
+                        showTranscriptedInDock = newValue
+                        trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
+                        DockVisibilityPreferences.setVisible(newValue)
+                    }
+                ))
+
+                Text(
+                    showTranscriptedInDock
+                        ? "Transcripted keeps a normal Dock icon."
+                        : "Transcripted stays menu-bar-only while idle and still becomes visible during active recording if recovery is needed."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             SettingsSection(
@@ -1510,6 +1553,7 @@ struct TranscriptedSettingsView: View {
         refreshRecentCaptures()
         refreshShortcutState()
         refreshMenuBarVisibility()
+        refreshDockVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
         customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
@@ -1579,20 +1623,26 @@ struct TranscriptedSettingsView: View {
 
     private func refreshRecentCaptures() {
         recentCaptureRefreshTask?.cancel()
-        recentCapturesLoading = true
-        recentCaptureRefreshTask = Task { @MainActor in
-            let snapshot = await RecentCaptureLoader.load(limit: 5)
-            guard !Task.isCancelled else { return }
-            recentMeetings = snapshot.meetings
-            recentDictations = snapshot.dictations
-            recentCapturesLoading = false
-        }
+        recentCaptureRefreshTask = nil
+        recentCapturesLoading = false
 
-        if navigation.selectedPage == .home {
+        switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
+        case .homeDashboard:
             homeViewModel.refresh()
             Task { @MainActor in
-                await StatsService.shared.refreshStats()
+                await statsService.refreshStats()
             }
+        case .recentLists:
+            recentCapturesLoading = true
+            recentCaptureRefreshTask = Task { @MainActor in
+                let snapshot = await RecentCaptureLoader.load(limit: 5)
+                guard !Task.isCancelled else { return }
+                recentMeetings = snapshot.meetings
+                recentDictations = snapshot.dictations
+                recentCapturesLoading = false
+            }
+        case .none:
+            break
         }
     }
 
@@ -1604,6 +1654,10 @@ struct TranscriptedSettingsView: View {
 
     private func refreshMenuBarVisibility() {
         menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
+    }
+
+    private func refreshDockVisibility() {
+        showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     }
 
     private func refreshLaunchAtLoginState() {

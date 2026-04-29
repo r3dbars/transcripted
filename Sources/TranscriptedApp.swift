@@ -66,10 +66,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var workspaceObservers: [NSObjectProtocol] = []
     private var terminationCleanupStarted = false
 
-    /// Switches NSApp's activation policy between `.accessory` (idle) and
-    /// `.regular` (during a meeting/dictation recording) so the app appears
-    /// in the macOS force-quit dialog while a session is active. Initialized
-    /// in `applicationDidFinishLaunching` after AppKit is ready.
+    /// Keeps NSApp in sync with the Dock visibility setting and promotes
+    /// the app to `.regular` during active recording for force-quit
+    /// recovery. Initialized in `applicationDidFinishLaunching` after
+    /// AppKit is ready.
     private var activationPolicyController: ActivationPolicyController?
     private var activationPolicySubscriptions: Set<AnyCancellable> = []
 
@@ -77,9 +77,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Crash reporting
         CrashReporter.setup()
 
-        // Dock icon + menubar — start `.accessory` for the menubar-only
-        // feel; the controller will swap to `.regular` while a recording
-        // session runs so the app shows up in Cmd+Option+Esc.
         let activationController = ActivationPolicyController()
         activationPolicyController = activationController
         wireActivationPolicy(controller: activationController)
@@ -364,16 +361,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func finishOnboardingAndStartDictation() {
-        let sourceApp = resolvedSourceApp()
-        PermissionsOnboardingPreferences.markCompleted()
-        appState.recoverHotkeysAfterPermissionChange()
-        onboardingWindowController.dismiss()
-        closePopover()
-        sourceApp?.activate(options: [])
-        sessionController.startDictation(sourceApp: sourceApp, trigger: .onboarding)
-    }
-
     private func showMainPopover(
         relativeTo button: NSStatusBarButton,
         popover: NSPopover,
@@ -450,12 +437,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         return nil
     }
 
-    /// Subscribe to meeting and dictation `isRecording` flags so the
-    /// activation-policy controller can swap the app between `.accessory`
-    /// (idle) and `.regular` (recording) — the latter makes the app appear
-    /// in the macOS force-quit dialog so a frozen recording session can be
-    /// killed without Activity Monitor.
+    /// Subscribe to the Dock preference plus meeting and dictation
+    /// recording flags so the activation-policy controller can keep the
+    /// app visible when users want a Dock icon or when active capture
+    /// needs force-quit visibility.
     private func wireActivationPolicy(controller: ActivationPolicyController) {
+        NotificationCenter.default.publisher(for: .dockVisibilityPreferencesDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak controller] _ in
+                controller?.setShowInDock(DockVisibilityPreferences.isVisible())
+            }
+            .store(in: &activationPolicySubscriptions)
+
         // Dictation: STTRouter publishes its own isRecording flag.
         appState.sttRouter.$isRecording
             .receive(on: DispatchQueue.main)

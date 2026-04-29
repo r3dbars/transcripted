@@ -86,7 +86,7 @@ enum DictationTranscriptWriter {
         let sourceBundleID = sourceApp?.bundleIdentifier ?? ""
         let wordCount = normalizedText.split(whereSeparator: \.isWhitespace).count
         let characterCount = normalizedText.count
-        let entryID = "dictation-\(entryIdFormatter.string(from: createdAt))"
+        let entryID = "dictation-\(entryIdFormatter.string(from: createdAt))-\(UUID().uuidString.lowercased())"
         let dayHeader = dailyHeader(for: createdAt)
         let section = dailySection(
             entryID: entryID,

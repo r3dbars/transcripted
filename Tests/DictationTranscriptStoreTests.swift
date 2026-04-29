@@ -231,6 +231,50 @@ func testDictationTranscriptStore() {
         assertFalse(remainingContent.contains("dictation-second"), "second entry ID removed")
         assertFalse(remainingContent.contains("second text"), "second entry body removed")
     }
+
+    runSuite("DictationTranscriptStore.deleteEntry — same-timestamp saved entries keep distinct IDs") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let createdAt = isoDate("2026-04-12T10:05:00Z")
+        _ = try? DictationTranscriptWriter.save(
+            text: "first saved text",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: createdAt,
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptWriter.save(
+            text: "second saved text",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: createdAt,
+            directory: outputDir
+        )
+
+        let entries = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: outputDir)
+        assertEqual(entries.count, 2, "both same-timestamp entries should be readable")
+        let uniqueEntryIDs = Set(entries.compactMap(\.entryID))
+        assertEqual(uniqueEntryIDs.count, 2, "same-timestamp saves should still get unique entry IDs")
+
+        guard let second = entries.first(where: { $0.text == "second saved text" }) else {
+            assertionFailure("Expected second saved dictation entry")
+            return
+        }
+
+        do {
+            try DictationTranscriptStore.deleteEntry(second)
+        } catch {
+            assertionFailure("deleteEntry should not throw for unique same-timestamp save: \(error)")
+        }
+
+        let remainingEntries = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: outputDir)
+        assertEqual(remainingEntries.count, 1, "deleting one same-timestamp entry should keep the other")
+        assertEqual(remainingEntries.first?.text, "first saved text", "first same-timestamp entry should remain")
+    }
 }
 
 private func isoDate(_ string: String) -> Date {

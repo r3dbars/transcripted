@@ -3,79 +3,121 @@ import Foundation
 
 @MainActor
 func testActivationPolicyController() async {
-    runSuite("ActivationPolicyDecision returns .regular when both sessions are idle") {
+    runSuite("ActivationPolicyDecision returns .regular when Dock visibility is on and both sessions are idle") {
         let policy = ActivationPolicyDecision.desiredPolicy(
+            showInDock: true,
             isMeetingRecording: false,
             isDictationRecording: false
         )
-        assertEqual(policy, .regular, "app keeps a permanent Dock presence even when idle")
+        assertEqual(policy, .regular, "Dock visibility should keep the app regular while idle")
+    }
+
+    runSuite("ActivationPolicyDecision returns .accessory when Dock visibility is off and both sessions are idle") {
+        let policy = ActivationPolicyDecision.desiredPolicy(
+            showInDock: false,
+            isMeetingRecording: false,
+            isDictationRecording: false
+        )
+        assertEqual(policy, .accessory, "idle app should stay menu-bar-only when the Dock toggle is off")
     }
 
     runSuite("ActivationPolicyDecision returns .regular when a meeting is recording") {
         let policy = ActivationPolicyDecision.desiredPolicy(
+            showInDock: false,
             isMeetingRecording: true,
             isDictationRecording: false
         )
-        assertEqual(policy, .regular, "meeting session keeps the app visible in force-quit / Dock")
+        assertEqual(policy, .regular, "meeting recording should force a visible Dock presence")
     }
 
     runSuite("ActivationPolicyDecision returns .regular when a dictation is recording") {
         let policy = ActivationPolicyDecision.desiredPolicy(
+            showInDock: false,
             isMeetingRecording: false,
             isDictationRecording: true
         )
-        assertEqual(policy, .regular, "dictation session keeps the app visible in force-quit / Dock")
+        assertEqual(policy, .regular, "dictation recording should force a visible Dock presence")
     }
 
-    runSuite("ActivationPolicyDecision returns .regular when both sessions are recording") {
-        let policy = ActivationPolicyDecision.desiredPolicy(
-            isMeetingRecording: true,
-            isDictationRecording: true
+    runSuite("DockVisibilityPreferences defaults to visible") {
+        let (defaults, suiteName) = makeDockVisibilityDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertTrue(
+            DockVisibilityPreferences.isVisible(userDefaults: defaults),
+            "new installs should keep the current Dock-visible behavior"
         )
-        assertEqual(policy, .regular, "any combination of session flags resolves to .regular")
     }
 
-    await runSuite("ActivationPolicyController applies initial .regular policy at init") {
+    runSuite("DockVisibilityPreferences persists explicit hidden state") {
+        let (defaults, suiteName) = makeDockVisibilityDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        DockVisibilityPreferences.setVisible(false, userDefaults: defaults)
+
+        assertFalse(
+            DockVisibilityPreferences.isVisible(userDefaults: defaults),
+            "Dock preference should round-trip through injected defaults"
+        )
+    }
+
+    runSuite("DockVisibilityPreferences uses a stable storage key") {
+        assertEqual(
+            DockVisibilityPreferences.showInDockKey,
+            "show-transcripted-in-dock",
+            "storage key must stay stable across releases"
+        )
+    }
+
+    runSuite("ActivationPolicyController applies initial .regular policy when Dock visibility is on") {
         let recorder = PolicyRecorder()
-        _ = ActivationPolicyController(
-            initialPolicy: .regular,
-            applyPolicy: { policy in recorder.append(policy) }
-        )
-        assertEqual(recorder.history, [.regular], "init applies initial policy exactly once")
+        _ = ActivationPolicyController(showInDock: true) { policy in
+            recorder.append(policy)
+        }
+        assertEqual(recorder.history, [.regular], "init applies the regular policy exactly once")
     }
 
-    await runSuite("ActivationPolicyController stays .regular when a meeting starts") {
+    runSuite("ActivationPolicyController applies initial .accessory policy when Dock visibility is off") {
         let recorder = PolicyRecorder()
-        let controller = ActivationPolicyController(
-            initialPolicy: .regular,
-            applyPolicy: { policy in recorder.append(policy) }
-        )
+        _ = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
+        assertEqual(recorder.history, [.accessory], "idle hidden-Dock mode should start as menu-bar-only")
+    }
+
+    runSuite("ActivationPolicyController promotes hidden-Dock mode to .regular while a meeting records") {
+        let recorder = PolicyRecorder()
+        let controller = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
 
         controller.setMeetingRecording(true)
 
-        assertEqual(recorder.history, [.regular], "meeting on does not bounce the activation policy")
-        assertEqual(controller.currentPolicy, .regular, "controller stays .regular")
+        assertEqual(recorder.history, [.accessory, .regular], "meeting start should surface the app in the Dock")
+        assertEqual(controller.currentPolicy, .regular, "controller should stay regular while recording")
     }
 
-    await runSuite("ActivationPolicyController stays .regular when meeting stops") {
+    runSuite("ActivationPolicyController demotes hidden-Dock mode after recording stops") {
         let recorder = PolicyRecorder()
-        let controller = ActivationPolicyController(
-            initialPolicy: .regular,
-            applyPolicy: { policy in recorder.append(policy) }
-        )
+        let controller = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
 
         controller.setMeetingRecording(true)
         controller.setMeetingRecording(false)
 
-        assertEqual(recorder.history, [.regular], "session lifecycle never demotes the app from .regular")
+        assertEqual(
+            recorder.history,
+            [.accessory, .regular, .accessory],
+            "hidden-Dock mode should return to menu-bar-only when recording ends"
+        )
     }
 
-    await runSuite("ActivationPolicyController stays .regular across overlapping sessions") {
+    runSuite("ActivationPolicyController keeps hidden-Dock mode visible across overlapping sessions") {
         let recorder = PolicyRecorder()
-        let controller = ActivationPolicyController(
-            initialPolicy: .regular,
-            applyPolicy: { policy in recorder.append(policy) }
-        )
+        let controller = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
 
         controller.setMeetingRecording(true)
         controller.setDictationRecording(true)
@@ -84,24 +126,40 @@ func testActivationPolicyController() async {
 
         assertEqual(
             recorder.history,
-            [.regular],
-            "no combination of overlapping session flags should demote the activation policy"
+            [.accessory, .regular, .accessory],
+            "overlapping recordings should only surface once and hide once"
         )
     }
 
-    await runSuite("ActivationPolicyController coalesces redundant flag updates") {
+    runSuite("ActivationPolicyController can toggle Dock visibility while idle") {
         let recorder = PolicyRecorder()
-        let controller = ActivationPolicyController(
-            initialPolicy: .regular,
-            applyPolicy: { policy in recorder.append(policy) }
+        let controller = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
+
+        controller.setShowInDock(true)
+        controller.setShowInDock(false)
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .regular, .accessory],
+            "Dock toggle should promote and demote the app while idle"
         )
+    }
+
+    runSuite("ActivationPolicyController coalesces redundant flag updates") {
+        let recorder = PolicyRecorder()
+        let controller = ActivationPolicyController(showInDock: false) { policy in
+            recorder.append(policy)
+        }
 
         controller.setMeetingRecording(false)
         controller.setDictationRecording(false)
+        controller.setShowInDock(false)
         controller.setMeetingRecording(true)
         controller.setMeetingRecording(true)
 
-        assertEqual(recorder.history, [.regular], "redundant updates do not re-apply policy")
+        assertEqual(recorder.history, [.accessory, .regular], "redundant updates should not re-apply policy")
     }
 }
 
@@ -115,4 +173,11 @@ private final class PolicyRecorder {
     func append(_ policy: NSApplication.ActivationPolicy) {
         history.append(policy)
     }
+}
+
+private func makeDockVisibilityDefaults() -> (UserDefaults, String) {
+    let suiteName = "DockVisibilityPreferencesTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return (defaults, suiteName)
 }

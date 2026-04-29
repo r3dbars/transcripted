@@ -390,7 +390,7 @@ class AgentTodoRunner
   end
 
   def codex_command
-    @codex_command ||= @codex_config.fetch("command", "codex exec -m gpt-5.4 --dangerously-bypass-approvals-and-sandbox -").to_s
+    @codex_command ||= @codex_config.fetch("command", "codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox -").to_s
   end
 
   def max_concurrent_agents
