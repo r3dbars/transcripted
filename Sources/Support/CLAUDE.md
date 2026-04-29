@@ -4,12 +4,13 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (18 Swift files)
+## Files (19 Swift files)
 
-- `ActivationPolicyController.swift` — flips the app between `.accessory` and `.regular` while dictation or meeting recording is active so Transcripted stays visible in the macOS force-quit dialog during live capture
+- `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges Claude's config JSON, and runs the helper self-test
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
+- `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
@@ -35,6 +36,7 @@
 - `PermissionsOnboardingPreferences` is the canonical completion flag for the guided first-run permissions flow. Keep onboarding state out of view-local storage so forced reruns and completion state stay consistent.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
 - `ClaudeDesktopIntegrationInstaller` owns the Claude Desktop config merge. Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
+- `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - `MicrophoneProcessingPreferences` is the canonical switch for meeting-mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording.
 
