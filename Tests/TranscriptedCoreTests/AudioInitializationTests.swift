@@ -115,6 +115,70 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testStopWaitsForAudioGraphLockBeforeFinishingTeardown() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+
+        let audio = Audio(paths: paths)
+        let initialGeneration = audio.recordingSessionGeneration
+        let lockHeld = expectation(description: "audio graph lock held")
+        let earlyStopFinish = expectation(description: "stop completion stays blocked while lock is held")
+        earlyStopFinish.isInverted = true
+        let stopFinished = expectation(description: "stop completion fired")
+        let releaseLock = DispatchSemaphore(value: 0)
+        let completionStateLock = NSLock()
+        var allowCompletion = false
+
+        audio.onRecordingComplete = { _, _ in
+            completionStateLock.lock()
+            let shouldTreatAsFinalCompletion = allowCompletion
+            completionStateLock.unlock()
+
+            if shouldTreatAsFinalCompletion {
+                stopFinished.fulfill()
+            } else {
+                earlyStopFinish.fulfill()
+            }
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            audio.withAudioGraphLock {
+                lockHeld.fulfill()
+                _ = releaseLock.wait(timeout: .now() + 2)
+            }
+        }
+
+        wait(for: [lockHeld], timeout: 1.0)
+
+        audio.stop()
+
+        XCTAssertEqual(
+            audio.recordingSessionGeneration,
+            initialGeneration &+ 1,
+            "stop() must still invalidate the current session immediately while teardown waits for the shared audio graph lock"
+        )
+
+        wait(for: [earlyStopFinish], timeout: 0.1)
+
+        completionStateLock.lock()
+        allowCompletion = true
+        completionStateLock.unlock()
+        releaseLock.signal()
+
+        wait(for: [stopFinished], timeout: 1.0)
+    }
+
     func testPrepareForNewRecordingStartClearsStaleCaptureArtifacts() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
