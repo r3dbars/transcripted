@@ -172,6 +172,8 @@ APP_SOURCES=(
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/UI/Settings/TranscriptedSettingsPage.swift"
+    "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"

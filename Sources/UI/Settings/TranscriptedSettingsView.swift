@@ -122,7 +122,6 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear(perform: refreshState)
         .task(id: navigation.presentationID) {
             refreshState()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
@@ -1488,20 +1487,26 @@ struct TranscriptedSettingsView: View {
 
     private func refreshRecentCaptures() {
         recentCaptureRefreshTask?.cancel()
-        recentCapturesLoading = true
-        recentCaptureRefreshTask = Task { @MainActor in
-            let snapshot = await RecentCaptureLoader.load(limit: 5)
-            guard !Task.isCancelled else { return }
-            recentMeetings = snapshot.meetings
-            recentDictations = snapshot.dictations
-            recentCapturesLoading = false
-        }
+        recentCaptureRefreshTask = nil
+        recentCapturesLoading = false
 
-        if navigation.selectedPage == .home {
+        switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
+        case .homeDashboard:
             homeViewModel.refresh()
             Task { @MainActor in
-                await StatsService.shared.refreshStats()
+                await statsService.refreshStats()
             }
+        case .recentLists:
+            recentCapturesLoading = true
+            recentCaptureRefreshTask = Task { @MainActor in
+                let snapshot = await RecentCaptureLoader.load(limit: 5)
+                guard !Task.isCancelled else { return }
+                recentMeetings = snapshot.meetings
+                recentDictations = snapshot.dictations
+                recentCapturesLoading = false
+            }
+        case .none:
+            break
         }
     }
 
