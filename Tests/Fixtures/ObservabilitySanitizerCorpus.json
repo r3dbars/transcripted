@@ -1,0 +1,87 @@
+{
+  "cases": [
+    {
+      "id": "user-path-and-bearer",
+      "input": "Saved to /Users/redbars/Private/notes.md with token sk-ant-secret and header Bearer abc123",
+      "must_not_contain": [
+        "/Users/redbars/",
+        "sk-ant-secret",
+        "Bearer abc123"
+      ],
+      "must_contain": [
+        "[redacted-path]",
+        "sk-****",
+        "Bearer ****"
+      ]
+    },
+    {
+      "id": "email-hostname-and-private-path",
+      "input": "Contact person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt",
+      "must_not_contain": [
+        "person@example.com",
+        "Redbarss-MacBook-Pro.local",
+        "/private/var/folders/demo/file.txt"
+      ],
+      "must_contain": [
+        "[redacted-email]",
+        "[redacted-host]",
+        "[redacted-path]"
+      ]
+    },
+    {
+      "id": "raw-url-and-common-secrets",
+      "input": "Download failed at https://example.com/private?token=abc123 with github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 AKIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+      "must_not_contain": [
+        "https://example.com/private?token=abc123",
+        "github_pat_abcdefghijklmnopqrstuvwxyz_1234567890",
+        "AKIAIOSFODNN7EXAMPLE",
+        "AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+      ],
+      "must_contain": [
+        "[redacted-url]",
+        "[redacted-secret]"
+      ]
+    },
+    {
+      "id": "secret-assignments",
+      "input": "Sync failed with password=hunter2 client_secret:supersecret credential=temp-pass dsn=https://example@sentry.invalid/1",
+      "must_not_contain": [
+        "hunter2",
+        "supersecret",
+        "temp-pass",
+        "https://example@sentry.invalid/1"
+      ],
+      "must_contain": [
+        "password=[redacted-secret]",
+        "client_secret=[redacted-secret]",
+        "credential=[redacted-secret]"
+      ]
+    },
+    {
+      "id": "authorization-headers",
+      "input": "Authorization: Basic dXNlcjpwYXNz Proxy-Authorization=Bearer abc123 fallback Basic ZGVtbzpwYXNz",
+      "must_not_contain": [
+        "dXNlcjpwYXNz",
+        "abc123",
+        "ZGVtbzpwYXNz"
+      ],
+      "must_contain": [
+        "Authorization=[redacted-secret]",
+        "Proxy-Authorization=[redacted-secret]",
+        "Basic ****"
+      ]
+    },
+    {
+      "id": "pem-private-key",
+      "input": "Failed to parse key:\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAlwAAAAdzc2gtcn\n-----END OPENSSH PRIVATE KEY-----",
+      "must_not_contain": [
+        "BEGIN OPENSSH PRIVATE KEY",
+        "b3BlbnNzaC1rZXkt",
+        "END OPENSSH PRIVATE KEY"
+      ],
+      "must_contain": [
+        "[redacted-secret]"
+      ]
+    }
+  ]
+}

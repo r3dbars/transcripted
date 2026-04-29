@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "repo_slug": "r3dbars/transcripted",
+  "paths": {
+    "info_plist": "Info.plist",
+    "appcast": "docs/appcast.xml",
+    "local_entitlements": "config/entitlements/local.plist",
+    "beta_entitlements": "config/entitlements/beta.plist",
+    "build_script": "scripts/entrypoints/build.sh",
+    "build_beta_script": "scripts/entrypoints/build-beta.sh",
+    "sanitizer_corpus": "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
+    "sentry_sanitizer_tests": "Tests/SentryPayloadSanitizerTests.swift",
+    "analytics_sanitizer_tests": "Tests/AnalyticsPayloadSanitizerTests.swift"
+  },
+  "expected_info_plist": {
+    "LSMinimumSystemVersion": "26.0",
+    "SUFeedURL": "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
+    "SUPublicEDKey": "Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=",
+    "SUEnableAutomaticChecks": true,
+    "SUAllowsAutomaticUpdates": true,
+    "TranscriptedPostHogHost": "https://us.i.posthog.com"
+  },
+  "expected_entitlements": {
+    "local": {
+      "com.apple.security.app-sandbox": false,
+      "com.apple.security.device.audio-capture": true,
+      "com.apple.security.device.audio-input": true
+    },
+    "beta": {
+      "com.apple.security.app-sandbox": false,
+      "com.apple.security.cs.allow-jit": true,
+      "com.apple.security.cs.disable-library-validation": true,
+      "com.apple.security.device.audio-capture": true,
+      "com.apple.security.device.audio-input": true,
+      "com.apple.security.network.client": true
+    }
+  },
+  "required_build_script_substrings": {
+    "scripts/entrypoints/build.sh": [
+      "config/entitlements/local.plist",
+      "codesign -dvvv --entitlements - \"$APP_BUNDLE\""
+    ],
+    "scripts/entrypoints/build-beta.sh": [
+      "config/entitlements/beta.plist",
+      "codesign -dvvv --entitlements - \"$APP_BUNDLE\""
+    ]
+  },
+  "secret_scan": {
+    "history_commit_window": 12,
+    "tracked_file_allowlist_globs": [
+      "Tests/*SanitizerTests.swift",
+      "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
+      "archive/**",
+      "docs/archive/**"
+    ],
+    "history_file_allowlist_globs": [
+      "Tests/*SanitizerTests.swift",
+      "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
+      "archive/**",
+      "docs/archive/**"
+    ]
+  },
+  "scoring": {
+    "weights": {
+      "secret_scan": 25,
+      "observability_privacy": 25,
+      "release_integrity": 20,
+      "entitlements_and_signing": 15,
+      "automation_guardrails": 15
+    },
+    "severity_multipliers": {
+      "none": 1.0,
+      "low": 0.85,
+      "medium": 0.5,
+      "high": 0.0
+    }
+  }
+}

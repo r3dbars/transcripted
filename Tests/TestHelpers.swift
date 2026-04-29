@@ -7,6 +7,24 @@ var totalTests = 0
 var passedTests = 0
 var failedTests = 0
 
+struct ObservabilitySanitizerCorpus: Decodable {
+    let cases: [ObservabilitySanitizerCorpusCase]
+}
+
+struct ObservabilitySanitizerCorpusCase: Decodable {
+    let id: String
+    let input: String
+    let mustNotContain: [String]
+    let mustContain: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case input
+        case mustNotContain = "must_not_contain"
+        case mustContain = "must_contain"
+    }
+}
+
 func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String = "", file: String = #file, line: Int = #line) {
     totalTests += 1
     if actual == expected {
@@ -63,4 +81,24 @@ func runSuite(_ name: String, _ block: () -> Void) {
 func runSuite(_ name: String, _ block: () async -> Void) async {
     print("Running \(name)...")
     await block()
+}
+
+func repoFixtureURL(_ relativePath: String) -> URL {
+    URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent(relativePath)
+}
+
+func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.self, file: String = #file, line: Int = #line) -> T {
+    let url = repoFixtureURL(relativePath)
+
+    do {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(T.self, from: data)
+    } catch {
+        failedTests += 1
+        totalTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not load fixture \(relativePath): \(error)")
+        fatalError("Missing required fixture \(relativePath)")
+    }
 }

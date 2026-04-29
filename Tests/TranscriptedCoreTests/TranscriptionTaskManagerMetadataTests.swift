@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+import AVFoundation
 import FluidAudio
 @testable import TranscriptedCore
 
@@ -72,6 +73,32 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                        "embedders that pass only the static value should still get a valid resolver result")
     }
 
+    func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
+        let manager = makeManager()
+        let micURL = tempDirectory.appendingPathComponent("audio/mic.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: nil,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertEqual(manager.activeTasks.count, 0)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertEqual(
+            manager.failedTranscriptionManager.failedTranscriptions.first?.errorMessage,
+            PipelineError.missingSystemAudio.localizedDescription
+        )
+
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected failed display status when system audio is missing")
+        }
+        XCTAssertEqual(message, "System audio required")
+    }
+
     private func makeManager(
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil
@@ -98,6 +125,40 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             retainedAudioDirectory: retainedAudioDirectory,
             retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
         )
+    }
+
+    private func writeMonoWAV(to url: URL, duration: TimeInterval, sampleRate: Double = 16_000) throws {
+        let frameCount = Int(duration * sampleRate)
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            return XCTFail("Failed to create test audio format")
+        }
+
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(frameCount)
+        ) else {
+            return XCTFail("Failed to create test audio buffer")
+        }
+
+        buffer.frameLength = AVAudioFrameCount(frameCount)
+        if let channelData = buffer.floatChannelData?[0] {
+            for index in 0..<frameCount {
+                channelData[index] = 0.25
+            }
+        }
+
+        try file.write(from: buffer)
     }
 }
 

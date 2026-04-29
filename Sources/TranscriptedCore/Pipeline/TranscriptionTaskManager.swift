@@ -82,6 +82,24 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
+        guard systemURL != nil else {
+            let errorMessage = PipelineError.missingSystemAudio.localizedDescription
+            AppLogger.pipeline.warning("Rejecting transcription — system audio capture is missing")
+            archiveFailedRecordingAudioIfConfigured(
+                micURL: micURL,
+                systemURL: nil,
+                taskId: UUID()
+            )
+            failedTranscriptionManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: nil,
+                errorMessage: errorMessage
+            )
+            displayStatus = .failed(message: "System audio required")
+            sendFailureNotification(errorMessage: errorMessage)
+            scheduleStatusReset(delay: 4)
+            return
+        }
 
         // Gate: reject only when every available capture track is too short.
         // Meeting recovery can produce a very short mic stub while system audio is still

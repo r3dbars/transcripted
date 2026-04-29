@@ -70,8 +70,10 @@ Use these docs for these jobs:
 - `README.md` — public product overview and quick start
 - `CONTRIBUTING.md` — contributor setup and contribution norms
 - `AGENTS.md` — Codex-specific workflow rules
+- `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
 - `CLAUDE.md` — Claude-specific repo orientation
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
+- `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
