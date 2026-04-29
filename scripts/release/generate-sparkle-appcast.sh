@@ -146,7 +146,9 @@ for existing in existing_items:
     if item_version(existing) == version:
         repo_channel.remove(existing)
 
-repo_channel.insert(0, latest_item)
+children = list(repo_channel)
+insert_index = next((index for index, child in enumerate(children) if child.tag == "item"), len(children))
+repo_channel.insert(insert_index, latest_item)
 
 if hasattr(ET, "indent"):
     ET.indent(repo_tree, space="  ")
