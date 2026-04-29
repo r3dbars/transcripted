@@ -104,6 +104,10 @@ swift run transcripted-qa stress-test --transcripts 100 --speakers-per-transcrip
 
 `ValidationReport` wraps all rows, computes a pass/fail/warn summary, exposes the CLI exit code, and can print either aligned text output or pretty JSON.
 
+For agent and automation use, the JSON form also includes:
+- `automation` - overall status, exit code, generated timestamp, and grouped-fingerprint count
+- `failureFingerprints` - grouped non-pass checks with stable ids, counts, and affected targets
+
 ## Key Features
 
 - **Health checks**: Quick system status before deep validation
