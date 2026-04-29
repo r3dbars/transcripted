@@ -18,10 +18,11 @@ Important entry points:
 - `Support/PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `Support/PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier bindings used by capture routing for push-to-talk, hands-free dictation, and meeting shortcuts
 - `Support/CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements applied to final dictation and meeting transcript text
+- `Support/DockVisibilityPreferences.swift` — persisted General toggle for whether Transcripted keeps a Dock icon while idle
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
 - `Support/MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, defaulting to software AGC and exposing optional Apple voice processing when users need the WebRTC-specific recovery path
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
-- `Support/ActivationPolicyController.swift` — main-actor policy for toggling the app between menubar-only and force-quit-visible activation modes while recording
+- `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting hotkey routing, and hotkey error surfacing
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs

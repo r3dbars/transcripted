@@ -31,6 +31,7 @@ struct TranscriptedSettingsView: View {
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
+    @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -144,6 +145,9 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
             refreshMenuBarVisibility()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dockVisibilityPreferencesDidChange)) { _ in
+            refreshDockVisibility()
         }
         .onReceive(NotificationCenter.default.publisher(for: .hotkeysDidChange)) { _ in
             refreshShortcutState()
@@ -737,6 +741,29 @@ struct TranscriptedSettingsView: View {
                 Text(launchAtLoginStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Dock",
+                detail: "Choose whether Transcripted stays visible in the Dock when idle."
+            ) {
+                Toggle("Show Transcripted in Dock", isOn: Binding(
+                    get: { showTranscriptedInDock },
+                    set: { newValue in
+                        showTranscriptedInDock = newValue
+                        trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
+                        DockVisibilityPreferences.setVisible(newValue)
+                    }
+                ))
+
+                Text(
+                    showTranscriptedInDock
+                        ? "Transcripted keeps a normal Dock icon."
+                        : "Transcripted stays menu-bar-only while idle and still becomes visible during active recording if recovery is needed."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             SettingsSection(
@@ -1509,6 +1536,7 @@ struct TranscriptedSettingsView: View {
         refreshRecentCaptures()
         refreshShortcutState()
         refreshMenuBarVisibility()
+        refreshDockVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
         customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
@@ -1609,6 +1637,10 @@ struct TranscriptedSettingsView: View {
 
     private func refreshMenuBarVisibility() {
         menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
+    }
+
+    private func refreshDockVisibility() {
+        showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     }
 
     private func refreshLaunchAtLoginState() {
