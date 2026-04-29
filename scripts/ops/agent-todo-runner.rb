@@ -13,7 +13,7 @@ class AgentTodoRunner
   LABELS = {
     "agent todo" => ["5319e7", "Ready for the local Codex issue runner"],
     "agent in progress" => ["f9d0c4", "Claimed by the local Codex issue runner"],
-    "agent review" => ["0e8a16", "Codex opened a PR for human review"],
+    "human review" => ["0e8a16", "Codex opened a PR for human review"],
     "agent blocked" => ["d93f0b", "Codex needs human input before continuing"],
     "agent done" => ["cfd3d7", "Agent task is complete"]
   }.freeze
@@ -421,7 +421,7 @@ class AgentTodoRunner
   end
 
   def review_label
-    @review_label ||= @tracker.fetch("review_label", "agent review")
+    @review_label ||= @tracker.fetch("review_label", "human review")
   end
 
   def blocked_label
