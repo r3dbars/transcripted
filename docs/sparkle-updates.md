@@ -57,7 +57,10 @@ Future agents should treat this as a release requirement:
 bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
-4. The script copies the generated `appcast.xml` back into `docs/appcast.xml`.
+4. The script keeps the current feed history, takes the newest generated item,
+   rewrites its enclosure URL to the matching GitHub release asset, aligns the
+   minimum macOS version with `Info.plist`, and then writes the merged result
+   back to `docs/appcast.xml`.
 5. Upload the release archive to GitHub Releases.
 6. Verify the published update path:
 
@@ -69,6 +72,10 @@ bash scripts/release/verify-sparkle-release.sh <version>
 
 If the final push has not happened yet, Sparkle clients will keep seeing the old
 version.
+
+Do not replace `docs/appcast.xml` wholesale with Sparkle's raw generated output.
+That can drop older feed history and leave the latest item pointing at the wrong
+URL shape instead of the real GitHub release asset.
 
 Sparkle will then discover the new version from the appcast URL on the next app launch.
 

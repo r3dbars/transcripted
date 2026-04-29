@@ -37,6 +37,15 @@ not have to carry the full operational logic:
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/agent-todo-runner.rb` - local GitHub Issues queue runner for Codex agent tasks
+  - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
+  - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`
+  - Usage: `ruby scripts/ops/agent-todo-runner.rb --watch`
+  - Reads `WORKFLOW.md` and watches issues labeled `agent todo` or `agent in progress`
+- `scripts/ops/agent-todo-launchagent.sh` - install, restart, inspect, or remove the macOS background watcher
+  - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
+  - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
+  - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
 - `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the auto-close workflow
   - Usage: `bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]`
   - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`

@@ -75,6 +75,7 @@ transport.
 - `app_launched`
 - `onboarding_completed`
 - `dictation_started`
+- `dictation_start_failed`
 - `dictation_completed`
 - `dictation_cancelled`
 - `dictation_no_speech`
