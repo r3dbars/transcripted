@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (47 Swift files)
+## Files (48 Swift files)
 
 ### Overlay/
 
@@ -68,6 +68,7 @@ The current agent-connect surfaces should keep one simple mental model:
 ### Settings/
 
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
+- `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, summary stats, and lightweight copy/feedback/delete affordances
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
@@ -101,6 +102,11 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
+The redesigned Settings home surface is intentionally a fast dashboard rather
+than a full archive browser. `HomeView` keeps recent dictations and meetings to
+small paged slices so the settings window still opens quickly for users with
+large capture libraries.
+
 Keep user-visible TCC prompts user-initiated. Background warmup paths should
 not request microphone, system-audio-recording, or calendar access on their own;
 onboarding and Settings own those prompts so the dialogs appear in context.
@@ -129,6 +135,7 @@ Manual checks:
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
 - recent meetings in Settings can play retained audio attachments without losing sync between transcript rows and playback state
+- the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
 - settings window still opens correctly
