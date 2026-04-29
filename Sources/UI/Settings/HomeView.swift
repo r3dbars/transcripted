@@ -414,29 +414,9 @@ struct HomeRowActionButtons: View {
             )
 
             if !menuItems.isEmpty {
-                Menu {
-                    ForEach(menuItems) { item in
-                        if item.isDestructive {
-                            Button(role: .destructive, action: item.action) {
-                                Label(item.title, systemImage: item.symbolName)
-                            }
-                        } else {
-                            Button(action: item.action) {
-                                Label(item.title, systemImage: item.symbolName)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("More options")
+                HomeRowMoreMenuButton(items: menuItems)
+                    .frame(width: 26, height: 26)
+                    .help("More options")
             }
         }
     }
@@ -451,6 +431,71 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+struct HomeRowMoreMenuButton: NSViewRepresentable {
+    let items: [HomeRowMenuItem]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(items: items)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.image = NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: "More options"
+        )
+        button.contentTintColor = .secondaryLabelColor
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.showMenu(_:))
+        button.setButtonType(.momentaryChange)
+        button.setAccessibilityLabel("More options")
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.items = items
+        button.isEnabled = !items.isEmpty
+    }
+
+    final class Coordinator: NSObject {
+        var items: [HomeRowMenuItem]
+
+        init(items: [HomeRowMenuItem]) {
+            self.items = items
+        }
+
+        @objc func showMenu(_ sender: NSButton) {
+            let menu = NSMenu()
+            for item in items {
+                let menuItem = NSMenuItem(
+                    title: item.title,
+                    action: #selector(performMenuItem(_:)),
+                    keyEquivalent: ""
+                )
+                menuItem.target = self
+                menuItem.representedObject = item.id
+                menu.addItem(menuItem)
+            }
+
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: sender.bounds.height + 2),
+                in: sender
+            )
+        }
+
+        @objc private func performMenuItem(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? UUID,
+                  let item = items.first(where: { $0.id == id }) else {
+                return
+            }
+            item.action()
+        }
     }
 }
 
