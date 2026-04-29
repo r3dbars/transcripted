@@ -19,7 +19,10 @@ class AgentTodoRunner
     "agent in progress" => ["f9d0c4", "Claimed by the local Codex issue runner"],
     "human review" => ["0e8a16", "Codex opened a PR for human review"],
     "agent blocked" => ["d93f0b", "Codex needs human input before continuing"],
-    "agent done" => ["cfd3d7", "Agent task is complete"]
+    "agent done" => ["cfd3d7", "Agent task is complete"],
+    "qa failed" => ["d93f0b", "Review packet QA failed"],
+    "visual missing" => ["fbca04", "UI change needs a screenshot or GIF"],
+    "packet failed" => ["d93f0b", "Agent review packet failed to post"]
   }.freeze
 
   def initialize(options)
@@ -41,7 +44,7 @@ class AgentTodoRunner
 
   def run
     validate!
-    ensure_labels if @ensure_labels_requested
+    ensure_labels if @ensure_labels_requested || !@dry_run
     return if @labels_only
 
     loop do
@@ -119,12 +122,19 @@ class AgentTodoRunner
 
   def active_issue?(issue)
     labels = label_names(issue)
-    (labels & active_labels).any? && (labels & terminal_labels).empty? && allowed_author?(issue)
+    active_by_label?(labels) && allowed_author?(issue)
   end
 
   def unauthorized_active_issue?(issue)
     labels = label_names(issue)
-    (labels & active_labels).any? && (labels & terminal_labels).empty? && !allowed_author?(issue)
+    active_by_label?(labels) && !allowed_author?(issue)
+  end
+
+  def active_by_label?(labels)
+    return false if labels.include?(done_label)
+    return true if labels.include?(todo_label)
+
+    labels.include?(in_progress_label) && !labels.include?(review_label) && !labels.include?(blocked_label)
   end
 
   def handle_issue(issue)
@@ -158,6 +168,9 @@ class AgentTodoRunner
     removals = []
     additions << in_progress_label unless labels.include?(in_progress_label)
     removals << todo_label if labels.include?(todo_label)
+    removals << review_label if labels.include?(review_label)
+    removals << blocked_label if labels.include?(blocked_label)
+    removals << packet_failed_label if labels.include?(packet_failed_label)
     edit_labels(issue.fetch("number"), additions, removals)
   end
 
@@ -288,7 +301,20 @@ class AgentTodoRunner
       automated_review: automated_review
     )
 
-    write_review_packet_comment(pr.fetch("number"), comment)
+    packet_url = write_review_packet_comment(pr.fetch("number"), comment)
+    update_review_labels(number, classification, visual_files, qa_results)
+    upsert_human_review_hub(
+      issue: issue,
+      pr: pr,
+      branch: branch,
+      changed_files: changed_files,
+      classification: classification,
+      visual_files: visual_files,
+      visual_links: visual_links,
+      qa_results: qa_results,
+      automated_review: automated_review,
+      packet_url: packet_url
+    )
   end
 
   def find_pull_request(branch)
@@ -573,8 +599,117 @@ class AgentTodoRunner
     Tempfile.create(["agent-review-packet", ".md"]) do |file|
       file.write(body)
       file.flush
-      run_command("gh", "pr", "comment", pr_number.to_s, "--repo", repo, "--body-file", file.path)
+      run_command("gh", "pr", "comment", pr_number.to_s, "--repo", repo, "--body-file", file.path).strip
     end
+  end
+
+  def update_review_labels(number, classification, visual_files, qa_results)
+    additions = []
+    removals = [packet_failed_label]
+
+    if qa_failed?(qa_results)
+      additions << qa_failed_label
+    else
+      removals << qa_failed_label
+    end
+
+    if classification.include?("ui change") && visual_files.empty?
+      additions << visual_missing_label
+    else
+      removals << visual_missing_label
+    end
+
+    edit_labels(number, additions, removals)
+  end
+
+  def qa_failed?(qa_results)
+    qa_results.any? { |result| !%w[passed skipped].include?(result.fetch("status", "")) }
+  end
+
+  def upsert_human_review_hub(issue:, pr:, branch:, changed_files:, classification:, visual_files:, visual_links:, qa_results:, automated_review:, packet_url:)
+    body = human_review_hub_comment(
+      issue: issue,
+      pr: pr,
+      branch: branch,
+      changed_files: changed_files,
+      classification: classification,
+      visual_files: visual_files,
+      visual_links: visual_links,
+      qa_results: qa_results,
+      automated_review: automated_review,
+      packet_url: packet_url
+    )
+    upsert_issue_comment(issue.fetch("number"), "## Human Review Ready", body)
+  end
+
+  def human_review_hub_comment(issue:, pr:, branch:, changed_files:, classification:, visual_files:, visual_links:, qa_results:, automated_review:, packet_url:)
+    qa_summary = qa_results.map do |result|
+      "- #{result.fetch("name")}: **#{result.fetch("status")}** (`#{result.fetch("command")}`)"
+    end.join("\n")
+
+    visual_summary = if visual_files.empty?
+                       classification.include?("ui change") ? "UI change detected, but no visual artifact was found." : "No UI visual required."
+                     else
+                       visual_links.join("\n\n")
+                     end
+
+    review_body = automated_review.fetch("body", "").lines.first(12).join.strip
+    review_body = "No automated review text returned." if review_body.empty?
+
+    <<~MD
+      ## Human Review Ready
+
+      PR: #{pr.fetch("url")}
+      Packet: #{packet_url.empty? ? "Posted on the PR." : packet_url}
+      Branch: `#{branch}`
+      Change type: #{classification.join(", ")}
+
+      ### Visuals
+      #{visual_summary}
+
+      ### QA
+      #{qa_summary}
+
+      ### Automated Review
+      Status: #{automated_review.fetch("status")}
+
+      #{review_body}
+
+      ### Changed Files
+      #{changed_files.empty? ? "- No changed files detected." : changed_files.map { |path| "- `#{path}`" }.join("\n")}
+
+      ### What To Do Next
+      - If this looks good, review and merge the PR.
+      - If it needs changes, comment your feedback on this issue or the PR, then add `agent todo` again. The runner will resume this issue and update the existing PR.
+
+      Issue: #{issue.fetch("url")}
+    MD
+  end
+
+  def upsert_issue_comment(number, heading, body)
+    comments = issue_comments(number)
+    existing = comments.find { |comment| comment.fetch("body", "").include?(heading) }
+
+    if existing
+      comment_id = issue_comment_database_id(existing)
+      raise "Could not parse issue comment id for #{heading}" if comment_id.nil?
+
+      run_command("gh", "api", "repos/#{repo}/issues/comments/#{comment_id}", "-X", "PATCH", "-f", "body=#{body}")
+    else
+      run_command("gh", "issue", "comment", number.to_s, "--repo", repo, "--body", body)
+    end
+  end
+
+  def issue_comments(number)
+    capture_json(
+      "gh", "issue", "view", number.to_s,
+      "--repo", repo,
+      "--json", "comments"
+    ).fetch("comments")
+  end
+
+  def issue_comment_database_id(comment)
+    comment.fetch("url", "")[/issuecomment-(\d+)/, 1]
   end
 
   def truncate_packet_output(output)
@@ -654,6 +789,7 @@ class AgentTodoRunner
   end
 
   def comment_review_packet_failure(number, message)
+    edit_labels(number, [packet_failed_label], [])
     return if @dry_run
 
     body = <<~MD
@@ -763,7 +899,7 @@ class AgentTodoRunner
   end
 
   def terminal_labels
-    @terminal_labels ||= [review_label, blocked_label, done_label]
+    @terminal_labels ||= [done_label]
   end
 
   def todo_label
@@ -784,6 +920,18 @@ class AgentTodoRunner
 
   def done_label
     @done_label ||= @tracker.fetch("done_label", "agent done")
+  end
+
+  def qa_failed_label
+    @qa_failed_label ||= "qa failed"
+  end
+
+  def visual_missing_label
+    @visual_missing_label ||= "visual missing"
+  end
+
+  def packet_failed_label
+    @packet_failed_label ||= "packet failed"
   end
 
   def allowed_author?(issue)
