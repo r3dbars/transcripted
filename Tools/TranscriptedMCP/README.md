@@ -43,3 +43,7 @@ The server reads:
 
 Override paths with `TRANSCRIPTED_DATA_DIR`, `TRANSCRIPTED_MEETINGS_DIR`,
 `TRANSCRIPTED_DICTATIONS_DIR`, or `TRANSCRIPTED_INDEX_DIR`.
+If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
+`dictations/` subfolders, `transcripted-mcp` uses those subfolders
+automatically and stores its SQLite index in that shared root unless
+`TRANSCRIPTED_INDEX_DIR` is also set.
