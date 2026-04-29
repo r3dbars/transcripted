@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (47 Swift files)
+## Files (48 Swift files)
 
 ### Overlay/
 
@@ -68,6 +68,7 @@ The current agent-connect surfaces should keep one simple mental model:
 ### Settings/
 
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
+- `Settings/HomeView.swift` — SwiftUI home page with first-run guidance, permission status, quick actions, and live transcription activity
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
