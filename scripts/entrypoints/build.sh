@@ -40,7 +40,7 @@ dependency_input_listing() {
 }
 
 newest_dependency_input() {
-    dependency_input_listing | sort -nr | head -1
+    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
 }
 
 deps_build_stamp_info() {
