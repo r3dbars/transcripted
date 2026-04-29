@@ -277,6 +277,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "dictation_start_failed": .init(
+            name: "dictation_start_failed",
+            allowedProperties: [
+                "failure_kind",
+                "trigger",
+            ]
+        ),
         "dictation_completed": .init(
             name: "dictation_completed",
             allowedProperties: [

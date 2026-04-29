@@ -99,12 +99,31 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationCompleted?.allowedProperties.contains("auto_send"), true, "dictation completion should allow the existing auto_send property")
     }
 
+    runSuite("AnalyticsEventPolicy allows dictation start failures with coarse attribution") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should preserve normalized failure kinds")
+        assertEqual(dictationStartFailed?.allowedProperties.contains("trigger"), true, "dictation start failures should preserve trigger attribution")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "microphone_start_timeout",
+                "trigger": "hotkey",
+            ],
+            allowedKeys: ["failure_kind", "trigger"]
+        )
+        assertEqual(sanitized["failure_kind"], "microphone_start_timeout", "dictation start failure kind should survive sanitization")
+        assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
+    }
+
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let unknown = AnalyticsEventPolicy.policy(forEvent: "raw_transcript_uploaded")
 
+        assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
