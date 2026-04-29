@@ -46,6 +46,18 @@ func testRepoCommandContract() {
             "build.sh should not bundle the legacy Parakeet directory as a second 461 MB copy"
         )
     }
+
+    runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
+        let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
+        assertTrue(
+            contents.contains("issues.select { |issue| active_issue?(issue) || unauthorized_active_issue?(issue) }"),
+            "runner should fetch unauthorized active issues so handle_issue can remove agent labels"
+        )
+        assertTrue(
+            contents.contains("def unauthorized_active_issue?(issue)"),
+            "runner should keep unauthorized active issue detection explicit"
+        )
+    }
 }
 
 private func repoRootURL() -> URL {

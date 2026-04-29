@@ -71,6 +71,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var pendingImmediateInstallHandler: (() -> Void)?
     private var pendingImmediateInstallVersion: String?
     private var didTrackCurrentUpdateCycleFailure = false
+    private var observedUpdateCheckTimeoutTask: Task<Void, Never>?
+    private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
 
     override init() {
         super.init()
@@ -200,9 +202,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private func beginObservedUpdateCheck() {
         switch updateStatus.state {
         case .updateAvailable, .downloading, .readyToInstall:
+            cancelObservedUpdateCheckTimeout()
             syncReadiness(from: updaterController.updater)
         default:
             setUpdateStatus(.checking, canCheckForUpdates: updaterController.updater.canCheckForUpdates)
+            scheduleObservedUpdateCheckTimeout()
         }
     }
 
@@ -258,6 +262,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private func markNoUpdateAvailable(from updater: SPUUpdater) {
+        cancelObservedUpdateCheckTimeout()
         if updateStatus.availableUpdateVersion != nil {
             trackUpdateCheckFinished(
                 result: "no_change",
@@ -277,6 +282,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private func markUpdateCheckFailed(from updater: SPUUpdater, error: (any Error)?) {
+        cancelObservedUpdateCheckTimeout()
         if error != nil {
             didTrackCurrentUpdateCycleFailure = true
         }
@@ -295,6 +301,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private func markUpdaterIdle(from updater: SPUUpdater) {
+        cancelObservedUpdateCheckTimeout()
         guard updateStatus.availableUpdateVersion == nil else {
             syncReadiness(from: updater)
             return
@@ -306,6 +313,20 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
     private func versionString(for item: SUAppcastItem) -> String {
         Self.displayVersionString(for: item)
+    }
+
+    private func scheduleObservedUpdateCheckTimeout() {
+        observedUpdateCheckTimeoutTask?.cancel()
+        observedUpdateCheckTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.observedUpdateCheckTimeoutNanoseconds)
+            guard let self, !Task.isCancelled, self.updateStatus.state == .checking else { return }
+            self.markUpdateCheckFailed(from: self.updaterController.updater, error: nil)
+        }
+    }
+
+    private func cancelObservedUpdateCheckTimeout() {
+        observedUpdateCheckTimeoutTask?.cancel()
+        observedUpdateCheckTimeoutTask = nil
     }
 
     nonisolated private static func displayVersionString(for item: SUAppcastItem) -> String {
@@ -436,6 +457,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
 extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        cancelObservedUpdateCheckTimeout()
         let version = versionString(for: item)
         let state = UpdateStatus.State.updateAvailable(version: version)
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
@@ -498,6 +520,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        cancelObservedUpdateCheckTimeout()
         if let error {
             guard !didTrackCurrentUpdateCycleFailure else { return }
             markUpdateCheckFailed(from: updater, error: error)

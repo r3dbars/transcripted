@@ -88,9 +88,7 @@ final class MeetingCaptureBridge: ObservableObject {
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
                     existingErrorMessage: self.errorMessage
                 )
-                if self.audio.isRecording {
-                    self.audio.stop()
-                }
+                self.audio.stop()
                 continuation.resume(returning: false)
             })
         }

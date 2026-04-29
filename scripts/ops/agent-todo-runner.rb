@@ -102,7 +102,7 @@ class AgentTodoRunner
       "--json", "number,title,body,labels,url,assignees,author,createdAt,updatedAt"
     )
 
-    issues.select { |issue| active_issue?(issue) }
+    issues.select { |issue| active_issue?(issue) || unauthorized_active_issue?(issue) }
   end
 
   def fetch_issue(number)
@@ -116,6 +116,11 @@ class AgentTodoRunner
   def active_issue?(issue)
     labels = label_names(issue)
     (labels & active_labels).any? && (labels & terminal_labels).empty? && allowed_author?(issue)
+  end
+
+  def unauthorized_active_issue?(issue)
+    labels = label_names(issue)
+    (labels & active_labels).any? && (labels & terminal_labels).empty? && !allowed_author?(issue)
   end
 
   def handle_issue(issue)

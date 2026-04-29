@@ -1,4 +1,6 @@
 import XCTest
+import AVFoundation
+import Combine
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -41,6 +43,15 @@ final class RecordingHealthInfoTests: XCTestCase {
         XCTAssertEqual(health.gapDescriptions, ["sleep_wake: 1.5s"])
     }
 
+    func testHealthInfoTreatsZeroSystemBuffersAsDegraded() {
+        let audio = Audio(paths: makePaths())
+        let capture = StubSystemAudioCapture(successRate: 0.0)
+
+        let health = RecordingHealthInfo.from(audio: audio, systemCapture: capture)
+
+        XCTAssertEqual(health.captureQuality, .degraded)
+    }
+
     private func makePaths() -> CoreStoragePaths {
         CoreStoragePaths(
             transcripts: tempRoot.appendingPathComponent("transcripts", isDirectory: true),
@@ -52,4 +63,21 @@ final class RecordingHealthInfoTests: XCTestCase {
             logs: tempRoot.appendingPathComponent("logs", isDirectory: true)
         )
     }
+}
+
+private final class StubSystemAudioCapture: SystemAudioCaptureEngine {
+    let diagnosticBackendName = "stub"
+    let audioFormat: AVAudioFormat? = nil
+    let bufferSuccessRate: Double
+    let deliversOwnedAudioBuffers = true
+    let errorMessagePublisher = Just<String?>(nil).eraseToAnyPublisher()
+
+    init(successRate: Double) {
+        self.bufferSuccessRate = successRate
+    }
+
+    func prepare() throws {}
+    func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {}
+    func stop() {}
+    func stopSync() {}
 }
