@@ -195,6 +195,31 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    private func trackDictationStartFailed(_ failureKind: String) {
+        AnalyticsReporter.track(
+            "dictation_start_failed",
+            properties: [
+                "failure_kind": failureKind,
+                "trigger": currentDictationTrigger.rawValue,
+            ]
+        )
+    }
+
+    private func dictationStartFailureKind(for status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .denied:
+            return "microphone_permission_denied"
+        case .restricted:
+            return "microphone_permission_restricted"
+        case .notDetermined:
+            return "microphone_permission_not_determined"
+        case .authorized:
+            return "microphone_unavailable"
+        @unknown default:
+            return "microphone_permission_unknown"
+        }
+    }
+
     private func continueDictationStart(
         appState: TranscriptedAppState,
         overlayController: FloatingOverlayController,
@@ -387,6 +412,7 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        trackDictationStartFailed("microphone_start_timeout")
         isDictating = false
         overlayController.showError(
             microphoneTimeoutMessage(
@@ -421,6 +447,7 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        trackDictationStartFailed(dictationStartFailureKind(for: status))
         if !overlayController.isVisible {
             overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
         }
