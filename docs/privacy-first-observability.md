@@ -102,3 +102,26 @@ without joining against any sensitive context.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
+
+## Nightly guardrail sweep
+
+The nightly security automation should start with the deterministic checker:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json
+```
+
+That report is the first pass, not the whole job. It should score the current
+state, flag repo/release/privacy drift, and only then hand the run off to agent
+judgment for a small high-confidence patch or a findings note.
+
+If the run built a fresh app or needs build-output verification, rerun it with:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json
+```
+
+The shared regression corpus for off-device scrubbers lives at
+`Tests/Fixtures/ObservabilitySanitizerCorpus.json`. Both the Sentry and
+analytics sanitizer tests should stay pinned to that same corpus so privacy
+coverage does not drift quietly between the two lanes.

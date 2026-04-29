@@ -1,6 +1,8 @@
 import Foundation
 
 func testAnalyticsPayloadSanitizer() {
+    let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
+
     runSuite("AnalyticsPayloadSanitizer keeps only allowlisted coarse properties") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -172,5 +174,23 @@ func testAnalyticsPayloadSanitizer() {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeText(long)
         assertTrue(sanitized.count <= 83, "sanitizeText should still enforce the 80-char cap + \"...\" marker; got \(sanitized.count)")
         assertTrue(sanitized.hasSuffix("..."), "sanitizeText should append the truncation marker")
+    }
+
+    runSuite("AnalyticsPayloadSanitizer matches the shared regression corpus") {
+        for testCase in corpus.cases {
+            let sanitized = AnalyticsPayloadSanitizer.redact(testCase.input)
+            for forbidden in testCase.mustNotContain {
+                assertFalse(
+                    sanitized.contains(forbidden),
+                    "shared case \(testCase.id) should redact \(forbidden)"
+                )
+            }
+            for required in testCase.mustContain {
+                assertTrue(
+                    sanitized.contains(required),
+                    "shared case \(testCase.id) should keep marker \(required)"
+                )
+            }
+        }
     }
 }
