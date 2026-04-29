@@ -196,53 +196,55 @@ struct HomeWelcomeHeader: View {
 // MARK: - Hero card
 
 struct HomeHeroCard: View {
-    let title: String
-    let subtitle: String
     let primaryTitle: String
+    let primarySubtitle: String
     let primaryAction: () -> Void
     let secondaryTitle: String
+    let secondarySubtitle: String
     let secondaryAction: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.16))
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .frame(width: 38, height: 38)
+            Text("Capture spoken work")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.primary)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    HomeActionChoiceCard(
+                        title: primaryTitle,
+                        subtitle: primarySubtitle,
+                        symbolName: "mic.fill",
+                        isPrimary: true,
+                        action: primaryAction
+                    )
 
-            HStack(spacing: 14) {
-                Button(action: primaryAction) {
-                    Label(primaryTitle, systemImage: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
+                    HomeActionChoiceCard(
+                        title: secondaryTitle,
+                        subtitle: secondarySubtitle,
+                        symbolName: "waveform",
+                        isPrimary: false,
+                        action: secondaryAction
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
 
-                Button(action: secondaryAction) {
-                    Label(secondaryTitle, systemImage: "waveform")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    HomeActionChoiceCard(
+                        title: primaryTitle,
+                        subtitle: primarySubtitle,
+                        symbolName: "mic.fill",
+                        isPrimary: true,
+                        action: primaryAction
+                    )
+
+                    HomeActionChoiceCard(
+                        title: secondaryTitle,
+                        subtitle: secondarySubtitle,
+                        symbolName: "waveform",
+                        isPrimary: false,
+                        action: secondaryAction
+                    )
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(18)
@@ -264,6 +266,89 @@ struct HomeHeroCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
+    }
+}
+
+private struct HomeActionChoiceCard: View {
+    let title: String
+    let subtitle: String
+    let symbolName: String
+    let isPrimary: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(iconBackground)
+                        Image(systemName: symbolName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(iconForeground)
+                    }
+                    .frame(width: 34, height: 34)
+
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    Text(title)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isPrimary ? Color.white : Color.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isPrimary ? Color.accentColor : Color.accentColor.opacity(0.13))
+                )
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(borderColor, lineWidth: isPrimary ? 1.2 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var cardBackground: Color {
+        if isPrimary {
+            return Color.accentColor.opacity(0.13)
+        }
+        return Color(nsColor: .controlBackgroundColor).opacity(0.72)
+    }
+
+    private var borderColor: Color {
+        isPrimary ? Color.accentColor.opacity(0.34) : Color.accentColor.opacity(0.2)
+    }
+
+    private var iconBackground: Color {
+        isPrimary ? Color.accentColor.opacity(0.2) : Color(nsColor: .textColor).opacity(0.08)
+    }
+
+    private var iconForeground: Color {
+        isPrimary ? Color.accentColor : Color.secondary
     }
 }
 
@@ -414,29 +499,9 @@ struct HomeRowActionButtons: View {
             )
 
             if !menuItems.isEmpty {
-                Menu {
-                    ForEach(menuItems) { item in
-                        if item.isDestructive {
-                            Button(role: .destructive, action: item.action) {
-                                Label(item.title, systemImage: item.symbolName)
-                            }
-                        } else {
-                            Button(action: item.action) {
-                                Label(item.title, systemImage: item.symbolName)
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("More options")
+                HomeRowMoreMenuButton(items: menuItems)
+                    .frame(width: 26, height: 26)
+                    .help("More options")
             }
         }
     }
@@ -451,6 +516,71 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(.plain)
         .help(help)
+    }
+}
+
+struct HomeRowMoreMenuButton: NSViewRepresentable {
+    let items: [HomeRowMenuItem]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(items: items)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.image = NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: "More options"
+        )
+        button.contentTintColor = .secondaryLabelColor
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.showMenu(_:))
+        button.setButtonType(.momentaryChange)
+        button.setAccessibilityLabel("More options")
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.items = items
+        button.isEnabled = !items.isEmpty
+    }
+
+    final class Coordinator: NSObject {
+        var items: [HomeRowMenuItem]
+
+        init(items: [HomeRowMenuItem]) {
+            self.items = items
+        }
+
+        @objc func showMenu(_ sender: NSButton) {
+            let menu = NSMenu()
+            for item in items {
+                let menuItem = NSMenuItem(
+                    title: item.title,
+                    action: #selector(performMenuItem(_:)),
+                    keyEquivalent: ""
+                )
+                menuItem.target = self
+                menuItem.representedObject = item.id
+                menu.addItem(menuItem)
+            }
+
+            menu.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: sender.bounds.height + 2),
+                in: sender
+            )
+        }
+
+        @objc private func performMenuItem(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? UUID,
+                  let item = items.first(where: { $0.id == id }) else {
+                return
+            }
+            item.action()
+        }
     }
 }
 

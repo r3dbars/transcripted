@@ -113,6 +113,8 @@ to scan:
 - `visual missing`
 - `packet failed`
 
+Visual artifacts are embedded from files committed under `.agent-review/visuals/` on the PR branch.
+
 ## Revision Loop
 
 If Justin wants changes after review, he can comment on the issue or PR and add
