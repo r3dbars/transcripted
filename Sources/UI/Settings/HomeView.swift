@@ -196,53 +196,55 @@ struct HomeWelcomeHeader: View {
 // MARK: - Hero card
 
 struct HomeHeroCard: View {
-    let title: String
-    let subtitle: String
     let primaryTitle: String
+    let primarySubtitle: String
     let primaryAction: () -> Void
     let secondaryTitle: String
+    let secondarySubtitle: String
     let secondaryAction: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.16))
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .frame(width: 38, height: 38)
+            Text("Capture spoken work")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.primary)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(subtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    HomeActionChoiceCard(
+                        title: primaryTitle,
+                        subtitle: primarySubtitle,
+                        symbolName: "mic.fill",
+                        isPrimary: true,
+                        action: primaryAction
+                    )
 
-            HStack(spacing: 14) {
-                Button(action: primaryAction) {
-                    Label(primaryTitle, systemImage: "mic.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
+                    HomeActionChoiceCard(
+                        title: secondaryTitle,
+                        subtitle: secondarySubtitle,
+                        symbolName: "waveform",
+                        isPrimary: false,
+                        action: secondaryAction
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
 
-                Button(action: secondaryAction) {
-                    Label(secondaryTitle, systemImage: "waveform")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    HomeActionChoiceCard(
+                        title: primaryTitle,
+                        subtitle: primarySubtitle,
+                        symbolName: "mic.fill",
+                        isPrimary: true,
+                        action: primaryAction
+                    )
+
+                    HomeActionChoiceCard(
+                        title: secondaryTitle,
+                        subtitle: secondarySubtitle,
+                        symbolName: "waveform",
+                        isPrimary: false,
+                        action: secondaryAction
+                    )
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(18)
@@ -264,6 +266,89 @@ struct HomeHeroCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
+    }
+}
+
+private struct HomeActionChoiceCard: View {
+    let title: String
+    let subtitle: String
+    let symbolName: String
+    let isPrimary: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(iconBackground)
+                        Image(systemName: symbolName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(iconForeground)
+                    }
+                    .frame(width: 34, height: 34)
+
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    Text(title)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isPrimary ? Color.white : Color.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isPrimary ? Color.accentColor : Color.accentColor.opacity(0.13))
+                )
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(borderColor, lineWidth: isPrimary ? 1.2 : 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var cardBackground: Color {
+        if isPrimary {
+            return Color.accentColor.opacity(0.13)
+        }
+        return Color(nsColor: .controlBackgroundColor).opacity(0.72)
+    }
+
+    private var borderColor: Color {
+        isPrimary ? Color.accentColor.opacity(0.34) : Color.accentColor.opacity(0.2)
+    }
+
+    private var iconBackground: Color {
+        isPrimary ? Color.accentColor.opacity(0.2) : Color(nsColor: .textColor).opacity(0.08)
+    }
+
+    private var iconForeground: Color {
+        isPrimary ? Color.accentColor : Color.secondary
     }
 }
 
