@@ -75,7 +75,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
     func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
         let manager = makeManager()
-        let micURL = tempDirectory.appendingPathComponent("mic.wav")
+        let micURL = tempDirectory.appendingPathComponent("audio/mic.wav")
         try writeMonoWAV(to: micURL, duration: 2.5)
 
         manager.startTranscription(
