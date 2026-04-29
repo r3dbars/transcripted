@@ -35,7 +35,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     var bufferSuccessRate: Double {
         statsLock.lock()
         defer { statsLock.unlock() }
-        guard _totalBuffers > 0 else { return 1.0 }
+        guard _totalBuffers > 0 else { return 0.0 }
         return Double(_buffersWithData) / Double(_totalBuffers)
     }
 

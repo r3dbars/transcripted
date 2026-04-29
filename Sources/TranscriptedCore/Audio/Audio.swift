@@ -705,6 +705,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return
         }
         prepareForNewRecordingStart()
+        let startGeneration = recordingSessionGeneration
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -714,8 +715,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             do {
                 try await startAudioCapture()
                 await MainActor.run {
-                    self.isRecording = true
-                    self.isStarting = false
+                    self.finishSuccessfulStartIfCurrent(startGeneration)
                 }
             } catch {
                 await MainActor.run {
@@ -734,6 +734,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Set isStarting to prevent double-start during async setup
         isStarting = true
         prepareForNewRecordingStart()
+        let startGeneration = recordingSessionGeneration
 
         AppLogger.audio.info("Starting audio capture")
 
@@ -743,8 +744,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             do {
                 try await startAudioCapture()
                 await MainActor.run {
-                    self.isRecording = true
-                    self.isStarting = false
+                    self.finishSuccessfulStartIfCurrent(startGeneration)
                 }
             } catch {
                 await MainActor.run {
@@ -755,6 +755,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    @MainActor
+    private func finishSuccessfulStartIfCurrent(_ startGeneration: UInt64) {
+        guard recordingSessionGeneration == startGeneration, isStarting else {
+            AppLogger.audio.warning("Audio capture start finished after session was cancelled; tearing down stale capture", [
+                "startGeneration": "\(startGeneration)",
+                "currentGeneration": "\(recordingSessionGeneration)"
+            ])
+            isRecording = false
+            isStarting = false
+            stop()
+            return
+        }
+
+        isRecording = true
+        isStarting = false
     }
 
     // MARK: - Stop Recording
@@ -786,6 +803,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // — the freeze Taylor reported on the meeting widget.
         DispatchQueue.main.async {
             self.isRecording = false
+            self.isStarting = false
             self.audioLevel = 0.0
             self.systemAudioStatus = .unknown  // Reset status when not recording
             self.stopTimer()

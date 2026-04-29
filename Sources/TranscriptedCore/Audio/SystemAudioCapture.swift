@@ -129,12 +129,12 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
     var _buffersDropped: Int = 0
     let statsLock = NSLock()
 
-    /// Public getter for buffer success rate (Phase 3: Transcript Metadata)
-    /// Returns 1.0 if no buffers received yet (assume success until proven otherwise)
+    /// Public getter for buffer success rate (Phase 3: Transcript Metadata).
+    /// A started capture that reports no buffers is degraded, not excellent.
     var bufferSuccessRate: Double {
         statsLock.lock()
         defer { statsLock.unlock() }
-        guard _totalBuffers > 0 else { return 1.0 }
+        guard _totalBuffers > 0 else { return 0.0 }
         return Double(_buffersWithData) / Double(_totalBuffers)
     }
 
