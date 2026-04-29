@@ -103,11 +103,6 @@ extension FileManager {
         ensuredPrivateDirectory(at: transcriptedAppSupportRootURL, context: "Transcripted app support root")
     }
 
-    /// Historic Draft compatibility root, retained only for migration / cleanup flows.
-    var draftAppSupportDir: URL {
-        userApplicationSupportDir.appendingPathComponent("Draft", isDirectory: true)
-    }
-
     var transcriptedDefaultCaptureLibraryDir: URL {
         let url = transcriptedAppSupportDir.appendingPathComponent("captures", isDirectory: true)
         return ensuredPrivateDirectory(at: url, context: "Transcripted capture library parent")
