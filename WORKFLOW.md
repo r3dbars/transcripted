@@ -7,7 +7,7 @@ tracker:
     - agent in progress
   todo_label: agent todo
   in_progress_label: agent in progress
-  review_label: agent review
+  review_label: human review
   blocked_label: agent blocked
   done_label: agent done
   allowed_authors:
@@ -57,7 +57,7 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 9. Stage only your own changes, commit, and push.
 10. Open a draft PR against `main` with `gh pr create --draft`.
 11. Link the PR in the issue workpad and add a short verification summary.
-12. Remove `agent in progress` and add `agent review` when the PR is ready for Justin to review.
+12. Remove `agent in progress` and add `human review` when the PR is ready for Justin to review.
 
 ## Guardrails
 

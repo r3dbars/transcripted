@@ -13,7 +13,7 @@ The runner treats labels as state:
 
 - `agent todo` - ready for Codex
 - `agent in progress` - Codex claimed it
-- `agent review` - draft PR is ready for human review
+- `human review` - draft PR is ready for Justin to review
 - `agent blocked` - Codex hit a real blocker
 - `agent done` - optional final state after merge or manual closeout
 
@@ -84,7 +84,7 @@ bash scripts/ops/agent-todo-launchagent.sh restart
 - Moves new work from `agent todo` to `agent in progress`.
 - Launches Codex in that issue workspace.
 
-Codex is expected to commit, push, open a draft PR, update the workpad, and move the issue to `agent review`.
+Codex is expected to commit, push, open a draft PR, update the workpad, and move the issue to `human review`.
 
 ## Safety Notes
 
