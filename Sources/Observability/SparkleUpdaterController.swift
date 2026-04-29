@@ -319,10 +319,31 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     private var hasConfiguredFeedURL: Bool {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+              let feedURL = normalizedHTTPSURL(value) else {
             return false
         }
-        return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // Security: require an HTTPS Sparkle feed with a non-empty EdDSA public key.
+        // If a tampered Info.plist swaps in HTTP or removes SUPublicEDKey, fail closed
+        // instead of letting update checks proceed against an unsigned/plaintext channel.
+        guard let publicKey = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
+              !publicKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+
+        return feedURL.host != nil
+    }
+
+    private func normalizedHTTPSURL(_ rawValue: String) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme,
+              scheme.caseInsensitiveCompare("https") == .orderedSame else {
+            return nil
+        }
+        return url
     }
 
     private func trackUpdateActionClicked(surface: String, state: UpdateStatus.State, version: String?) {
