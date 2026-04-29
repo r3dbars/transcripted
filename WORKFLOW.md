@@ -55,9 +55,11 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 7. Make the smallest change that satisfies the issue.
 8. Run the verification required by the files you changed.
 9. Stage only your own changes, commit, and push.
-10. Open a draft PR against `main` with `gh pr create --draft`.
-11. Link the PR in the issue workpad and add a short verification summary.
-12. Remove `agent in progress` and add `human review` when the PR is ready for Justin to review.
+10. If the change touches UI, visual design, app copy, or user-facing flows, add sanitized visual evidence under `.agent-review/visuals/` before opening the PR. Prefer a PNG screenshot; use a GIF only when motion or interaction matters. Never include private transcripts, customer data, tokens, absolute personal paths, or real user content in visuals.
+11. Open a draft PR against `main` with `gh pr create --draft`.
+12. Link the PR in the issue workpad and add a short verification summary.
+13. Remove `agent in progress` and add `human review` when the PR is ready for Justin to review.
+14. After you finish, the runner will add an Agent Review Packet to the PR with change classification, visual evidence when present, Transcripted QA, and an automated PR review.
 
 ## Guardrails
 
@@ -69,6 +71,7 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 - If you touch Swift source, run `bash build.sh` and `bash run-tests.sh`.
 - If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 - If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
+- For UI changes, make the PR reviewable without pulling the branch locally: include a screenshot or GIF in `.agent-review/visuals/` and note the manual check in the PR body.
 
 ## Workpad Shape
 
