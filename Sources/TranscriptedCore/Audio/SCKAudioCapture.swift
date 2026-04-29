@@ -22,6 +22,8 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var _isCapturing = false
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
 
+    var diagnosticBackendName: String { "screen_capture_kit" }
+
     // Buffer statistics (thread-safe)
     private var _totalBuffers: Int = 0
     private var _buffersWithData: Int = 0

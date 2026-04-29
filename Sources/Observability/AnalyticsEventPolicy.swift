@@ -8,6 +8,30 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies[event]
     }
 
+    private static let meetingCaptureDiagnosticProperties: Set<String> = [
+        "buffer_success_bucket",
+        "gap_count_bucket",
+        "input_channels",
+        "input_device_class",
+        "input_rate_hz",
+        "mic_processing",
+        "mic_recovering",
+        "output_device_class",
+        "output_rate_hz",
+        "realtime_agc",
+        "recovery_attempt_bucket",
+        "route_change_count_bucket",
+        "system_backend",
+        "system_channels",
+        "system_failed",
+        "system_output_device_class",
+        "system_output_rate_hz",
+        "system_rate_hz",
+        "system_status",
+        "voice_processing",
+        "voice_processing_active",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -310,9 +334,16 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "meeting_recording_started": .init(
             name: "meeting_recording_started",
-            allowedProperties: [
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
                 "trigger",
-            ]
+            ]))
+        ),
+        "meeting_recording_start_failed": .init(
+            name: "meeting_recording_start_failed",
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
+                "failure_kind",
+                "trigger",
+            ]))
         ),
         "meeting_prompt_shown": .init(
             name: "meeting_prompt_shown",
@@ -341,22 +372,38 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "meeting_recording_stopped": .init(
             name: "meeting_recording_stopped",
-            allowedProperties: [
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
                 "capture_quality",
                 "duration_bucket",
+                "gap_count_bucket",
                 "reason",
+                "route_change_count_bucket",
                 "system_stream_present",
+                "stop_timed_out",
                 "trigger",
-            ]
+            ]))
+        ),
+        "meeting_capture_health_snapshot": .init(
+            name: "meeting_capture_health_snapshot",
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
+                "capture_quality",
+                "duration_bucket",
+                "gap_count_bucket",
+                "reason",
+                "route_change_count_bucket",
+                "system_stream_present",
+                "stop_timed_out",
+                "trigger",
+            ]))
         ),
         "meeting_recording_cancelled": .init(
             name: "meeting_recording_cancelled",
-            allowedProperties: [
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
                 "duration_bucket",
                 "reason",
                 "system_stream_present",
                 "trigger",
-            ]
+            ]))
         ),
         "meeting_transcript_saved": .init(
             name: "meeting_transcript_saved",
@@ -370,11 +417,11 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "meeting_transcript_failed": .init(
             name: "meeting_transcript_failed",
-            allowedProperties: [
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
                 "failure_kind",
                 "queue_depth_bucket",
                 "trigger",
-            ]
+            ]))
         ),
         "meeting_file_imported": .init(
             name: "meeting_file_imported",

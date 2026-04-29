@@ -10,6 +10,9 @@ import Combine
 /// Legacy `SystemAudioCapture` still conforms to this protocol for older or
 /// standalone paths, but the live Transcripted app no longer routes through it.
 public protocol SystemAudioCaptureEngine: AnyObject {
+    /// Coarse backend name for diagnostics. Must not include device names or process names.
+    var diagnosticBackendName: String { get }
+
     /// Audio format available after `prepare()`. Used to create the WAV file before starting capture.
     var audioFormat: AVAudioFormat? { get }
 

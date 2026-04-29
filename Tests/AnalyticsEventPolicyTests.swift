@@ -133,28 +133,81 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy meeting_recording_stopped system_stream_present key is not silently filtered") {
         let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_stopped")
+        let healthPolicy = AnalyticsEventPolicy.policy(forEvent: "meeting_capture_health_snapshot")
+        let startFailedPolicy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_start_failed")
         assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "system_stream_present should be in the allowlist")
         assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting stop events should preserve start trigger attribution")
+        assertEqual(policy?.allowedProperties.contains("buffer_success_bucket"), true, "meeting stop events should preserve coarse buffer success")
+        assertEqual(policy?.allowedProperties.contains("gap_count_bucket"), true, "meeting stop events should preserve coarse gap counts")
+        assertEqual(policy?.allowedProperties.contains("input_device_class"), true, "meeting stop events should preserve coarse input device class")
+        assertEqual(policy?.allowedProperties.contains("input_rate_hz"), true, "meeting stop events should preserve safe input rate")
+        assertEqual(policy?.allowedProperties.contains("route_change_count_bucket"), true, "meeting stop events should preserve coarse route-change counts")
+        assertEqual(policy?.allowedProperties.contains("mic_processing"), true, "meeting stop events should preserve the coarse mic processing mode")
+        assertEqual(policy?.allowedProperties.contains("output_device_class"), true, "meeting stop events should preserve coarse output device class")
+        assertEqual(policy?.allowedProperties.contains("recovery_attempt_bucket"), true, "meeting stop events should preserve recovery attempt buckets")
+        assertEqual(policy?.allowedProperties.contains("system_backend"), true, "meeting stop events should preserve system capture backend")
+        assertEqual(policy?.allowedProperties.contains("system_status"), true, "meeting stop events should preserve system capture status")
+        assertEqual(policy?.allowedProperties.contains("voice_processing"), true, "meeting stop events should preserve whether VPIO was requested")
+        assertEqual(healthPolicy?.allowedProperties.contains("stop_timed_out"), true, "health snapshot should preserve stop timeout state")
+        assertEqual(startFailedPolicy?.allowedProperties.contains("failure_kind"), true, "meeting start failures should preserve normalized failure kinds")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
+                "buffer_success_bucket": "90_97",
+                "gap_count_bucket": "1",
+                "input_device_class": "bluetooth",
+                "input_rate_hz": "48000",
+                "mic_processing": "software_agc",
+                "output_device_class": "built_in",
+                "recovery_attempt_bucket": "0",
+                "route_change_count_bucket": "2_3",
+                "system_backend": "screen_capture_kit",
                 "system_stream_present": "true",
+                "system_status": "healthy",
                 "trigger": "detected_prompt",
+                "voice_processing": "false",
             ],
-            allowedKeys: ["system_stream_present", "trigger"]
+            allowedKeys: [
+                "buffer_success_bucket",
+                "gap_count_bucket",
+                "input_device_class",
+                "input_rate_hz",
+                "mic_processing",
+                "output_device_class",
+                "recovery_attempt_bucket",
+                "route_change_count_bucket",
+                "system_backend",
+                "system_stream_present",
+                "system_status",
+                "trigger",
+                "voice_processing",
+            ]
         )
+        assertEqual(sanitized["buffer_success_bucket"], "90_97", "buffer success buckets should survive sanitization")
+        assertEqual(sanitized["gap_count_bucket"], "1", "gap count buckets should survive sanitization")
+        assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input device class should survive sanitization")
+        assertEqual(sanitized["input_rate_hz"], "48000", "input sample rate should survive sanitization")
+        assertEqual(sanitized["mic_processing"], "software_agc", "coarse mic processing mode should survive sanitization")
+        assertEqual(sanitized["output_device_class"], "built_in", "coarse output device class should survive sanitization")
+        assertEqual(sanitized["recovery_attempt_bucket"], "0", "recovery attempt buckets should survive sanitization")
+        assertEqual(sanitized["route_change_count_bucket"], "2_3", "route-change buckets should survive sanitization")
+        assertEqual(sanitized["system_backend"], "screen_capture_kit", "capture backend should survive sanitization")
         assertEqual(sanitized["system_stream_present"], "true", "system_stream_present must survive sanitization — if empty the metric is always missing")
+        assertEqual(sanitized["system_status"], "healthy", "system capture status should survive sanitization")
         assertEqual(sanitized["trigger"], "detected_prompt", "meeting trigger attribution must survive sanitization")
+        assertEqual(sanitized["voice_processing"], "false", "voice processing state should survive sanitization")
     }
 
     runSuite("AnalyticsEventPolicy meeting_recording_cancelled stays coarse and allowlisted") {
         let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_cancelled")
 
         assertEqual(policy?.allowedProperties.contains("duration_bucket"), true, "meeting cancellation should only keep bucketed duration")
+        assertEqual(policy?.allowedProperties.contains("mic_processing"), true, "meeting cancellation should preserve the coarse mic processing mode")
         assertEqual(policy?.allowedProperties.contains("reason"), true, "meeting cancellation should preserve coarse reason")
         assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "meeting cancellation should preserve system stream presence")
         assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting cancellation should preserve trigger attribution")
+        assertEqual(policy?.allowedProperties.contains("voice_processing"), true, "meeting cancellation should preserve whether VPIO was requested")
     }
 
     runSuite("AnalyticsEventPolicy allows meeting outcome trigger attribution") {

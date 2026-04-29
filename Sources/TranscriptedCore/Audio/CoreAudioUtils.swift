@@ -24,6 +24,11 @@ extension AudioObjectID {
         try AudioDeviceID.system.readDefaultSystemOutputDevice()
     }
 
+    /// Reads the value for `kAudioHardwarePropertyDefaultOutputDevice`.
+    public static func readDefaultOutputDevice() throws -> AudioDeviceID {
+        try AudioDeviceID.system.readDefaultOutputDevice()
+    }
+
     /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`.
     public static func readDefaultInputDevice() throws -> AudioDeviceID {
         try AudioObjectID.system.readDefaultInputDevice()
@@ -87,6 +92,13 @@ extension AudioObjectID {
         return try read(kAudioHardwarePropertyDefaultSystemOutputDevice, defaultValue: AudioDeviceID.unknown)
     }
 
+    /// Reads the value for `kAudioHardwarePropertyDefaultOutputDevice`, should only be called on the system object.
+    func readDefaultOutputDevice() throws -> AudioDeviceID {
+        try requireSystemObject()
+
+        return try read(kAudioHardwarePropertyDefaultOutputDevice, defaultValue: AudioDeviceID.unknown)
+    }
+
     /// Reads the value for `kAudioHardwarePropertyDefaultInputDevice`, should only be called on the system object.
     func readDefaultInputDevice() throws -> AudioDeviceID {
         try requireSystemObject()
@@ -106,6 +118,11 @@ extension AudioObjectID {
     /// Returns the rate the device is configured to operate at (e.g. 24000, 44100, 48000, 96000).
     func readNominalSampleRate() throws -> Float64 {
         try read(kAudioDevicePropertyNominalSampleRate, defaultValue: Float64(0))
+    }
+
+    /// Reads the coarse transport type for a device without exposing its name or UID.
+    func readTransportType() throws -> UInt32 {
+        try read(kAudioDevicePropertyTransportType, defaultValue: UInt32(kAudioDeviceTransportTypeUnknown))
     }
 
     private func requireSystemObject() throws {
