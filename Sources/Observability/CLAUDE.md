@@ -9,7 +9,8 @@ anonymous analytics, and Sparkle update plumbing.
 
 - `AppLogger.swift` — developer-facing debug log writer
 - `EventReporter.swift` — structured event capture
-- `JSONLWriter.swift` — shared append-only JSONL writer
+- `JSONLWriter.swift` — shared append-only JSONL writer that reuses file handles and falls back cleanly if log files are rotated or recreated
+- `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
 - `CrashReporter.swift` — crash reporting setup
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
@@ -20,12 +21,14 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
-- `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app
+- `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
+- `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
 
 ## Current Notes
 
 - Treat this directory as shared infrastructure for the current dictation + meetings app
 - Sparkle is the live in-app update path on `main`; the older beta DMG self-update flow is no longer part of the app target
+- `LockedFileAppender` is the canonical append path for local debug and JSONL logs. Keep concurrent file writes funneled through it so app and helper processes do not splice records together.
 - Do not assume older draft/style/analysis event flows are still active just because they appear in historical docs or event logs
 - `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` disables `app.jsonl` writes for test and smoke runs so local production logs stay clean
@@ -33,6 +36,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
+- Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
 
 ## Verification
 
@@ -52,6 +56,8 @@ Relevant direct coverage:
 - `Tests/SentryEventPolicyTests.swift`
 - `Tests/SentryPayloadSanitizerTests.swift`
 - `Tests/SentryRuntimeConfigurationTests.swift`
+- `Tests/ObservabilityLogWriterTests.swift`
+- `Tests/UpdateFailureKindTests.swift`
 
 Useful files while testing:
 
