@@ -10,6 +10,9 @@ tracker:
   review_label: agent review
   blocked_label: agent blocked
   done_label: agent done
+  allowed_authors:
+    - r3dbars
+    - justinbetker
 workspace:
   root: /Users/redbars/code/symphony-workspaces
   clone_url: git@github.com:r3dbars/transcripted.git

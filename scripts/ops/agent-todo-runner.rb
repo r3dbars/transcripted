@@ -99,7 +99,7 @@ class AgentTodoRunner
       "--repo", repo,
       "--state", "open",
       "--limit", "100",
-      "--json", "number,title,body,labels,url,assignees,createdAt,updatedAt"
+      "--json", "number,title,body,labels,url,assignees,author,createdAt,updatedAt"
     )
 
     issues.select { |issue| active_issue?(issue) }
@@ -109,18 +109,23 @@ class AgentTodoRunner
     capture_json(
       "gh", "issue", "view", number.to_s,
       "--repo", repo,
-      "--json", "number,title,body,labels,url,assignees,createdAt,updatedAt"
+      "--json", "number,title,body,labels,url,assignees,author,createdAt,updatedAt"
     )
   end
 
   def active_issue?(issue)
     labels = label_names(issue)
-    (labels & active_labels).any? && (labels & terminal_labels).empty?
+    (labels & active_labels).any? && (labels & terminal_labels).empty? && allowed_author?(issue)
   end
 
   def handle_issue(issue)
     number = issue.fetch("number")
     workspace = workspace_path(number)
+
+    unless allowed_author?(issue)
+      skip_unauthorized_issue(issue)
+      return
+    end
 
     puts "Claiming #{repo}##{number}: #{issue.fetch("title")}"
     claim_issue(issue)
@@ -248,6 +253,7 @@ class AgentTodoRunner
         "title" => issue.fetch("title", ""),
         "body" => issue.fetch("body", "") || "",
         "url" => issue.fetch("url", ""),
+        "author" => issue_author(issue),
         "labels" => label_names(issue).join(", ")
       },
       "workspace" => {
@@ -302,6 +308,21 @@ class AgentTodoRunner
       ```text
       #{message}
       ```
+    MD
+    run_command("gh", "issue", "comment", number.to_s, "--repo", repo, "--body", body)
+  end
+
+  def skip_unauthorized_issue(issue)
+    number = issue.fetch("number")
+    author = issue_author(issue)
+    puts "Skipping ##{number}: author #{author} is not in allowed_authors"
+    return if @dry_run
+
+    edit_labels(number, [], [todo_label, in_progress_label])
+    body = <<~MD
+      Agent handoff skipped.
+
+      `agent todo` is restricted to repository operators. This issue was opened by `#{author}`, which is not in the runner allowlist.
     MD
     run_command("gh", "issue", "comment", number.to_s, "--repo", repo, "--body", body)
   end
@@ -409,6 +430,24 @@ class AgentTodoRunner
 
   def done_label
     @done_label ||= @tracker.fetch("done_label", "agent done")
+  end
+
+  def allowed_author?(issue)
+    authors = allowed_authors
+    return true if authors.empty?
+
+    authors.include?(issue_author(issue))
+  end
+
+  def allowed_authors
+    @allowed_authors ||= Array(@tracker.fetch("allowed_authors", [])).map(&:to_s)
+  end
+
+  def issue_author(issue)
+    author = issue.fetch("author", nil)
+    return author.fetch("login", "unknown").to_s if author.is_a?(Hash)
+
+    "unknown"
   end
 
   def label_names(issue)
