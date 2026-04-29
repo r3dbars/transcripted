@@ -77,11 +77,16 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 transcriptURL: transcriptURL
             )
         case .failed(let message):
+            let copy = MeetingFailureCopy.make(
+                forMessage: message,
+                shortErrorMessage: message,
+                isRetryable: true
+            )
             return HomeTranscriptionActivityPresentation(
                 symbolName: "exclamationmark.triangle.fill",
-                title: "Transcription didn't finish",
+                title: copy.title,
                 status: "Needs attention",
-                detail: message,
+                detail: copy.detail,
                 tone: .caution,
                 progress: nil,
                 transcriptURL: nil
