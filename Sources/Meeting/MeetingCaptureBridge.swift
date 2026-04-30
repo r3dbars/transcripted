@@ -134,12 +134,12 @@ final class MeetingCaptureBridge: ObservableObject {
 
     /// Stop the current recording, wait for file handles to close, then remove
     /// the just-captured scratch audio instead of handing it to transcription.
-    func stopAndDiscardFiles() async -> (micURL: URL?, systemURL: URL?) {
+    func stopAndDiscardFiles() async -> CaptureStopResult {
         let result = await stopAndAwaitFiles()
         MeetingRecordingCleanup.discardFiles(micURL: result.micURL, systemURL: result.systemURL)
         audio.micAudioFileURL = nil
         audio.systemAudioFileURL = nil
-        return (result.micURL, result.systemURL)
+        return result
     }
 
     func pipelineDiagnosticsSnapshot(
