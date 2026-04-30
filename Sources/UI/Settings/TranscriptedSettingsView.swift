@@ -1022,6 +1022,37 @@ struct TranscriptedSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            SettingsSection(
+                title: "Recent Meetings",
+                detail: "The last five saved meeting transcripts."
+            ) {
+                if recentCapturesLoading && recentMeetings.isEmpty {
+                    Text("Loading recent meetings...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if recentMeetings.isEmpty {
+                    Text("Record or import a meeting and it will appear here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recentMeetings) { item in
+                        SettingsRecentMeetingRow(
+                            item: item,
+                            detail: formattedRecentDate(item.date),
+                            isCopied: copiedAgentMeetingID == item.id,
+                            openAction: {
+                                trackSettingsAction("open_recent_meeting", page: .meetings)
+                                NSWorkspace.shared.open(item.transcriptURL)
+                            },
+                            copyForAgentAction: {
+                                trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
+                                copyMeetingForAgent(item)
+                            }
+                        )
+                    }
+                }
+            }
+
             if !meetingSession.failedMeetings.isEmpty {
                 SettingsSection(
                     title: "Needs Attention",
@@ -1070,37 +1101,6 @@ struct TranscriptedSettingsView: View {
                 Text("Takes effect on the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-            }
-
-            SettingsSection(
-                title: "Recent",
-                detail: "The last five saved meeting transcripts."
-            ) {
-                if recentCapturesLoading && recentMeetings.isEmpty {
-                    Text("Loading recent meetings...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if recentMeetings.isEmpty {
-                    Text("No meeting transcripts saved yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentMeetings) { item in
-                        SettingsRecentMeetingRow(
-                            item: item,
-                            detail: formattedRecentDate(item.date),
-                            isCopied: copiedAgentMeetingID == item.id,
-                            openAction: {
-                                trackSettingsAction("open_recent_meeting", page: .meetings)
-                                NSWorkspace.shared.open(item.transcriptURL)
-                            },
-                            copyForAgentAction: {
-                                trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
-                                copyMeetingForAgent(item)
-                            }
-                        )
-                    }
-                }
             }
         }
     }
@@ -2195,7 +2195,7 @@ private struct SettingsRecentMeetingRow: View {
     @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Button(action: openAction) {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "doc.text")
@@ -2224,25 +2224,99 @@ private struct SettingsRecentMeetingRow: View {
             }
             .buttonStyle(.plain)
 
-            if let audio = item.audio {
+            HStack(spacing: 10) {
+                if let audio = item.audio {
+                    SettingsRecentMeetingAudioControl(
+                        title: playback.buttonTitle(for: audio),
+                        symbolName: playback.symbolName(for: audio),
+                        isActive: playback.isActive(audio),
+                        isPlaying: playback.isPlaying && playback.isActive(audio)
+                    ) {
+                        playback.toggle(audio)
+                    }
+                    .help("\(playback.buttonTitle(for: audio)) meeting audio")
+                }
+
                 Button {
-                    playback.toggle(audio)
+                    copyForAgentAction()
                 } label: {
-                    Label(playback.buttonTitle(for: audio), systemImage: playback.symbolName(for: audio))
+                    Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("\(playback.buttonTitle(for: audio)) meeting audio")
             }
-
-            Button {
-                copyForAgentAction()
-            } label: {
-                Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
+    }
+}
+
+private struct SettingsRecentMeetingAudioControl: View {
+    let title: String
+    let symbolName: String
+    let isActive: Bool
+    let isPlaying: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(iconForeground)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(iconBackground))
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.22))
+                        .frame(width: 44, height: 4)
+
+                    Capsule()
+                        .fill(playheadColor)
+                        .frame(width: isPlaying ? 28 : 8, height: 4)
+
+                    Circle()
+                        .fill(playheadColor)
+                        .frame(width: 8, height: 8)
+                        .offset(x: isPlaying ? 24 : 4)
+                }
+                .frame(width: 44, height: 12)
+
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var background: Color {
+        isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08)
+    }
+
+    private var stroke: Color {
+        isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
+    }
+
+    private var iconBackground: Color {
+        isActive ? Color.accentColor : Color.primary.opacity(0.12)
+    }
+
+    private var iconForeground: Color {
+        isActive ? .white : .secondary
+    }
+
+    private var playheadColor: Color {
+        isActive ? .accentColor : .secondary.opacity(0.65)
     }
 }
 
