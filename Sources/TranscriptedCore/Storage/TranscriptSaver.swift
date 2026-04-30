@@ -17,8 +17,16 @@ public class TranscriptSaver {
         let fallback = CoreStoragePaths.default.transcripts
 
         // Check for custom save location first
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+        if let customPath = RecordingValidator.normalizedCustomSavePath(),
            !customPath.isEmpty {
+            if let validation = RecordingValidator.validateRawSavePath(customPath) {
+                AppLogger.pipeline.warning("Custom save path rejected in defaultSaveDirectory, using default", [
+                    "path": customPath,
+                    "reason": validation.errorMessage ?? "unknown"
+                ])
+                return fallback
+            }
+
             let captureLibraryURL = URL(fileURLWithPath: customPath, isDirectory: true)
             let validation = RecordingValidator.validateSavePath(captureLibraryURL)
             guard validation.isValid else {
