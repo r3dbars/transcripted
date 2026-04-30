@@ -13,6 +13,7 @@ func testFeedbackIssueBuilder() {
 
         let body = feedbackBody(from: url)
         assertTrue(body.contains("What happened:"), "issue body should include the feedback prompt")
+        assertTrue(body.contains("Diagnostics:"), "issue body should include a diagnostics section")
         assertTrue(body.contains("APP LAUNCHED"), "short logs should remain in the issue body")
         assertFalse(body.contains("/Users/redbars/"), "paths should be redacted before the URL is built")
         assertFalse(body.contains("person@example.com"), "emails should be redacted before the URL is built")
@@ -41,6 +42,18 @@ func testFeedbackIssueBuilder() {
 
         assertFalse(body.contains("marker_0"), "logs older than the latest 80 entries should not be included")
         assertTrue(body.contains("marker_99"), "latest log entry should be included")
+    }
+
+    runSuite("FeedbackIssueBuilder attaches sanitized diagnostics") {
+        let url = FeedbackIssueBuilder.issueURL(
+            rawLogLines: ["[14:00:00.000] APP LAUNCHED"],
+            diagnostics: "Route bluetooth_input_to_built_in_output from /Users/redbars/private.txt for person@example.com"
+        )
+        let body = feedbackBody(from: url)
+
+        assertTrue(body.contains("bluetooth_input_to_built_in_output"), "safe diagnostic route shape should be included")
+        assertFalse(body.contains("/Users/redbars"), "diagnostic paths should be redacted")
+        assertFalse(body.contains("person@example.com"), "diagnostic emails should be redacted")
     }
 }
 

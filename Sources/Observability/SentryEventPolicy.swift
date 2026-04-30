@@ -10,6 +10,16 @@ struct SentryEventPolicy: Equatable {
     }
 
     private static let allowedPolicies: [String: SentryEventPolicy] = [
+        "app.unclean_shutdown_detected": .init(
+            engine: "app",
+            event: "unclean_shutdown_detected",
+            summary: "Previous app session did not shut down cleanly."
+        ),
+        "app.session_stall_detected": .init(
+            engine: "app",
+            event: "session_stall_detected",
+            summary: "Transcripted detected a stalled runtime session."
+        ),
         "parakeet.model_init_failed": .init(
             engine: "parakeet",
             event: "model_init_failed",

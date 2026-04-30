@@ -124,6 +124,7 @@ class DictationSessionController: ObservableObject {
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         currentDictationTrigger = trigger
         lastCompletedText = nil
+        appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -269,6 +270,7 @@ class DictationSessionController: ObservableObject {
                     self.recordingStartRetryTask = nil
                     overlayController.state = .listening
                     self.resizePanelToCompact()
+                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                     appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
                     AppSoundPlayer.shared.play(.dictationStart)
                     self.installSessionTimeout()
@@ -350,6 +352,7 @@ class DictationSessionController: ObservableObject {
                 if started {
                     overlayController.state = .listening
                     resizePanelToCompact()
+                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
                     let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
                     appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
@@ -417,6 +420,16 @@ class DictationSessionController: ObservableObject {
             )
         )
         trackDictationStartFailed("microphone_start_timeout")
+        appState.runtimeDiagnostics.recordStall(
+            kind: "dictation",
+            stage: "microphone_start_timeout",
+            durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
+            extra: [
+                "format_ready": "\(appState.sttRouter.inputFormatReady)",
+                "recovering": "\(appState.sttRouter.isRecovering)"
+            ]
+        )
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_start_timeout")
         isDictating = false
         overlayController.showError(
             microphoneTimeoutMessage(
@@ -452,6 +465,7 @@ class DictationSessionController: ObservableObject {
             )
         )
         trackDictationStartFailed(dictationStartFailureKind(for: status))
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "start_failed")
         if !overlayController.isVisible {
             overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
         }
@@ -557,6 +571,7 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         streamingTask = Task {
+            appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             await appState.sttRouter.stopRecording()
 
             // Surface model warmup honestly instead of calling it "Transcribing"
@@ -574,10 +589,12 @@ class DictationSessionController: ObservableObject {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("Voice model failed to load")
                     isDictating = false
+                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return
                 }
             }
             overlayController.state = .drafting
+            appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled else { return }
 
@@ -610,6 +627,7 @@ class DictationSessionController: ObservableObject {
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "no_speech")
                 return
             }
 
@@ -675,6 +693,7 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
         }
     }
 
@@ -685,6 +704,7 @@ class DictationSessionController: ObservableObject {
         AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "cancelled")
         appState.logger.log("DICTATION | cancelled")
         DiagnosticsTrail.record(
             logger: appState.logger,
@@ -766,6 +786,7 @@ class DictationSessionController: ObservableObject {
                 case .failed(let message):
                     self.startupTask = nil
                     self.isDictating = false
+                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                     overlayController.showError(
                         "Dictation couldn't start: \(message)",
                         actionTitle: "Retry Dictation",
@@ -788,6 +809,13 @@ class DictationSessionController: ObservableObject {
             guard !Task.isCancelled else { return }
             self.startupTask = nil
             self.isDictating = false
+            appState.runtimeDiagnostics.recordStall(
+                kind: "dictation",
+                stage: "model_load_timeout",
+                durationSeconds: Double(TranscriptedConstants.modelLoadMaxIterations)
+                    * Double(TranscriptedConstants.modelLoadPollInterval) / 1_000_000_000
+            )
+            appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
             overlayController.showError(
                 "Dictation is still loading. Please try again in a moment.",
                 actionTitle: "Retry Dictation",
@@ -959,6 +987,7 @@ class DictationSessionController: ObservableObject {
     private func handleDictationInterruption() {
         cancelActiveTasks(cancelRecording: true)
         isDictating = false
+        appState?.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "interrupted")
         appState?.logger.log("DICTATION | interrupted")
         DiagnosticsTrail.record(
             logger: appState?.logger,

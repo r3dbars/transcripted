@@ -53,9 +53,44 @@ struct AnalyticsEventPolicy: Equatable {
         "was_recording",
     ]
 
+    private static let runtimeDiagnosticProperties: Set<String> = [
+        "app_version",
+        "build_version",
+        "duration_bucket",
+        "format_ready",
+        "heartbeat_age_bucket",
+        "last_event",
+        "os_major",
+        "previous_clean_shutdown",
+        "reason",
+        "recovering",
+        "session_active",
+        "session_kind",
+        "session_stage",
+        "stall_kind",
+        "stall_stage",
+        "trigger",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
+            allowedProperties: []
+        ),
+        "app_unclean_shutdown_detected": .init(
+            name: "app_unclean_shutdown_detected",
+            allowedProperties: runtimeDiagnosticProperties
+        ),
+        "app_session_stall_detected": .init(
+            name: "app_session_stall_detected",
+            allowedProperties: runtimeDiagnosticProperties
+        ),
+        "support_diagnostics_copied": .init(
+            name: "support_diagnostics_copied",
+            allowedProperties: []
+        ),
+        "support_diagnostic_event_sent": .init(
+            name: "support_diagnostic_event_sent",
             allowedProperties: []
         ),
         "onboarding_shown": .init(

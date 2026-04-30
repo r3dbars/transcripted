@@ -94,6 +94,33 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
+        let unclean = AnalyticsEventPolicy.policy(forEvent: "app_unclean_shutdown_detected")
+        let stall = AnalyticsEventPolicy.policy(forEvent: "app_session_stall_detected")
+        let copied = AnalyticsEventPolicy.policy(forEvent: "support_diagnostics_copied")
+        let sent = AnalyticsEventPolicy.policy(forEvent: "support_diagnostic_event_sent")
+
+        assertEqual(unclean?.allowedProperties.contains("session_stage"), true, "unclean shutdown should preserve last session stage")
+        assertEqual(unclean?.allowedProperties.contains("heartbeat_age_bucket"), true, "unclean shutdown should preserve heartbeat age bucket")
+        assertEqual(stall?.allowedProperties.contains("stall_stage"), true, "session stall should preserve stall stage")
+        assertEqual(stall?.allowedProperties.contains("duration_bucket"), true, "session stall should preserve duration bucket")
+        assertNotNil(copied, "copy diagnostics event should be allowlisted")
+        assertNotNil(sent, "send diagnostic event should be allowlisted")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "duration_bucket": "30_119s",
+                "heartbeat_age_bucket": "1_4m",
+                "session_kind": "dictation",
+                "session_stage": "recording",
+                "stall_stage": "microphone_start_timeout",
+            ],
+            allowedKeys: stall?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["session_stage"], "recording", "session stage should survive sanitization")
+        assertEqual(sanitized["stall_stage"], "microphone_start_timeout", "stall stage should survive sanitization")
+    }
+
     runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         assertEqual(dictationCompleted?.allowedProperties.contains("auto_send"), true, "dictation completion should allow the existing auto_send property")

@@ -48,6 +48,7 @@ struct TranscriptedSettingsView: View {
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
+    @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var recentMeetings: [RecentMeetingItem] = []
@@ -1282,6 +1283,7 @@ struct TranscriptedSettingsView: View {
                         trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
                         CrashReportingPreferences.setEnabled(newValue)
                         sentryTestStatus = nil
+                        diagnosticsActionStatus = nil
                     }
                 ))
                 .disabled(!CrashReporter.isAvailable)
@@ -1297,6 +1299,7 @@ struct TranscriptedSettingsView: View {
                             trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
                             AnalyticsPreferences.setEnabled(false)
                         }
+                        diagnosticsActionStatus = nil
                     }
                 ))
                 .disabled(!AnalyticsReporter.isAvailable)
@@ -1310,6 +1313,27 @@ struct TranscriptedSettingsView: View {
 
                     if let sentryTestStatus {
                         Text(sentryTestStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack {
+                    Button("Copy Diagnostics") {
+                        trackSettingsAction("copy_diagnostics", page: .privacy)
+                        diagnosticsActionStatus = actions.copyDiagnostics()
+                            ? "Copied diagnostics."
+                            : "Could not copy diagnostics."
+                    }
+
+                    Button("Send Diagnostic Event") {
+                        trackSettingsAction("send_diagnostic_event", page: .privacy)
+                        sendDiagnosticEvent()
+                    }
+                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
+
+                    if let diagnosticsActionStatus {
+                        Text(diagnosticsActionStatus)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1793,6 +1817,25 @@ struct TranscriptedSettingsView: View {
         }
 
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
+    }
+
+    private func sendDiagnosticEvent() {
+        guard CrashReporter.isAvailable else {
+            diagnosticsActionStatus = "Sentry is not configured in this build yet."
+            return
+        }
+
+        guard crashReportingEnabled else {
+            diagnosticsActionStatus = "Turn on crash and error reports first."
+            return
+        }
+
+        guard let eventID = actions.sendDiagnosticEvent() else {
+            diagnosticsActionStatus = "Diagnostic event could not be queued."
+            return
+        }
+
+        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 
     private func chooseCaptureLibrary() {

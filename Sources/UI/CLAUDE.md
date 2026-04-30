@@ -74,7 +74,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
-- `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback) injected into the settings view
+- `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, meetings, dictations, people, storage, connectAgent, privacy, about) with titles, summaries, and SF Symbol names
@@ -91,7 +91,8 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
-- `Shared/TranscriptedSupportActions.swift` — "Send feedback" flow that builds a GitHub-issue URL seeded with sanitized recent log lines
+- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events
+- `Shared/TranscriptedSupportActions.swift` — support flows for feedback, copied diagnostics, and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
 so the meeting prompt detector and the settings/onboarding flows share the same

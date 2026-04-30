@@ -6,6 +6,14 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "transcription_failed"
         )
+        let uncleanShutdown = SentryEventPolicy.policy(
+            forEngine: "app",
+            event: "unclean_shutdown_detected"
+        )
+        let sessionStall = SentryEventPolicy.policy(
+            forEngine: "app",
+            event: "session_stall_detected"
+        )
         let hotkeyFailure = SentryEventPolicy.policy(
             forEngine: "capture",
             event: "hotkey_register_failed"
@@ -56,6 +64,8 @@ func testSentryEventPolicy() {
         )
 
         assertEqual(transcriptionFailure?.summary, "Speech transcription failed.", "transcription failure should use the normalized summary")
+        assertEqual(uncleanShutdown?.summary, "Previous app session did not shut down cleanly.", "unclean shutdown reports should be visible in Sentry")
+        assertEqual(sessionStall?.summary, "Transcripted detected a stalled runtime session.", "session stalls should be visible in Sentry")
         assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")

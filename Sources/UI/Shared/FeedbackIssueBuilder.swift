@@ -6,25 +6,34 @@ enum FeedbackIssueBuilder {
 
     private static let title = "Transcripted Feedback"
     private static let maxLogLines = 80
+    private static let maxDiagnosticsCharacters = 2_500
     private static let omittedLogsNotice = "[Older logs omitted because GitHub rejects very long feedback URLs.]"
+    private static let omittedDiagnosticsNotice = "[Older diagnostics omitted because GitHub rejects very long feedback URLs.]"
     private static let noLogsMessage = "No in-app logs attached."
 
-    static func issueURL(rawLogLines: [String]?) -> URL? {
+    static func issueURL(rawLogLines: [String]?, diagnostics: String? = nil) -> URL? {
         let rawLogs = rawLogLines?.suffix(maxLogLines).joined(separator: "\n") ?? noLogsMessage
         let sanitizedLogs = AnalyticsPayloadSanitizer.redact(rawLogs)
-        return issueURL(sanitizedLogs: sanitizedLogs.isEmpty ? noLogsMessage : sanitizedLogs)
+        let sanitizedDiagnostics = diagnostics.map { fittingDiagnostics(from: AnalyticsPayloadSanitizer.redact($0)) }
+        return issueURL(
+            sanitizedLogs: sanitizedLogs.isEmpty ? noLogsMessage : sanitizedLogs,
+            diagnostics: sanitizedDiagnostics
+        )
     }
 
-    static func issueURL(sanitizedLogs: String) -> URL? {
-        if let url = uncappedIssueURL(sanitizedLogs: sanitizedLogs),
+    static func issueURL(sanitizedLogs: String, diagnostics: String? = nil) -> URL? {
+        if let url = uncappedIssueURL(sanitizedLogs: sanitizedLogs, diagnostics: diagnostics),
            url.absoluteString.count <= maxIssueURLCharacterCount {
             return url
         }
 
-        return uncappedIssueURL(sanitizedLogs: fittingTrimmedLogs(from: sanitizedLogs))
+        return uncappedIssueURL(
+            sanitizedLogs: fittingTrimmedLogs(from: sanitizedLogs, diagnostics: diagnostics),
+            diagnostics: diagnostics
+        )
     }
 
-    private static func fittingTrimmedLogs(from sanitizedLogs: String) -> String {
+    private static func fittingTrimmedLogs(from sanitizedLogs: String, diagnostics: String?) -> String {
         var lowerBound = 0
         var upperBound = sanitizedLogs.count
         var best = omittedLogsNotice
@@ -33,7 +42,7 @@ enum FeedbackIssueBuilder {
             let middle = (lowerBound + upperBound) / 2
             let candidate = trimmedLogs(from: sanitizedLogs, maxTailCharacters: middle)
 
-            guard let url = uncappedIssueURL(sanitizedLogs: candidate) else {
+            guard let url = uncappedIssueURL(sanitizedLogs: candidate, diagnostics: diagnostics) else {
                 upperBound = middle - 1
                 continue
             }
@@ -62,19 +71,38 @@ enum FeedbackIssueBuilder {
         return "\(omittedLogsNotice)\n\(tail)"
     }
 
-    private static func uncappedIssueURL(sanitizedLogs: String) -> URL? {
+    private static func fittingDiagnostics(from diagnostics: String) -> String {
+        guard diagnostics.count > maxDiagnosticsCharacters else { return diagnostics }
+        var tail = String(diagnostics.suffix(maxDiagnosticsCharacters))
+        if let firstNewline = tail.firstIndex(of: "\n") {
+            tail = String(tail[tail.index(after: firstNewline)...])
+        }
+        return "\(omittedDiagnosticsNotice)\n\(tail)"
+    }
+
+    private static func uncappedIssueURL(sanitizedLogs: String, diagnostics: String?) -> URL? {
         var components = URLComponents(string: issueURLString)
         components?.queryItems = [
             URLQueryItem(name: "title", value: title),
-            URLQueryItem(name: "body", value: body(logs: sanitizedLogs))
+            URLQueryItem(name: "body", value: body(logs: sanitizedLogs, diagnostics: diagnostics))
         ]
         return components?.url
     }
 
-    private static func body(logs: String) -> String {
-        """
+    private static func body(logs: String, diagnostics: String?) -> String {
+        let diagnosticsText: String
+        if let diagnostics, !diagnostics.isEmpty {
+            diagnosticsText = diagnostics
+        } else {
+            diagnosticsText = "No diagnostics attached."
+        }
+        return """
         What happened:
         [describe the issue here]
+
+        ---
+        Diagnostics:
+        \(diagnosticsText)
 
         ---
         Logs:

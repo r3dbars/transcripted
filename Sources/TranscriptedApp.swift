@@ -37,7 +37,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
         sendFeedback: { [weak self] in
             guard let self else { return }
-            TranscriptedSupportActions.sendFeedback(logger: self.appState.logger)
+            TranscriptedSupportActions.sendFeedback(appState: self.appState)
+        },
+        copyDiagnostics: { [weak self] in
+            guard let self else { return false }
+            return TranscriptedSupportActions.copyDiagnostics(appState: self.appState)
+        },
+        sendDiagnosticEvent: { [weak self] in
+            guard let self else { return nil }
+            return TranscriptedSupportActions.sendDiagnosticEvent(appState: self.appState)
         }
     )
     private lazy var settingsWindowController = TranscriptedSettingsWindowController(
