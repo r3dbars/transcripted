@@ -75,7 +75,17 @@ enum RecentCaptureLoader {
 }
 
 private final class LoadTaskBox: @unchecked Sendable {
-    var task: Task<RecentCaptureSnapshot, Never>?
+    private let lock = NSLock()
+    private var storedTask: Task<RecentCaptureSnapshot, Never>?
+
+    var task: Task<RecentCaptureSnapshot, Never>? {
+        get {
+            lock.withLock { storedTask }
+        }
+        set {
+            lock.withLock { storedTask = newValue }
+        }
+    }
 }
 
 enum RecentMeetingsScanner {
