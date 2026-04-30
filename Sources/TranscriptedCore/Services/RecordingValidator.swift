@@ -27,8 +27,12 @@ public enum RecordingValidator {
     /// - Parameter paths: Filesystem layout to probe. Defaults to `CoreStoragePaths.default`.
     public static func validateRecordingConditions(paths: CoreStoragePaths = .default) -> ValidationResult {
         // Validate custom save path if set
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+        if let customPath = normalizedCustomSavePath(),
            !customPath.isEmpty {
+            if let rawPathResult = validateRawSavePath(customPath) {
+                return rawPathResult
+            }
+
             let savePathResult = validateSavePath(URL(fileURLWithPath: customPath))
             if case .failure(_) = savePathResult {
                 return savePathResult
@@ -109,8 +113,12 @@ public enum RecordingValidator {
     }
 
     private static func resolvedSaveDirectory(paths: CoreStoragePaths) -> URL {
-        if let customPath = UserDefaults.standard.string(forKey: "transcriptSaveLocation"),
+        if let customPath = normalizedCustomSavePath(),
            !customPath.isEmpty {
+            if validateRawSavePath(customPath) != nil {
+                return paths.transcripts
+            }
+
             let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
                 .appendingPathComponent("meetings", isDirectory: true)
             // Security: validate the path even in internal callers (checkDiskSpace,
@@ -131,6 +139,15 @@ public enum RecordingValidator {
 
     /// System directories that must never be used as a transcript save location.
     private static let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+
+    static func normalizedCustomSavePath(userDefaults: UserDefaults = .standard) -> String? {
+        userDefaults.string(forKey: "transcriptSaveLocation")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func validateRawSavePath(_ path: String) -> ValidationResult? {
+        path.hasPrefix("/") ? nil : .failure("Save path must be an absolute filesystem path")
+    }
 
     /// Validates a custom save path is safe to use.
     /// Resolves symlinks and rejects paths containing `..` traversals or targeting system directories.
@@ -160,7 +177,7 @@ public enum RecordingValidator {
 
         // Reject system directories
         for prefix in forbiddenPrefixes {
-            if resolvedPath.hasPrefix(prefix) {
+            if resolvedPath == prefix || resolvedPath.hasPrefix(prefix + "/") {
                 return .failure("Cannot save transcripts to system directory: \(prefix)")
             }
         }

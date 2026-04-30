@@ -13,6 +13,10 @@ enum TranscriptedStoragePreferences {
         if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !customPath.isEmpty {
+            guard customPath.hasPrefix("/") else {
+                return fileManager.transcriptedDefaultCaptureLibraryDir
+            }
+
             let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
             // Security: reject tampered preferences that target traversal or system
             // roots while preserving the user's ability to choose their own library.
