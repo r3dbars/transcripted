@@ -1,3 +1,5 @@
+import AVFoundation
+import Combine
 import XCTest
 @testable import TranscriptedCore
 
@@ -93,4 +95,70 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
         XCTAssertEqual(info.captureQuality, .degraded,
                        "createHealthInfo must forward the override into the factory")
     }
+
+    func testHealthyOverrideCannotRecoverAfterCleanupResetsBufferCounters() {
+        let audio = Audio(paths: makePaths())
+        let capture = MutableStubSystemAudioCapture(successRate: 1.0)
+        audio.systemAudioCapture = capture
+        audio.systemAudioStatus = .healthy
+
+        let preStopInfo = audio.createHealthInfo(overrideSystemAudioStatus: .healthy)
+        XCTAssertEqual(preStopInfo.captureQuality, .excellent,
+                       "healthy pre-stop buffers should report excellent capture quality")
+
+        // Simulate the teardown path that triggered the 1.1.26 meeting-health
+        // bug: stop/cleanup reset the live capture counters before the app read
+        // them, so even a preserved healthy status could no longer recover the
+        // real buffer success rate.
+        capture.bufferSuccessRate = 0.0
+        audio.systemAudioStatus = .unknown
+
+        let postStopInfo = audio.createHealthInfo(overrideSystemAudioStatus: .healthy)
+
+        XCTAssertEqual(postStopInfo.captureQuality, .degraded,
+                       "health must be snapshotted before cleanup resets system buffer counters")
+    }
+
+    func testPipelineDiagnosticsSnapshotMustBeTakenBeforeCleanupResetsBuffers() {
+        let audio = Audio(paths: makePaths())
+        let capture = MutableStubSystemAudioCapture(successRate: 1.0)
+        audio.systemAudioCapture = capture
+        audio.systemAudioStatus = .healthy
+
+        let preStopSnapshot = audio.createPipelineDiagnosticsSnapshot(
+            overrideSystemAudioStatus: .healthy
+        )
+        XCTAssertEqual(preStopSnapshot.systemStatus, "healthy")
+        XCTAssertEqual(preStopSnapshot.bufferSuccessBucket, "98_100",
+                       "healthy pre-stop capture should keep its high buffer bucket")
+
+        capture.bufferSuccessRate = 0.0
+        audio.systemAudioStatus = .unknown
+
+        let postStopSnapshot = audio.createPipelineDiagnosticsSnapshot(
+            overrideSystemAudioStatus: .healthy
+        )
+
+        XCTAssertEqual(postStopSnapshot.systemStatus, "healthy",
+                       "override should preserve the pre-stop status label")
+        XCTAssertEqual(postStopSnapshot.bufferSuccessBucket, "lt_50",
+                       "diagnostics must be captured before cleanup resets buffer-success counters")
+    }
+}
+
+private final class MutableStubSystemAudioCapture: SystemAudioCaptureEngine, @unchecked Sendable {
+    let diagnosticBackendName = "stub"
+    let audioFormat: AVAudioFormat? = nil
+    var bufferSuccessRate: Double
+    let deliversOwnedAudioBuffers = true
+    let errorMessagePublisher = CurrentValueSubject<String?, Never>(nil).eraseToAnyPublisher()
+
+    init(successRate: Double) {
+        self.bufferSuccessRate = successRate
+    }
+
+    func prepare() throws {}
+    func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {}
+    func stop() {}
+    func stopSync() {}
 }
