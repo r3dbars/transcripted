@@ -5,13 +5,13 @@ import Foundation
 @MainActor
 enum TranscriptedSupportActions {
     static func sendFeedback(appState: TranscriptedAppState) {
-        guard let url = feedbackIssueURL(appState: appState) else { return }
+        guard let url = feedbackEmailURL(appState: appState) else { return }
         AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         NSWorkspace.shared.open(url)
     }
 
     static func sendFeedback(logger: AppLogger?) {
-        guard let url = FeedbackIssueBuilder.issueURL(rawLogLines: logger?.entries) else { return }
+        guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return }
         AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         NSWorkspace.shared.open(url)
     }
@@ -35,12 +35,12 @@ enum TranscriptedSupportActions {
         return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
     }
 
-    static func feedbackIssueURL(logger: AppLogger?) -> URL? {
-        FeedbackIssueBuilder.issueURL(rawLogLines: logger?.entries)
+    static func feedbackEmailURL(logger: AppLogger?) -> URL? {
+        FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries)
     }
 
-    static func feedbackIssueURL(appState: TranscriptedAppState) -> URL? {
-        FeedbackIssueBuilder.issueURL(
+    static func feedbackEmailURL(appState: TranscriptedAppState) -> URL? {
+        FeedbackIssueBuilder.emailURL(
             rawLogLines: appState.logger.entries,
             diagnostics: diagnosticsText(appState: appState)
         )
