@@ -97,6 +97,9 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         assertEqual(dictationCompleted?.allowedProperties.contains("auto_send"), true, "dictation completion should allow the existing auto_send property")
+        assertEqual(dictationCompleted?.allowedProperties.contains("input_device_class"), true, "dictation completion should preserve coarse input device class")
+        assertEqual(dictationCompleted?.allowedProperties.contains("hfp_suspected"), true, "dictation completion should preserve Bluetooth HFP suspicion only as a boolean")
+        assertEqual(dictationCompleted?.allowedProperties.contains("sample_flow_started"), true, "dictation completion should preserve whether audio samples ever flowed")
     }
 
     runSuite("AnalyticsEventPolicy allows dictation start failures with coarse attribution") {
@@ -104,16 +107,63 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should preserve normalized failure kinds")
         assertEqual(dictationStartFailed?.allowedProperties.contains("trigger"), true, "dictation start failures should preserve trigger attribution")
+        assertEqual(dictationStartFailed?.allowedProperties.contains("route_shape"), true, "dictation start failures should preserve safe route shape")
+        assertEqual(dictationStartFailed?.allowedProperties.contains("selection_reason"), true, "dictation start failures should preserve coarse device-selection reason")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
                 "failure_kind": "microphone_start_timeout",
+                "format_ready": "false",
+                "hfp_suspected": "true",
+                "input_channels": "1",
+                "input_device_class": "bluetooth",
+                "input_rate_hz": "24000",
+                "output_channels": "1",
+                "output_device_class": "bluetooth",
+                "output_rate_hz": "48000",
+                "recovering": "true",
+                "route_shape": "bluetooth_input_to_bluetooth_output",
+                "sample_flow_started": "false",
+                "selection_reason": "noBuiltInFallbackAvailable",
                 "trigger": "hotkey",
             ],
-            allowedKeys: ["failure_kind", "trigger"]
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
         )
         assertEqual(sanitized["failure_kind"], "microphone_start_timeout", "dictation start failure kind should survive sanitization")
+        assertEqual(sanitized["input_device_class"], "bluetooth", "coarse dictation input class should survive sanitization")
+        assertEqual(sanitized["input_rate_hz"], "24000", "safe dictation input rate should survive sanitization")
+        assertEqual(sanitized["route_shape"], "bluetooth_input_to_bluetooth_output", "safe route shape should survive sanitization")
+        assertEqual(sanitized["hfp_suspected"], "true", "Bluetooth HFP suspicion should survive as a boolean")
+        assertEqual(sanitized["sample_flow_started"], "false", "sample flow state should survive as a boolean")
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy allows dictation audio route lifecycle events") {
+        let changed = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_changed")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_recovery_finished")
+        let timeout = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_recovery_timeout")
+
+        assertEqual(changed?.allowedProperties.contains("was_recording"), true, "route change should preserve whether an active recording was interrupted")
+        assertEqual(changed?.allowedProperties.contains("selected_input_class"), true, "route change should preserve selected input class")
+        assertEqual(finished?.allowedProperties.contains("outcome"), true, "route recovery should preserve success/failure")
+        assertEqual(finished?.allowedProperties.contains("recovery_latency_bucket"), true, "route recovery should preserve latency as a bucket")
+        assertEqual(timeout?.allowedProperties.contains("hfp_suspected"), true, "route timeout should preserve Bluetooth HFP suspicion only as a boolean")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "outcome": "failed",
+                "recovery_latency_bucket": "2_9m",
+                "selected_input_class": "built_in",
+                "was_recording": "true",
+            ],
+            allowedKeys: finished?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["outcome"], "failed", "route recovery outcome should survive sanitization")
+        assertEqual(sanitized["recovery_latency_bucket"], "2_9m", "route recovery latency bucket should survive sanitization")
+        assertEqual(sanitized["selected_input_class"], "built_in", "selected input class should survive sanitization")
+        assertEqual(sanitized["was_recording"], "true", "recording interruption state should survive sanitization")
     }
 
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {

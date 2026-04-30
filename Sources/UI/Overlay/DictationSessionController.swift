@@ -189,19 +189,23 @@ class DictationSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "dictation_started",
-            properties: [
-                "trigger": trigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "trigger": trigger.rawValue,
+                ]
+            )
         )
     }
 
     private func trackDictationStartFailed(_ failureKind: String) {
         AnalyticsReporter.track(
             "dictation_start_failed",
-            properties: [
-                "failure_kind": failureKind,
-                "trigger": currentDictationTrigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "failure_kind": failureKind,
+                    "trigger": currentDictationTrigger.rawValue,
+                ]
+            )
         )
     }
 
@@ -579,16 +583,28 @@ class DictationSessionController: ObservableObject {
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
-                    message: "Dictation transcription empty")
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "overlay",
+                    event: "no_voice_input",
+                    message: "Dictation transcription empty",
+                    context: self.dictationContext(
+                        extra: [
+                            "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
+                            "trigger": self.currentDictationTrigger.rawValue
+                        ]
+                    )
+                )
                 AnalyticsReporter.track(
                     "dictation_no_speech",
-                    properties: [
-                        "duration_bucket": AnalyticsReporter.durationBucket(
-                            seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
-                        ),
-                        "trigger": currentDictationTrigger.rawValue,
-                    ]
+                    properties: self.dictationAnalyticsProperties(
+                        extra: [
+                            "duration_bucket": AnalyticsReporter.durationBucket(
+                                seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
+                            ),
+                            "trigger": currentDictationTrigger.rawValue,
+                        ]
+                    )
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
@@ -649,13 +665,15 @@ class DictationSessionController: ObservableObject {
             }
             AnalyticsReporter.track(
                 "dictation_completed",
-                properties: [
-                    "delivery": pasteOutcome.delivery.rawValue,
-                    "auto_send": autoSendOutcome.diagnosticName,
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                    "trigger": currentDictationTrigger.rawValue,
-                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
-                ]
+                properties: self.dictationAnalyticsProperties(
+                    extra: [
+                        "delivery": pasteOutcome.delivery.rawValue,
+                        "auto_send": autoSendOutcome.diagnosticName,
+                        "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                        "trigger": currentDictationTrigger.rawValue,
+                        "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+                    ]
+                )
             )
         }
     }
@@ -686,10 +704,12 @@ class DictationSessionController: ObservableObject {
         }
         AnalyticsReporter.track(
             "dictation_cancelled",
-            properties: [
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                "trigger": currentDictationTrigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    "trigger": currentDictationTrigger.rawValue,
+                ]
+            )
         )
     }
 
@@ -1073,12 +1093,25 @@ class DictationSessionController: ObservableObject {
         var context: [String: String] = [
             "audio_device": appState?.sttRouter.inputDeviceName ?? ""
         ]
+        if let routeContext = appState?.sttRouter.dictationAudioRouteAnalyticsContext {
+            for (key, value) in routeContext {
+                context[key] = value
+            }
+        }
 
         for (key, value) in extra {
             context[key] = value
         }
 
         return context
+    }
+
+    private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {
+        var properties = appState?.sttRouter.dictationAudioRouteAnalyticsContext ?? [:]
+        for (key, value) in extra {
+            properties[key] = value
+        }
+        return properties
     }
 }
 

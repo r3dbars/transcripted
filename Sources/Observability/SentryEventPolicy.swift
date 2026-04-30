@@ -65,6 +65,16 @@ struct SentryEventPolicy: Equatable {
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
         ),
+        "parakeet.device_change_recovery_timeout": .init(
+            engine: "parakeet",
+            event: "device_change_recovery_timeout",
+            summary: "Speech engine device-change recovery timed out."
+        ),
+        "parakeet.recording_interrupted": .init(
+            engine: "parakeet",
+            event: "recording_interrupted",
+            summary: "Dictation recording was interrupted by audio device recovery."
+        ),
         "meeting.meeting_start_failed": .init(
             engine: "meeting",
             event: "meeting_start_failed",

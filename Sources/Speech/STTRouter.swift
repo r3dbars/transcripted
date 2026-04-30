@@ -28,6 +28,9 @@ class STTRouter: ObservableObject {
     }
 
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
+    var dictationAudioRouteAnalyticsContext: [String: String] {
+        parakeetEngine.currentAudioRouteAnalyticsContext
+    }
 
     init() {
         parakeetEngine.$isRecording.assign(to: &$isRecording)
