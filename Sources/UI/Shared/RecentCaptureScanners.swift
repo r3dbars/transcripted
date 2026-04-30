@@ -25,15 +25,66 @@ enum RecentCaptureLoader {
         meetingLimit: Int,
         includeDictationCounts: Bool = false
     ) async -> RecentCaptureSnapshot {
-        await Task.detached(priority: .utility) {
-            RecentCaptureSnapshot(
-                meetings: RecentMeetingsScanner.loadRecent(limit: meetingLimit),
-                dictations: DictationTranscriptStore.recentSavedDictations(limit: dictationLimit),
-                dictationCounts: includeDictationCounts
+        let taskBox = LoadTaskBox()
+
+        return await withTaskCancellationHandler {
+            let task = Task.detached(priority: .utility) {
+                guard !Task.isCancelled else {
+                    return emptySnapshot()
+                }
+
+                let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit)
+                guard !Task.isCancelled else {
+                    return emptySnapshot()
+                }
+
+                let dictations = DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
+                guard !Task.isCancelled else {
+                    return emptySnapshot()
+                }
+
+                let dictationCounts = includeDictationCounts
                     ? DictationTranscriptStore.savedDictationCounts()
                     : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
-            )
-        }.value
+
+                guard !Task.isCancelled else {
+                    return emptySnapshot()
+                }
+
+                return RecentCaptureSnapshot(
+                    meetings: meetings,
+                    dictations: dictations,
+                    dictationCounts: dictationCounts
+                )
+            }
+
+            taskBox.task = task
+            return await task.value
+        } onCancel: {
+            taskBox.task?.cancel()
+        }
+    }
+
+    private static func emptySnapshot() -> RecentCaptureSnapshot {
+        RecentCaptureSnapshot(
+            meetings: [],
+            dictations: [],
+            dictationCounts: DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
+        )
+    }
+}
+
+private final class LoadTaskBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTask: Task<RecentCaptureSnapshot, Never>?
+
+    var task: Task<RecentCaptureSnapshot, Never>? {
+        get {
+            lock.withLock { storedTask }
+        }
+        set {
+            lock.withLock { storedTask = newValue }
+        }
     }
 }
 

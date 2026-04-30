@@ -20,6 +20,7 @@ final class HomeViewModel: ObservableObject {
     @Published private(set) var canLoadMoreMeetings: Bool = false
 
     private var refreshTask: Task<Void, Never>?
+    private var refreshGeneration = 0
     private var dictationLimit = 10
     private var meetingLimit = 10
 
@@ -56,8 +57,10 @@ final class HomeViewModel: ObservableObject {
 
     private func loadCurrentLimits(isInitialLoad: Bool) {
         refreshTask?.cancel()
+        refreshGeneration += 1
         isLoading = isInitialLoad
         isLoadingMore = !isInitialLoad
+        let generation = refreshGeneration
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
         refreshTask = Task { @MainActor in
@@ -66,7 +69,9 @@ final class HomeViewModel: ObservableObject {
                 meetingLimit: requestedMeetingLimit + 1,
                 includeDictationCounts: true
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, generation == self.refreshGeneration else {
+                return
+            }
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
@@ -88,6 +93,9 @@ final class HomeViewModel: ObservableObject {
     func cancel() {
         refreshTask?.cancel()
         refreshTask = nil
+        refreshGeneration += 1
+        isLoading = false
+        isLoadingMore = false
     }
 
     // MARK: - Helpers
