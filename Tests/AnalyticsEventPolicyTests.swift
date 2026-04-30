@@ -205,6 +205,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("duration_bucket"), true, "meeting cancellation should only keep bucketed duration")
         assertEqual(policy?.allowedProperties.contains("mic_processing"), true, "meeting cancellation should preserve the coarse mic processing mode")
         assertEqual(policy?.allowedProperties.contains("reason"), true, "meeting cancellation should preserve coarse reason")
+        assertEqual(policy?.allowedProperties.contains("stop_timed_out"), true, "meeting cancellation should preserve stop timeout state")
         assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "meeting cancellation should preserve system stream presence")
         assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting cancellation should preserve trigger attribution")
         assertEqual(policy?.allowedProperties.contains("voice_processing"), true, "meeting cancellation should preserve whether VPIO was requested")
