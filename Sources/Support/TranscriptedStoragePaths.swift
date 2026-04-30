@@ -43,6 +43,12 @@ enum TranscriptedStoragePreferences {
     }
 
     static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
+        // Security: reject relative paths from tampered preferences so Transcripted
+        // never resolves a capture library against the process working directory.
+        guard url.isFileURL, url.path.hasPrefix("/") else {
+            return false
+        }
+
         if url.pathComponents.contains("..") {
             return false
         }

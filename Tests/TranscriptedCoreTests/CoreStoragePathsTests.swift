@@ -78,6 +78,13 @@ final class CoreStoragePathsTests: XCTestCase {
         XCTAssertTrue(result.isValid)
     }
 
+    func testRecordingValidatorRejectsRelativePaths() {
+        let relativePath = URL(fileURLWithPath: "relative-capture-root", isDirectory: true)
+        let result = RecordingValidator.validateSavePath(relativePath)
+        XCTAssertFalse(result.isValid)
+        XCTAssertEqual(result.errorMessage, "Save path must be an absolute filesystem path")
+    }
+
     func testRecordingValidatorAllowsDocumentsTranscriptedSubdirectory() {
         let allowedPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents", isDirectory: true)

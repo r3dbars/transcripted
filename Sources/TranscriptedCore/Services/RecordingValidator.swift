@@ -137,6 +137,13 @@ public enum RecordingValidator {
     /// - Parameter url: The candidate save directory URL
     /// - Returns: `.success` if the path is safe, `.failure` with reason otherwise
     public static func validateSavePath(_ url: URL) -> ValidationResult {
+        // Security: reject relative paths from tampered preferences so Transcripted
+        // cannot be tricked into writing its permission probe or transcripts relative
+        // to an attacker-chosen working directory.
+        guard url.isFileURL, url.path.hasPrefix("/") else {
+            return .failure("Save path must be an absolute filesystem path")
+        }
+
         // Security: check for ".." traversal components on the RAW path before symlink resolution.
         // After resolvingSymlinksInPath(), ".." components are already normalised away and would
         // never appear in pathComponents — making a post-resolution check useless dead code.

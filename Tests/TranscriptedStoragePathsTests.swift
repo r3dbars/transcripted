@@ -132,4 +132,26 @@ func testTranscriptedStoragePaths() {
             "storage should fall back to the default Transcripted Library capture root"
         )
     }
+
+    runSuite("Transcripted capture library helpers — reject relative capture folders") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let relativeRoot = URL(fileURLWithPath: "relative-capture-root", isDirectory: true)
+
+        TranscriptedStoragePreferences.setCaptureLibraryURL(relativeRoot)
+
+        assertEqual(
+            UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
+            nil,
+            "relative capture-library paths should not be persisted"
+        )
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            "relative capture-library paths should fall back to the default Transcripted Library capture root"
+        )
+    }
 }
