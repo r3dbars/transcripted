@@ -66,7 +66,11 @@ final class HomeViewModel: ObservableObject {
                 meetingLimit: requestedMeetingLimit + 1,
                 includeDictationCounts: true
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                self.isLoading = false
+                self.isLoadingMore = false
+                return
+            }
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
             let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
             let calendar = Calendar.current
@@ -88,6 +92,8 @@ final class HomeViewModel: ObservableObject {
     func cancel() {
         refreshTask?.cancel()
         refreshTask = nil
+        isLoading = false
+        isLoadingMore = false
     }
 
     // MARK: - Helpers

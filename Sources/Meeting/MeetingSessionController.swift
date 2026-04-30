@@ -708,7 +708,8 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        let files = await capture.stopAndDiscardFiles()
+        let stopResult = await capture.stopAndDiscardFiles()
+        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
@@ -723,7 +724,8 @@ final class MeetingSessionController: ObservableObject {
                     "reason": reason.rawValue,
                     "duration_ms": "\(durationMs)",
                     "mic_file_present": boolString(files.micURL != nil),
-                    "system_file_present": boolString(files.systemURL != nil)
+                    "system_file_present": boolString(files.systemURL != nil),
+                    "stop_timed_out": boolString(stopResult.didTimeOut)
                 ]
             )
         )
@@ -733,6 +735,7 @@ final class MeetingSessionController: ObservableObject {
                 [
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
                     "reason": reason.rawValue,
+                    "stop_timed_out": boolString(stopResult.didTimeOut),
                     "system_stream_present": boolString(files.systemURL != nil),
                     "trigger": recordingTrigger.rawValue,
                 ],
@@ -748,7 +751,7 @@ final class MeetingSessionController: ObservableObject {
                 reason: reason.rawValue,
                 durationSeconds: Double(durationMs) / 1000,
                 systemStreamPresent: files.systemURL != nil,
-                stopTimedOut: false
+                stopTimedOut: stopResult.didTimeOut
             )
         )
     }
