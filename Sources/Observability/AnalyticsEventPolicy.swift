@@ -401,6 +401,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
                 "duration_bucket",
                 "reason",
+                "stop_timed_out",
                 "system_stream_present",
                 "trigger",
             ]))

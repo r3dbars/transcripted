@@ -592,13 +592,23 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
 // MARK: - Activity rows
 
-struct HomeDictationRow: View {
-    let entry: SavedDictationEntry
+private enum HomeActivityRowFormatting {
+    static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = "h:mm a"
+        return f
+    }()
+}
+
+private struct HomeActivityRowShell<Content: View>: View {
+    let timeString: String
     let isCopied: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
 
@@ -612,21 +622,8 @@ struct HomeDictationRow: View {
                         .frame(width: 64, alignment: .leading)
                         .padding(.top, 2)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(preview)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.primary)
-                            .lineLimit(3)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        if !entry.sourceAppName.isEmpty, entry.sourceAppName != "Unknown" {
-                            Text(entry.sourceAppName)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    content()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .contentShape(Rectangle())
             }
@@ -649,9 +646,40 @@ struct HomeDictationRow: View {
         )
         .onHover { isHovering = $0 }
     }
+}
 
-    private var timeString: String {
-        Self.timeFormatter.string(from: entry.createdAt)
+struct HomeDictationRow: View {
+    let entry: SavedDictationEntry
+    let isCopied: Bool
+    let onOpen: () -> Void
+    let onCopy: () -> Void
+    let onFlag: () -> Void
+    let menuItems: [HomeRowMenuItem]
+
+    var body: some View {
+        HomeActivityRowShell(
+            timeString: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt),
+            isCopied: isCopied,
+            onOpen: onOpen,
+            onCopy: onCopy,
+            onFlag: onFlag,
+            menuItems: menuItems
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(preview)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !entry.sourceAppName.isEmpty, entry.sourceAppName != "Unknown" {
+                    Text(entry.sourceAppName)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
     }
 
     private var preview: String {
@@ -659,13 +687,6 @@ struct HomeDictationRow: View {
         guard !trimmed.isEmpty else { return entry.title }
         return trimmed
     }
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateFormat = "h:mm a"
-        return f
-    }()
 }
 
 struct HomeMeetingRow: View {
@@ -676,64 +697,30 @@ struct HomeMeetingRow: View {
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
 
-    @State private var isHovering = false
-
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Button(action: onOpen) {
-                HStack(alignment: .top, spacing: 14) {
-                    Text(timeString)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 64, alignment: .leading)
-                        .padding(.top, 2)
+        HomeActivityRowShell(
+            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            isCopied: isCopied,
+            onOpen: onOpen,
+            onCopy: onCopy,
+            onFlag: onFlag,
+            menuItems: menuItems
+        ) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "person.2.wave.2.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
 
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "person.2.wave.2.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 2)
-
-                        Text(item.title)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.primary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .contentShape(Rectangle())
+                Text(item.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
-
-            HomeRowActionButtons(
-                isCopied: isCopied,
-                onCopy: onCopy,
-                onFlag: onFlag,
-                menuItems: menuItems
-            )
-            .opacity(isHovering ? 1 : 0.55)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
-        )
-        .onHover { isHovering = $0 }
     }
-
-    private var timeString: String {
-        Self.timeFormatter.string(from: item.date)
-    }
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateFormat = "h:mm a"
-        return f
-    }()
 }
 
 // MARK: - Day-grouped list
@@ -839,59 +826,41 @@ struct HomeActivityTabsCard: View {
             } else {
                 switch selectedTab {
                 case .dictations:
-                    VStack(alignment: .leading, spacing: 12) {
-                        HomeDayGroupedList(
-                            sections: dictationSections,
-                            emptyMessage: "No recent dictations.",
-                            getID: { AnyHashable($0.id) },
-                            row: { entry in
-                                HomeDictationRow(
-                                    entry: entry,
-                                    isCopied: copiedRowID == entry.id,
-                                    onOpen: { onOpenDictation(entry) },
-                                    onCopy: { onCopyDictation(entry) },
-                                    onFlag: { onFlagDictation(entry) },
-                                    menuItems: dictationMenuItems(entry)
-                                )
-                            }
+                    activitySection(
+                        sections: dictationSections,
+                        emptyMessage: "No recent dictations.",
+                        canLoadMore: canLoadMoreDictations,
+                        loadMoreTitle: "Load more dictations",
+                        loadMoreAction: onLoadMoreDictations,
+                        getID: { AnyHashable($0.id) }
+                    ) { entry in
+                        HomeDictationRow(
+                            entry: entry,
+                            isCopied: copiedRowID == entry.id,
+                            onOpen: { onOpenDictation(entry) },
+                            onCopy: { onCopyDictation(entry) },
+                            onFlag: { onFlagDictation(entry) },
+                            menuItems: dictationMenuItems(entry)
                         )
-
-                        if canLoadMoreDictations {
-                            HomeLoadMoreButton(
-                                title: "Load more dictations",
-                                isLoading: isLoadingMore,
-                                action: onLoadMoreDictations
-                            )
-                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 case .meetings:
-                    VStack(alignment: .leading, spacing: 12) {
-                        HomeDayGroupedList(
-                            sections: meetingSections,
-                            emptyMessage: "No recent meetings.",
-                            getID: { AnyHashable($0.id) },
-                            row: { item in
-                                HomeMeetingRow(
-                                    item: item,
-                                    isCopied: copiedRowID == item.id,
-                                    onOpen: { onOpenMeeting(item) },
-                                    onCopy: { onCopyMeeting(item) },
-                                    onFlag: { onFlagMeeting(item) },
-                                    menuItems: meetingMenuItems(item)
-                                )
-                            }
+                    activitySection(
+                        sections: meetingSections,
+                        emptyMessage: "No recent meetings.",
+                        canLoadMore: canLoadMoreMeetings,
+                        loadMoreTitle: "Load more meetings",
+                        loadMoreAction: onLoadMoreMeetings,
+                        getID: { AnyHashable($0.id) }
+                    ) { item in
+                        HomeMeetingRow(
+                            item: item,
+                            isCopied: copiedRowID == item.id,
+                            onOpen: { onOpenMeeting(item) },
+                            onCopy: { onCopyMeeting(item) },
+                            onFlag: { onFlagMeeting(item) },
+                            menuItems: meetingMenuItems(item)
                         )
-
-                        if canLoadMoreMeetings {
-                            HomeLoadMoreButton(
-                                title: "Load more meetings",
-                                isLoading: isLoadingMore,
-                                action: onLoadMoreMeetings
-                            )
-                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -905,6 +874,35 @@ struct HomeActivityTabsCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private func activitySection<Item, Content: View>(
+        sections: [HomeDaySection<Item>],
+        emptyMessage: String,
+        canLoadMore: Bool,
+        loadMoreTitle: String,
+        loadMoreAction: @escaping () -> Void,
+        getID: @escaping (Item) -> AnyHashable,
+        @ViewBuilder row: @escaping (Item) -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HomeDayGroupedList(
+                sections: sections,
+                emptyMessage: emptyMessage,
+                getID: getID,
+                row: row
+            )
+
+            if canLoadMore {
+                HomeLoadMoreButton(
+                    title: loadMoreTitle,
+                    isLoading: isLoadingMore,
+                    action: loadMoreAction
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var activitySubtitle: String {

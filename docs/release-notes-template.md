@@ -9,6 +9,7 @@ Keep it short. Focus on what a user would notice or care about.
 
 - One sentence on what this candidate is trying to improve.
 - Call out the version gap plainly if `Info.plist` and GitHub Releases still match.
+- Say whether Sparkle and Homebrew already point at this version, or still lag.
 
 ## User-visible changes
 
@@ -27,6 +28,7 @@ Keep it short. Focus on what a user would notice or care about.
 - Things that still need manual QA.
 - Things that are better but not fully proven yet.
 - Anything that is still docs-only and should not be oversold.
+- Say plainly if this is not a real release candidate yet and is only release metadata or install-path follow-up.
 
 ## Good reason to ship or wait
 

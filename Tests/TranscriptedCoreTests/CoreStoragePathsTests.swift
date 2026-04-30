@@ -78,6 +78,57 @@ final class CoreStoragePathsTests: XCTestCase {
         XCTAssertTrue(result.isValid)
     }
 
+    func testRecordingValidatorRejectsRawRelativePaths() {
+        guard let result = RecordingValidator.validateRawSavePath("relative-capture-root") else {
+            XCTFail("Expected raw relative path to fail validation")
+            return
+        }
+
+        XCTAssertFalse(result.isValid)
+        XCTAssertEqual(result.errorMessage, "Save path must be an absolute filesystem path")
+    }
+
+    func testRecordingValidatorRejectsRelativePathPreferencesBeforeURLConstruction() {
+        let original = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
+        defer {
+            if let original {
+                UserDefaults.standard.set(original, forKey: "transcriptSaveLocation")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+            }
+        }
+
+        let paths = CoreStoragePaths(
+            transcripts: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-transcripts-\(UUID().uuidString)", isDirectory: true),
+            speakerDB: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-speakers-\(UUID().uuidString).sqlite"),
+            statsDB: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-stats-\(UUID().uuidString).sqlite"),
+            failedQueue: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-failed-\(UUID().uuidString).json"),
+            speakerClips: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-clips-\(UUID().uuidString)", isDirectory: true),
+            audioCaptures: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-audio-\(UUID().uuidString)", isDirectory: true),
+            logs: FileManager.default.temporaryDirectory
+                .appendingPathComponent("TranscriptedCoreTests-logs-\(UUID().uuidString)", isDirectory: true)
+        )
+        defer {
+            try? FileManager.default.removeItem(at: paths.transcripts)
+            try? FileManager.default.removeItem(at: paths.speakerClips)
+            try? FileManager.default.removeItem(at: paths.audioCaptures)
+            try? FileManager.default.removeItem(at: paths.logs)
+        }
+
+        UserDefaults.standard.set("relative-capture-root", forKey: "transcriptSaveLocation")
+
+        let result = RecordingValidator.validateRecordingConditions(paths: paths)
+
+        XCTAssertFalse(result.isValid)
+        XCTAssertEqual(result.errorMessage, "Save path must be an absolute filesystem path")
+    }
+
     func testRecordingValidatorAllowsDocumentsTranscriptedSubdirectory() {
         let allowedPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents", isDirectory: true)
