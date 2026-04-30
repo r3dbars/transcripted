@@ -8,6 +8,7 @@ final class MenuBarUtilityActionsView: NSView {
     var onOpenConnectAgent: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onOpenSupport: (() -> Void)?
 
     private let connectAgentRow = MenuBarActionRowView()
     private let feedbackRow = MenuBarActionRowView()
@@ -28,8 +29,7 @@ final class MenuBarUtilityActionsView: NSView {
     private func setupViews() {
         connectAgentRow.onPress = { [weak self] in self?.onOpenConnectAgent?() }
         feedbackRow.onPress = { [weak self] in
-            self?.trackMenuAction("submit_feedback")
-            self?.sendFeedback()
+            self?.onOpenSupport?()
         }
         updatesRow.onPress = { [weak self] in self?.onCheckForUpdates?() }
         settingsRow.onPress = { [weak self] in self?.onOpenSettings?() }
@@ -59,8 +59,8 @@ final class MenuBarUtilityActionsView: NSView {
 
         feedbackRow.update(
             symbolName: "bubble.left",
-            title: "Submit Feedback",
-            detail: "",
+            title: "Submit feedback for support",
+            detail: "Opens the Support tab",
             tone: .standard,
             size: .utility
         )
@@ -110,10 +110,6 @@ final class MenuBarUtilityActionsView: NSView {
         for row in allRows where row.isHidden {
             row.frame = .zero
         }
-    }
-
-    private func sendFeedback() {
-        TranscriptedSupportActions.sendFeedback(logger: appState?.logger)
     }
 
     private func trackMenuAction(_ actionID: String) {

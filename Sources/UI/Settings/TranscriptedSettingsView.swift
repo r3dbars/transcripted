@@ -1320,27 +1320,6 @@ struct TranscriptedSettingsView: View {
                     }
                 }
 
-                HStack {
-                    Button("Copy Diagnostics") {
-                        trackSettingsAction("copy_diagnostics", page: .privacy)
-                        diagnosticsActionStatus = actions.copyDiagnostics()
-                            ? "Copied diagnostics."
-                            : "Could not copy diagnostics."
-                    }
-
-                    Button("Send Diagnostic Event") {
-                        trackSettingsAction("send_diagnostic_event", page: .privacy)
-                        sendDiagnosticEvent()
-                    }
-                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-
-                    if let diagnosticsActionStatus {
-                        Text(diagnosticsActionStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1420,43 +1399,45 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Support",
-                summary: "Feedback and diagnostics."
+                summary: "Send feedback or support by email."
             )
 
             SettingsSection(
-                title: "Contact",
-                detail: "Opens a prefilled email to help@transcripted.app."
+                title: "Send feedback or support by email",
+                detail: "Starts an email draft to help@transcripted.app."
             ) {
                 SettingsStatusCard(
                     title: "Email support",
                     status: "help@transcripted.app",
-                    detail: "Includes scrubbed app context so problems are easier to fix.",
+                    detail: "Opens a prefilled email with scrubbed app context.",
                     tone: .ready
                 )
 
-                Button("Send Feedback") {
+                Button("Email support") {
                     trackSettingsAction("submit_feedback", page: .support)
                     actions.sendFeedback()
                 }
             }
 
             SettingsSection(
-                title: "Diagnostics",
-                detail: "Privacy-safe context for debugging device and app issues."
+                title: "Diagnostics for support",
+                detail: "Use these when the issue is hard to explain."
             ) {
-                HStack {
-                    Button("Copy Diagnostics") {
-                        trackSettingsAction("copy_diagnostics", page: .support)
-                        diagnosticsActionStatus = actions.copyDiagnostics()
-                            ? "Copied diagnostics."
-                            : "Could not copy diagnostics."
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Button("Copy diagnostics to attach to email") {
+                            trackSettingsAction("copy_diagnostics", page: .support)
+                            diagnosticsActionStatus = actions.copyDiagnostics()
+                                ? "Copied diagnostics. Attach them to your support email."
+                                : "Could not copy diagnostics."
+                        }
 
-                    Button("Send Diagnostic Event") {
-                        trackSettingsAction("send_diagnostic_event", page: .support)
-                        sendDiagnosticEvent()
+                        Button("One-click send diagnostic event") {
+                            trackSettingsAction("send_diagnostic_event", page: .support)
+                            sendDiagnosticEvent()
+                        }
+                        .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
                     }
-                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
 
                     if let diagnosticsActionStatus {
                         Text(diagnosticsActionStatus)
@@ -1464,6 +1445,10 @@ struct TranscriptedSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                Text("The diagnostic event sends privacy-safe issue context to the creator of Transcripted so the problem is easier to fix.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)

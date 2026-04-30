@@ -45,6 +45,7 @@ final class MenuBarPanelController: NSViewController {
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
         content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }
+        content.utilityActionsView.onOpenSupport = { [weak self] in self?.openSettingsFromMenu(.support) }
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content

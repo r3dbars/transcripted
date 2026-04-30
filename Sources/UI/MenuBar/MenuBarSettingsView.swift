@@ -24,8 +24,8 @@ final class MenuBarSettingsView: NSView {
     )
     private let feedbackButton = MenuIconButton(
         symbolName: "bubble.left",
-        accessibilityLabel: "Send feedback",
-        toolTip: "Send feedback"
+        accessibilityLabel: "Submit feedback for support",
+        toolTip: "Submit feedback for support"
     )
     private let quitButton = MenuIconButton(
         symbolName: "power",
@@ -37,6 +37,7 @@ final class MenuBarSettingsView: NSView {
     var onOpenSettings: (() -> Void)?
     var onCheckForUpdates: (() -> Void)?
     var onOpenAgentConnect: (() -> Void)?
+    var onOpenSupport: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -60,7 +61,7 @@ final class MenuBarSettingsView: NSView {
         updatesButton.target = self
         updatesButton.action = #selector(checkForUpdates)
         feedbackButton.target = self
-        feedbackButton.action = #selector(sendFeedback)
+        feedbackButton.action = #selector(openSupport)
         quitButton.target = self
         quitButton.action = #selector(quitApp)
     }
@@ -94,10 +95,6 @@ final class MenuBarSettingsView: NSView {
         connectAgentButton.frame = NSRect(x: 0, y: buttonY, width: connectWidth, height: buttonSize)
     }
 
-    @objc private func sendFeedback() {
-        TranscriptedSupportActions.sendFeedback(logger: appState?.logger)
-    }
-
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
@@ -112,6 +109,10 @@ final class MenuBarSettingsView: NSView {
 
     @objc private func openAgentConnect() {
         onOpenAgentConnect?()
+    }
+
+    @objc private func openSupport() {
+        onOpenSupport?()
     }
 
     func dismissTransientUI() {}
