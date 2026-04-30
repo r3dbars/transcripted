@@ -13,7 +13,7 @@ private struct SettingsSidebarSection: Identifiable {
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
         SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .about])
+        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
 }
 
@@ -239,6 +239,8 @@ struct TranscriptedSettingsView: View {
             connectAgentPage
         case .privacy:
             privacyPage
+        case .support:
+            supportPage
         case .about:
             aboutPage
         }
@@ -1358,7 +1360,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "About",
-                summary: "Version, updates, and support."
+                summary: "Version and updates."
             )
 
             SettingsSection(
@@ -1409,12 +1411,63 @@ struct TranscriptedSettingsView: View {
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
                     .disabled(!aboutUpdateButtonEnabled)
+                }
+            }
+        }
+    }
 
-                    Button("Submit Feedback") {
-                        trackSettingsAction("submit_feedback", page: .about)
-                        actions.sendFeedback()
+    private var supportPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Support",
+                summary: "Feedback and diagnostics."
+            )
+
+            SettingsSection(
+                title: "Contact",
+                detail: "Opens a prefilled email to help@transcripted.app."
+            ) {
+                SettingsStatusCard(
+                    title: "Email support",
+                    status: "help@transcripted.app",
+                    detail: "Includes scrubbed app context so problems are easier to fix.",
+                    tone: .ready
+                )
+
+                Button("Send Feedback") {
+                    trackSettingsAction("submit_feedback", page: .support)
+                    actions.sendFeedback()
+                }
+            }
+
+            SettingsSection(
+                title: "Diagnostics",
+                detail: "Privacy-safe context for debugging device and app issues."
+            ) {
+                HStack {
+                    Button("Copy Diagnostics") {
+                        trackSettingsAction("copy_diagnostics", page: .support)
+                        diagnosticsActionStatus = actions.copyDiagnostics()
+                            ? "Copied diagnostics."
+                            : "Could not copy diagnostics."
+                    }
+
+                    Button("Send Diagnostic Event") {
+                        trackSettingsAction("send_diagnostic_event", page: .support)
+                        sendDiagnosticEvent()
+                    }
+                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
+
+                    if let diagnosticsActionStatus {
+                        Text(diagnosticsActionStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
+
+                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
