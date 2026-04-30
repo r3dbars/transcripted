@@ -59,8 +59,8 @@ final class MenuBarUtilityActionsView: NSView {
 
         feedbackRow.update(
             symbolName: "bubble.left",
-            title: "Submit feedback for support",
-            detail: "Opens the Support tab",
+            title: "Submit feedback",
+            detail: "",
             tone: .standard,
             size: .utility
         )

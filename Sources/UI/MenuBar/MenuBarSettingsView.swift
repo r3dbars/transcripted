@@ -24,8 +24,8 @@ final class MenuBarSettingsView: NSView {
     )
     private let feedbackButton = MenuIconButton(
         symbolName: "bubble.left",
-        accessibilityLabel: "Submit feedback for support",
-        toolTip: "Submit feedback for support"
+        accessibilityLabel: "Submit feedback",
+        toolTip: "Submit feedback"
     )
     private let quitButton = MenuIconButton(
         symbolName: "power",
