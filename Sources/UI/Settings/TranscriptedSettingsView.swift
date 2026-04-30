@@ -1396,64 +1396,190 @@ struct TranscriptedSettingsView: View {
     }
 
     private var supportPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 20) {
             SettingsPageIntro(
                 title: "Support",
-                summary: "Send feedback or support by email."
+                summary: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
             )
 
-            SettingsSection(
-                title: "Send feedback or support by email",
-                detail: "Starts an email draft to help@transcripted.app."
+            SupportActionCard(
+                symbolName: "envelope.fill",
+                title: "Email support",
+                detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
+                buttonTitle: "Email support",
+                buttonSymbolName: "paperplane.fill",
+                tone: .primary,
+                status: nil,
+                isEnabled: true
             ) {
-                SettingsStatusCard(
-                    title: "Email support",
-                    status: "help@transcripted.app",
-                    detail: "Opens a prefilled email with scrubbed app context.",
-                    tone: .ready
-                )
-
-                Button("Email support") {
-                    trackSettingsAction("submit_feedback", page: .support)
-                    actions.sendFeedback()
-                }
+                trackSettingsAction("submit_feedback", page: .support)
+                actions.sendFeedback()
             }
 
-            SettingsSection(
-                title: "Diagnostics for support",
-                detail: "Use these when the issue is hard to explain."
+            SupportActionCard(
+                symbolName: "waveform.path.ecg",
+                title: "Send diagnostics",
+                detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
+                buttonTitle: "One-click send diagnostics",
+                buttonSymbolName: "bolt.fill",
+                tone: .secondary,
+                status: diagnosticsActionStatus,
+                isEnabled: CrashReporter.isAvailable && crashReportingEnabled
             ) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Button("Copy diagnostics to attach to email") {
-                            trackSettingsAction("copy_diagnostics", page: .support)
-                            diagnosticsActionStatus = actions.copyDiagnostics()
-                                ? "Copied diagnostics. Attach them to your support email."
-                                : "Could not copy diagnostics."
-                        }
+                trackSettingsAction("send_diagnostic_event", page: .support)
+                sendDiagnosticEvent()
+            }
 
-                        Button("One-click send diagnostic event") {
-                            trackSettingsAction("send_diagnostic_event", page: .support)
-                            sendDiagnosticEvent()
-                        }
-                        .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-                    }
+            SupportPrivacyNote()
+        }
+    }
 
-                    if let diagnosticsActionStatus {
-                        Text(diagnosticsActionStatus)
-                            .font(.caption)
+    private struct SupportActionCard: View {
+        enum Tone {
+            case primary
+            case secondary
+        }
+
+        let symbolName: String
+        let title: String
+        let detail: String
+        let buttonTitle: String
+        let buttonSymbolName: String
+        let tone: Tone
+        let status: String?
+        let isEnabled: Bool
+        let action: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(iconForeground)
+                        .frame(width: 34, height: 34)
+                        .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(title)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+
+                        Text(detail)
+                            .font(.callout)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                 }
 
-                Text("The diagnostic event sends privacy-safe issue context to the creator of Transcripted so the problem is easier to fix.")
-                    .font(.caption)
+                Button(action: action) {
+                    Label(buttonTitle, systemImage: buttonSymbolName)
+                        .font(.callout.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(buttonBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .foregroundStyle(buttonForeground)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.55)
+
+                if let status, !status.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color(nsColor: .systemGreen))
+
+                        Text(status)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(cardStroke, lineWidth: 1)
+            )
+        }
+
+        private var iconForeground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen)
+            case .secondary:
+                return Color.accentColor
+            }
+        }
+
+        private var iconBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.16)
+            case .secondary:
+                return Color.accentColor.opacity(0.14)
+            }
+        }
+
+        private var cardBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .controlBackgroundColor).opacity(0.9)
+            case .secondary:
+                return Color(nsColor: .controlBackgroundColor).opacity(0.72)
+            }
+        }
+
+        private var cardStroke: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.25)
+            case .secondary:
+                return Color.primary.opacity(0.08)
+            }
+        }
+
+        private var buttonBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen)
+            case .secondary:
+                return Color.secondary.opacity(0.16)
+            }
+        }
+
+        private var buttonForeground: Color {
+            switch tone {
+            case .primary:
+                return .white
+            case .secondary:
+                return .primary
+            }
+        }
+    }
+
+    private struct SupportPrivacyNote: View {
+        var body: some View {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 20)
 
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.top, 2)
         }
     }
 
