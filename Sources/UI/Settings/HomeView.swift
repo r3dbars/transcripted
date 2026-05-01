@@ -189,17 +189,17 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .dictation: return "Capture spoken work anywhere"
-        case .meeting: return "Record the conversation once"
+        case .dictation: return "Speak anywhere. It types where you were writing."
+        case .meeting: return "Record the call. Keep the notes."
         }
     }
 
     var subtitle: String {
         switch self {
         case .dictation:
-            return "Press your shortcut and speak. Transcripted pastes clean text into whatever app you're using."
+            return "Use your shortcut, say the thought, and Transcripted pastes cleaned text back into the app you were using."
         case .meeting:
-            return "Capture local mic and system audio, then turn the call into searchable notes you can review later."
+            return "Capture local mic and system audio, then turn the conversation into searchable local Markdown."
         }
     }
 
@@ -212,8 +212,8 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
 
     var learnTitle: String {
         switch self {
-        case .dictation: return "Dictation works anywhere you write"
-        case .meeting: return "Meetings become local notes"
+        case .dictation: return "Works in any app with a text cursor."
+        case .meeting: return "Saved locally for review and agent context."
         }
     }
 
@@ -223,6 +223,30 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         case .meeting: return "waveform"
         }
     }
+
+    var steps: [HomeHeroStep] {
+        switch self {
+        case .dictation:
+            return [
+                HomeHeroStep(number: "1", title: "Press your shortcut", detail: "Start from the app where you are writing."),
+                HomeHeroStep(number: "2", title: "Say the thought", detail: "Transcripted listens locally and cleans up the text."),
+                HomeHeroStep(number: "3", title: "Keep moving", detail: "The finished text lands back at your cursor.")
+            ]
+        case .meeting:
+            return [
+                HomeHeroStep(number: "1", title: "Start recording", detail: "Capture your mic plus system audio."),
+                HomeHeroStep(number: "2", title: "Let it transcribe", detail: "Transcripted turns the call into readable notes."),
+                HomeHeroStep(number: "3", title: "Use it later", detail: "Open the Markdown or point an agent at it.")
+            ]
+        }
+    }
+}
+
+struct HomeHeroStep: Identifiable {
+    let id = UUID()
+    let number: String
+    let title: String
+    let detail: String
 }
 
 // MARK: - Stats summary
@@ -260,37 +284,46 @@ struct HomeHeroCard: View {
     let onStartMeeting: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .center) {
+                Label("Capture", systemImage: selectedMode.symbolName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+
+                Spacer()
+
+                Picker("", selection: $selectedMode) {
+                    ForEach(HomeHeroMode.allCases) { mode in
+                        Text(mode.switchTitle).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 210)
+            }
+
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 22) {
+                HStack(alignment: .top, spacing: 24) {
                     heroCopy
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    HomeAppIconCloud()
-                        .frame(width: 330, height: 190)
+                    HomeHeroWorkflowPanel(mode: selectedMode)
+                        .frame(width: 290)
                 }
 
                 VStack(alignment: .leading, spacing: 18) {
                     heroCopy
-                    HomeAppIconCloud()
-                        .frame(height: 150)
+                    HomeHeroWorkflowPanel(mode: selectedMode)
                 }
             }
         }
-        .padding(22)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(nsColor: .controlBackgroundColor).opacity(0.98),
-                            Color.accentColor.opacity(0.08)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -302,44 +335,24 @@ struct HomeHeroCard: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 9) {
                 Text(selectedMode.title)
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(selectedMode.subtitle)
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 10) {
-                ForEach(HomeHeroMode.allCases) { mode in
-                    HomeHeroModeButton(
-                        mode: mode,
-                        isSelected: selectedMode == mode,
-                        action: {
-                            withAnimation(.easeInOut(duration: 0.16)) {
-                                selectedMode = mode
-                            }
-                        }
-                    )
-                }
-            }
-
             HStack(spacing: 12) {
                 Button(action: selectedAction) {
                     Label(selectedMode.actionTitle, systemImage: selectedMode.symbolName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 9)
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.white)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.accentColor)
-                )
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
                 .help(selectedMode.actionTitle)
 
                 HStack(spacing: 6) {
@@ -362,101 +375,60 @@ struct HomeHeroCard: View {
     }
 }
 
-private struct HomeHeroModeButton: View {
+private struct HomeHeroWorkflowPanel: View {
     let mode: HomeHeroMode
-    let isSelected: Bool
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: mode.symbolName)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(mode.switchTitle)
-                    .font(.system(size: 14, weight: .semibold))
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor).opacity(0.86))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(isSelected ? Color.clear : Color.primary.opacity(0.12), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .help("Show \(mode.switchTitle.lowercased())")
-    }
-}
+        VStack(alignment: .leading, spacing: 12) {
+            Text("How it works")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.6)
 
-private struct HomeAppIconCloud: View {
-    private let icons: [HomeAppIconBubble] = [
-        HomeAppIconBubble(symbolName: "message.fill", label: nil, color: .green, x: 0.12, y: 0.72, size: 43),
-        HomeAppIconBubble(symbolName: "envelope.fill", label: nil, color: .red, x: 0.34, y: 0.64, size: 46),
-        HomeAppIconBubble(symbolName: "note.text", label: nil, color: .yellow, x: 0.58, y: 0.46, size: 43, usesDarkGlyph: true),
-        HomeAppIconBubble(symbolName: "calendar", label: nil, color: .orange, x: 0.24, y: 0.24, size: 48),
-        HomeAppIconBubble(symbolName: "terminal.fill", label: nil, color: .black, x: 0.72, y: 0.18, size: 46),
-        HomeAppIconBubble(symbolName: "sparkles", label: nil, color: .purple, x: 0.48, y: 0.23, size: 42),
-        HomeAppIconBubble(symbolName: nil, label: "in", color: .blue, x: 0.83, y: 0.68, size: 44),
-        HomeAppIconBubble(symbolName: "bubble.left.and.bubble.right.fill", label: nil, color: .cyan, x: 0.94, y: 0.38, size: 40)
-    ]
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                ForEach(icons) { icon in
-                    HomeAppIconBubbleView(icon: icon)
-                        .position(
-                            x: proxy.size.width * icon.x,
-                            y: proxy.size.height * icon.y
-                        )
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(mode.steps) { step in
+                    HomeHeroStepRow(step: step)
                 }
             }
         }
-        .accessibilityHidden(true)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        )
     }
 }
 
-private struct HomeAppIconBubble: Identifiable {
-    let id = UUID()
-    let symbolName: String?
-    let label: String?
-    let color: Color
-    let x: CGFloat
-    let y: CGFloat
-    let size: CGFloat
-    var usesDarkGlyph = false
-}
-
-private struct HomeAppIconBubbleView: View {
-    let icon: HomeAppIconBubble
+private struct HomeHeroStepRow: View {
+    let step: HomeHeroStep
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.92))
-                .shadow(color: Color.black.opacity(0.08), radius: 8, y: 4)
-            Circle()
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        HStack(alignment: .top, spacing: 10) {
+            Text(step.number)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.12))
+                )
 
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(icon.color.opacity(icon.color == .black ? 0.88 : 0.82))
-                .frame(width: icon.size * 0.52, height: icon.size * 0.52)
-
-            if let symbolName = icon.symbolName {
-                Image(systemName: symbolName)
-                    .font(.system(size: icon.size * 0.27, weight: .semibold))
-                    .foregroundStyle(icon.usesDarkGlyph ? Color.black.opacity(0.7) : Color.white)
-            } else if let label = icon.label {
-                Text(label)
-                    .font(.system(size: icon.size * 0.27, weight: .bold))
-                    .foregroundStyle(Color.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                Text(step.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(width: icon.size, height: icon.size)
     }
 }
 
