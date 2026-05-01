@@ -262,7 +262,7 @@ struct TranscriptedSettingsView: View {
                     }
 
                     HomeHeroCard(
-                        selectedMode: $homeHeroMode,
+                        selectedMode: homeHeroModeSelection,
                         onStartDictation: {
                             trackSettingsAction("start_dictation", page: .home)
                             actions.startDictation()
@@ -312,7 +312,7 @@ struct TranscriptedSettingsView: View {
             }
 
             HomeActivityTabsCard(
-                selectedTab: $homeActivityTab,
+                selectedTab: homeActivityTab,
                 dictationSections: homeViewModel.dictationDaySections,
                 meetingSections: homeViewModel.meetingDaySections,
                 isLoading: homeViewModel.isLoading,
@@ -379,6 +379,16 @@ struct TranscriptedSettingsView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+    }
+
+    private var homeHeroModeSelection: Binding<HomeHeroMode> {
+        Binding(
+            get: { homeHeroMode },
+            set: { newMode in
+                homeHeroMode = newMode
+                homeActivityTab = newMode.activityTab
+            }
+        )
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {

@@ -224,29 +224,12 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         }
     }
 
-    var steps: [HomeHeroStep] {
+    var activityTab: HomeActivityTab {
         switch self {
-        case .dictation:
-            return [
-                HomeHeroStep(number: "1", title: "Press your shortcut", detail: "Start from the app where you are writing."),
-                HomeHeroStep(number: "2", title: "Say the thought", detail: "Transcripted listens locally and cleans up the text."),
-                HomeHeroStep(number: "3", title: "Keep moving", detail: "The finished text lands back at your cursor.")
-            ]
-        case .meeting:
-            return [
-                HomeHeroStep(number: "1", title: "Start recording", detail: "Capture your mic plus system audio."),
-                HomeHeroStep(number: "2", title: "Let it transcribe", detail: "Transcripted turns the call into readable notes."),
-                HomeHeroStep(number: "3", title: "Use it later", detail: "Open the Markdown or point an agent at it.")
-            ]
+        case .dictation: return .dictations
+        case .meeting: return .meetings
         }
     }
-}
-
-struct HomeHeroStep: Identifiable {
-    let id = UUID()
-    let number: String
-    let title: String
-    let detail: String
 }
 
 // MARK: - Stats summary
@@ -304,20 +287,7 @@ struct HomeHeroCard: View {
                 .frame(width: 210)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 24) {
-                    heroCopy
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    HomeHeroWorkflowPanel(mode: selectedMode)
-                        .frame(width: 290)
-                }
-
-                VStack(alignment: .leading, spacing: 18) {
-                    heroCopy
-                    HomeHeroWorkflowPanel(mode: selectedMode)
-                }
-            }
+            heroCopy
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -371,63 +341,6 @@ struct HomeHeroCard: View {
         switch selectedMode {
         case .dictation: return onStartDictation
         case .meeting: return onStartMeeting
-        }
-    }
-}
-
-private struct HomeHeroWorkflowPanel: View {
-    let mode: HomeHeroMode
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("How it works")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.6)
-
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(mode.steps) { step in
-                    HomeHeroStepRow(step: step)
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-        )
-    }
-}
-
-private struct HomeHeroStepRow: View {
-    let step: HomeHeroStep
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(step.number)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 22, height: 22)
-                .background(
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.12))
-                )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(step.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                Text(step.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 }
@@ -845,7 +758,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 // MARK: - Activity tabs container
 
 struct HomeActivityTabsCard: View {
-    @Binding var selectedTab: HomeActivityTab
+    let selectedTab: HomeActivityTab
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<RecentMeetingItem>]
     let isLoading: Bool
@@ -876,15 +789,6 @@ struct HomeActivityTabsCard: View {
                 }
 
                 Spacer(minLength: 12)
-
-                Picker("", selection: $selectedTab) {
-                    ForEach(HomeActivityTab.allCases) { tab in
-                        Text(tab.label).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 190, alignment: .trailing)
             }
 
             if isLoading {
