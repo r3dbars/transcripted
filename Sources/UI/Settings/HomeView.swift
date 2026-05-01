@@ -267,32 +267,27 @@ struct HomeHeroCard: View {
     let onStartMeeting: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center) {
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            HomeHeroModeTabs(selectedMode: $selectedMode)
+                .padding(.leading, 20)
+                .padding(.bottom, -1)
+                .zIndex(1)
 
-                Picker("", selection: $selectedMode) {
-                    ForEach(HomeHeroMode.allCases) { mode in
-                        Text(mode.switchTitle).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 210)
+            VStack(alignment: .leading, spacing: 0) {
+                heroCopy
             }
-
-            heroCopy
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
         }
-        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 
     private var heroCopy: some View {
@@ -332,11 +327,108 @@ struct HomeHeroCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var cardFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+
     private var selectedAction: () -> Void {
         switch selectedMode {
         case .dictation: return onStartDictation
         case .meeting: return onStartMeeting
         }
+    }
+}
+
+private struct HomeHeroModeTabs: View {
+    @Binding var selectedMode: HomeHeroMode
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(HomeHeroMode.allCases) { mode in
+                HomeHeroModeTab(
+                    mode: mode,
+                    isSelected: selectedMode == mode,
+                    action: {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            selectedMode = mode
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+private struct HomeHeroModeTab: View {
+    let mode: HomeHeroMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: mode.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(mode.switchTitle)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .padding(.horizontal, 15)
+            .padding(.top, isSelected ? 11 : 9)
+            .padding(.bottom, isSelected ? 10 : 8)
+            .background(
+                HomeHeroTabShape(cornerRadius: 12)
+                    .fill(tabFill)
+            )
+            .overlay(
+                HomeHeroTabShape(cornerRadius: 12)
+                    .stroke(tabStroke, lineWidth: 1)
+            )
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    Rectangle()
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
+                        .frame(height: 1.5)
+                        .padding(.horizontal, 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Show \(mode.switchTitle.lowercased())")
+    }
+
+    private var tabFill: Color {
+        if isSelected {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.82)
+        }
+        return Color.primary.opacity(0.035)
+    }
+
+    private var tabStroke: Color {
+        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05)
+    }
+}
+
+private struct HomeHeroTabShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
