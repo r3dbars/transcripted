@@ -1,5 +1,7 @@
 import Foundation
 
+import Foundation
+
 func testFeedbackIssueBuilder() {
     runSuite("FeedbackIssueBuilder builds a normal GitHub issue URL") {
         let url = FeedbackIssueBuilder.issueURL(rawLogLines: [
@@ -41,6 +43,31 @@ func testFeedbackIssueBuilder() {
 
         assertFalse(body.contains("marker_0"), "logs older than the latest 80 entries should not be included")
         assertTrue(body.contains("marker_99"), "latest log entry should be included")
+    }
+
+    runSuite("FeedbackIssueBuilder builds contextual capture feedback") {
+        let report = FeedbackReport(
+            sourceKind: "dictation",
+            referenceID: "abc123",
+            occurredAt: Date(timeIntervalSince1970: 1_714_000_000),
+            issueKind: "Wrong words",
+            userNotes: "It included /Users/redbars/private.txt and person@example.com",
+            appVersion: "Version 1.2.3",
+            includeDiagnostics: true
+        )
+        let url = FeedbackIssueBuilder.issueURL(report: report, rawLogLines: [
+            "[12:00:00.000] APP LAUNCHED",
+            "[12:01:00.000] ERROR | https://example.com/log"
+        ])
+        let body = feedbackBody(from: url)
+
+        assertTrue(body.contains("Capture:"), "contextual issue should include capture metadata")
+        assertTrue(body.contains("Type: dictation"), "source kind should be included")
+        assertTrue(body.contains("Issue: Wrong words"), "issue kind should be included")
+        assertTrue(body.contains("Reference: abc123"), "safe reference should be included")
+        assertFalse(body.contains("/Users/redbars/"), "user notes should be scrubbed")
+        assertFalse(body.contains("person@example.com"), "emails in user notes should be scrubbed")
+        assertFalse(body.contains("https://example.com/log"), "diagnostic URLs should be scrubbed")
     }
 }
 

@@ -26,6 +26,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
+    private let appLogger: AppLogger
     private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
@@ -64,6 +65,8 @@ struct TranscriptedSettingsView: View {
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
+    @State private var homeFeedbackTarget: HomeFeedbackTarget?
+    @State private var homeMeetingPreview: HomeMeetingPreview?
 
     init(
         appState: TranscriptedAppState,
@@ -74,6 +77,7 @@ struct TranscriptedSettingsView: View {
         self.navigation = navigation
         self.speakerPeopleModel = speakerPeopleModel
         self.actions = actions
+        self.appLogger = appState.logger
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         _meetingSession = ObservedObject(wrappedValue: appState.meetingSession)
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
@@ -286,23 +290,22 @@ struct TranscriptedSettingsView: View {
                     onCopyDictation: { entry in
                         handleCopyDictation(entry)
                     },
-                    onFlagDictation: { _ in
+                    onFlagDictation: { entry in
                         trackSettingsAction("flag_dictation", page: .home)
-                        actions.sendFeedback()
+                        homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
                     },
                     dictationMenuItems: { entry in
                         dictationRowMenuItems(for: entry)
                     },
                     onOpenMeeting: { item in
-                        trackSettingsAction("open_recent_meeting", page: .home)
-                        NSWorkspace.shared.open(item.transcriptURL)
+                        presentHomeMeetingPreview(item)
                     },
                     onCopyMeeting: { item in
                         handleCopyMeeting(item)
                     },
-                    onFlagMeeting: { _ in
+                    onFlagMeeting: { item in
                         trackSettingsAction("flag_meeting", page: .home)
-                        actions.sendFeedback()
+                        homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
                     },
                     meetingMenuItems: { item in
                         meetingRowMenuItems(for: item)
@@ -348,6 +351,36 @@ struct TranscriptedSettingsView: View {
             }
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
+        .sheet(item: $homeFeedbackTarget) { target in
+            HomeFeedbackSheet(
+                target: target,
+                onCancel: {
+                    homeFeedbackTarget = nil
+                },
+                onSubmit: { submission in
+                    submitHomeFeedback(submission)
+                }
+            )
+        }
+        .sheet(item: $homeMeetingPreview) { preview in
+            HomeMeetingPreviewSheet(
+                preview: preview,
+                onOpenMarkdown: {
+                    trackSettingsAction("open_recent_meeting_markdown", page: .home)
+                    NSWorkspace.shared.open(preview.transcriptURL)
+                },
+                onCopyForAgent: {
+                    handleCopyMeetingPreview(preview)
+                },
+                onReportIssue: {
+                    homeMeetingPreview = nil
+                    homeFeedbackTarget = preview.feedbackTarget
+                },
+                onDone: {
+                    homeMeetingPreview = nil
+                }
+            )
+        }
         .onChange(of: homeActivityTab) { _, newValue in
             trackSettingsAction("home_tab_\(newValue.rawValue)", page: .home)
         }
@@ -405,6 +438,64 @@ struct TranscriptedSettingsView: View {
             return
         }
         flashCopied(rowID: item.id)
+    }
+
+    private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
+        trackSettingsAction("copy_meeting_preview", page: .home)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(preview.markdown, forType: .string)
+    }
+
+    private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
+        trackSettingsAction("preview_recent_meeting", page: .home)
+        do {
+            let markdown = try String(contentsOf: item.transcriptURL, encoding: .utf8)
+            homeMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+        } catch {
+            homeMeetingPreview = HomeMeetingPreview(
+                item: item,
+                markdown: "",
+                readError: error.localizedDescription
+            )
+        }
+    }
+
+    private func submitHomeFeedback(_ submission: HomeFeedbackSubmission) {
+        trackSettingsAction("submit_home_feedback", page: .home)
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "feedback",
+            event: "capture_feedback_prepared",
+            message: "User prepared capture feedback",
+            context: [
+                "source_kind": submission.target.sourceKind,
+                "issue_kind": submission.issueKind.rawValue,
+                "include_diagnostics": submission.includeDiagnostics ? "true" : "false",
+            ]
+        )
+
+        let report = FeedbackReport(
+            sourceKind: submission.target.sourceKind,
+            referenceID: submission.target.referenceID,
+            occurredAt: submission.target.createdAt,
+            issueKind: submission.issueKind.label,
+            userNotes: submission.notes,
+            appVersion: TranscriptedSupportActions.appVersionDescription,
+            includeDiagnostics: submission.includeDiagnostics
+        )
+
+        guard let url = FeedbackIssueBuilder.issueURL(
+            report: report,
+            rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
+        ) else {
+            NSSound.beep()
+            return
+        }
+
+        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
+        homeFeedbackTarget = nil
+        NSWorkspace.shared.open(url)
     }
 
     private func flashCopied(rowID: String) {

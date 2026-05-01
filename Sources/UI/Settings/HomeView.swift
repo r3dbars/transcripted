@@ -243,6 +243,95 @@ struct HomeStatItem: Identifiable {
     let label: String
 }
 
+enum HomeFeedbackIssueKind: String, CaseIterable, Identifiable {
+    case wrongWords
+    case missingText
+    case badFormatting
+    case wrongSpeakers
+    case audioProblem
+    case other
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .wrongWords: return "Wrong words"
+        case .missingText: return "Missing text"
+        case .badFormatting: return "Bad formatting"
+        case .wrongSpeakers: return "Speaker issue"
+        case .audioProblem: return "Audio issue"
+        case .other: return "Other"
+        }
+    }
+}
+
+struct HomeFeedbackTarget: Identifiable {
+    let id: String
+    let sourceKind: String
+    let title: String
+    let createdAt: Date
+    let referenceID: String
+    let suggestedIssue: HomeFeedbackIssueKind
+
+    static func dictation(_ entry: SavedDictationEntry) -> HomeFeedbackTarget {
+        HomeFeedbackTarget(
+            id: "dictation-\(stableReferenceID(for: entry.id))",
+            sourceKind: "dictation",
+            title: "Dictation at \(HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt))",
+            createdAt: entry.createdAt,
+            referenceID: stableReferenceID(for: entry.id),
+            suggestedIssue: .wrongWords
+        )
+    }
+
+    static func meeting(_ item: RecentMeetingItem) -> HomeFeedbackTarget {
+        HomeFeedbackTarget(
+            id: "meeting-\(stableReferenceID(for: item.id))",
+            sourceKind: "meeting",
+            title: "Meeting at \(HomeActivityRowFormatting.timeFormatter.string(from: item.date))",
+            createdAt: item.date,
+            referenceID: stableReferenceID(for: item.id),
+            suggestedIssue: .wrongSpeakers
+        )
+    }
+
+    private static func stableReferenceID(for value: String) -> String {
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
+    }
+}
+
+struct HomeFeedbackSubmission {
+    let target: HomeFeedbackTarget
+    let issueKind: HomeFeedbackIssueKind
+    let notes: String
+    let includeDiagnostics: Bool
+}
+
+struct HomeMeetingPreview: Identifiable {
+    let id: String
+    let title: String
+    let date: Date
+    let transcriptURL: URL
+    let markdown: String
+    let readError: String?
+    let feedbackTarget: HomeFeedbackTarget
+
+    init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
+        id = item.id
+        title = item.title
+        date = item.date
+        transcriptURL = item.transcriptURL
+        self.markdown = markdown
+        self.readError = readError
+        feedbackTarget = HomeFeedbackTarget.meeting(item)
+    }
+}
+
 // MARK: - Welcome header
 
 struct HomeWelcomeHeader: View {
@@ -560,7 +649,7 @@ struct HomeRowActionButtons: View {
 
             iconButton(
                 systemName: "flag",
-                help: "Send feedback",
+                help: "Report issue",
                 action: onFlag
             )
 
@@ -927,6 +1016,182 @@ struct HomeActivityTabsCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+// MARK: - Row feedback
+
+struct HomeFeedbackSheet: View {
+    let target: HomeFeedbackTarget
+    let onCancel: () -> Void
+    let onSubmit: (HomeFeedbackSubmission) -> Void
+
+    @State private var issueKind: HomeFeedbackIssueKind
+    @State private var notes = ""
+    @State private var includeDiagnostics = true
+
+    init(
+        target: HomeFeedbackTarget,
+        onCancel: @escaping () -> Void,
+        onSubmit: @escaping (HomeFeedbackSubmission) -> Void
+    ) {
+        self.target = target
+        self.onCancel = onCancel
+        self.onSubmit = onSubmit
+        _issueKind = State(initialValue: target.suggestedIssue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Report an issue")
+                    .font(.system(size: 22, weight: .semibold))
+                Text(target.title)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("Issue", selection: $issueKind) {
+                ForEach(HomeFeedbackIssueKind.allCases) { kind in
+                    Text(kind.label).tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What happened?")
+                    .font(.subheadline.weight(.semibold))
+                TextEditor(text: $notes)
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(0.035))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+            }
+
+            Toggle("Include safe diagnostics", isOn: $includeDiagnostics)
+
+            Text("Transcripted attaches the capture type, time, app version, a private reference ID, and recent scrubbed logs. It does not attach transcript text, audio, file paths, meeting titles, emails, or raw URLs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                Spacer()
+                Button("Review report") {
+                    onSubmit(HomeFeedbackSubmission(
+                        target: target,
+                        issueKind: issueKind,
+                        notes: notes,
+                        includeDiagnostics: includeDiagnostics
+                    ))
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+}
+
+// MARK: - Meeting preview
+
+struct HomeMeetingPreviewSheet: View {
+    let preview: HomeMeetingPreview
+    let onOpenMarkdown: () -> Void
+    let onCopyForAgent: () -> Void
+    let onReportIssue: () -> Void
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(preview.title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .lineLimit(2)
+                    Text(HomeMeetingPreviewSheet.dateFormatter.string(from: preview.date))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            Group {
+                if let readError = preview.readError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Could not preview this meeting", systemImage: "exclamationmark.triangle")
+                            .font(.headline)
+                        Text(readError)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
+                } else {
+                    ScrollView {
+                        Text(renderedMarkdown)
+                            .font(.system(size: 13))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(18)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                }
+            }
+
+            HStack {
+                Button {
+                    onOpenMarkdown()
+                } label: {
+                    Label("Open Markdown", systemImage: "doc.text")
+                }
+
+                Button {
+                    onCopyForAgent()
+                } label: {
+                    Label("Copy for agent", systemImage: "square.on.square")
+                }
+
+                Button {
+                    onReportIssue()
+                } label: {
+                    Label("Report issue", systemImage: "flag")
+                }
+
+                Spacer()
+            }
+        }
+        .padding(24)
+        .frame(width: 680, height: 620)
+    }
+
+    private var renderedMarkdown: AttributedString {
+        (try? AttributedString(markdown: preview.markdown)) ?? AttributedString(preview.markdown)
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
 }
 
 struct HomeLoadMoreButton: View {
