@@ -28,7 +28,6 @@ public class FailedTranscriptionManager: ObservableObject {
         self.allowedAudioRoots = [
             paths.audioCaptures,
             paths.transcripts
-                .deletingLastPathComponent()
                 .appendingPathComponent("audio", isDirectory: true),
         ].map(Self.canonicalDirectoryURL)
 
