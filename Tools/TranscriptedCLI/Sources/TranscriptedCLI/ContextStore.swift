@@ -295,6 +295,36 @@ enum CLIContextStore {
         return Array(items.sorted { $0.datetime > $1.datetime }.prefix(count))
     }
 
+    static func readMeeting(filename: String, in directories: CLIContextDirectories) throws -> String {
+        let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
+        var invalidPathRequested = false
+        var markdownURL: URL?
+        for directory in directories.meetingDirs {
+            switch CLIPathSecurity.resolveReadableFile(named: requestedName, in: directory) {
+            case .valid(let safeURL):
+                markdownURL = safeURL
+            case .missing:
+                continue
+            case .invalid:
+                invalidPathRequested = true
+            }
+            if markdownURL != nil { break }
+        }
+
+        if invalidPathRequested && markdownURL == nil {
+            throw ValidationError("Invalid meeting filename: \(filename)")
+        }
+
+        guard let markdownURL,
+              let content = try? String(contentsOf: markdownURL, encoding: .utf8),
+              looksLikeCaptureMarkdown(markdownURL),
+              !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
+            throw ValidationError("Meeting not found: \(filename)")
+        }
+
+        return content
+    }
+
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
         let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
         var invalidPathRequested = false
