@@ -296,6 +296,7 @@ class DictationSessionController: ObservableObject {
         let startedAt = CFAbsoluteTimeGetCurrent()
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
+        var recoveryStartAttempts = 0
         var readinessRefreshes = 0
         var nextReadinessRefreshAt = startedAt
 
@@ -323,7 +324,12 @@ class DictationSessionController: ObservableObject {
                 anchorRect: sessionAnchorRect
             )
 
-            switch DictationReadinessWaitPolicy.action(isRecovering: isRecovering, inputFormatReady: inputFormatReady) {
+            switch DictationReadinessWaitPolicy.action(
+                isRecovering: isRecovering,
+                inputFormatReady: inputFormatReady,
+                readinessRefreshes: readinessRefreshes,
+                recoveryStartAttempts: recoveryStartAttempts
+            ) {
             case .waitForRecovery:
                 break
 
@@ -333,6 +339,58 @@ class DictationSessionController: ObservableObject {
                     readinessRefreshes += 1
                     nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
+
+            case .startRecoveryRecording:
+                startAttempts += 1
+                recoveryStartAttempts += 1
+                DiagnosticsTrail.record(
+                    logger: appState.logger,
+                    level: .warning,
+                    engine: "dictation",
+                    event: "dictation_recording_recovery_start",
+                    message: "Dictation forcing one recovery recording start after stale readiness refreshes",
+                    context: dictationContext(
+                        extra: [
+                            "attempt": "\(startAttempts)",
+                            "readiness_refreshes": "\(readinessRefreshes)",
+                            "is_recovering": "\(appState.sttRouter.isRecovering)",
+                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                        ]
+                    )
+                )
+                let started = await appState.sttRouter.startRecordingRecoveryAttempt()
+                guard !Task.isCancelled, isDictating else {
+                    if started {
+                        await appState.sttRouter.stopRecording()
+                    }
+                    return
+                }
+                if started {
+                    overlayController.state = .listening
+                    resizePanelToCompact()
+                    let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+                    appState.logger.log("DICTATION | started after forced recovery start and \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        engine: "dictation",
+                        event: "dictation_started_after_wait",
+                        message: "Dictation started after forcing a recovery recording start",
+                        context: dictationContext(
+                            extra: [
+                                "wait_ms": "\(waited)",
+                                "start_attempts": "\(startAttempts)",
+                                "readiness_refreshes": "\(readinessRefreshes)"
+                            ]
+                        )
+                    )
+                    AppSoundPlayer.shared.play(.dictationStart)
+                    installSessionTimeout()
+                    return
+                }
+
+                await appState.sttRouter.refreshInputReadiness()
+                readinessRefreshes += 1
+                nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
 
             case .startRecording:
                 startAttempts += 1
@@ -408,6 +466,7 @@ class DictationSessionController: ObservableObject {
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
                     "format_ready": "\(appState.sttRouter.inputFormatReady)",
                     "start_attempts": "\(startAttempts)",
+                    "recovery_start_attempts": "\(recoveryStartAttempts)",
                     "readiness_refreshes": "\(readinessRefreshes)"
                 ]
             )
