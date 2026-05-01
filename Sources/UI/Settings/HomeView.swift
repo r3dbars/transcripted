@@ -189,17 +189,17 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .dictation: return "Speak anywhere. It types where you were writing."
-        case .meeting: return "Record the call. Keep the notes."
+        case .dictation: return "Dictate anywhere"
+        case .meeting: return "Record meetings"
         }
     }
 
     var subtitle: String {
         switch self {
         case .dictation:
-            return "Use your shortcut, say the thought, and Transcripted pastes cleaned text back into the app you were using."
+            return "Speak once. Clean text lands back at your cursor."
         case .meeting:
-            return "Capture local mic and system audio, then turn the conversation into searchable local Markdown."
+            return "Capture the call. Save searchable local notes."
         }
     }
 
@@ -212,8 +212,8 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
 
     var learnTitle: String {
         switch self {
-        case .dictation: return "Works in any app with a text cursor."
-        case .meeting: return "Saved locally for review and agent context."
+        case .dictation: return "Works anywhere you write."
+        case .meeting: return "Saved as local Markdown."
         }
     }
 
@@ -267,14 +267,8 @@ struct HomeHeroCard: View {
     let onStartMeeting: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Label("Capture", systemImage: selectedMode.symbolName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-
                 Spacer()
 
                 Picker("", selection: $selectedMode) {
@@ -302,7 +296,7 @@ struct HomeHeroCard: View {
     }
 
     private var heroCopy: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 15) {
             VStack(alignment: .leading, spacing: 9) {
                 Text(selectedMode.title)
                     .font(.system(size: 26, weight: .semibold))
@@ -312,11 +306,11 @@ struct HomeHeroCard: View {
                 Text(selectedMode.subtitle)
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
-                    .lineSpacing(2)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Button(action: selectedAction) {
                     Label(selectedMode.actionTitle, systemImage: selectedMode.symbolName)
                         .font(.system(size: 13, weight: .semibold))
@@ -332,6 +326,7 @@ struct HomeHeroCard: View {
                 }
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -395,9 +390,6 @@ struct HomeStatsRail: View {
                         Text("\(streak) day streak")
                             .font(.subheadline.weight(.semibold))
                     }
-                    Text(streak == 1 ? "Keep it going tomorrow." : "Nice run.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -656,15 +648,8 @@ struct HomeDictationRow: View {
                 Text(preview)
                     .font(.system(size: 13))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(3)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !entry.sourceAppName.isEmpty, entry.sourceAppName != "Unknown" {
-                    Text(entry.sourceAppName)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
         }
     }
@@ -702,8 +687,7 @@ struct HomeMeetingRow: View {
                 Text(item.title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -781,11 +765,8 @@ struct HomeActivityTabsCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Recent activity")
+                    Text(selectedTab.label)
                         .font(.system(size: 15, weight: .semibold))
-                    Text(activitySubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 12)
@@ -795,7 +776,7 @@ struct HomeActivityTabsCard: View {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading recent activity")
+                    Text("Loading")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -881,15 +862,6 @@ struct HomeActivityTabsCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var activitySubtitle: String {
-        switch selectedTab {
-        case .dictations:
-            return canLoadMoreDictations ? "Showing the latest 10 dictations" : "Latest dictations"
-        case .meetings:
-            return canLoadMoreMeetings ? "Showing the latest 10 meetings" : "Latest meetings"
-        }
     }
 }
 

@@ -525,7 +525,7 @@ struct TranscriptedSettingsView: View {
         let meetings = statsService.todayRecordings
         let dictationLabel = dictations == 1 ? "dictation" : "dictations"
         let meetingLabel = meetings == 1 ? "meeting" : "meetings"
-        return "\(formattedInteger(dictations)) \(dictationLabel) today, \(formattedInteger(meetings)) \(meetingLabel) today."
+        return "\(formattedInteger(dictations)) \(dictationLabel) · \(formattedInteger(meetings)) \(meetingLabel) today"
     }
 
     private var homeStatItems: [HomeStatItem] {
@@ -538,7 +538,7 @@ struct TranscriptedSettingsView: View {
             HomeStatItem(
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
-                label: "typing saved"
+                label: "saved"
             ),
             HomeStatItem(
                 symbolName: "person.2.wave.2.fill",
@@ -548,7 +548,7 @@ struct TranscriptedSettingsView: View {
             HomeStatItem(
                 symbolName: "clock.fill",
                 value: statsService.formattedTotalHours,
-                label: "meeting hours"
+                label: "hours"
             )
         ]
     }
