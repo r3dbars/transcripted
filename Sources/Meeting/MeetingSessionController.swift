@@ -230,6 +230,7 @@ final class MeetingSessionController: ObservableObject {
             diarization: services.diarization,
             speakerStore: services.speakerStore,
             speakerClipsDirectory: storagePaths.speakerClips,
+            cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
             statsStore: statsDatabase
         )

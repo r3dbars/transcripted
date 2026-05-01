@@ -57,10 +57,10 @@ extension TranscriptionTaskManager {
                 transcriptURL,
                 transcriptId: transcriptId
             ) else {
-                SpeakerClipExtractor.cleanupClips(clips)
+                self?.cleanupSpeakerClips(clips)
                 if shouldRemoveTemporaryAudio {
-                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                    self?.removeManagedCleanupFile(micURL, label: "mic audio")
+                    self?.removeManagedCleanupFile(systemURL, label: "system audio")
                 }
 
                 Task { @MainActor in
@@ -79,10 +79,10 @@ extension TranscriptionTaskManager {
                 clipsBySpeakerId: clipsBySpeakerId,
                 speakerDB: speakerDB
             ) else {
-                SpeakerClipExtractor.cleanupClips(clips)
+                self?.cleanupSpeakerClips(clips)
                 if shouldRemoveTemporaryAudio {
-                    Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                    Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                    self?.removeManagedCleanupFile(micURL, label: "mic audio")
+                    self?.removeManagedCleanupFile(systemURL, label: "system audio")
                 }
 
                 Task { @MainActor in
@@ -134,10 +134,10 @@ extension TranscriptionTaskManager {
                 )
             }
 
-            SpeakerClipExtractor.cleanupClips(clips)
+            self?.cleanupSpeakerClips(clips)
             if shouldRemoveTemporaryAudio {
-                Self.removeTemporaryAudioFile(micURL, label: "mic audio")
-                Self.removeTemporaryAudioFile(systemURL, label: "system audio")
+                self?.removeManagedCleanupFile(micURL, label: "mic audio")
+                self?.removeManagedCleanupFile(systemURL, label: "system audio")
             }
 
             Task { @MainActor in
@@ -156,12 +156,24 @@ extension TranscriptionTaskManager {
     public func cleanupPendingNaming() {
         if let request = speakerNamingRequest {
             if request.shouldRemoveTemporaryAudioOnCleanup {
-                Self.removeTemporaryAudioFile(request.micAudioURL, label: "pending mic audio")
-                Self.removeTemporaryAudioFile(request.systemAudioURL, label: "pending system audio")
+                removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
+                removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
             }
-            SpeakerClipExtractor.cleanupClips(request.speakers)
+            cleanupSpeakerClips(request.speakers)
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
+        }
+    }
+
+    private func cleanupSpeakerClips(_ clips: [SpeakerNamingEntry]) {
+        for clip in clips {
+            removeManagedCleanupFile(clip.clipURL, label: "speaker naming clip")
+        }
+    }
+
+    private func cleanupSpeakerClips(_ clips: [ClipResult]) {
+        for clip in clips {
+            removeManagedCleanupFile(clip.clipURL, label: "temporary clip")
         }
     }
 
@@ -376,19 +388,6 @@ extension TranscriptionTaskManager {
             }
             .sorted { $0.callCount > $1.callCount }
             .first
-    }
-
-    nonisolated private static func removeTemporaryAudioFile(_ url: URL?, label: String) {
-        guard let url else { return }
-        do {
-            try FileManager.default.removeItem(at: url)
-        } catch {
-            AppLogger.pipeline.warning("Failed to remove temporary audio file", [
-                "label": label,
-                "file": url.lastPathComponent,
-                "error": error.localizedDescription
-            ])
-        }
     }
 
     nonisolated private static func normalizeSpeakerName(_ name: String?) -> String {

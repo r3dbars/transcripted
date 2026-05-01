@@ -101,6 +101,20 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(message, "System audio required")
     }
 
+    func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
+        let manager = makeManager()
+        let externalURL = tempDirectory.appendingPathComponent("outside.wav")
+        try writeMonoWAV(to: externalURL, duration: 2.5)
+
+        manager.activeTasks[UUID()] = Task {}
+        manager.startImportedTranscription(
+            audioURL: externalURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
     private func makeManager(
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil
@@ -124,6 +138,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             speechToText: MetadataStubSpeechToTextEngine(),
             diarization: MetadataStubDiarizationEngine(),
             speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
+            cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
             retainedAudioDirectory: retainedAudioDirectory,
             retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
         )
