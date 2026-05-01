@@ -60,6 +60,7 @@ struct TranscriptedSettingsView: View {
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeActivityTab: HomeActivityTab = .dictations
+    @State private var homeHeroMode: HomeHeroMode = .dictation
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -261,15 +262,12 @@ struct TranscriptedSettingsView: View {
                     }
 
                     HomeHeroCard(
-                        primaryTitle: "Start Dictation",
-                        primarySubtitle: "Press your dictation shortcut and speak. Transcripted pastes the text into any app you're using. Capture what you say anywhere you write.",
-                        primaryAction: {
+                        selectedMode: $homeHeroMode,
+                        onStartDictation: {
                             trackSettingsAction("start_dictation", page: .home)
                             actions.startDictation()
                         },
-                        secondaryTitle: "Record a Meeting",
-                        secondarySubtitle: "Record a meeting to capture the conversation, transcribe it, and save notes you can review or reuse later.",
-                        secondaryAction: {
+                        onStartMeeting: {
                             trackSettingsAction("start_meeting", page: .home)
                             actions.startMeeting()
                         }
