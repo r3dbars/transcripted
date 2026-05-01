@@ -175,10 +175,12 @@ enum HomeActivityTab: String, CaseIterable, Identifiable {
 }
 
 enum HomeHeroMode: String, CaseIterable, Identifiable {
-    case dictation
     case meeting
+    case dictation
 
     var id: String { rawValue }
+
+    static let tabOrder: [HomeHeroMode] = [.meeting, .dictation]
 
     var switchTitle: String {
         switch self {
@@ -261,22 +263,42 @@ struct HomeWelcomeHeader: View {
 
 // MARK: - Hero card
 
-struct HomeHeroCard: View {
+struct HomeHeroCard<ActivityContent: View>: View {
     @Binding var selectedMode: HomeHeroMode
     let onStartDictation: () -> Void
     let onStartMeeting: () -> Void
+    private let activityContent: () -> ActivityContent
+
+    init(
+        selectedMode: Binding<HomeHeroMode>,
+        onStartDictation: @escaping () -> Void,
+        onStartMeeting: @escaping () -> Void,
+        @ViewBuilder activityContent: @escaping () -> ActivityContent
+    ) {
+        _selectedMode = selectedMode
+        self.onStartDictation = onStartDictation
+        self.onStartMeeting = onStartMeeting
+        self.activityContent = activityContent
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.leading, 20)
+                .padding(.leading, 36)
                 .padding(.bottom, -1)
                 .zIndex(1)
 
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 22) {
                 heroCopy
+
+                Divider()
+                    .opacity(0.55)
+
+                activityContent()
             }
-            .padding(24)
+            .padding(.top, 26)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -344,7 +366,7 @@ private struct HomeHeroModeTabs: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            ForEach(HomeHeroMode.allCases) { mode in
+            ForEach(HomeHeroMode.tabOrder) { mode in
                 HomeHeroModeTab(
                     mode: mode,
                     isSelected: selectedMode == mode,
@@ -373,9 +395,9 @@ private struct HomeHeroModeTab: View {
                     .font(.system(size: 13, weight: .semibold))
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-            .padding(.horizontal, 15)
-            .padding(.top, isSelected ? 11 : 9)
-            .padding(.bottom, isSelected ? 10 : 8)
+            .padding(.horizontal, 18)
+            .padding(.top, isSelected ? 12 : 10)
+            .padding(.bottom, isSelected ? 11 : 9)
             .background(
                 HomeHeroTabShape(cornerRadius: 12)
                     .fill(tabFill)
@@ -915,16 +937,7 @@ struct HomeActivityTabsCard: View {
                 }
             }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 
     @ViewBuilder
@@ -944,14 +957,6 @@ struct HomeActivityTabsCard: View {
                 getID: getID,
                 row: row
             )
-
-            if canLoadMore {
-                HomeLoadMoreButton(
-                    title: loadMoreTitle,
-                    isLoading: isLoadingMore,
-                    action: loadMoreAction
-                )
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

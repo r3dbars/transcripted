@@ -59,8 +59,8 @@ struct TranscriptedSettingsView: View {
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @StateObject private var homeViewModel = HomeViewModel()
-    @State private var homeActivityTab: HomeActivityTab = .dictations
-    @State private var homeHeroMode: HomeHeroMode = .dictation
+    @State private var homeActivityTab: HomeActivityTab = .meetings
+    @State private var homeHeroMode: HomeHeroMode = .meeting
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -271,7 +271,54 @@ struct TranscriptedSettingsView: View {
                             trackSettingsAction("start_meeting", page: .home)
                             actions.startMeeting()
                         }
-                    )
+                    ) {
+                        HomeActivityTabsCard(
+                            selectedTab: homeActivityTab,
+                            dictationSections: homeViewModel.dictationDaySections,
+                            meetingSections: homeViewModel.meetingDaySections,
+                            isLoading: homeViewModel.isLoading,
+                            isLoadingMore: homeViewModel.isLoadingMore,
+                            canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
+                            canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
+                            copiedRowID: homeCopiedRowID,
+                            onOpenDictation: { entry in
+                                trackSettingsAction("open_recent_dictation", page: .home)
+                                NSWorkspace.shared.open(entry.url)
+                            },
+                            onCopyDictation: { entry in
+                                handleCopyDictation(entry)
+                            },
+                            onFlagDictation: { _ in
+                                trackSettingsAction("flag_dictation", page: .home)
+                                actions.sendFeedback()
+                            },
+                            dictationMenuItems: { entry in
+                                dictationRowMenuItems(for: entry)
+                            },
+                            onOpenMeeting: { item in
+                                trackSettingsAction("open_recent_meeting", page: .home)
+                                NSWorkspace.shared.open(item.transcriptURL)
+                            },
+                            onCopyMeeting: { item in
+                                handleCopyMeeting(item)
+                            },
+                            onFlagMeeting: { _ in
+                                trackSettingsAction("flag_meeting", page: .home)
+                                actions.sendFeedback()
+                            },
+                            meetingMenuItems: { item in
+                                meetingRowMenuItems(for: item)
+                            },
+                            onLoadMoreDictations: {
+                                trackSettingsAction("load_more_dictations", page: .home)
+                                homeViewModel.loadMoreDictations()
+                            },
+                            onLoadMoreMeetings: {
+                                trackSettingsAction("load_more_meetings", page: .home)
+                                homeViewModel.loadMoreMeetings()
+                            }
+                        )
+                    }
 
                     if let activity = homeTranscriptionActivity {
                         SettingsActivityCard(
@@ -310,53 +357,6 @@ struct TranscriptedSettingsView: View {
                         .frame(width: 200, alignment: .topLeading)
                 }
             }
-
-            HomeActivityTabsCard(
-                selectedTab: homeActivityTab,
-                dictationSections: homeViewModel.dictationDaySections,
-                meetingSections: homeViewModel.meetingDaySections,
-                isLoading: homeViewModel.isLoading,
-                isLoadingMore: homeViewModel.isLoadingMore,
-                canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
-                canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
-                copiedRowID: homeCopiedRowID,
-                onOpenDictation: { entry in
-                    trackSettingsAction("open_recent_dictation", page: .home)
-                    NSWorkspace.shared.open(entry.url)
-                },
-                onCopyDictation: { entry in
-                    handleCopyDictation(entry)
-                },
-                onFlagDictation: { _ in
-                    trackSettingsAction("flag_dictation", page: .home)
-                    actions.sendFeedback()
-                },
-                dictationMenuItems: { entry in
-                    dictationRowMenuItems(for: entry)
-                },
-                onOpenMeeting: { item in
-                    trackSettingsAction("open_recent_meeting", page: .home)
-                    NSWorkspace.shared.open(item.transcriptURL)
-                },
-                onCopyMeeting: { item in
-                    handleCopyMeeting(item)
-                },
-                onFlagMeeting: { _ in
-                    trackSettingsAction("flag_meeting", page: .home)
-                    actions.sendFeedback()
-                },
-                meetingMenuItems: { item in
-                    meetingRowMenuItems(for: item)
-                },
-                onLoadMoreDictations: {
-                    trackSettingsAction("load_more_dictations", page: .home)
-                    homeViewModel.loadMoreDictations()
-                },
-                onLoadMoreMeetings: {
-                    trackSettingsAction("load_more_meetings", page: .home)
-                    homeViewModel.loadMoreMeetings()
-                }
-            )
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
         .onChange(of: homeActivityTab) { _, newValue in
