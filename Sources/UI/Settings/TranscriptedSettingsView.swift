@@ -247,115 +247,104 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
-        let useWideLayout = homeShouldUseWideLayout
 
         return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 20) {
-                VStack(alignment: .leading, spacing: 18) {
-                    HomeWelcomeHeader(
-                        name: homeViewModel.welcomeName,
-                        summary: homeWelcomeSummary
-                    )
-
-                    if !useWideLayout {
-                        HomeStatsStrip(stats: stats, streak: homeStreak)
-                    }
-
-                    HomeHeroCard(
-                        selectedMode: homeHeroModeSelection,
-                        onStartDictation: {
-                            trackSettingsAction("start_dictation", page: .home)
-                            actions.startDictation()
-                        },
-                        onStartMeeting: {
-                            trackSettingsAction("start_meeting", page: .home)
-                            actions.startMeeting()
-                        }
-                    ) {
-                        HomeActivityTabsCard(
-                            selectedTab: homeActivityTab,
-                            dictationSections: homeViewModel.dictationDaySections,
-                            meetingSections: homeViewModel.meetingDaySections,
-                            isLoading: homeViewModel.isLoading,
-                            isLoadingMore: homeViewModel.isLoadingMore,
-                            canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
-                            canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
-                            copiedRowID: homeCopiedRowID,
-                            onOpenDictation: { entry in
-                                trackSettingsAction("open_recent_dictation", page: .home)
-                                NSWorkspace.shared.open(entry.url)
-                            },
-                            onCopyDictation: { entry in
-                                handleCopyDictation(entry)
-                            },
-                            onFlagDictation: { _ in
-                                trackSettingsAction("flag_dictation", page: .home)
-                                actions.sendFeedback()
-                            },
-                            dictationMenuItems: { entry in
-                                dictationRowMenuItems(for: entry)
-                            },
-                            onOpenMeeting: { item in
-                                trackSettingsAction("open_recent_meeting", page: .home)
-                                NSWorkspace.shared.open(item.transcriptURL)
-                            },
-                            onCopyMeeting: { item in
-                                handleCopyMeeting(item)
-                            },
-                            onFlagMeeting: { _ in
-                                trackSettingsAction("flag_meeting", page: .home)
-                                actions.sendFeedback()
-                            },
-                            meetingMenuItems: { item in
-                                meetingRowMenuItems(for: item)
-                            },
-                            onLoadMoreDictations: {
-                                trackSettingsAction("load_more_dictations", page: .home)
-                                homeViewModel.loadMoreDictations()
-                            },
-                            onLoadMoreMeetings: {
-                                trackSettingsAction("load_more_meetings", page: .home)
-                                homeViewModel.loadMoreMeetings()
-                            }
-                        )
-                    }
-
-                    if let activity = homeTranscriptionActivity {
-                        SettingsActivityCard(
-                            symbolName: activity.symbolName,
-                            title: activity.title,
-                            status: activity.status,
-                            detail: activity.detail,
-                            tone: activity.tone,
-                            progress: activity.progress,
-                            actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
-                            action: activity.transcriptURL.map { transcriptURL in
-                                {
-                                    trackSettingsAction("open_current_activity", page: .home)
-                                    NSWorkspace.shared.open(transcriptURL)
-                                }
-                            }
-                        )
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-
-                    if !needsAttention.isEmpty {
-                        HomeNeedsAttentionCard(
-                            issues: needsAttention,
-                            onOpenPrivacy: {
-                                trackSettingsAction("open_needs_attention", page: .home)
-                                navigation.selectedPage = .privacy
-                            }
-                        )
-                    }
-
-                }
+                HomeWelcomeHeader(
+                    name: homeViewModel.welcomeName,
+                    summary: homeWelcomeSummary
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                if useWideLayout {
-                    HomeStatsRail(header: "Overall", stats: stats, streak: homeStreak)
-                        .frame(width: 200, alignment: .topLeading)
+                HomeStatsTopCard(stats: stats, streak: homeStreak)
+            }
+
+            HomeHeroCard(
+                selectedMode: homeHeroModeSelection,
+                onStartDictation: {
+                    trackSettingsAction("start_dictation", page: .home)
+                    actions.startDictation()
+                },
+                onStartMeeting: {
+                    trackSettingsAction("start_meeting", page: .home)
+                    actions.startMeeting()
                 }
+            ) {
+                HomeActivityTabsCard(
+                    selectedTab: homeActivityTab,
+                    dictationSections: homeViewModel.dictationDaySections,
+                    meetingSections: homeViewModel.meetingDaySections,
+                    isLoading: homeViewModel.isLoading,
+                    isLoadingMore: homeViewModel.isLoadingMore,
+                    canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
+                    canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
+                    copiedRowID: homeCopiedRowID,
+                    onOpenDictation: { entry in
+                        trackSettingsAction("open_recent_dictation", page: .home)
+                        NSWorkspace.shared.open(entry.url)
+                    },
+                    onCopyDictation: { entry in
+                        handleCopyDictation(entry)
+                    },
+                    onFlagDictation: { _ in
+                        trackSettingsAction("flag_dictation", page: .home)
+                        actions.sendFeedback()
+                    },
+                    dictationMenuItems: { entry in
+                        dictationRowMenuItems(for: entry)
+                    },
+                    onOpenMeeting: { item in
+                        trackSettingsAction("open_recent_meeting", page: .home)
+                        NSWorkspace.shared.open(item.transcriptURL)
+                    },
+                    onCopyMeeting: { item in
+                        handleCopyMeeting(item)
+                    },
+                    onFlagMeeting: { _ in
+                        trackSettingsAction("flag_meeting", page: .home)
+                        actions.sendFeedback()
+                    },
+                    meetingMenuItems: { item in
+                        meetingRowMenuItems(for: item)
+                    },
+                    onLoadMoreDictations: {
+                        trackSettingsAction("load_more_dictations", page: .home)
+                        homeViewModel.loadMoreDictations()
+                    },
+                    onLoadMoreMeetings: {
+                        trackSettingsAction("load_more_meetings", page: .home)
+                        homeViewModel.loadMoreMeetings()
+                    }
+                )
+            }
+
+            if let activity = homeTranscriptionActivity {
+                SettingsActivityCard(
+                    symbolName: activity.symbolName,
+                    title: activity.title,
+                    status: activity.status,
+                    detail: activity.detail,
+                    tone: activity.tone,
+                    progress: activity.progress,
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    action: activity.transcriptURL.map { transcriptURL in
+                        {
+                            trackSettingsAction("open_current_activity", page: .home)
+                            NSWorkspace.shared.open(transcriptURL)
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if !needsAttention.isEmpty {
+                HomeNeedsAttentionCard(
+                    issues: needsAttention,
+                    onOpenPrivacy: {
+                        trackSettingsAction("open_needs_attention", page: .home)
+                        navigation.selectedPage = .privacy
+                    }
+                )
             }
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
@@ -514,10 +503,6 @@ struct TranscriptedSettingsView: View {
             title: title,
             message: error.localizedDescription
         )
-    }
-
-    private var homeShouldUseWideLayout: Bool {
-        true
     }
 
     private var homeWelcomeSummary: String {

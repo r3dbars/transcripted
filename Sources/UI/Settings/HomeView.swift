@@ -456,106 +456,73 @@ private struct HomeHeroTabShape: Shape {
 
 // MARK: - Stats rail
 
-struct HomeStatsRail: View {
-    let header: String
+struct HomeStatsTopCard: View {
     let stats: [HomeStatItem]
     let streak: Int?
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(header)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.6)
+    private let columns = [
+        GridItem(.flexible(minimum: 86), spacing: 12),
+        GridItem(.flexible(minimum: 86), spacing: 12)
+    ]
 
-            VStack(alignment: .leading, spacing: 12) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Text("Overall")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+
+                Spacer(minLength: 10)
+
+                if let streak, streak > 0 {
+                    HStack(spacing: 5) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text("\(streak)d")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.primary)
+                }
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                 ForEach(stats) { stat in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(spacing: 8) {
                         ZStack {
                             Circle()
                                 .fill(Color.primary.opacity(0.06))
                             Image(systemName: stat.symbolName)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }
-                        .frame(width: 26, height: 26)
-                        .padding(.top, 1)
+                        .frame(width: 24, height: 24)
 
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(stat.value)
-                                .font(.system(size: 20, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.primary)
+                                .lineLimit(1)
                             Text(stat.label)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                    }
-                }
-            }
-
-            if let streak, streak > 0 {
-                Divider()
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.orange)
-                        Text("\(streak) day streak")
-                            .font(.subheadline.weight(.semibold))
                     }
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .frame(width: 286, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-// MARK: - Inline stats strip (narrow layout fallback)
-
-struct HomeStatsStrip: View {
-    let stats: [HomeStatItem]
-    let streak: Int?
-
-    var body: some View {
-        HStack(spacing: 22) {
-            ForEach(stats) { stat in
-                VStack(alignment: .leading, spacing: 2) {
-                    Label(stat.value, systemImage: stat.symbolName)
-                        .font(.system(size: 18, weight: .semibold))
-                    Text(stat.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let streak, streak > 0 {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "flame.fill")
-                            .foregroundStyle(.orange)
-                        Text("\(streak)")
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                    Text("day streak")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
         )
     }
 }
