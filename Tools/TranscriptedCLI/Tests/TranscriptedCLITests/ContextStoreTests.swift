@@ -331,6 +331,7 @@ final class ContextStoreTests: XCTestCase {
 
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items.first?.title, "Duplicate names")
+        XCTAssertEqual(items.first?.speakers, ["Alex"])
     }
 
     func testReadDictationRejectsParentTraversal() throws {

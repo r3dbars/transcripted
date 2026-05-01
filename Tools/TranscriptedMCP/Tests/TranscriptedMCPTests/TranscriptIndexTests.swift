@@ -283,6 +283,30 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(result.items.first?.preview, "Good morning everyone")
     }
 
+    func testRecentContextDeduplicatesSpeakerNames() throws {
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-03-29T10:00:00-0500",
+                speakers: [
+                    ("system_0", "Alex", "80FB272B-6061-4FC4-8408-3F7A974C59DB"),
+                    ("system_1", "Alex", "4F57C98D-B6B7-449F-95B9-3521FA99D7DA"),
+                ],
+                utterances: [
+                    ("system_0", 0.0, 5.0, "First shared name"),
+                    ("system_1", 5.0, 10.0, "Second shared name"),
+                ]
+            ),
+            filename: "Call_2026-03-29_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .meeting, count: 10)
+
+        XCTAssertEqual(result.items.count, 1)
+        XCTAssertEqual(result.items.first?.speakers, ["Alex"])
+    }
+
     func testRecentContextEmptyMeetingUsesExplicitPreview() throws {
         try writeFixture(
             makeFixtureJSON(

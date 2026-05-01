@@ -389,7 +389,7 @@ enum CLIContextStore {
                 date: String(transcript.recording.date.prefix(10)),
                 datetime: transcript.recording.date,
                 wordCount: transcript.speakers.reduce(0) { $0 + $1.wordCount },
-                speakers: transcript.speakers.map(\.name),
+                speakers: uniqueSpeakerNames(from: transcript.speakers.map(\.name)),
                 utterances: transcript.utterances.map { utterance in
                     CLIUtterance(
                         start: utterance.start,
@@ -530,6 +530,19 @@ enum CLIContextStore {
 
     private static func speakerMatches(filter: String, speakerName: String) -> Bool {
         speakerName.localizedCaseInsensitiveContains(filter)
+    }
+
+    private static func uniqueSpeakerNames(from names: [String]) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+
+        for name in names {
+            let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(name)
+        }
+
+        return ordered
     }
 
     private struct ParsedFrontmatter {
