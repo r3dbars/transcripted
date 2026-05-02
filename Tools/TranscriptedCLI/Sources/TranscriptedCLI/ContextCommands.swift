@@ -123,6 +123,22 @@ struct ListDictations: ParsableCommand {
     }
 }
 
+struct ReadMeeting: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "read-meeting",
+        abstract: "Read a saved meeting transcript."
+    )
+
+    @Argument(help: "Meeting filename, with or without .md.")
+    var filename: String
+
+    @OptionGroup var paths: CLIContextPathOptions
+
+    func run() throws {
+        print(try CLIContextStore.readMeeting(filename: filename, in: paths.resolved))
+    }
+}
+
 struct ReadDictation: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "read-dictation",

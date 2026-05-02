@@ -10,6 +10,7 @@ It does not build or run the app target.
 
 - `transcripted-cli context-recent` — list recent meetings and dictations
 - `transcripted-cli context-search <query>` — search across saved meetings and dictations, including meeting titles and speaker names
+- `transcripted-cli read-meeting <filename>` — read one saved meeting transcript
 - `transcripted-cli list-dictations` — list saved dictation day files
 - `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
 
@@ -43,7 +44,7 @@ They also honor:
 |------|---------|
 | `Package.swift` | Swift package manifest; links against repo dependency artifacts |
 | `TranscriptedCLI.swift` | `@main` command root and subcommand registration |
-| `ContextCommands.swift` | CLI entry points for recent/search/dictation commands |
+| `ContextCommands.swift` | CLI entry points for recent/search/read context commands |
 | `ContextStore.swift` | Shared file-loading and filtering logic for local context |
 | `ContextModels.swift` | Codable models used by the context commands |
 | `DiarizeCommand.swift` | Single-file diarization command |
@@ -67,6 +68,7 @@ swift build
 swift test
 swift run transcripted-cli context-recent
 swift run transcripted-cli context-search "roadmap"
+swift run transcripted-cli read-meeting "Product review"
 swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
@@ -80,6 +82,7 @@ on SwiftPM again:
 ./.build/debug/transcripted-cli context-recent --count 10
 ./.build/debug/transcripted-cli context-recent --kind meeting --count 3
 ./.build/debug/transcripted-cli context-search "Linus" --kind meeting --speaker "Linus" --count 5
+./.build/debug/transcripted-cli read-meeting "Call_2026-04-29_09-15-00"
 ./.build/debug/transcripted-cli list-dictations --date-from 2026-04-29 --date-to 2026-04-29
 ./.build/debug/transcripted-cli read-dictation Dictations_2026-04-29
 ```
@@ -88,6 +91,7 @@ What these are good for:
 
 - latest mixed context: `context-recent`
 - latest meeting only: `context-recent --kind meeting`
+- full meeting markdown: `read-meeting` with the filename returned by `context-recent --kind meeting`
 - meetings by speaker or topic: `context-search <query> --kind meeting --speaker <name>`
 - dictations by day: `list-dictations --date-from YYYY-MM-DD --date-to YYYY-MM-DD`, then `read-dictation`
 

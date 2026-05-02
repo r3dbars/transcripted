@@ -354,6 +354,49 @@ final class ContextStoreTests: XCTestCase {
         ))
     }
 
+    func testReadMeetingReturnsMarkdownFromAllowedMeetingDirectory() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let markdown = makeMeetingMarkdown(title: "Product review", date: "2026-04-18", body: "[00:03] [Mic/You] Ship the agent path.")
+        try markdown.write(
+            to: meetingsDir.appendingPathComponent("Product review.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let content = try CLIContextStore.readMeeting(
+            filename: "Product review",
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        )
+
+        XCTAssertEqual(content, markdown)
+    }
+
+    func testReadMeetingRejectsParentTraversal() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let outsideDir = root.appendingPathComponent("outside", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+        try makeMeetingMarkdown(title: "Escaped", date: "2026-04-18", body: "[00:03] [Mic/You] escaped content")
+            .write(to: outsideDir.appendingPathComponent("Escaped.md"), atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try CLIContextStore.readMeeting(
+            filename: "../outside/Escaped.md",
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        ))
+    }
+
     func testReadDictationRejectsSymlinkEscape() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }
