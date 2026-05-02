@@ -74,6 +74,22 @@ final class CrashReporter {
         )
     }
 
+    @discardableResult
+    func captureSupportDiagnosticEvent(extra: [String: String]) -> String? {
+        captureMessageEvent(
+            level: .warning,
+            title: "support_diagnostic_event",
+            message: "Manual support diagnostic event from Transcripted Settings",
+            tags: [
+                "source": "support_diagnostics",
+                "engine": "support",
+                "event": "diagnostic_event",
+            ],
+            extra: extra,
+            fingerprint: ["support", "diagnostic_event"]
+        )
+    }
+
     func captureObservabilityEvent(
         level: EventLevel,
         engine: String,

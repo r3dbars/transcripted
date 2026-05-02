@@ -11,6 +11,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case storage
     case connectAgent
     case privacy
+    case support
     case about
 
     var id: String { rawValue }
@@ -36,6 +37,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
         case .privacy: return "Privacy"
+        case .support: return "Support"
         case .about: return "About"
         }
     }
@@ -62,8 +64,10 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
             return "One prompt, plus direct paths."
         case .privacy:
             return "Permissions and optional reporting."
+        case .support:
+            return "Feedback and diagnostics."
         case .about:
-            return "Version, updates, and support."
+            return "Version and updates."
         }
     }
 
@@ -79,6 +83,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
         case .privacy: return "lock.shield.fill"
+        case .support: return "questionmark.bubble.fill"
         case .about: return "info.circle.fill"
         }
     }

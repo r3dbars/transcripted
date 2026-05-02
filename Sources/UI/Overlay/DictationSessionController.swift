@@ -124,6 +124,7 @@ class DictationSessionController: ObservableObject {
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         currentDictationTrigger = trigger
         lastCompletedText = nil
+        appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -189,19 +190,23 @@ class DictationSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "dictation_started",
-            properties: [
-                "trigger": trigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "trigger": trigger.rawValue,
+                ]
+            )
         )
     }
 
     private func trackDictationStartFailed(_ failureKind: String) {
         AnalyticsReporter.track(
             "dictation_start_failed",
-            properties: [
-                "failure_kind": failureKind,
-                "trigger": currentDictationTrigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "failure_kind": failureKind,
+                    "trigger": currentDictationTrigger.rawValue,
+                ]
+            )
         )
     }
 
@@ -265,6 +270,7 @@ class DictationSessionController: ObservableObject {
                     self.recordingStartRetryTask = nil
                     overlayController.state = .listening
                     self.resizePanelToCompact()
+                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                     appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
                     AppSoundPlayer.shared.play(.dictationStart)
                     self.installSessionTimeout()
@@ -358,6 +364,7 @@ class DictationSessionController: ObservableObject {
                 if started {
                     overlayController.state = .listening
                     resizePanelToCompact()
+                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
                     let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
                     appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
@@ -426,6 +433,16 @@ class DictationSessionController: ObservableObject {
             )
         )
         trackDictationStartFailed("microphone_start_timeout")
+        appState.runtimeDiagnostics.recordStall(
+            kind: "dictation",
+            stage: "microphone_start_timeout",
+            durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
+            extra: [
+                "format_ready": "\(appState.sttRouter.inputFormatReady)",
+                "recovering": "\(appState.sttRouter.isRecovering)"
+            ]
+        )
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_start_timeout")
         isDictating = false
         overlayController.showError(
             microphoneTimeoutMessage(
@@ -461,6 +478,7 @@ class DictationSessionController: ObservableObject {
             )
         )
         trackDictationStartFailed(dictationStartFailureKind(for: status))
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "start_failed")
         if !overlayController.isVisible {
             overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
         }
@@ -566,6 +584,7 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         streamingTask = Task {
+            appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             await appState.sttRouter.stopRecording()
 
             // Surface model warmup honestly instead of calling it "Transcribing"
@@ -583,30 +602,45 @@ class DictationSessionController: ObservableObject {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("Voice model failed to load")
                     isDictating = false
+                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return
                 }
             }
             overlayController.state = .drafting
+            appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled else { return }
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "no_voice_input",
-                    message: "Dictation transcription empty")
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "overlay",
+                    event: "no_voice_input",
+                    message: "Dictation transcription empty",
+                    context: self.dictationContext(
+                        extra: [
+                            "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
+                            "trigger": self.currentDictationTrigger.rawValue
+                        ]
+                    )
+                )
                 AnalyticsReporter.track(
                     "dictation_no_speech",
-                    properties: [
-                        "duration_bucket": AnalyticsReporter.durationBucket(
-                            seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
-                        ),
-                        "trigger": currentDictationTrigger.rawValue,
-                    ]
+                    properties: self.dictationAnalyticsProperties(
+                        extra: [
+                            "duration_bucket": AnalyticsReporter.durationBucket(
+                                seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
+                            ),
+                            "trigger": currentDictationTrigger.rawValue,
+                        ]
+                    )
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss()
                 isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "no_speech")
                 return
             }
 
@@ -662,14 +696,17 @@ class DictationSessionController: ObservableObject {
             }
             AnalyticsReporter.track(
                 "dictation_completed",
-                properties: [
-                    "delivery": pasteOutcome.delivery.rawValue,
-                    "auto_send": autoSendOutcome.diagnosticName,
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                    "trigger": currentDictationTrigger.rawValue,
-                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
-                ]
+                properties: self.dictationAnalyticsProperties(
+                    extra: [
+                        "delivery": pasteOutcome.delivery.rawValue,
+                        "auto_send": autoSendOutcome.diagnosticName,
+                        "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                        "trigger": currentDictationTrigger.rawValue,
+                        "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+                    ]
+                )
             )
+            appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
         }
     }
 
@@ -680,6 +717,7 @@ class DictationSessionController: ObservableObject {
         AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "cancelled")
         appState.logger.log("DICTATION | cancelled")
         DiagnosticsTrail.record(
             logger: appState.logger,
@@ -699,10 +737,12 @@ class DictationSessionController: ObservableObject {
         }
         AnalyticsReporter.track(
             "dictation_cancelled",
-            properties: [
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                "trigger": currentDictationTrigger.rawValue,
-            ]
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    "trigger": currentDictationTrigger.rawValue,
+                ]
+            )
         )
     }
 
@@ -759,6 +799,7 @@ class DictationSessionController: ObservableObject {
                 case .failed(let message):
                     self.startupTask = nil
                     self.isDictating = false
+                    appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                     overlayController.showError(
                         "Dictation couldn't start: \(message)",
                         actionTitle: "Retry Dictation",
@@ -781,6 +822,13 @@ class DictationSessionController: ObservableObject {
             guard !Task.isCancelled else { return }
             self.startupTask = nil
             self.isDictating = false
+            appState.runtimeDiagnostics.recordStall(
+                kind: "dictation",
+                stage: "model_load_timeout",
+                durationSeconds: Double(TranscriptedConstants.modelLoadMaxIterations)
+                    * Double(TranscriptedConstants.modelLoadPollInterval) / 1_000_000_000
+            )
+            appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
             overlayController.showError(
                 "Dictation is still loading. Please try again in a moment.",
                 actionTitle: "Retry Dictation",
@@ -952,6 +1000,7 @@ class DictationSessionController: ObservableObject {
     private func handleDictationInterruption() {
         cancelActiveTasks(cancelRecording: true)
         isDictating = false
+        appState?.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "interrupted")
         appState?.logger.log("DICTATION | interrupted")
         DiagnosticsTrail.record(
             logger: appState?.logger,
@@ -1086,12 +1135,25 @@ class DictationSessionController: ObservableObject {
         var context: [String: String] = [
             "audio_device": appState?.sttRouter.inputDeviceName ?? ""
         ]
+        if let routeContext = appState?.sttRouter.dictationAudioRouteAnalyticsContext {
+            for (key, value) in routeContext {
+                context[key] = value
+            }
+        }
 
         for (key, value) in extra {
             context[key] = value
         }
 
         return context
+    }
+
+    private func dictationAnalyticsProperties(extra: [String: String] = [:]) -> [String: String] {
+        var properties = appState?.sttRouter.dictationAudioRouteAnalyticsContext ?? [:]
+        for (key, value) in extra {
+            properties[key] = value
+        }
+        return properties
     }
 }
 

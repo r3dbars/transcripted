@@ -10,6 +10,16 @@ struct SentryEventPolicy: Equatable {
     }
 
     private static let allowedPolicies: [String: SentryEventPolicy] = [
+        "app.unclean_shutdown_detected": .init(
+            engine: "app",
+            event: "unclean_shutdown_detected",
+            summary: "Previous app session did not shut down cleanly."
+        ),
+        "app.session_stall_detected": .init(
+            engine: "app",
+            event: "session_stall_detected",
+            summary: "Transcripted detected a stalled runtime session."
+        ),
         "parakeet.model_init_failed": .init(
             engine: "parakeet",
             event: "model_init_failed",
@@ -64,6 +74,16 @@ struct SentryEventPolicy: Equatable {
             engine: "dictation",
             event: "microphone_start_timeout",
             summary: "Dictation microphone start timed out."
+        ),
+        "parakeet.device_change_recovery_timeout": .init(
+            engine: "parakeet",
+            event: "device_change_recovery_timeout",
+            summary: "Speech engine device-change recovery timed out."
+        ),
+        "parakeet.recording_interrupted": .init(
+            engine: "parakeet",
+            event: "recording_interrupted",
+            summary: "Dictation recording was interrupted by audio device recovery."
         ),
         "meeting.meeting_start_failed": .init(
             engine: "meeting",

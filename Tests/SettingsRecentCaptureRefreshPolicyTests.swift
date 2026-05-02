@@ -23,7 +23,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
-        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .about] {
+        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .none,

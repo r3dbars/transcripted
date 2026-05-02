@@ -40,6 +40,7 @@ App-owned meeting state is stored separately under:
 - speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`
 - stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
+- runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
 
 Claude Desktop integration installs the bundled read-only MCP helper under:
 

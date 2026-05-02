@@ -13,7 +13,7 @@ private struct SettingsSidebarSection: Identifiable {
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
         SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .about])
+        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
 }
 
@@ -48,6 +48,7 @@ struct TranscriptedSettingsView: View {
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
+    @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var recentMeetings: [RecentMeetingItem] = []
@@ -238,6 +239,8 @@ struct TranscriptedSettingsView: View {
             connectAgentPage
         case .privacy:
             privacyPage
+        case .support:
+            supportPage
         case .about:
             aboutPage
         }
@@ -1282,6 +1285,7 @@ struct TranscriptedSettingsView: View {
                         trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
                         CrashReportingPreferences.setEnabled(newValue)
                         sentryTestStatus = nil
+                        diagnosticsActionStatus = nil
                     }
                 ))
                 .disabled(!CrashReporter.isAvailable)
@@ -1297,6 +1301,7 @@ struct TranscriptedSettingsView: View {
                             trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
                             AnalyticsPreferences.setEnabled(false)
                         }
+                        diagnosticsActionStatus = nil
                     }
                 ))
                 .disabled(!AnalyticsReporter.isAvailable)
@@ -1334,7 +1339,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "About",
-                summary: "Version, updates, and support."
+                summary: "Version and updates."
             )
 
             SettingsSection(
@@ -1385,13 +1390,196 @@ struct TranscriptedSettingsView: View {
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
                     .disabled(!aboutUpdateButtonEnabled)
+                }
+            }
+        }
+    }
 
-                    Button("Submit Feedback") {
-                        trackSettingsAction("submit_feedback", page: .about)
-                        actions.sendFeedback()
+    private var supportPage: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsPageIntro(
+                title: "Support",
+                summary: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
+            )
+
+            SupportActionCard(
+                symbolName: "envelope.fill",
+                title: "Email support",
+                detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
+                buttonTitle: "Email support",
+                buttonSymbolName: "paperplane.fill",
+                tone: .primary,
+                status: nil,
+                isEnabled: true
+            ) {
+                trackSettingsAction("submit_feedback", page: .support)
+                actions.sendFeedback()
+            }
+
+            SupportActionCard(
+                symbolName: "waveform.path.ecg",
+                title: "Send diagnostics",
+                detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
+                buttonTitle: "One-click send diagnostics",
+                buttonSymbolName: "bolt.fill",
+                tone: .secondary,
+                status: diagnosticsActionStatus,
+                isEnabled: CrashReporter.isAvailable && crashReportingEnabled
+            ) {
+                trackSettingsAction("send_diagnostic_event", page: .support)
+                sendDiagnosticEvent()
+            }
+
+            SupportPrivacyNote()
+        }
+    }
+
+    private struct SupportActionCard: View {
+        enum Tone {
+            case primary
+            case secondary
+        }
+
+        let symbolName: String
+        let title: String
+        let detail: String
+        let buttonTitle: String
+        let buttonSymbolName: String
+        let tone: Tone
+        let status: String?
+        let isEnabled: Bool
+        let action: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(iconForeground)
+                        .frame(width: 34, height: 34)
+                        .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(title)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+
+                        Text(detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                }
+
+                Button(action: action) {
+                    Label(buttonTitle, systemImage: buttonSymbolName)
+                        .font(.callout.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(buttonBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .foregroundStyle(buttonForeground)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.55)
+
+                if let status, !status.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color(nsColor: .systemGreen))
+
+                        Text(status)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(cardStroke, lineWidth: 1)
+            )
+        }
+
+        private var iconForeground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen)
+            case .secondary:
+                return Color.accentColor
+            }
+        }
+
+        private var iconBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.16)
+            case .secondary:
+                return Color.accentColor.opacity(0.14)
+            }
+        }
+
+        private var cardBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .controlBackgroundColor).opacity(0.9)
+            case .secondary:
+                return Color(nsColor: .controlBackgroundColor).opacity(0.72)
+            }
+        }
+
+        private var cardStroke: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.25)
+            case .secondary:
+                return Color.primary.opacity(0.08)
+            }
+        }
+
+        private var buttonBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen)
+            case .secondary:
+                return Color.secondary.opacity(0.16)
+            }
+        }
+
+        private var buttonForeground: Color {
+            switch tone {
+            case .primary:
+                return .white
+            case .secondary:
+                return .primary
+            }
+        }
+    }
+
+    private struct SupportPrivacyNote: View {
+        var body: some View {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+
+                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -1793,6 +1981,25 @@ struct TranscriptedSettingsView: View {
         }
 
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
+    }
+
+    private func sendDiagnosticEvent() {
+        guard CrashReporter.isAvailable else {
+            diagnosticsActionStatus = "Sentry is not configured in this build yet."
+            return
+        }
+
+        guard crashReportingEnabled else {
+            diagnosticsActionStatus = "Turn on crash and error reports first."
+            return
+        }
+
+        guard let eventID = actions.sendDiagnosticEvent() else {
+            diagnosticsActionStatus = "Diagnostic event could not be queued."
+            return
+        }
+
+        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 
     private func chooseCaptureLibrary() {
