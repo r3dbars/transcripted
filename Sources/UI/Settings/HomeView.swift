@@ -377,7 +377,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
                 .padding(.bottom, -12)
                 .zIndex(1)
 
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
                 heroCopy
 
                 Divider()
@@ -385,9 +385,9 @@ struct HomeHeroCard<ActivityContent: View>: View {
 
                 activityContent()
             }
-            .padding(.top, 34)
+            .padding(.top, 30)
             .padding(.horizontal, 28)
-            .padding(.bottom, 24)
+            .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -402,10 +402,10 @@ struct HomeHeroCard<ActivityContent: View>: View {
     }
 
     private var heroCopy: some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 9) {
                 Text(selectedMode.title)
-                    .font(.system(size: 26, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(Color.primary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -795,6 +795,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var compact: Bool = false
     @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
@@ -826,7 +827,7 @@ private struct HomeActivityRowShell<Content: View>: View {
             .animation(.easeOut(duration: 0.12), value: isHovering)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 9)
+        .padding(.vertical, compact ? 5 : 9)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
@@ -884,16 +885,17 @@ struct HomeMeetingRow: View {
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
-            menuItems: menuItems
+            menuItems: menuItems,
+            compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "person.2.wave.2.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
 
                 Text(item.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -908,6 +910,8 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
     let getID: (Item) -> AnyHashable
+    var sectionSpacing: CGFloat = 12
+    var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
@@ -921,9 +925,9 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             .padding(.vertical, 28)
             .padding(.horizontal, 4)
         } else {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: headerSpacing) {
                         Text(section.label)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -970,7 +974,7 @@ struct HomeActivityTabsCard: View {
     let onLoadMoreMeetings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(selectedTab.label)
@@ -1044,11 +1048,13 @@ struct HomeActivityTabsCard: View {
         getID: @escaping (Item) -> AnyHashable,
         @ViewBuilder row: @escaping (Item) -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HomeDayGroupedList(
                 sections: sections,
                 emptyMessage: emptyMessage,
                 getID: getID,
+                sectionSpacing: 10,
+                headerSpacing: 1,
                 row: row
             )
         }
@@ -1176,11 +1182,30 @@ struct HomeMeetingPreviewSheet: View {
                     .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
                 } else {
                     ScrollView {
-                        Text(renderedMarkdown)
-                            .font(.system(size: 13))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(18)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Transcript")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .tracking(0.6)
+
+                            if transcriptLines.isEmpty {
+                                Text(cleanedMarkdown)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(Array(transcriptLines.enumerated()), id: \.offset) { _, line in
+                                        HomeMeetingTranscriptLineView(line: line)
+                                    }
+                                }
+                                .textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(18)
                     }
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1219,8 +1244,57 @@ struct HomeMeetingPreviewSheet: View {
         .frame(width: 680, height: 620)
     }
 
-    private var renderedMarkdown: AttributedString {
-        (try? AttributedString(markdown: preview.markdown)) ?? AttributedString(preview.markdown)
+    private var cleanedMarkdown: String {
+        Self.readableMarkdown(from: preview.markdown)
+    }
+
+    private var transcriptLines: [HomeMeetingTranscriptLine] {
+        cleanedMarkdown
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .compactMap { Self.parseTranscriptLine(String($0)) }
+    }
+
+    private static func readableMarkdown(from markdown: String) -> String {
+        var lines = markdown.components(separatedBy: .newlines)
+
+        if lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---",
+           let endIndex = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "---" }) {
+            lines.removeSubrange(...endIndex)
+        }
+
+        if let transcriptIndex = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "## Full Transcript" }) {
+            lines = Array(lines.dropFirst(transcriptIndex + 1))
+        }
+
+        lines = lines.filter { line in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed != "---" && !trimmed.hasPrefix("*Generated by Transcripted")
+        }
+
+        return lines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func parseTranscriptLine(_ rawLine: String) -> HomeMeetingTranscriptLine? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("["),
+              let timeEnd = line.firstIndex(of: "]") else { return nil }
+
+        let time = String(line[line.index(after: line.startIndex)..<timeEnd])
+        var remainder = line[line.index(after: timeEnd)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var speaker = "Speaker"
+        if remainder.hasPrefix("["),
+           let speakerEnd = remainder.firstIndex(of: "]") {
+            speaker = String(remainder[remainder.index(after: remainder.startIndex)..<speakerEnd])
+            remainder = remainder[remainder.index(after: speakerEnd)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard !remainder.isEmpty else { return nil }
+        return HomeMeetingTranscriptLine(time: time, speaker: speaker, text: remainder)
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -1230,6 +1304,39 @@ struct HomeMeetingPreviewSheet: View {
         f.timeStyle = .short
         return f
     }()
+}
+
+private struct HomeMeetingTranscriptLine {
+    let time: String
+    let speaker: String
+    let text: String
+}
+
+private struct HomeMeetingTranscriptLineView: View {
+    let line: HomeMeetingTranscriptLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(line.time)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .leading)
+
+            Text(line.speaker)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 92, alignment: .leading)
+
+            Text(line.text)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.primary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 struct HomeLoadMoreButton: View {
