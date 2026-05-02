@@ -125,6 +125,7 @@ extension Audio {
         // disabled by preference, this is a no-op and the software
         // RealtimeAGC keeps running across the device change.
         var recordingFormat = withAudioGraphLock {
+            applyPreferredMeetingInputDevice(to: newInputNode, operation: "device_recovery")
             armVoiceProcessing(on: newInputNode)
 
             // Re-evaluate software AGC: if VPIO armed (rare here), drop AGC; if
