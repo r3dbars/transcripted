@@ -616,9 +616,9 @@ final class MeetingSessionController: ObservableObject {
             Self.runtimeDiagnosticsRecorder?.recordStall(
                 kind: "meeting",
                 stage: "recording_stop_timeout",
-                durationSeconds: finalRecordingDuration,
+                durationSeconds: recordingSnapshot.durationSeconds,
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue
                 ]
             )
