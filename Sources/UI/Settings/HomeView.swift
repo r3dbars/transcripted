@@ -374,7 +374,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
                 .padding(.leading, 36)
-                .padding(.bottom, -1)
+                .padding(.bottom, -5)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 22) {
@@ -498,25 +498,30 @@ private struct HomeHeroModeTab: View {
             .overlay(alignment: .bottom) {
                 if isSelected {
                     Rectangle()
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
-                        .frame(height: 1.5)
-                        .padding(.horizontal, 1)
+                        .fill(surfaceFill)
+                        .frame(height: 6)
+                        .offset(y: 2)
                 }
             }
         }
         .buttonStyle(.plain)
         .help("Show \(mode.switchTitle.lowercased())")
+        .zIndex(isSelected ? 1 : 0)
     }
 
     private var tabFill: Color {
         if isSelected {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.82)
+            return surfaceFill
         }
-        return Color.primary.opacity(0.035)
+        return Color.primary.opacity(0.026)
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.05)
+        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.045)
+    }
+
+    private var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
     }
 }
 
