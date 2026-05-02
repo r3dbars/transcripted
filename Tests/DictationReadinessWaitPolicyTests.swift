@@ -30,6 +30,45 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .refreshInputReadiness, "failed recovery should trigger another readiness refresh")
     }
 
+    runSuite("DictationReadinessWaitPolicy — forces recovery after repeated unready refreshes") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 6,
+            forcedRecoveryAttempts: 0,
+            forcedRecoveryRefreshThreshold: 6,
+            maxForcedRecoveryAttempts: 2
+        )
+
+        assertEqual(action, .forceInputRecovery, "repeated unready refreshes should force a hard input recovery before timeout")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — forced recovery budget falls back to refresh") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 6,
+            forcedRecoveryAttempts: 2,
+            forcedRecoveryRefreshThreshold: 6,
+            maxForcedRecoveryAttempts: 2
+        )
+
+        assertEqual(action, .refreshInputReadiness, "forced recovery should stay bounded inside a single dictation wait")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — active recovery wins over forced recovery threshold") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: true,
+            inputFormatReady: false,
+            readinessRefreshes: 6,
+            forcedRecoveryAttempts: 0,
+            forcedRecoveryRefreshThreshold: 6,
+            maxForcedRecoveryAttempts: 2
+        )
+
+        assertEqual(action, .waitForRecovery, "active device recovery should not be interrupted by the forced recovery threshold")
+    }
+
     runSuite("DictationReadinessWaitPolicy — starts recording when input is ready") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,

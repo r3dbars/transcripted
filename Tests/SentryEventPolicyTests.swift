@@ -30,6 +30,10 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "recording_stop_timeout"
         )
+        let meetingTranscriptFailed = SentryEventPolicy.policy(
+            forEngine: "meeting",
+            event: "meeting_transcript_failed"
+        )
         let modelInitFailure = SentryEventPolicy.policy(
             forEngine: "parakeet",
             event: "model_init_failed"
@@ -54,6 +58,7 @@ func testSentryEventPolicy() {
         assertEqual(meetingStartFailed?.summary, "Meeting recording could not start.", "meeting start failures should be visible without raw device names")
         assertEqual(meetingCaptureDegraded?.summary, "Meeting capture health degraded.", "degraded meeting capture should be visible without raw device names")
         assertEqual(meetingStopTimeout?.summary, "Meeting recording stop timed out.", "stop timeouts should be visible without raw device names")
+        assertEqual(meetingTranscriptFailed?.summary, "Meeting transcription failed.", "meeting transcript failures should be visible with sanitized context")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
         assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")

@@ -822,6 +822,33 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    func forceInputReadinessRecovery(reason: String) async {
+        guard !isShuttingDown else { return }
+        guard !isRecording, !audioStartInProgress else { return }
+
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
+        prewarmRetryCount = 0
+
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "input_readiness_recovery_forced",
+            message: "Forced idle audio graph recovery while waiting for dictation input readiness",
+            context: [
+                "reason": reason,
+                "recovering": "\(recoveryState.isRecovering)",
+                "format_ready": "\(recoveryState.inputFormatReady)",
+                "generation": "\(recoveryState.generation)",
+            ]
+        )
+
+        await rebuildAudioEngine(reason: reason)
+        markFormatUnreadyAndPublish()
+        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+        await prewarm()
+    }
+
     private func installAudioObserversIfNeeded() {
         installAudioEngineConfigObserverIfNeeded()
 

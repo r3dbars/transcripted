@@ -82,6 +82,13 @@ enum TranscriptedConstants {
     /// This lets a failed recovery get unstuck without hammering CoreAudio.
     static let dictationReadinessRefreshInterval: TimeInterval = 0.3
 
+    /// Number of active readiness refreshes before a user-started dictation
+    /// performs a hard idle audio graph rebuild.
+    static let dictationReadinessForcedRecoveryRefreshes: Int = 6
+
+    /// Max hard recovery attempts inside one user-started dictation wait.
+    static let dictationReadinessForcedRecoveryAttempts: Int = 2
+
     /// Max consecutive prewarm retries before giving up. Each retry waits
     /// `audioRecoveryDelay` (300ms), so 18 retries = ~5.4s of background settling.
     /// Prevents infinite Task chains when the mic is permanently unavailable.
