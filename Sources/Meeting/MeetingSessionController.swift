@@ -96,7 +96,7 @@ final class MeetingSessionController: ObservableObject {
         let trigger: StartTrigger
         let systemAudioStatus: SystemAudioStatus
         let durationSeconds: TimeInterval
-        let durationMilliseconds: Int
+        var durationMilliseconds: Int { Int(durationSeconds * 1000) }
         let healthInfo: RecordingHealthInfo
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
     }
@@ -1583,6 +1583,8 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    /// Snapshot capture health before the stop call, since the system-audio
+    /// backend can clean up buffer counters before file-close completion resumes.
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
@@ -1590,7 +1592,6 @@ final class MeetingSessionController: ObservableObject {
             trigger: activeRecordingTrigger,
             systemAudioStatus: systemAudioStatus,
             durationSeconds: durationSeconds,
-            durationMilliseconds: Int(durationSeconds * 1000),
             healthInfo: capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus),
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
