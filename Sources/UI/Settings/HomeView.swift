@@ -174,6 +174,66 @@ enum HomeActivityTab: String, CaseIterable, Identifiable {
     }
 }
 
+enum HomeHeroMode: String, CaseIterable, Identifiable {
+    case meeting
+    case dictation
+
+    var id: String { rawValue }
+
+    static let tabOrder: [HomeHeroMode] = [.meeting, .dictation]
+
+    var switchTitle: String {
+        switch self {
+        case .dictation: return "Dictation"
+        case .meeting: return "Meetings"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .dictation: return "Dictate anywhere"
+        case .meeting: return "Record meetings"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .dictation:
+            return "Speak once. Clean text lands back at your cursor."
+        case .meeting:
+            return "Capture the call. Save searchable local notes."
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .dictation: return "Start dictation"
+        case .meeting: return "Record meeting"
+        }
+    }
+
+    var learnTitle: String {
+        switch self {
+        case .dictation: return "Works anywhere you write."
+        case .meeting: return "Saved as local Markdown."
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .dictation: return "mic.fill"
+        case .meeting: return "waveform"
+        }
+    }
+
+    var activityTab: HomeActivityTab {
+        switch self {
+        case .dictation: return .dictations
+        case .meeting: return .meetings
+        }
+    }
+}
+
 // MARK: - Stats summary
 
 struct HomeStatItem: Identifiable {
@@ -181,6 +241,100 @@ struct HomeStatItem: Identifiable {
     let symbolName: String
     let value: String
     let label: String
+}
+
+enum HomeFeedbackIssueKind: String, CaseIterable, Identifiable {
+    case wrongWords
+    case missingText
+    case badFormatting
+    case wrongSpeakers
+    case audioProblem
+    case other
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .wrongWords: return "Wrong words"
+        case .missingText: return "Missing text"
+        case .badFormatting: return "Bad formatting"
+        case .wrongSpeakers: return "Speaker issue"
+        case .audioProblem: return "Audio issue"
+        case .other: return "Other"
+        }
+    }
+}
+
+struct HomeFeedbackTarget: Identifiable {
+    let id: String
+    let sourceKind: String
+    let title: String
+    let createdAt: Date
+    let referenceID: String
+    let suggestedIssue: HomeFeedbackIssueKind
+
+    static func dictation(_ entry: SavedDictationEntry) -> HomeFeedbackTarget {
+        HomeFeedbackTarget(
+            id: "dictation-\(stableReferenceID(for: entry.id))",
+            sourceKind: "dictation",
+            title: "Dictation at \(HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt))",
+            createdAt: entry.createdAt,
+            referenceID: stableReferenceID(for: entry.id),
+            suggestedIssue: .wrongWords
+        )
+    }
+
+    static func meeting(_ item: RecentMeetingItem) -> HomeFeedbackTarget {
+        HomeFeedbackTarget(
+            id: "meeting-\(stableReferenceID(for: item.id))",
+            sourceKind: "meeting",
+            title: "Meeting at \(HomeActivityRowFormatting.timeFormatter.string(from: item.date))",
+            createdAt: item.date,
+            referenceID: stableReferenceID(for: item.id),
+            suggestedIssue: .wrongSpeakers
+        )
+    }
+
+    private static func stableReferenceID(for value: String) -> String {
+        var hash: UInt64 = 1_469_598_103_934_665_603
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
+    }
+}
+
+struct HomeFeedbackSubmission {
+    let target: HomeFeedbackTarget
+    let issueKind: HomeFeedbackIssueKind
+    let notes: String
+    let includeDiagnostics: Bool
+}
+
+struct HomeMeetingPreview: Identifiable {
+    let id: String
+    let title: String
+    let date: Date
+    let transcriptURL: URL
+    let markdown: String
+    let readError: String?
+    let feedbackTarget: HomeFeedbackTarget
+
+    init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
+        id = item.id
+        title = item.title
+        date = item.date
+        transcriptURL = item.transcriptURL
+        self.markdown = markdown
+        self.readError = readError
+        feedbackTarget = HomeFeedbackTarget.meeting(item)
+    }
+}
+
+enum HomeMeetingMarkdownReadResult {
+    case success(String)
+    case failure(String)
 }
 
 // MARK: - Welcome header
@@ -203,268 +357,304 @@ struct HomeWelcomeHeader: View {
 
 // MARK: - Hero card
 
-struct HomeHeroCard: View {
-    let primaryTitle: String
-    let primarySubtitle: String
-    let primaryAction: () -> Void
-    let secondaryTitle: String
-    let secondarySubtitle: String
-    let secondaryAction: () -> Void
+struct HomeHeroCard<ActivityContent: View>: View {
+    @Binding var selectedMode: HomeHeroMode
+    let onStartDictation: () -> Void
+    let onStartMeeting: () -> Void
+    private let activityContent: () -> ActivityContent
+
+    init(
+        selectedMode: Binding<HomeHeroMode>,
+        onStartDictation: @escaping () -> Void,
+        onStartMeeting: @escaping () -> Void,
+        @ViewBuilder activityContent: @escaping () -> ActivityContent
+    ) {
+        _selectedMode = selectedMode
+        self.onStartDictation = onStartDictation
+        self.onStartMeeting = onStartMeeting
+        self.activityContent = activityContent
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Capture spoken work")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(Color.primary)
+        VStack(alignment: .leading, spacing: 0) {
+            HomeHeroModeTabs(selectedMode: $selectedMode)
+                .padding(.leading, 36)
+                .padding(.bottom, -12)
+                .zIndex(1)
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    HomeActionChoiceCard(
-                        title: primaryTitle,
-                        subtitle: primarySubtitle,
-                        symbolName: "mic.fill",
-                        isPrimary: true,
-                        action: primaryAction
-                    )
+            VStack(alignment: .leading, spacing: 18) {
+                heroCopy
 
-                    HomeActionChoiceCard(
-                        title: secondaryTitle,
-                        subtitle: secondarySubtitle,
-                        symbolName: "waveform",
-                        isPrimary: false,
-                        action: secondaryAction
-                    )
+                Divider()
+                    .opacity(0.55)
+
+                activityContent()
+            }
+            .padding(.top, 30)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var heroCopy: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(selectedMode.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(selectedMode.subtitle)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: selectedAction) {
+                    Label(selectedMode.actionTitle, systemImage: selectedMode.symbolName)
+                        .font(.system(size: 13, weight: .semibold))
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .help(selectedMode.actionTitle)
 
-                VStack(spacing: 12) {
-                    HomeActionChoiceCard(
-                        title: primaryTitle,
-                        subtitle: primarySubtitle,
-                        symbolName: "mic.fill",
-                        isPrimary: true,
-                        action: primaryAction
-                    )
-
-                    HomeActionChoiceCard(
-                        title: secondaryTitle,
-                        subtitle: secondarySubtitle,
-                        symbolName: "waveform",
-                        isPrimary: false,
-                        action: secondaryAction
-                    )
+                HStack(spacing: 6) {
+                    Text(selectedMode.learnTitle)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
                 }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(nsColor: .controlBackgroundColor).opacity(0.94),
-                            Color.accentColor.opacity(0.11)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-        )
+    }
+
+    private var cardFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+
+    private var selectedAction: () -> Void {
+        switch selectedMode {
+        case .dictation: return onStartDictation
+        case .meeting: return onStartMeeting
+        }
     }
 }
 
-private struct HomeActionChoiceCard: View {
-    let title: String
-    let subtitle: String
-    let symbolName: String
-    let isPrimary: Bool
+private struct HomeHeroModeTabs: View {
+    @Binding var selectedMode: HomeHeroMode
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            ForEach(HomeHeroMode.tabOrder) { mode in
+                HomeHeroModeTab(
+                    mode: mode,
+                    isSelected: selectedMode == mode,
+                    action: {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            selectedMode = mode
+                        }
+                    }
+                )
+            }
+        }
+        .background(alignment: .bottom) {
+            Rectangle()
+                .fill(surfaceFill)
+                .frame(height: 18)
+                .offset(y: 10)
+                .padding(.horizontal, -1)
+        }
+    }
+
+    private var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+}
+
+private struct HomeHeroModeTab: View {
+    let mode: HomeHeroMode
+    let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center, spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(iconBackground)
-                        Image(systemName: symbolName)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(iconForeground)
-                    }
-                    .frame(width: 34, height: 34)
-
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(1)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 6) {
-                    Text(title)
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isPrimary ? Color.white : Color.accentColor)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(isPrimary ? Color.accentColor : Color.accentColor.opacity(0.13))
-                )
-                .padding(.top, 2)
+            HStack(spacing: 7) {
+                Image(systemName: mode.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(mode.switchTitle)
+                    .font(.system(size: 13, weight: .semibold))
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(16)
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .padding(.horizontal, 18)
+            .padding(.top, isSelected ? 12 : 10)
+            .padding(.bottom, isSelected ? 11 : 9)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(cardBackground)
+                HomeHeroTabShape(cornerRadius: 12)
+                    .fill(tabFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(borderColor, lineWidth: isPrimary ? 1.2 : 1)
+                HomeHeroTabBorderShape(cornerRadius: 12)
+                    .stroke(tabStroke, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    Rectangle()
+                        .fill(surfaceFill)
+                        .frame(height: 14)
+                        .offset(y: 8)
+                }
+            }
         }
         .buttonStyle(.plain)
+        .help("Show \(mode.switchTitle.lowercased())")
+        .zIndex(isSelected ? 1 : 0)
     }
 
-    private var cardBackground: Color {
-        if isPrimary {
-            return Color.accentColor.opacity(0.13)
+    private var tabFill: Color {
+        if isSelected {
+            return surfaceFill
         }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.72)
+        return surfaceFill.opacity(0.62)
     }
 
-    private var borderColor: Color {
-        isPrimary ? Color.accentColor.opacity(0.34) : Color.accentColor.opacity(0.2)
+    private var tabStroke: Color {
+        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03)
     }
 
-    private var iconBackground: Color {
-        isPrimary ? Color.accentColor.opacity(0.2) : Color(nsColor: .textColor).opacity(0.08)
+    private var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
     }
+}
 
-    private var iconForeground: Color {
-        isPrimary ? Color.accentColor : Color.secondary
+private struct HomeHeroTabShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct HomeHeroTabBorderShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
     }
 }
 
 // MARK: - Stats rail
 
-struct HomeStatsRail: View {
-    let header: String
+struct HomeStatsTopCard: View {
     let stats: [HomeStatItem]
     let streak: Int?
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(header)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .tracking(0.6)
+    private let columns = [
+        GridItem(.flexible(minimum: 86), spacing: 12),
+        GridItem(.flexible(minimum: 86), spacing: 12)
+    ]
 
-            VStack(alignment: .leading, spacing: 12) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Text("Overall")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+
+                Spacer(minLength: 10)
+
+                if let streak, streak > 0 {
+                    HStack(spacing: 5) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text("\(streak)d")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.primary)
+                }
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                 ForEach(stats) { stat in
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(spacing: 8) {
                         ZStack {
                             Circle()
                                 .fill(Color.primary.opacity(0.06))
                             Image(systemName: stat.symbolName)
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }
-                        .frame(width: 26, height: 26)
-                        .padding(.top, 1)
+                        .frame(width: 24, height: 24)
 
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 1) {
                             Text(stat.value)
-                                .font(.system(size: 20, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.primary)
+                                .lineLimit(1)
                             Text(stat.label)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
-                }
-            }
-
-            if let streak, streak > 0 {
-                Divider()
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.orange)
-                        Text("\(streak) day streak")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    Text(streak == 1 ? "Keep it going tomorrow." : "Nice run.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .frame(width: 286, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-// MARK: - Inline stats strip (narrow layout fallback)
-
-struct HomeStatsStrip: View {
-    let stats: [HomeStatItem]
-    let streak: Int?
-
-    var body: some View {
-        HStack(spacing: 22) {
-            ForEach(stats) { stat in
-                VStack(alignment: .leading, spacing: 2) {
-                    Label(stat.value, systemImage: stat.symbolName)
-                        .font(.system(size: 18, weight: .semibold))
-                    Text(stat.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let streak, streak > 0 {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "flame.fill")
-                            .foregroundStyle(.orange)
-                        Text("\(streak)")
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                    Text("day streak")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
         )
     }
 }
@@ -502,7 +692,7 @@ struct HomeRowActionButtons: View {
 
             iconButton(
                 systemName: "flag",
-                help: "Send feedback",
+                help: "Report issue",
                 action: onFlag
             )
 
@@ -610,6 +800,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var compact: Bool = false
     @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
@@ -641,7 +832,7 @@ private struct HomeActivityRowShell<Content: View>: View {
             .animation(.easeOut(duration: 0.12), value: isHovering)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 9)
+        .padding(.vertical, compact ? 5 : 9)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
@@ -671,15 +862,8 @@ struct HomeDictationRow: View {
                 Text(preview)
                     .font(.system(size: 13))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(3)
+                    .lineLimit(1)
                     .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !entry.sourceAppName.isEmpty, entry.sourceAppName != "Unknown" {
-                    Text(entry.sourceAppName)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
         }
     }
@@ -706,19 +890,19 @@ struct HomeMeetingRow: View {
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
-            menuItems: menuItems
+            menuItems: menuItems,
+            compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "person.2.wave.2.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
 
                 Text(item.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -731,6 +915,8 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
     let getID: (Item) -> AnyHashable
+    var sectionSpacing: CGFloat = 12
+    var headerSpacing: CGFloat = 2
     @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
@@ -744,9 +930,9 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             .padding(.vertical, 28)
             .padding(.horizontal, 4)
         } else {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: headerSpacing) {
                         Text(section.label)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -773,7 +959,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 // MARK: - Activity tabs container
 
 struct HomeActivityTabsCard: View {
-    @Binding var selectedTab: HomeActivityTab
+    let selectedTab: HomeActivityTab
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<RecentMeetingItem>]
     let isLoading: Bool
@@ -793,33 +979,21 @@ struct HomeActivityTabsCard: View {
     let onLoadMoreMeetings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Recent activity")
+                    Text(selectedTab.label)
                         .font(.system(size: 15, weight: .semibold))
-                    Text(activitySubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 12)
-
-                Picker("", selection: $selectedTab) {
-                    ForEach(HomeActivityTab.allCases) { tab in
-                        Text(tab.label).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 190, alignment: .trailing)
             }
 
             if isLoading {
                 HStack {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading recent activity")
+                    Text("Loading")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -866,16 +1040,7 @@ struct HomeActivityTabsCard: View {
                 }
             }
         }
-        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
     }
 
     @ViewBuilder
@@ -888,32 +1053,251 @@ struct HomeActivityTabsCard: View {
         getID: @escaping (Item) -> AnyHashable,
         @ViewBuilder row: @escaping (Item) -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HomeDayGroupedList(
                 sections: sections,
                 emptyMessage: emptyMessage,
                 getID: getID,
+                sectionSpacing: 10,
+                headerSpacing: 1,
                 row: row
             )
-
-            if canLoadMore {
-                HomeLoadMoreButton(
-                    title: loadMoreTitle,
-                    isLoading: isLoadingMore,
-                    action: loadMoreAction
-                )
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    private var activitySubtitle: String {
-        switch selectedTab {
-        case .dictations:
-            return canLoadMoreDictations ? "Showing the latest 10 dictations" : "Latest dictations"
-        case .meetings:
-            return canLoadMoreMeetings ? "Showing the latest 10 meetings" : "Latest meetings"
+// MARK: - Row feedback
+
+struct HomeFeedbackSheet: View {
+    let target: HomeFeedbackTarget
+    let onCancel: () -> Void
+    let onSubmit: (HomeFeedbackSubmission) -> Void
+
+    @State private var issueKind: HomeFeedbackIssueKind
+    @State private var notes = ""
+    @State private var includeDiagnostics = true
+
+    init(
+        target: HomeFeedbackTarget,
+        onCancel: @escaping () -> Void,
+        onSubmit: @escaping (HomeFeedbackSubmission) -> Void
+    ) {
+        self.target = target
+        self.onCancel = onCancel
+        self.onSubmit = onSubmit
+        _issueKind = State(initialValue: target.suggestedIssue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Report an issue")
+                    .font(.system(size: 22, weight: .semibold))
+                Text(target.title)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("Issue", selection: $issueKind) {
+                ForEach(HomeFeedbackIssueKind.allCases) { kind in
+                    Text(kind.label).tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("What happened?")
+                    .font(.subheadline.weight(.semibold))
+                TextEditor(text: $notes)
+                    .font(.body)
+                    .frame(minHeight: 120)
+                    .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(0.035))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+            }
+
+            Toggle("Include safe diagnostics", isOn: $includeDiagnostics)
+
+            Text("Transcripted attaches the capture type, time, app version, a private reference ID, and recent scrubbed logs. It does not attach transcript text, audio, file paths, meeting titles, emails, or raw URLs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                Spacer()
+                Button("Review report") {
+                    onSubmit(HomeFeedbackSubmission(
+                        target: target,
+                        issueKind: issueKind,
+                        notes: notes,
+                        includeDiagnostics: includeDiagnostics
+                    ))
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
+        .padding(24)
+        .frame(width: 520)
+    }
+}
+
+// MARK: - Meeting preview
+
+struct HomeMeetingPreviewSheet: View {
+    let preview: HomeMeetingPreview
+    let onOpenMarkdown: () -> Void
+    let onCopyForAgent: () -> Void
+    let onReportIssue: () -> Void
+    let onDone: () -> Void
+    private let readableContent: HomeMeetingPreviewContent
+
+    init(
+        preview: HomeMeetingPreview,
+        onOpenMarkdown: @escaping () -> Void,
+        onCopyForAgent: @escaping () -> Void,
+        onReportIssue: @escaping () -> Void,
+        onDone: @escaping () -> Void
+    ) {
+        self.preview = preview
+        self.onOpenMarkdown = onOpenMarkdown
+        self.onCopyForAgent = onCopyForAgent
+        self.onReportIssue = onReportIssue
+        self.onDone = onDone
+        self.readableContent = HomeMeetingPreviewContent.make(from: preview.markdown)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(preview.title)
+                        .font(.system(size: 22, weight: .semibold))
+                        .lineLimit(2)
+                    Text(HomeMeetingPreviewSheet.dateFormatter.string(from: preview.date))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            Group {
+                if let readError = preview.readError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Could not preview this meeting", systemImage: "exclamationmark.triangle")
+                            .font(.headline)
+                        Text(readError)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Transcript")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .tracking(0.6)
+
+                            if readableContent.transcriptLines.isEmpty {
+                                Text(readableContent.fallbackText)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.primary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(Array(readableContent.transcriptLines.enumerated()), id: \.offset) { _, line in
+                                        HomeMeetingTranscriptLineView(line: line)
+                                    }
+                                }
+                                .textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(18)
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+                }
+            }
+
+            HStack {
+                Button {
+                    onOpenMarkdown()
+                } label: {
+                    Label("Open Markdown", systemImage: "doc.text")
+                }
+
+                Button {
+                    onCopyForAgent()
+                } label: {
+                    Label("Copy for agent", systemImage: "square.on.square")
+                }
+
+                Button {
+                    onReportIssue()
+                } label: {
+                    Label("Report issue", systemImage: "flag")
+                }
+
+                Spacer()
+            }
+        }
+        .padding(24)
+        .frame(width: 680, height: 620)
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+}
+
+private struct HomeMeetingTranscriptLineView: View {
+    let line: HomeMeetingTranscriptLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(line.time)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .leading)
+
+            Text(line.speaker)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 92, alignment: .leading)
+
+            Text(line.text)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.primary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 2)
     }
 }
 

@@ -94,6 +94,15 @@ final class MeetingSessionController: ObservableObject {
         case failed(String)
     }
 
+    private struct RecordingStopSnapshot {
+        let trigger: StartTrigger
+        let systemAudioStatus: SystemAudioStatus
+        let durationSeconds: TimeInterval
+        var durationMilliseconds: Int { Int(durationSeconds * 1000) }
+        let healthInfo: RecordingHealthInfo
+        let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
+    }
+
     // MARK: - Published state (for meeting UI bindings)
 
     /// High-level session state for the meeting UI.
@@ -232,6 +241,7 @@ final class MeetingSessionController: ObservableObject {
             diarization: services.diarization,
             speakerStore: services.speakerStore,
             speakerClipsDirectory: storagePaths.speakerClips,
+            cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
             statsStore: statsDatabase
         )
@@ -506,7 +516,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
 
-        let recordingTrigger = activeRecordingTrigger
+        let recordingSnapshot = makeRecordingStopSnapshot()
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -514,57 +524,50 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting stop requested",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue,
-                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)"
                 ]
             )
         )
 
-        // Snapshot capture health BEFORE stop, since the system-audio backend
-        // can clean up buffer counters before file-close completion resumes.
-        let finalSystemAudioStatus = capture.systemAudioStatus
-        let finalRecordingDuration = recordingDuration
-        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
-        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
         let stopResult = await capture.stopAndAwaitFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let durationMs = Int(finalRecordingDuration * 1000)
         activeRecordingTrigger = .unknown
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
 
         DiagnosticsTrail.record(
-            level: finalSystemAudioStatus.isWarning ? .warning : .info,
+            level: recordingSnapshot.systemAudioStatus.isWarning ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue,
-                    "duration_ms": "\(durationMs)",
+                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                     "mic_file_present": boolString(files.micURL != nil),
                     "system_file_present": boolString(files.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
-                    "capture_quality": healthInfo.captureQuality.rawValue,
-                    "audio_gaps": "\(healthInfo.audioGaps)",
-                    "device_switches": "\(healthInfo.deviceSwitches)"
+                    "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
+                    "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
                 ]
             )
         )
         AnalyticsReporter.track(
             "meeting_recording_stopped",
-            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+            properties: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot).merging(
                 [
-                    "capture_quality": healthInfo.captureQuality.rawValue,
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: finalRecordingDuration),
-                    "gap_count_bucket": AnalyticsReporter.countBucket(healthInfo.audioGaps),
+                    "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
+                    "gap_count_bucket": AnalyticsReporter.countBucket(recordingSnapshot.healthInfo.audioGaps),
                     "reason": reason.rawValue,
-                    "route_change_count_bucket": AnalyticsReporter.countBucket(healthInfo.deviceSwitches),
+                    "route_change_count_bucket": AnalyticsReporter.countBucket(recordingSnapshot.healthInfo.deviceSwitches),
                     "system_stream_present": boolString(files.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
             )
@@ -572,21 +575,21 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: meetingCaptureHealthSnapshotProperties(
-                snapshot: pipelineSnapshot,
-                healthInfo: healthInfo,
-                trigger: recordingTrigger.rawValue,
+                snapshot: recordingSnapshot.pipelineSnapshot,
+                healthInfo: recordingSnapshot.healthInfo,
+                trigger: recordingSnapshot.trigger.rawValue,
                 reason: reason.rawValue,
-                durationSeconds: finalRecordingDuration,
+                durationSeconds: recordingSnapshot.durationSeconds,
                 systemStreamPresent: files.systemURL != nil,
                 stopTimedOut: stopResult.didTimeOut
             )
         )
         reportCaptureHealthIfNeeded(
-            snapshot: pipelineSnapshot,
-            healthInfo: healthInfo,
-            trigger: recordingTrigger,
+            snapshot: recordingSnapshot.pipelineSnapshot,
+            healthInfo: recordingSnapshot.healthInfo,
+            trigger: recordingSnapshot.trigger,
             reason: reason,
-            durationSeconds: finalRecordingDuration,
+            durationSeconds: recordingSnapshot.durationSeconds,
             files: files,
             stopTimedOut: stopResult.didTimeOut
         )
@@ -639,8 +642,8 @@ final class MeetingSessionController: ObservableObject {
         let outcome = enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
-            healthInfo: healthInfo,
-            startTrigger: recordingTrigger
+            healthInfo: recordingSnapshot.healthInfo,
+            startTrigger: recordingSnapshot.trigger
         )
 
         let queueDepth = queuedTranscriptionJobs.count
@@ -652,9 +655,9 @@ final class MeetingSessionController: ObservableObject {
                 : "Meeting queued behind an earlier transcription",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue,
-                    "duration_ms": "\(durationMs)",
+                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                     "queue_depth": "\(queueDepth)"
                 ]
             )
@@ -707,12 +710,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
 
-        let recordingTrigger = activeRecordingTrigger
-        let finalSystemAudioStatus = capture.systemAudioStatus
-        let finalRecordingDuration = recordingDuration
-        let durationMs = Int(finalRecordingDuration * 1000)
-        let healthInfo = capture.healthInfo(overrideSystemAudioStatus: finalSystemAudioStatus)
-        let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot(overrideSystemAudioStatus: finalSystemAudioStatus)
+        let recordingSnapshot = makeRecordingStopSnapshot()
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -720,9 +718,9 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting cancellation requested",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue,
-                    "duration_ms": "\(durationMs)"
+                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)"
                 ]
             )
         )
@@ -740,9 +738,9 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting recording cancelled",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                     "reason": reason.rawValue,
-                    "duration_ms": "\(durationMs)",
+                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
                     "mic_file_present": boolString(files.micURL != nil),
                     "system_file_present": boolString(files.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut)
@@ -751,13 +749,13 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_recording_cancelled",
-            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+            properties: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot).merging(
                 [
-                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "reason": reason.rawValue,
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "system_stream_present": boolString(files.systemURL != nil),
-                    "trigger": recordingTrigger.rawValue,
+                    "trigger": recordingSnapshot.trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }
             )
@@ -765,11 +763,11 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: meetingCaptureHealthSnapshotProperties(
-                snapshot: pipelineSnapshot,
-                healthInfo: healthInfo,
-                trigger: recordingTrigger.rawValue,
+                snapshot: recordingSnapshot.pipelineSnapshot,
+                healthInfo: recordingSnapshot.healthInfo,
+                trigger: recordingSnapshot.trigger.rawValue,
                 reason: reason.rawValue,
-                durationSeconds: Double(durationMs) / 1000,
+                durationSeconds: recordingSnapshot.durationSeconds,
                 systemStreamPresent: files.systemURL != nil,
                 stopTimedOut: stopResult.didTimeOut
             )
@@ -1610,6 +1608,22 @@ final class MeetingSessionController: ObservableObject {
         default:
             return nil
         }
+    }
+
+    /// Snapshot capture health before the stop call, since the system-audio
+    /// backend can clean up buffer counters before file-close completion resumes.
+    private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
+        let systemAudioStatus = capture.systemAudioStatus
+        let durationSeconds = recordingDuration
+        return RecordingStopSnapshot(
+            trigger: activeRecordingTrigger,
+            systemAudioStatus: systemAudioStatus,
+            durationSeconds: durationSeconds,
+            healthInfo: capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus),
+            pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
+                overrideSystemAudioStatus: systemAudioStatus
+            )
+        )
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

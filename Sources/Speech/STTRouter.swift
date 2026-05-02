@@ -100,6 +100,11 @@ class STTRouter: ObservableObject {
         return await parakeetEngine.startRecording()
     }
 
+    func startRecordingRecoveryAttempt() async -> Bool {
+        activeRecordingModel = selectedModel
+        return await parakeetEngine.startRecording(isRecoveryAttempt: true)
+    }
+
     func refreshInputReadiness() async {
         await parakeetEngine.prewarm()
     }
