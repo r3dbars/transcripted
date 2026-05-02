@@ -123,10 +123,13 @@ struct TranscriptedSettingsView: View {
                     VStack(alignment: .leading, spacing: 28) {
                         pageBody
                     }
-                    .padding(28)
+                    .padding(.horizontal, 28)
+                    .padding(.top, settingsContentTopPadding)
+                    .padding(.bottom, 28)
                     .frame(maxWidth: 860, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(minWidth: 880, minHeight: 640)
@@ -252,7 +255,7 @@ struct TranscriptedSettingsView: View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
 
-        return VStack(alignment: .leading, spacing: 20) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 20) {
                 HomeWelcomeHeader(
                     name: homeViewModel.welcomeName,
@@ -401,6 +404,10 @@ struct TranscriptedSettingsView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+    }
+
+    private var settingsContentTopPadding: CGFloat {
+        navigation.selectedPage == .home ? -34 : 14
     }
 
     private var homeHeroModeSelection: Binding<HomeHeroMode> {
