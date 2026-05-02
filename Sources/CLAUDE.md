@@ -61,6 +61,8 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
+- touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`
+- touching beta-build configuration: `Sources/Beta/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`
 
 Prefer the local doc plus the actual Swift file list before assuming an older

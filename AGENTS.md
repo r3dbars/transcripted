@@ -34,20 +34,22 @@
 5. `CLAUDE.md`
 6. `Sources/CLAUDE.md`
 7. the nearest local `CLAUDE.md` for the area you are changing
-8. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
-9. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
-10. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
-11. `Sources/Speech/CLAUDE.md` when touching dictation STT, audio recovery, or device handling
-12. `Sources/Support/CLAUDE.md` when touching shared preferences, permissions, paths, or Claude Desktop install flow
-13. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
-14. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
-15. `Tests/README.md`
-16. `docs/storage-paths.md`
-17. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-18. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
-19. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
-20. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
-21. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
+8. `Sources/Accessibility/CLAUDE.md` when touching focused-editor AX metadata, overlay placement, or paste-back context
+9. `Sources/Beta/CLAUDE.md` when touching beta-build configuration
+10. `Sources/Dictation/CLAUDE.md` when touching dictation persistence
+11. `Sources/Meeting/CLAUDE.md` when touching meeting capture or meeting UI
+12. `Sources/TranscriptedCore/CLAUDE.md` when touching the shared library
+13. `Sources/Speech/CLAUDE.md` when touching dictation STT, audio recovery, or device handling
+14. `Sources/Support/CLAUDE.md` when touching shared preferences, permissions, paths, or Claude Desktop install flow
+15. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
+16. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
+17. `Tests/README.md`
+18. `docs/storage-paths.md`
+19. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+20. `Sources/Observability/CLAUDE.md` when touching crash reporting, event forwarding, anonymous analytics, or app updates
+21. `docs/release-packaging.md` when touching packaging, signing, notarization, or user-facing releases
+22. `docs/sparkle-updates.md` when touching app updates or cutting a release users should receive in-app
+23. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
 
 Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 
