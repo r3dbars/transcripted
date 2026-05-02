@@ -454,7 +454,7 @@ private struct HomeHeroModeTabs: View {
     @Binding var selectedMode: HomeHeroMode
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 4) {
+        HStack(alignment: .bottom, spacing: 0) {
             ForEach(HomeHeroMode.tabOrder) { mode in
                 HomeHeroModeTab(
                     mode: mode,
@@ -467,6 +467,17 @@ private struct HomeHeroModeTabs: View {
                 )
             }
         }
+        .background(alignment: .bottom) {
+            Rectangle()
+                .fill(surfaceFill)
+                .frame(height: 18)
+                .offset(y: 10)
+                .padding(.horizontal, -1)
+        }
+    }
+
+    private var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
     }
 }
 
@@ -513,11 +524,11 @@ private struct HomeHeroModeTab: View {
         if isSelected {
             return surfaceFill
         }
-        return Color.primary.opacity(0.026)
+        return surfaceFill.opacity(0.62)
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.035)
+        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03)
     }
 
     private var surfaceFill: Color {
