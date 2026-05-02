@@ -210,41 +210,8 @@ struct HomeHeroCard: View {
                 .foregroundStyle(Color.primary)
 
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    HomeActionChoiceCard(
-                        title: primaryTitle,
-                        subtitle: primarySubtitle,
-                        symbolName: "mic.fill",
-                        isPrimary: true,
-                        action: primaryAction
-                    )
-
-                    HomeActionChoiceCard(
-                        title: secondaryTitle,
-                        subtitle: secondarySubtitle,
-                        symbolName: "waveform",
-                        isPrimary: false,
-                        action: secondaryAction
-                    )
-                }
-
-                VStack(spacing: 12) {
-                    HomeActionChoiceCard(
-                        title: primaryTitle,
-                        subtitle: primarySubtitle,
-                        symbolName: "mic.fill",
-                        isPrimary: true,
-                        action: primaryAction
-                    )
-
-                    HomeActionChoiceCard(
-                        title: secondaryTitle,
-                        subtitle: secondarySubtitle,
-                        symbolName: "waveform",
-                        isPrimary: false,
-                        action: secondaryAction
-                    )
-                }
+                HStack(alignment: .top, spacing: 12) { actionCards }
+                VStack(spacing: 12) { actionCards }
             }
         }
         .padding(18)
@@ -265,6 +232,25 @@ struct HomeHeroCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var actionCards: some View {
+        HomeActionChoiceCard(
+            title: primaryTitle,
+            subtitle: primarySubtitle,
+            symbolName: "mic.fill",
+            isPrimary: true,
+            action: primaryAction
+        )
+
+        HomeActionChoiceCard(
+            title: secondaryTitle,
+            subtitle: secondarySubtitle,
+            symbolName: "waveform",
+            isPrimary: false,
+            action: secondaryAction
         )
     }
 }
@@ -900,12 +886,14 @@ struct HomeActivityTabsCard: View {
     }
 
     private var activitySubtitle: String {
-        switch selectedTab {
-        case .dictations:
-            return canLoadMoreDictations ? "Showing the latest 10 dictations" : "Latest dictations"
-        case .meetings:
-            return canLoadMoreMeetings ? "Showing the latest 10 meetings" : "Latest meetings"
-        }
+        let canLoadMore: Bool = {
+            switch selectedTab {
+            case .dictations: return canLoadMoreDictations
+            case .meetings: return canLoadMoreMeetings
+            }
+        }()
+        let noun = selectedTab.label.lowercased()
+        return canLoadMore ? "Showing the latest 10 \(noun)" : "Latest \(noun)"
     }
 }
 
