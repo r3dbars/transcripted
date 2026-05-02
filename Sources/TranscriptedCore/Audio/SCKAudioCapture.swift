@@ -113,7 +113,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         self.bufferCallback = bufferCallback
-        errorMessage = nil
+        publishErrorMessage(nil)
 
         // Output handler converts CMSampleBuffer → AVAudioPCMBuffer
         let output = SCKAudioStreamOutput { [weak self] buffer in
@@ -148,7 +148,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         } catch {
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
             cleanup()
-            DispatchQueue.main.async { self.errorMessage = error.localizedDescription }
+            publishErrorMessage(error.localizedDescription)
             throw error
         }
     }
@@ -212,6 +212,16 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         _totalBuffers = 0
         _buffersWithData = 0
         statsLock.unlock()
+    }
+
+    private func publishErrorMessage(_ message: String?) {
+        if Thread.isMainThread {
+            errorMessage = message
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.errorMessage = message
+            }
+        }
     }
 }
 
