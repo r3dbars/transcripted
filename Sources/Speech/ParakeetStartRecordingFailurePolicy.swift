@@ -12,6 +12,12 @@ struct ParakeetStartRecordingFailureAction: Equatable {
     let rebuildAudioEngine: Bool
 }
 
+struct ParakeetDeviceRecoveryFailureAction: Equatable {
+    let reportSentryFailure: Bool
+    let markRecordingInterrupted: Bool
+    let schedulePrewarmRetry: Bool
+}
+
 enum ParakeetStartRecordingFailurePolicy {
     static func action(
         for reason: ParakeetStartRecordingFailureReason,
@@ -27,6 +33,16 @@ enum ParakeetStartRecordingFailurePolicy {
             markFormatUnready: true,
             schedulePrewarmRetry: shouldScheduleRetry,
             rebuildAudioEngine: true
+        )
+    }
+}
+
+enum ParakeetDeviceRecoveryFailurePolicy {
+    static func action(wasRecording: Bool) -> ParakeetDeviceRecoveryFailureAction {
+        ParakeetDeviceRecoveryFailureAction(
+            reportSentryFailure: wasRecording,
+            markRecordingInterrupted: wasRecording,
+            schedulePrewarmRetry: true
         )
     }
 }

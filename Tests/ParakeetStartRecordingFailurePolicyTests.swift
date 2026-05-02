@@ -67,6 +67,22 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.rebuildAudioEngine, "recovery route failures should rebuild the audio engine")
     }
 
+    runSuite("ParakeetDeviceRecoveryFailurePolicy keeps idle device settling out of Sentry") {
+        let action = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: false)
+
+        assertFalse(action.reportSentryFailure, "idle device changes should keep transient rewarm failures local")
+        assertFalse(action.markRecordingInterrupted, "idle recovery should not mark a recording interruption")
+        assertTrue(action.schedulePrewarmRetry, "idle recovery should keep retrying prewarm until the route settles")
+    }
+
+    runSuite("ParakeetDeviceRecoveryFailurePolicy reports recording interruptions") {
+        let action = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: true)
+
+        assertTrue(action.reportSentryFailure, "active recordings should still report rewarm failures")
+        assertTrue(action.markRecordingInterrupted, "active recordings should surface interruption state")
+        assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,
