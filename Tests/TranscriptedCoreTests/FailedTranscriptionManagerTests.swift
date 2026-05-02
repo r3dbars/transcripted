@@ -120,6 +120,46 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.failedQueue.path))
     }
 
+    func testAddFailedTranscriptionAcceptsRetainedMeetingAudioArchivePaths() throws {
+        let paths = makePaths(root: testRoot)
+        let archiveRoot = paths.transcripts.appendingPathComponent("audio", isDirectory: true)
+        let archivedDirectory = archiveRoot.appendingPathComponent("Failed_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: archivedDirectory, withIntermediateDirectories: true)
+
+        let archivedMicURL = archivedDirectory.appendingPathComponent("microphone.wav")
+        let archivedSystemURL = archivedDirectory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: archivedMicURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: archivedSystemURL.path, contents: Data("system".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        manager.addFailedTranscription(
+            micAudioURL: archivedMicURL,
+            systemAudioURL: archivedSystemURL,
+            errorMessage: "Temporary transcription failure"
+        )
+
+        XCTAssertEqual(manager.failedTranscriptions.count, 1)
+        XCTAssertEqual(manager.failedTranscriptions.first?.micAudioURL, archivedMicURL)
+        XCTAssertEqual(manager.failedTranscriptions.first?.systemAudioURL, archivedSystemURL)
+
+        let siblingArchiveURL = paths.transcripts
+            .deletingLastPathComponent()
+            .appendingPathComponent("audio/sibling.wav")
+        try FileManager.default.createDirectory(
+            at: siblingArchiveURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        FileManager.default.createFile(atPath: siblingArchiveURL.path, contents: Data("sibling".utf8))
+
+        manager.addFailedTranscription(
+            micAudioURL: siblingArchiveURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+
+        XCTAssertEqual(manager.failedTranscriptions.count, 1)
+    }
+
     func testFailedTranscriptionRetryabilityDoesNotOvermatchGenericMinimumLanguage() {
         let failure = FailedTranscription(
             micAudioURL: testRoot.appendingPathComponent("mic.wav"),

@@ -1112,6 +1112,7 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
             } catch {
+                let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: shouldRestartRecording)
                 if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
                     self.cancelConfigRecoveryTimeout()
                     self.publishRecoveryState()
@@ -1127,7 +1128,7 @@ class ParakeetEngine: ObservableObject {
                         ]
                     )
                 )
-                if shouldRestartRecording {
+                if failureAction.markRecordingInterrupted {
                     self.recordingInterrupted = true
                     EventReporter.shared.capture(level: .error, engine: "parakeet",
                         event: "recording_interrupted",
@@ -1140,18 +1141,36 @@ class ParakeetEngine: ObservableObject {
                             ]
                         ))
                 }
-                EventReporter.shared.capture(level: .error, engine: "parakeet",
-                    event: "device_change_rewarm_failed",
-                    message: error.localizedDescription,
-                    context: self.dictationRouteDiagnosticsContext(
-                        selection: Self.loadDictationInputDeviceSelection(),
-                        extra: [
-                            "audio_device": self.inputDeviceName
-                        ]
-                    ))
+                if failureAction.reportSentryFailure {
+                    EventReporter.shared.capture(level: .error, engine: "parakeet",
+                        event: "device_change_rewarm_failed",
+                        message: error.localizedDescription,
+                        context: self.dictationRouteDiagnosticsContext(
+                            selection: Self.loadDictationInputDeviceSelection(),
+                            extra: [
+                                "audio_device": self.inputDeviceName,
+                                "was_recording": "\(shouldRestartRecording)",
+                                "recovery_generation": "\(myGeneration)"
+                            ]
+                        ))
+                } else {
+                    EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                        event: "device_change_rewarm_deferred",
+                        message: "Idle audio route still settling after device change",
+                        context: self.dictationRouteDiagnosticsContext(
+                            selection: Self.loadDictationInputDeviceSelection(),
+                            extra: [
+                                "was_recording": "false",
+                                "error": error.localizedDescription,
+                                "recovery_generation": "\(myGeneration)"
+                            ]
+                        ))
+                }
                 await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
-                self.prewarmRetryCount = 0
-                self.schedulePrewarmRetry()
+                if failureAction.schedulePrewarmRetry {
+                    self.prewarmRetryCount = 0
+                    self.schedulePrewarmRetry()
+                }
             }
         }
     }

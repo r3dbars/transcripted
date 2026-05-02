@@ -786,7 +786,7 @@ final class TranscriptIndex: @unchecked Sendable {
                     datetime: $0.datetime,
                     preview: firstUtterance.isEmpty ? "No transcript captured." : String(firstUtterance.prefix(220)),
                     wordCount: $0.wordCount,
-                    speakers: $0.speakers.map(\.name),
+                    speakers: uniqueSpeakerNames(from: $0.speakers.map(\.name)),
                     sourceAppName: nil,
                     delivery: nil
                 )
@@ -799,6 +799,19 @@ final class TranscriptIndex: @unchecked Sendable {
 
         items.sort { $0.datetime > $1.datetime }
         return RecentContextResult(items: Array(items.prefix(max(1, min(count, 50)))))
+    }
+
+    private func uniqueSpeakerNames(from names: [String]) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+
+        for name in names {
+            let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(name)
+        }
+
+        return ordered
     }
 
     func getSpeakerHistory(speaker: String) throws -> SpeakerHistoryResult {

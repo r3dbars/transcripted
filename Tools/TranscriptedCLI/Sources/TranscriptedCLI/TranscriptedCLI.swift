@@ -11,6 +11,7 @@ struct TranscriptedCLI: AsyncParsableCommand {
             Batch.self,
             ContextRecent.self,
             ContextSearch.self,
+            ReadMeeting.self,
             ListDictations.self,
             ReadDictation.self,
         ]

@@ -57,6 +57,33 @@ func testFeedbackIssueBuilder() {
         assertFalse(body.contains("/Users/redbars"), "diagnostic paths should be redacted")
         assertFalse(body.contains("person@example.com"), "diagnostic emails should be redacted")
     }
+
+    runSuite("FeedbackIssueBuilder builds contextual capture feedback email") {
+        let report = FeedbackReport(
+            sourceKind: "dictation",
+            referenceID: "abc123",
+            occurredAt: Date(timeIntervalSince1970: 1_714_000_000),
+            issueKind: "Wrong words",
+            userNotes: "It included /Users/redbars/private.txt and person@example.com",
+            appVersion: "Version 1.2.3",
+            includeDiagnostics: true
+        )
+        let url = FeedbackIssueBuilder.emailURL(report: report, rawLogLines: [
+            "[12:00:00.000] APP LAUNCHED",
+            "[12:01:00.000] ERROR | https://example.com/log"
+        ])
+        let body = feedbackBody(from: url)
+        let subject = feedbackSubject(from: url)
+
+        assertEqual(subject, "Transcripted Dictation Feedback", "contextual email subject should include the capture type")
+        assertTrue(body.contains("Capture:"), "contextual email should include capture metadata")
+        assertTrue(body.contains("Type: dictation"), "source kind should be included")
+        assertTrue(body.contains("Issue: Wrong words"), "issue kind should be included")
+        assertTrue(body.contains("Reference: abc123"), "safe reference should be included")
+        assertFalse(body.contains("/Users/redbars/"), "user notes should be scrubbed")
+        assertFalse(body.contains("person@example.com"), "emails in user notes should be scrubbed")
+        assertFalse(body.contains("https://example.com/log"), "diagnostic URLs should be scrubbed")
+    }
 }
 
 private func feedbackBody(from url: URL?) -> String {

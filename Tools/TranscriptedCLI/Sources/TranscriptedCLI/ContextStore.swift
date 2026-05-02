@@ -295,6 +295,36 @@ enum CLIContextStore {
         return Array(items.sorted { $0.datetime > $1.datetime }.prefix(count))
     }
 
+    static func readMeeting(filename: String, in directories: CLIContextDirectories) throws -> String {
+        let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
+        var invalidPathRequested = false
+        var markdownURL: URL?
+        for directory in directories.meetingDirs {
+            switch CLIPathSecurity.resolveReadableFile(named: requestedName, in: directory) {
+            case .valid(let safeURL):
+                markdownURL = safeURL
+            case .missing:
+                continue
+            case .invalid:
+                invalidPathRequested = true
+            }
+            if markdownURL != nil { break }
+        }
+
+        if invalidPathRequested && markdownURL == nil {
+            throw ValidationError("Invalid meeting filename: \(filename)")
+        }
+
+        guard let markdownURL,
+              let content = try? String(contentsOf: markdownURL, encoding: .utf8),
+              looksLikeCaptureMarkdown(markdownURL),
+              !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
+            throw ValidationError("Meeting not found: \(filename)")
+        }
+
+        return content
+    }
+
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
         let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
         var invalidPathRequested = false
@@ -389,7 +419,7 @@ enum CLIContextStore {
                 date: String(transcript.recording.date.prefix(10)),
                 datetime: transcript.recording.date,
                 wordCount: transcript.speakers.reduce(0) { $0 + $1.wordCount },
-                speakers: transcript.speakers.map(\.name),
+                speakers: uniqueSpeakerNames(from: transcript.speakers.map(\.name)),
                 utterances: transcript.utterances.map { utterance in
                     CLIUtterance(
                         start: utterance.start,
@@ -530,6 +560,19 @@ enum CLIContextStore {
 
     private static func speakerMatches(filter: String, speakerName: String) -> Bool {
         speakerName.localizedCaseInsensitiveContains(filter)
+    }
+
+    private static func uniqueSpeakerNames(from names: [String]) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+
+        for name in names {
+            let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }
+            ordered.append(name)
+        }
+
+        return ordered
     }
 
     private struct ParsedFrontmatter {

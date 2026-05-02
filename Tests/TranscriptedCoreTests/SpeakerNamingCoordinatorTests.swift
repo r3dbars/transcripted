@@ -62,6 +62,47 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testCleanupPendingNamingDoesNotDeleteOutOfSandboxFiles() throws {
+        let harness = try makeHarness()
+        let externalClipURL = tempDirectory.appendingPathComponent("outside-clip.wav")
+        let externalMicURL = tempDirectory.appendingPathComponent("outside-mic.wav")
+        let externalSystemURL = tempDirectory.appendingPathComponent("outside-system.wav")
+        try Data().write(to: externalClipURL)
+        try Data().write(to: externalMicURL)
+        try Data().write(to: externalSystemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    channel: .system,
+                    clipURL: externalClipURL,
+                    sampleText: "hello",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: nil,
+                    matchedProfileSnapshot: nil
+                )
+            ],
+            transcriptURL: harness.paths.transcripts.appendingPathComponent("Call.md"),
+            transcriptId: UUID(),
+            systemAudioURL: externalSystemURL,
+            micAudioURL: externalMicURL,
+            shouldRemoveTemporaryAudioOnCleanup: true,
+            onComplete: { _ in }
+        )
+
+        harness.manager.cleanupPendingNaming()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalClipURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalSystemURL.path))
+    }
+
+    @MainActor
     func testHandleNamingCompletePublishesSuccessAfterTranscriptRewrite() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
@@ -1533,7 +1574,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             failedTranscriptionManager: failedManager,
             speechToText: StubSpeechToTextEngine(),
             diarization: StubDiarizationEngine(),
-            speakerStore: speakerDB
+            speakerStore: speakerDB,
+            cleanupDirectories: [paths.audioCaptures, paths.speakerClips]
         )
 
         return TestHarness(paths: paths, speakerDB: speakerDB, manager: manager)
