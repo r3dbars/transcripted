@@ -71,7 +71,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, summary stats, and lightweight copy/feedback/delete affordances
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
-- `Settings/SettingsRecentCaptureRefreshPolicy.swift` — small routing policy that decides whether the current Settings page should live-refresh the home dashboard, recent capture lists, or neither
+- `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
@@ -106,7 +106,8 @@ collapse the local side back into a single "You" track.
 The redesigned Settings home surface is intentionally a fast dashboard rather
 than a full archive browser. `HomeView` keeps recent dictations and meetings to
 small paged slices so the settings window still opens quickly for users with
-large capture libraries.
+large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those
+refreshes scoped to the pages that actually need them.
 
 Keep user-visible TCC prompts user-initiated. Background warmup paths should
 not request microphone, system-audio-recording, or calendar access on their own;
