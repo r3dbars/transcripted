@@ -484,7 +484,7 @@ public class TranscriptionTaskManager: ObservableObject {
         notifier.notifyTranscriptionFailed(errorMessage: errorMessage)
     }
 
-    private func removeRecordingFile(_ url: URL, label: String) {
+    nonisolated private func removeRecordingFile(_ url: URL, label: String) {
         // Security: only delete scratch files inside Transcripted-managed cleanup roots.
         // `startImportedTranscription` accepts a URL from the caller, so without a containment
         // check a misuse or tampered in-memory request could unlink arbitrary user files.
@@ -511,31 +511,31 @@ public class TranscriptionTaskManager: ObservableObject {
         retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
     }
 
-    func removeManagedCleanupFile(_ url: URL?, label: String) {
+    nonisolated func removeManagedCleanupFile(_ url: URL?, label: String) {
         guard let url else { return }
         removeRecordingFile(url, label: label)
     }
 
-    private func isSafeCleanupURL(_ url: URL) -> Bool {
-        let canonicalURL = Self.canonicalFileURL(url)
+    nonisolated private func isSafeCleanupURL(_ url: URL) -> Bool {
+        let canonicalURL = Self.canonicalURL(url)
         return cleanupDirectories.contains { root in
             Self.isFile(canonicalURL, containedIn: root)
         }
     }
 
-    private static func canonicalFileURL(_ url: URL) -> URL {
+    private static func canonicalURL(_ url: URL) -> URL {
         url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     private static func canonicalDirectoryURL(_ url: URL) -> URL {
-        url.standardizedFileURL.resolvingSymlinksInPath()
+        canonicalURL(url)
     }
 
     private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
-        let filePath = canonicalFileURL(fileURL).path
+        let filePath = canonicalURL(fileURL).path
         let directoryPath = canonicalDirectoryURL(directoryURL).path
         let normalizedDirectoryPath = directoryPath.hasSuffix("/") ? directoryPath : directoryPath + "/"
-        return filePath == directoryPath || filePath.hasPrefix(normalizedDirectoryPath)
+        return filePath.hasPrefix(normalizedDirectoryPath)
     }
 
     private func archiveFailedRecordingAudioIfConfigured(

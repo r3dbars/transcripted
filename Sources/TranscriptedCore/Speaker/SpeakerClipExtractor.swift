@@ -149,21 +149,6 @@ public enum SpeakerClipExtractor {
         removeClipFile(url, label: "persisted clip")
     }
 
-    // MARK: - Temporary Clip Cleanup
-
-    /// Clean up temporary clip files
-    static func cleanupClips(_ clips: [ClipResult]) {
-        for clip in clips {
-            removeClipFile(clip.clipURL, label: "temporary clip")
-        }
-    }
-
-    static func cleanupClips(_ entries: [SpeakerNamingEntry]) {
-        for entry in entries {
-            removeClipFile(entry.clipURL, label: "speaker naming clip")
-        }
-    }
-
     // MARK: - Private
 
     /// Select which utterance segments to use for the clip.

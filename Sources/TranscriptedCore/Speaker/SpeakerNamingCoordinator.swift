@@ -165,15 +165,9 @@ extension TranscriptionTaskManager {
         }
     }
 
-    private func cleanupSpeakerClips(_ clips: [SpeakerNamingEntry]) {
+    nonisolated private func cleanupSpeakerClips(_ clips: [SpeakerNamingEntry]) {
         for clip in clips {
             removeManagedCleanupFile(clip.clipURL, label: "speaker naming clip")
-        }
-    }
-
-    private func cleanupSpeakerClips(_ clips: [ClipResult]) {
-        for clip in clips {
-            removeManagedCleanupFile(clip.clipURL, label: "temporary clip")
         }
     }
 
