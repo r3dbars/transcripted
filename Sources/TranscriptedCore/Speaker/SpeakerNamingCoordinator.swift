@@ -57,11 +57,12 @@ extension TranscriptionTaskManager {
                 transcriptURL,
                 transcriptId: transcriptId
             ) else {
-                self?.cleanupSpeakerClips(clips)
-                if shouldRemoveTemporaryAudio {
-                    self?.removeManagedCleanupFile(micURL, label: "mic audio")
-                    self?.removeManagedCleanupFile(systemURL, label: "system audio")
-                }
+                self?.cleanupNamingArtifacts(
+                    clips: clips,
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                )
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -79,11 +80,12 @@ extension TranscriptionTaskManager {
                 clipsBySpeakerId: clipsBySpeakerId,
                 speakerDB: speakerDB
             ) else {
-                self?.cleanupSpeakerClips(clips)
-                if shouldRemoveTemporaryAudio {
-                    self?.removeManagedCleanupFile(micURL, label: "mic audio")
-                    self?.removeManagedCleanupFile(systemURL, label: "system audio")
-                }
+                self?.cleanupNamingArtifacts(
+                    clips: clips,
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                )
 
                 Task { @MainActor in
                     self?.finishNamingFlow(
@@ -134,11 +136,12 @@ extension TranscriptionTaskManager {
                 )
             }
 
-            self?.cleanupSpeakerClips(clips)
-            if shouldRemoveTemporaryAudio {
-                self?.removeManagedCleanupFile(micURL, label: "mic audio")
-                self?.removeManagedCleanupFile(systemURL, label: "system audio")
-            }
+            self?.cleanupNamingArtifacts(
+                clips: clips,
+                micURL: micURL,
+                systemURL: systemURL,
+                shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+            )
 
             Task { @MainActor in
                 self?.finishNamingFlow(
@@ -163,6 +166,18 @@ extension TranscriptionTaskManager {
             speakerNamingRequest = nil
             AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
         }
+    }
+
+    nonisolated private func cleanupNamingArtifacts(
+        clips: [SpeakerNamingEntry],
+        micURL: URL?,
+        systemURL: URL,
+        shouldRemoveTemporaryAudio: Bool
+    ) {
+        cleanupSpeakerClips(clips)
+        guard shouldRemoveTemporaryAudio else { return }
+        removeManagedCleanupFile(micURL, label: "mic audio")
+        removeManagedCleanupFile(systemURL, label: "system audio")
     }
 
     nonisolated private func cleanupSpeakerClips(_ clips: [SpeakerNamingEntry]) {
