@@ -421,6 +421,10 @@ class ParakeetEngine: ObservableObject {
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
 
+    var currentAudioRouteAnalyticsContext: [String: String] {
+        dictationRouteAnalyticsContext(selection: Self.loadDictationInputDeviceSelection())
+    }
+
     init() {
         scheduleInputDeviceNameRefresh()
     }
@@ -918,6 +922,15 @@ class ParakeetEngine: ObservableObject {
         cancelConfigRecoveryTimeout()
         let recoveryGeneration = recoveryState.beginConfigChange()
         publishRecoveryState()
+        AnalyticsReporter.track(
+            "dictation_audio_route_changed",
+            properties: dictationRouteAnalyticsContext(
+                selection: Self.loadDictationInputDeviceSelection(),
+                extra: [
+                    "was_recording": "\(configChangeWasRecording)"
+                ]
+            )
+        )
         scheduleConfigRecoveryTimeout(
             generation: recoveryGeneration,
             wasRecording: configChangeWasRecording
@@ -967,6 +980,7 @@ class ParakeetEngine: ObservableObject {
         let shouldRestartRecording = configChangeWasRecording
         configChangeWasRecording = false
         let myGeneration = recoveryState.generation
+        let recoveryStartedAt = CFAbsoluteTimeGetCurrent()
 
         configRecoveryTask = Task { @MainActor [weak self] in
             // Wait for CoreAudio to finish settling the new device graph.
@@ -1015,6 +1029,19 @@ class ParakeetEngine: ObservableObject {
                 guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
                 self.cancelConfigRecoveryTimeout()
                 self.publishRecoveryState()
+                AnalyticsReporter.track(
+                    "dictation_audio_route_recovery_finished",
+                    properties: self.dictationRouteAnalyticsContext(
+                        outputFormat: snapshot.outputFormat,
+                        hwFormat: snapshot.hwFormat,
+                        selection: snapshot.selection,
+                        extra: [
+                            "outcome": "success",
+                            "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt),
+                            "was_recording": "\(shouldRestartRecording)"
+                        ]
+                    )
+                )
 
                 // If we were recording, try to restart on the new device.
                 // The watchdog (via isRecoveryAttempt=false) catches silent
@@ -1043,10 +1070,18 @@ class ParakeetEngine: ObservableObject {
                     }
                     if !restarted {
                         self.recordingInterrupted = true
-                        EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                        EventReporter.shared.capture(level: .error, engine: "parakeet",
                             event: "recording_interrupted",
                             message: "Recording could not restart after device change within retry budget",
-                            context: ["audio_device": self.inputDeviceName])
+                            context: self.dictationRouteDiagnosticsContext(
+                                outputFormat: snapshot.outputFormat,
+                                hwFormat: snapshot.hwFormat,
+                                selection: snapshot.selection,
+                                extra: [
+                                    "audio_device": self.inputDeviceName,
+                                    "reason": "recording_restart_budget_exhausted"
+                                ]
+                            ))
                     }
                 }
             } catch {
@@ -1055,30 +1090,54 @@ class ParakeetEngine: ObservableObject {
                     self.cancelConfigRecoveryTimeout()
                     self.publishRecoveryState()
                 }
+                AnalyticsReporter.track(
+                    "dictation_audio_route_recovery_finished",
+                    properties: self.dictationRouteAnalyticsContext(
+                        selection: Self.loadDictationInputDeviceSelection(),
+                        extra: [
+                            "outcome": "failed",
+                            "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt),
+                            "was_recording": "\(shouldRestartRecording)"
+                        ]
+                    )
+                )
                 if failureAction.markRecordingInterrupted {
                     self.recordingInterrupted = true
-                    EventReporter.shared.capture(level: .warning, engine: "parakeet",
+                    EventReporter.shared.capture(level: .error, engine: "parakeet",
                         event: "recording_interrupted",
                         message: "Recording interrupted — engine rewarm failed after device change",
-                        context: ["audio_device": self.inputDeviceName, "error": error.localizedDescription])
+                        context: self.dictationRouteDiagnosticsContext(
+                            selection: Self.loadDictationInputDeviceSelection(),
+                            extra: [
+                                "audio_device": self.inputDeviceName,
+                                "error": error.localizedDescription
+                            ]
+                        ))
                 }
                 if failureAction.reportSentryFailure {
                     EventReporter.shared.capture(level: .error, engine: "parakeet",
                         event: "device_change_rewarm_failed",
-                        message: error.localizedDescription, context: [
-                            "audio_device": self.inputDeviceName,
-                            "was_recording": "\(shouldRestartRecording)",
-                            "recovery_generation": "\(myGeneration)"
-                        ])
+                        message: error.localizedDescription,
+                        context: self.dictationRouteDiagnosticsContext(
+                            selection: Self.loadDictationInputDeviceSelection(),
+                            extra: [
+                                "audio_device": self.inputDeviceName,
+                                "was_recording": "\(shouldRestartRecording)",
+                                "recovery_generation": "\(myGeneration)"
+                            ]
+                        ))
                 } else {
                     EventReporter.shared.capture(level: .warning, engine: "parakeet",
                         event: "device_change_rewarm_deferred",
                         message: "Idle audio route still settling after device change",
-                        context: [
-                            "was_recording": "false",
-                            "error": error.localizedDescription,
-                            "recovery_generation": "\(myGeneration)"
-                        ])
+                        context: self.dictationRouteDiagnosticsContext(
+                            selection: Self.loadDictationInputDeviceSelection(),
+                            extra: [
+                                "was_recording": "false",
+                                "error": error.localizedDescription,
+                                "recovery_generation": "\(myGeneration)"
+                            ]
+                        ))
                 }
                 await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
                 if failureAction.schedulePrewarmRetry {
@@ -1098,29 +1157,47 @@ class ParakeetEngine: ObservableObject {
 
             self.configRecoveryTimeoutTask = nil
             self.publishRecoveryState()
+            AnalyticsReporter.track(
+                "dictation_audio_route_recovery_timeout",
+                properties: self.dictationRouteAnalyticsContext(
+                    selection: Self.loadDictationInputDeviceSelection(),
+                    extra: [
+                        "recovery_latency_bucket": AnalyticsReporter.durationBucket(
+                            seconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000
+                        ),
+                        "was_recording": "\(wasRecording)"
+                    ]
+                )
+            )
             EventReporter.shared.capture(
-                level: .warning,
+                level: .error,
                 engine: "parakeet",
                 event: "device_change_recovery_timeout",
                 message: "Audio device recovery timed out",
-                context: [
-                    "recovery_generation": "\(generation)",
-                    "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
-                    "was_recording": "\(wasRecording)",
-                    "audio_device": self.inputDeviceName
-                ]
+                context: self.dictationRouteDiagnosticsContext(
+                    selection: Self.loadDictationInputDeviceSelection(),
+                    extra: [
+                        "recovery_generation": "\(generation)",
+                        "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
+                        "was_recording": "\(wasRecording)",
+                        "audio_device": self.inputDeviceName
+                    ]
+                )
             )
             if wasRecording {
                 self.recordingInterrupted = true
                 EventReporter.shared.capture(
-                    level: .warning,
+                    level: .error,
                     engine: "parakeet",
                     event: "recording_interrupted",
                     message: "Recording interrupted because audio device recovery timed out",
-                    context: [
-                        "audio_device": self.inputDeviceName,
-                        "reason": "device_change_recovery_timeout"
-                    ]
+                    context: self.dictationRouteDiagnosticsContext(
+                        selection: Self.loadDictationInputDeviceSelection(),
+                        extra: [
+                            "audio_device": self.inputDeviceName,
+                            "reason": "device_change_recovery_timeout"
+                        ]
+                    )
                 )
             }
             await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
@@ -1231,6 +1308,82 @@ class ParakeetEngine: ObservableObject {
         }
 
         return context
+    }
+
+    private func dictationRouteDiagnosticsContext(
+        outputFormat: ParakeetAudioFormatSummary? = nil,
+        hwFormat: ParakeetAudioFormatSummary? = nil,
+        selection: DictationInputDeviceSelection?,
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        var context = dictationRouteAnalyticsContext(
+            outputFormat: outputFormat,
+            hwFormat: hwFormat,
+            selection: selection
+        )
+        context["recovering"] = "\(recoveryState.isRecovering)"
+        context["format_ready"] = "\(recoveryState.inputFormatReady)"
+        context["generation"] = "\(recoveryState.generation)"
+
+        for (key, value) in extra {
+            context[key] = value
+        }
+
+        return context
+    }
+
+    private func dictationRouteAnalyticsContext(
+        outputFormat: ParakeetAudioFormatSummary? = nil,
+        hwFormat: ParakeetAudioFormatSummary? = nil,
+        selection: DictationInputDeviceSelection?,
+        extra: [String: String] = [:]
+    ) -> [String: String] {
+        let selectedClass = selectedInputClass(for: selection)
+        let defaultInputClass = selection.map { DictationInputDeviceSelectionPolicy.deviceClass(for: $0.defaultInput) } ?? "unknown"
+        let defaultOutputClass = selection?.defaultOutput.map { DictationInputDeviceSelectionPolicy.deviceClass(for: $0) } ?? "unknown"
+        let outputRate = outputFormat?.sampleRate
+        let inputRate = hwFormat?.sampleRate
+
+        var context: [String: String] = [
+            "default_input_class": defaultInputClass,
+            "default_output_class": defaultOutputClass,
+            "format_ready": "\(recoveryState.inputFormatReady)",
+            "hfp_suspected": "\(isLikelyBluetoothHandsFreeProfile(inputClass: selectedClass, inputRate: inputRate, outputRate: outputRate))",
+            "input_device_class": selectedClass,
+            "output_device_class": defaultOutputClass,
+            "recovering": "\(recoveryState.isRecovering)",
+            "route_shape": "\(selectedClass)_input_to_\(defaultOutputClass)_output",
+            "sample_flow_started": "\(didReceiveAudioSamples)",
+            "selection_overrode_default": "\(selection?.didOverrideDefault ?? false)",
+            "selection_reason": selection?.reason.rawValue ?? "unknown",
+            "selected_input_class": selectedClass,
+        ]
+
+        if let outputFormat {
+            context["output_rate_hz"] = String(format: "%.0f", outputFormat.sampleRate)
+            context["output_channels"] = "\(outputFormat.channelCount)"
+        }
+
+        if let hwFormat {
+            context["input_rate_hz"] = String(format: "%.0f", hwFormat.sampleRate)
+            context["input_channels"] = "\(hwFormat.channelCount)"
+        }
+
+        for (key, value) in extra {
+            context[key] = value
+        }
+
+        return context
+    }
+
+    private func isLikelyBluetoothHandsFreeProfile(
+        inputClass: String,
+        inputRate: Double?,
+        outputRate: Double?
+    ) -> Bool {
+        guard inputClass == "bluetooth" else { return false }
+        guard let inputRate, let outputRate else { return false }
+        return inputRate <= 24_000 && outputRate >= 44_100
     }
 
     private func audioInputSnapshot(operation: String) async throws -> ParakeetAudioInputSnapshot {

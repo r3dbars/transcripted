@@ -12,6 +12,7 @@ class TranscriptedAppState: ObservableObject {
     let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
+    let runtimeDiagnostics = RuntimeDiagnostics()
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.
@@ -79,6 +80,10 @@ class TranscriptedAppState: ObservableObject {
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
+        runtimeDiagnostics.start()
+        if #available(macOS 14.0, *) {
+            MeetingSessionController.runtimeDiagnosticsRecorder = runtimeDiagnostics
+        }
 
         // Wire EventReporter with live engine state for context enrichment
         EventReporter.shared.setEngineStateSummary { [weak self] in
@@ -143,6 +148,10 @@ class TranscriptedAppState: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             promptsObserver = nil
         }
+        if #available(macOS 14.0, *) {
+            MeetingSessionController.runtimeDiagnosticsRecorder = nil
+        }
+        runtimeDiagnostics.markCleanShutdown()
     }
 
     private func startRuntimeReadinessIfNeeded() {
