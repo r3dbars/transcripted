@@ -111,9 +111,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             existingId: nil
         ).id
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
-        let clipURL = tempDirectory.appendingPathComponent("speaker.wav")
-        let micURL = tempDirectory.appendingPathComponent("mic.wav")
-        let systemURL = tempDirectory.appendingPathComponent("system.wav")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system.wav")
         let speakers = [
             MarkdownSpeaker(
                 id: "1",
@@ -1044,9 +1044,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             existingId: nil
         ).id
         let missingTranscriptURL = harness.paths.transcripts.appendingPathComponent("Missing.md")
-        let clipURL = tempDirectory.appendingPathComponent("speaker-failure.wav")
-        let micURL = tempDirectory.appendingPathComponent("mic-failure.wav")
-        let systemURL = tempDirectory.appendingPathComponent("system-failure.wav")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker-failure.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic-failure.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-failure.wav")
         let transcriptionResult = sampleTranscriptionResult(
             speakers: [
                 MarkdownSpeaker(
@@ -1566,6 +1566,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         try FileManager.default.createDirectory(at: paths.transcripts, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: paths.speakerClips, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: paths.logs, withIntermediateDirectories: true)
 
         let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
