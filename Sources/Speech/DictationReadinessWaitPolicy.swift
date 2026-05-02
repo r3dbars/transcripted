@@ -5,6 +5,7 @@
 enum DictationReadinessWaitAction: Equatable {
     case waitForRecovery
     case refreshInputReadiness
+    case forceInputRecovery
     case startRecording
     case startRecoveryRecording
 }
@@ -16,6 +17,9 @@ struct DictationReadinessWaitPolicy {
         isRecovering: Bool,
         inputFormatReady: Bool,
         readinessRefreshes: Int = 0,
+        forcedRecoveryAttempts: Int = 0,
+        forcedRecoveryRefreshThreshold: Int = TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
+        maxForcedRecoveryAttempts: Int = TranscriptedConstants.dictationReadinessForcedRecoveryAttempts,
         recoveryStartAttempts: Int = 0
     ) -> DictationReadinessWaitAction {
         if isRecovering {
@@ -29,6 +33,11 @@ struct DictationReadinessWaitPolicy {
         if readinessRefreshes >= refreshesBeforeRecoveryStart,
            recoveryStartAttempts == 0 {
             return .startRecoveryRecording
+        }
+
+        if readinessRefreshes >= forcedRecoveryRefreshThreshold,
+           forcedRecoveryAttempts < maxForcedRecoveryAttempts {
+            return .forceInputRecovery
         }
 
         return .refreshInputReadiness

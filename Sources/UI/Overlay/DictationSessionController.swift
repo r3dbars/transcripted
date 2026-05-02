@@ -304,6 +304,7 @@ class DictationSessionController: ObservableObject {
         var startAttempts = 0
         var recoveryStartAttempts = 0
         var readinessRefreshes = 0
+        var forcedReadinessRecoveries = 0
         var nextReadinessRefreshAt = startedAt
 
         if !appState.sttRouter.isRecovering, !appState.sttRouter.inputFormatReady {
@@ -334,6 +335,7 @@ class DictationSessionController: ObservableObject {
                 isRecovering: isRecovering,
                 inputFormatReady: inputFormatReady,
                 readinessRefreshes: readinessRefreshes,
+                forcedRecoveryAttempts: forcedReadinessRecoveries,
                 recoveryStartAttempts: recoveryStartAttempts
             ) {
             case .waitForRecovery:
@@ -345,6 +347,11 @@ class DictationSessionController: ObservableObject {
                     readinessRefreshes += 1
                     nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
+
+            case .forceInputRecovery:
+                forcedReadinessRecoveries += 1
+                readinessRefreshes = 0
+                await appState.sttRouter.forceInputReadinessRecovery(reason: "dictation_readiness_wait_stalled")
 
             case .startRecoveryRecording:
                 startAttempts += 1
@@ -473,8 +480,9 @@ class DictationSessionController: ObservableObject {
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
                     "format_ready": "\(appState.sttRouter.inputFormatReady)",
                     "start_attempts": "\(startAttempts)",
+                    "readiness_refreshes": "\(readinessRefreshes)",
                     "recovery_start_attempts": "\(recoveryStartAttempts)",
-                    "readiness_refreshes": "\(readinessRefreshes)"
+                    "forced_readiness_recoveries": "\(forcedReadinessRecoveries)"
                 ]
             )
         )

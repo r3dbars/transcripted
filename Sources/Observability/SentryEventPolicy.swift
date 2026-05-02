@@ -100,6 +100,11 @@ struct SentryEventPolicy: Equatable {
             event: "recording_stop_timeout",
             summary: "Meeting recording stop timed out."
         ),
+        "meeting.meeting_transcript_failed": .init(
+            engine: "meeting",
+            event: "meeting_transcript_failed",
+            summary: "Meeting transcription failed."
+        ),
         "onboarding.first_dictation_start_failed": .init(
             engine: "onboarding",
             event: "first_dictation_start_failed",
