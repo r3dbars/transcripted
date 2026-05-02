@@ -67,6 +67,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeMeetingPreview: HomeMeetingPreview?
+    @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
 
     init(
         appState: TranscriptedAppState,
@@ -168,6 +169,8 @@ struct TranscriptedSettingsView: View {
         .onDisappear {
             recentCaptureRefreshTask?.cancel()
             recentCaptureRefreshTask = nil
+            homeMeetingPreviewLoadTask?.cancel()
+            homeMeetingPreviewLoadTask = nil
             homeViewModel.cancel()
         }
     }
@@ -456,16 +459,34 @@ struct TranscriptedSettingsView: View {
 
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
-        do {
-            let markdown = try String(contentsOf: item.transcriptURL, encoding: .utf8)
-            homeMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
-        } catch {
-            homeMeetingPreview = HomeMeetingPreview(
-                item: item,
-                markdown: "",
-                readError: error.localizedDescription
-            )
+        homeMeetingPreviewLoadTask?.cancel()
+        homeMeetingPreviewLoadTask = Task { @MainActor in
+            let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
+            guard !Task.isCancelled else { return }
+
+            switch readResult {
+            case .success(let markdown):
+                homeMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+            case .failure(let message):
+                homeMeetingPreview = HomeMeetingPreview(
+                    item: item,
+                    markdown: "",
+                    readError: message
+                )
+            }
+
+            homeMeetingPreviewLoadTask = nil
         }
+    }
+
+    private static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
+        await Task.detached(priority: .userInitiated) {
+            do {
+                return .success(try String(contentsOf: url, encoding: .utf8))
+            } catch {
+                return .failure(error.localizedDescription)
+            }
+        }.value
     }
 
     private func submitHomeFeedback(_ submission: HomeFeedbackSubmission) {
