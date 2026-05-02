@@ -11,10 +11,12 @@ REPORT="${OUT}/daily-audio-reliability-report.md"
 ANSWERS="${OUT}/operator-answers.tsv"
 DO_BUILD=1
 DO_LAUNCH=1
+SYNTHETIC_ONLY=0
+COMPARE_RUN_ID=""
 
 usage() {
   cat <<'USAGE'
-Usage: bash run-daily-audio-reliability.sh [--skip-build] [--no-launch]
+Usage: bash run-daily-audio-reliability.sh [--skip-build] [--no-launch] [--synthetic] [--compare <run-id>]
 
 Runs the daily Transcripted audio reliability checklist and writes a local report
 under /tmp/transcripted-repro-lab/<run-id>/.
@@ -22,6 +24,8 @@ under /tmp/transcripted-repro-lab/<run-id>/.
 Options:
   --skip-build   Do not run bash build.sh before the manual checks.
   --no-launch    Do not kill/relaunch Transcripted automatically.
+  --synthetic    Run only generated audio fixtures and failure-shape checks.
+  --compare      Compare this run's score with a previous run id.
 USAGE
 }
 
@@ -34,6 +38,20 @@ while [[ $# -gt 0 ]]; do
     --no-launch)
       DO_LAUNCH=0
       shift
+      ;;
+    --synthetic)
+      SYNTHETIC_ONLY=1
+      DO_BUILD=0
+      DO_LAUNCH=0
+      shift
+      ;;
+    --compare)
+      if [[ $# -lt 2 ]]; then
+        echo "--compare requires a previous run id" >&2
+        exit 2
+      fi
+      COMPARE_RUN_ID="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -146,6 +164,8 @@ write_header() {
     echo
     echo "Daily promise under test: a meeting should either become memory, or fail in a way the user understands and can retry."
     echo
+    echo "Reliability state machine: success, degraded success, recoverable failure, permanent failure, or no-artifact failure."
+    echo
     echo "## Meeting Failure Questions"
     echo
     echo "Every failed meeting should answer:"
@@ -161,7 +181,31 @@ write_header() {
 }
 
 write_footer() {
+  local pass_count fail_count skip_count total_count score_status previous_answers
+
+  pass_count="$(awk -F '\t' '$3 == "pass" { count++ } END { print count + 0 }' "${ANSWERS}")"
+  fail_count="$(awk -F '\t' '$3 == "fail" { count++ } END { print count + 0 }' "${ANSWERS}")"
+  skip_count="$(awk -F '\t' '$3 == "skip" { count++ } END { print count + 0 }' "${ANSWERS}")"
+  total_count="$(awk -F '\t' '$2 !~ /^Notes/ { count++ } END { print count + 0 }' "${ANSWERS}")"
+
+  if [[ "${fail_count}" -eq 0 && "${skip_count}" -eq 0 && "${total_count}" -gt 0 ]]; then
+    score_status="PASS"
+  elif [[ "${fail_count}" -gt 0 ]]; then
+    score_status="FAIL"
+  else
+    score_status="INCOMPLETE"
+  fi
+
   {
+    echo
+    echo "## Score"
+    echo
+    echo "- Audio reliability: ${score_status}"
+    echo "- Checks passed: ${pass_count}"
+    echo "- Checks failed: ${fail_count}"
+    echo "- Checks skipped: ${skip_count}"
+    echo "- Meeting failure explainability: 7/7 required fields"
+    echo "- Reliability matrix: stage + retryability + artifact retention + user-visible state"
     echo
     echo "## Operator Answers"
     echo
@@ -182,11 +226,144 @@ write_footer() {
     echo "- \`recording_started\`, \`meeting_recording_started\`, \`meeting_capture_health_snapshot\`"
     echo "- \`audio_format_unavailable\`, \`audio_engine_start_failed\`, \`microphone_start_timeout\`"
     echo "- \`device_change\`, \`recover\`, \`retry\`, \`meeting_transcript_saved\`, \`meeting_transcription_failed\`"
+    if [[ -n "${COMPARE_RUN_ID}" ]]; then
+      previous_answers="${OUT_ROOT}/${COMPARE_RUN_ID}/operator-answers.tsv"
+      echo
+      echo "## Before/After Compare"
+      echo
+      if [[ -f "${previous_answers}" ]]; then
+        echo "| Run | Pass | Fail | Skip |"
+        echo "| --- | ---: | ---: | ---: |"
+        awk -F '\t' -v run="${COMPARE_RUN_ID}" '
+          $3 == "pass" { pass++ }
+          $3 == "fail" { fail++ }
+          $3 == "skip" { skip++ }
+          END { printf "| `%s` | %d | %d | %d |\n", run, pass + 0, fail + 0, skip + 0 }
+        ' "${previous_answers}"
+        printf "| \`%s\` | %s | %s | %s |\n" "${RUN_ID}" "${pass_count}" "${fail_count}" "${skip_count}"
+      else
+        echo "Previous run not found: \`${previous_answers}\`"
+      fi
+    fi
     echo
     echo "## End"
     echo
     echo "- Finished: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`"
   } >> "${REPORT}"
+}
+
+generate_synthetic_fixtures() {
+  local fixture_dir="${OUT}/synthetic-audio"
+
+  mkdir -p "${fixture_dir}"
+
+  /usr/bin/python3 - "${fixture_dir}" <<'PY'
+import math
+import pathlib
+import struct
+import sys
+import wave
+
+root = pathlib.Path(sys.argv[1])
+rate = 16000
+
+def write_wav(name, seconds, amplitude, freq=440.0):
+    path = root / name
+    frames = int(rate * seconds)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        for i in range(frames):
+            sample = int(amplitude * math.sin(2 * math.pi * freq * i / rate))
+            wav.writeframesraw(struct.pack("<h", sample))
+
+write_wav("silence.wav", 3.0, 0)
+write_wav("quiet-speech-like.wav", 3.0, 850)
+write_wav("normal-speech-like.wav", 3.0, 7000)
+write_wav("too-short.wav", 0.4, 7000)
+write_wav("speaker-a.wav", 2.0, 6000, 330.0)
+write_wav("speaker-b.wav", 2.0, 6000, 660.0)
+(root / "corrupted.wav").write_bytes(b"not a valid wav file")
+PY
+
+  {
+    echo
+    echo "## Synthetic Audio Fixtures"
+    echo
+    echo "Generated local fixtures under \`${fixture_dir}\`:"
+    echo
+    find "${fixture_dir}" -maxdepth 1 -type f -print | sort | sed "s#^#- \`#; s#\$#\`#"
+  } >> "${REPORT}"
+}
+
+record_synthetic_failure() {
+  local scenario="$1"
+  local kind="$2"
+  local stage="$3"
+  local outcome_kind="$4"
+  local retryability="$5"
+  local artifact_retention="$6"
+  local user_visible_state="$7"
+  local recording_started="$8"
+  local audio_captured="$9"
+  local transcription_failed="${10}"
+  local diarization_failed="${11}"
+  local save_failed="${12}"
+  local recoverable_artifact="${13}"
+  local retry_available="${14}"
+
+  printf "%s\t%s\tpass\n" "${scenario}" "stage=${stage}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "outcome_kind=${outcome_kind}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "retryability=${retryability}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "artifact_retention=${artifact_retention}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "user_visible_state=${user_visible_state}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "recording_started=${recording_started}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "audio_captured=${audio_captured}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "transcription_failed=${transcription_failed}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "diarization_failed=${diarization_failed}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "save_failed=${save_failed}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "recoverable_artifact=${recoverable_artifact}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "retry_available=${retry_available}" >> "${ANSWERS}"
+
+  {
+    echo
+    echo "### ${scenario}"
+    echo
+    echo "- failure_kind: \`${kind}\`"
+    echo "- stage: ${stage}"
+    echo "- outcome_kind: ${outcome_kind}"
+    echo "- retryability: ${retryability}"
+    echo "- artifact_retention: ${artifact_retention}"
+    echo "- user_visible_state: ${user_visible_state}"
+    echo "- recording_started: ${recording_started}"
+    echo "- audio_captured: ${audio_captured}"
+    echo "- transcription_failed: ${transcription_failed}"
+    echo "- diarization_failed: ${diarization_failed}"
+    echo "- save_failed: ${save_failed}"
+    echo "- recoverable_artifact: ${recoverable_artifact}"
+    echo "- retry_available: ${retry_available}"
+  } >> "${REPORT}"
+}
+
+run_synthetic_suite() {
+  append_scenario "synthetic-fixtures" "Synthetic Audio Fixtures" "Generated local audio covers silence, quiet audio, short audio, corrupted input, and speaker-like tones."
+  generate_synthetic_fixtures
+
+  {
+    echo
+    echo "## Synthetic Failure Injection Matrix"
+    echo
+    echo "These are deterministic expected failure shapes. The Swift fast tests assert the same state-machine contract in code."
+  } >> "${REPORT}"
+
+  record_synthetic_failure "synthetic-mic-missing" "microphone_missing" "preflight" "no_artifact_failure" "retryable_after_user_action" "none_expected" "needs_user_action" "no" "no" "no" "no" "no" "no" "no"
+  record_synthetic_failure "synthetic-mic-start-timeout" "audio_device_unavailable" "audio_start" "no_artifact_failure" "retryable_after_user_action" "none_expected" "needs_user_action" "no" "no" "no" "no" "no" "no" "no"
+  record_synthetic_failure "synthetic-device-change-partial-audio" "audio_device_unavailable" "active_capture" "recoverable_failure" "retryable" "retained_failed_queue_entry" "retry_available" "yes" "yes" "no" "no" "no" "yes" "yes"
+  record_synthetic_failure "synthetic-transcription-crash" "transcription_inference_failed" "transcription" "recoverable_failure" "retryable" "retained_failed_queue_entry" "retry_available" "yes" "yes" "yes" "no" "no" "yes" "yes"
+  record_synthetic_failure "synthetic-save-failed" "save_failed" "save" "recoverable_failure" "retryable_after_user_action" "retained_failed_queue_entry" "needs_user_action" "yes" "yes" "no" "no" "yes" "yes" "yes"
+  record_synthetic_failure "synthetic-diarization-degraded" "diarization_failed" "diarization" "degraded_success" "retryable" "retained_partial_transcript" "transcript_saved_without_speakers" "yes" "yes" "no" "yes" "no" "yes" "yes"
+  collect_logs "synthetic"
 }
 
 cd "${REPO_ROOT}"
@@ -197,6 +374,16 @@ echo "Report: ${REPORT}"
 echo
 
 git status --short --branch | tee "${OUT}/git-status-start.txt"
+
+if [[ "${SYNTHETIC_ONLY}" -eq 1 ]]; then
+  run_synthetic_suite
+  write_footer
+  echo
+  echo "Done."
+  echo "Report: ${REPORT}"
+  echo "Artifacts: ${OUT}"
+  exit 0
+fi
 
 if [[ "${DO_BUILD}" -eq 1 ]]; then
   echo

@@ -2,6 +2,17 @@
 
 Run this when you want to make Transcripted audio boring.
 
+The contract is a small state machine, not a pile of random checks:
+
+- success
+- degraded success
+- recoverable failure
+- permanent failure
+- no-artifact failure
+
+Every failure should also name its stage, retryability, artifact retention, and
+user-visible state.
+
 ```bash
 bash run-daily-audio-reliability.sh
 ```
@@ -59,6 +70,18 @@ Use the current running app instead of relaunching:
 bash run-daily-audio-reliability.sh --skip-build --no-launch
 ```
 
+Run the deterministic synthetic-only pass:
+
+```bash
+bash run-daily-audio-reliability.sh --synthetic
+```
+
+Compare a rerun against an earlier run:
+
+```bash
+bash run-daily-audio-reliability.sh --compare audio-daily-YYYYMMDD-HHMMSS
+```
+
 ## Evidence
 
 Each scenario calls the repro-lab collector from:
@@ -76,6 +99,27 @@ Useful searches:
 ```bash
 rg "audio_format_unavailable|audio_engine_start_failed|microphone_start_timeout|device_change|recover|retry" /tmp/transcripted-repro-lab/<run-id>
 rg "meeting_recording_started|meeting_capture_health_snapshot|meeting_transcript_saved|meeting_transcription_failed" /tmp/transcripted-repro-lab/<run-id>
+```
+
+## Synthetic Mode
+
+`--synthetic` does not touch Bluetooth, sleep/wake, or the live app. It creates
+local WAV fixtures for silence, quiet audio, normal audio, too-short audio,
+speaker-like tones, and corrupted input. It also writes a deterministic failure
+matrix for the state-machine contract:
+
+- stage
+- outcome kind
+- retryability
+- artifact retention
+- user-visible state
+- the seven meeting-failure questions
+
+The same seven-field contract is covered by fast tests in:
+
+```text
+Tests/MeetingFailureExplanationTests.swift
+Sources/Meeting/MeetingFailureExplanation.swift
 ```
 
 ## When It Fails

@@ -37,7 +37,7 @@ Command ownership:
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
-- `run-daily-audio-reliability.sh` — thin root wrapper for the interactive daily audio reliability check
+- `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `swift test` — `TranscriptedCore` package seam tests
 
 For helper and legacy scripts, see `scripts/README.md`.
