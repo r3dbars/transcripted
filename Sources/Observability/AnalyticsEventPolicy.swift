@@ -32,9 +32,65 @@ struct AnalyticsEventPolicy: Equatable {
         "voice_processing_active",
     ]
 
+    private static let dictationRouteDiagnosticProperties: Set<String> = [
+        "default_input_class",
+        "default_output_class",
+        "format_ready",
+        "hfp_suspected",
+        "input_channels",
+        "input_device_class",
+        "input_rate_hz",
+        "output_channels",
+        "output_device_class",
+        "output_rate_hz",
+        "recovery_latency_bucket",
+        "recovering",
+        "route_shape",
+        "sample_flow_started",
+        "selection_overrode_default",
+        "selection_reason",
+        "selected_input_class",
+        "was_recording",
+    ]
+
+    private static let runtimeDiagnosticProperties: Set<String> = [
+        "app_version",
+        "build_version",
+        "duration_bucket",
+        "format_ready",
+        "heartbeat_age_bucket",
+        "last_event",
+        "os_major",
+        "previous_clean_shutdown",
+        "reason",
+        "recovering",
+        "session_active",
+        "session_kind",
+        "session_stage",
+        "stall_kind",
+        "stall_stage",
+        "trigger",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
+            allowedProperties: []
+        ),
+        "app_unclean_shutdown_detected": .init(
+            name: "app_unclean_shutdown_detected",
+            allowedProperties: runtimeDiagnosticProperties
+        ),
+        "app_session_stall_detected": .init(
+            name: "app_session_stall_detected",
+            allowedProperties: runtimeDiagnosticProperties
+        ),
+        "support_diagnostics_copied": .init(
+            name: "support_diagnostics_copied",
+            allowedProperties: []
+        ),
+        "support_diagnostic_event_sent": .init(
+            name: "support_diagnostic_event_sent",
             allowedProperties: []
         ),
         "onboarding_shown": .init(
@@ -297,40 +353,54 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "dictation_started": .init(
             name: "dictation_started",
-            allowedProperties: [
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "trigger",
-            ]
+            ]))
         ),
         "dictation_start_failed": .init(
             name: "dictation_start_failed",
-            allowedProperties: [
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "failure_kind",
                 "trigger",
-            ]
+            ]))
         ),
         "dictation_completed": .init(
             name: "dictation_completed",
-            allowedProperties: [
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "auto_send",
                 "delivery",
                 "duration_bucket",
                 "trigger",
                 "word_count_bucket",
-            ]
+            ]))
         ),
         "dictation_cancelled": .init(
             name: "dictation_cancelled",
-            allowedProperties: [
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "duration_bucket",
                 "trigger",
-            ]
+            ]))
         ),
         "dictation_no_speech": .init(
             name: "dictation_no_speech",
-            allowedProperties: [
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "duration_bucket",
                 "trigger",
-            ]
+            ]))
+        ),
+        "dictation_audio_route_changed": .init(
+            name: "dictation_audio_route_changed",
+            allowedProperties: dictationRouteDiagnosticProperties
+        ),
+        "dictation_audio_route_recovery_finished": .init(
+            name: "dictation_audio_route_recovery_finished",
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
+                "outcome",
+            ]))
+        ),
+        "dictation_audio_route_recovery_timeout": .init(
+            name: "dictation_audio_route_recovery_timeout",
+            allowedProperties: dictationRouteDiagnosticProperties
         ),
         "meeting_recording_started": .init(
             name: "meeting_recording_started",

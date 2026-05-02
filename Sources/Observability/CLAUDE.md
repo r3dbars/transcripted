@@ -12,6 +12,8 @@ anonymous analytics, and Sparkle update plumbing.
 - `JSONLWriter.swift` — shared append-only JSONL writer that reuses file handles and falls back cleanly if log files are rotated or recreated
 - `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
+- `RuntimeDiagnostics.swift` — app runtime heartbeat, dirty-shutdown detection, and active session stage tracking for force quits / silent exits
+- `RuntimeDiagnosticsStore.swift` — JSON marker persistence and privacy-safe dirty-shutdown context builder
 - `CrashReporter.swift` — crash reporting setup
 - `CrashReportingPreferences.swift` — Settings-backed crash reporting preference
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog
@@ -36,6 +38,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
+- `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
 - Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
 
 ## Verification
@@ -57,6 +60,7 @@ Relevant direct coverage:
 - `Tests/SentryPayloadSanitizerTests.swift`
 - `Tests/SentryRuntimeConfigurationTests.swift`
 - `Tests/ObservabilityLogWriterTests.swift`
+- `Tests/RuntimeDiagnosticsStoreTests.swift`
 - `Tests/UpdateFailureKindTests.swift`
 
 Useful files while testing:

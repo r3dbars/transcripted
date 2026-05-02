@@ -6,6 +6,14 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "transcription_failed"
         )
+        let uncleanShutdown = SentryEventPolicy.policy(
+            forEngine: "app",
+            event: "unclean_shutdown_detected"
+        )
+        let sessionStall = SentryEventPolicy.policy(
+            forEngine: "app",
+            event: "session_stall_detected"
+        )
         let hotkeyFailure = SentryEventPolicy.policy(
             forEngine: "capture",
             event: "hotkey_register_failed"
@@ -17,6 +25,14 @@ func testSentryEventPolicy() {
         let microphoneStartTimeout = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "microphone_start_timeout"
+        )
+        let deviceRecoveryTimeout = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "device_change_recovery_timeout"
+        )
+        let recordingInterrupted = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "recording_interrupted"
         )
         let meetingStartFailed = SentryEventPolicy.policy(
             forEngine: "meeting",
@@ -48,9 +64,13 @@ func testSentryEventPolicy() {
         )
 
         assertEqual(transcriptionFailure?.summary, "Speech transcription failed.", "transcription failure should use the normalized summary")
+        assertEqual(uncleanShutdown?.summary, "Previous app session did not shut down cleanly.", "unclean shutdown reports should be visible in Sentry")
+        assertEqual(sessionStall?.summary, "Transcripted detected a stalled runtime session.", "session stalls should be visible in Sentry")
         assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
+        assertEqual(deviceRecoveryTimeout?.summary, "Speech engine device-change recovery timed out.", "device recovery timeouts should be visible in Sentry with privacy-safe route context")
+        assertEqual(recordingInterrupted?.summary, "Dictation recording was interrupted by audio device recovery.", "recording interruptions should be visible in Sentry with privacy-safe route context")
         assertEqual(meetingStartFailed?.summary, "Meeting recording could not start.", "meeting start failures should be visible without raw device names")
         assertEqual(meetingCaptureDegraded?.summary, "Meeting capture health degraded.", "degraded meeting capture should be visible without raw device names")
         assertEqual(meetingStopTimeout?.summary, "Meeting recording stop timed out.", "stop timeouts should be visible without raw device names")
