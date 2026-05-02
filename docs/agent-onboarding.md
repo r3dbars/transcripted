@@ -12,18 +12,20 @@ historical, and which local doc to read before editing a subsystem.
 4. `docs/agent-onboarding.md`
 5. `Sources/CLAUDE.md`
 6. the nearest local `CLAUDE.md`
-7. `Sources/Speech/CLAUDE.md` when touching STT, audio recovery, or device handling
-8. `Sources/Support/CLAUDE.md` when touching shared preferences, paths, permissions, or install flows
-9. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
-10. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
-11. `Tests/README.md` when touching verification or package seams
-12. `docs/storage-paths.md` when touching persisted output or path resolution
-13. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
-14. `Sources/Observability/CLAUDE.md` when touching crash reporting, analytics, or Sparkle plumbing
-15. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
-16. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
-17. `scripts/README.md` when touching the shell entrypoints or release helpers
-18. source comments
+7. `Sources/Accessibility/CLAUDE.md` when touching focused-editor AX metadata, overlay placement, or paste-back context
+8. `Sources/Beta/CLAUDE.md` when touching beta-build configuration
+9. `Sources/Speech/CLAUDE.md` when touching STT, audio recovery, or device handling
+10. `Sources/Support/CLAUDE.md` when touching shared preferences, paths, permissions, or install flows
+11. `Sources/UI/CLAUDE.md` when touching overlay, menubar, onboarding, settings, or agent-connect UI
+12. `Sources/Capture/CLAUDE.md` when touching hotkeys or physical dictation trigger routing
+13. `Tests/README.md` when touching verification or package seams
+14. `docs/storage-paths.md` when touching persisted output or path resolution
+15. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
+16. `Sources/Observability/CLAUDE.md` when touching crash reporting, analytics, or Sparkle plumbing
+17. `Sources/Reliability/CLAUDE.md` when touching wake / sleep recovery or hotkey recovery
+18. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
+19. `scripts/README.md` when touching the shell entrypoints or release helpers
+20. source comments
 
 For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
@@ -87,6 +89,10 @@ Rule of thumb:
 
 - `Sources/CLAUDE.md`
   App boot order and shared state wiring.
+- `Sources/Accessibility/CLAUDE.md`
+  Focused-editor AX metadata, overlay placement, and paste-back context.
+- `Sources/Beta/CLAUDE.md`
+  Beta-build configuration and archived beta-worker boundaries.
 - `Sources/Meeting/CLAUDE.md`
   App/Core bridge, meeting storage, runtime lifecycle.
 - `Sources/TranscriptedCore/CLAUDE.md`
