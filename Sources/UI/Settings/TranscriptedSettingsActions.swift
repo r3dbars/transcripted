@@ -9,4 +9,6 @@ struct TranscriptedSettingsActions {
     let openConnectAgent: () -> Void
     let checkForUpdates: () -> Void
     let sendFeedback: () -> Void
+    let copyDiagnostics: () -> Bool
+    let sendDiagnosticEvent: () -> String?
 }

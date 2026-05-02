@@ -13,7 +13,7 @@ enum SettingsRecentCaptureRefreshPolicy {
             return .homeDashboard
         case .meetings, .dictations:
             return .recentLists
-        case .general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .about:
+        case .general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about:
             return .none
         }
     }
