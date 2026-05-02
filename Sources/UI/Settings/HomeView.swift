@@ -374,7 +374,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
                 .padding(.leading, 36)
-                .padding(.bottom, -5)
+                .padding(.bottom, -12)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 22) {
@@ -385,7 +385,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
 
                 activityContent()
             }
-            .padding(.top, 26)
+            .padding(.top, 34)
             .padding(.horizontal, 28)
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -492,15 +492,15 @@ private struct HomeHeroModeTab: View {
                     .fill(tabFill)
             )
             .overlay(
-                HomeHeroTabShape(cornerRadius: 12)
+                HomeHeroTabBorderShape(cornerRadius: 12)
                     .stroke(tabStroke, lineWidth: 1)
             )
             .overlay(alignment: .bottom) {
                 if isSelected {
                     Rectangle()
                         .fill(surfaceFill)
-                        .frame(height: 6)
-                        .offset(y: 2)
+                        .frame(height: 14)
+                        .offset(y: 8)
                 }
             }
         }
@@ -517,7 +517,7 @@ private struct HomeHeroModeTab: View {
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.045)
+        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.035)
     }
 
     private var surfaceFill: Color {
@@ -544,6 +544,28 @@ private struct HomeHeroTabShape: Shape {
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         path.closeSubpath()
+        return path
+    }
+}
+
+private struct HomeHeroTabBorderShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         return path
     }
 }
