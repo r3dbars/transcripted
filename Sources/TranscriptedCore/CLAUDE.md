@@ -6,7 +6,7 @@
 
 ## Subsystems (62 Swift files)
 
-- `Audio/` (17 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
+- `Audio/` (17 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, signal analysis and normalization helpers, privacy-safe pipeline diagnostics snapshots, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
 - `Logging/` (2 files) — shared app logger and JSONL file logger
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
@@ -34,6 +34,7 @@ These seams exist specifically so the app can embed the library without adopting
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.
 - `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
+- `AudioPipelineDiagnosticsSnapshot` is the privacy-safe route and buffer-health summary used for analytics and Sentry context. Keep it limited to bucketed device classes, rates, channel counts, and recovery state, never raw device names, transcript text, titles, file paths, or audio.
 - Hosts embedding `TranscriptedCore` should keep app-specific permission UX outside this directory, but they should understand that system-audio capture backend behavior now depends on OS availability.
 - Imported meeting audio is funneled through the same pipeline primitives as live captures so transcript formatting, stats, speaker naming, and retry behavior stay aligned.
 
