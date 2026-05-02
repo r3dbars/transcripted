@@ -37,6 +37,30 @@ enum MeetingTranscriptStyler {
         styledTranscript(at: url, persistChanges: false)
     }
 
+    static func displayTranscriptPreview(at url: URL) -> StyledMeetingTranscript? {
+        let raw: String
+        do {
+            raw = try previewString(at: url)
+        } catch {
+            logFailure(
+                event: "meeting_transcript_preview_read_failed",
+                message: "Failed to read meeting transcript preview",
+                context: [
+                    "file": url.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
+            return nil
+        }
+
+        guard isMeetingTranscript(raw) else { return nil }
+        guard let document = parseDocument(raw, fallbackURL: url) else {
+            return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
+        }
+
+        return StyledMeetingTranscript(url: url, title: buildTitle(for: document))
+    }
+
     private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
         let raw: String
         do {
@@ -105,6 +129,18 @@ enum MeetingTranscriptStyler {
         }
         return stripFrontmatter(from: raw)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func previewString(at url: URL, byteLimit: Int = 64 * 1024) throws -> String {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard data.count > byteLimit else {
+            return String(decoding: data, as: UTF8.self)
+        }
+        return String(decoding: data.prefix(byteLimit), as: UTF8.self)
+    }
+
+    private static func isMeetingTranscript(_ raw: String) -> Bool {
+        raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
     }
 
     private static func parseDocument(_ raw: String, fallbackURL: URL) -> ParsedDocument? {
