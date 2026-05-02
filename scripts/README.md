@@ -55,6 +55,8 @@ not have to carry the full operational logic:
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
   - Usage: `bash scripts/ops/qa-gate-closeout.sh [repo] [issue_number] [owner_login]`
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
+- `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
+  - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
   - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
   - Writes:

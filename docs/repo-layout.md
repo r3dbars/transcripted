@@ -59,7 +59,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `docs/` — live project docs
 - `docs/archive/` — archived planning, reviews, and historical notes
 - `archive/` — historical code and legacy tooling kept out of the live product surface
-- `config/` — app config artifacts such as entitlements
+- `config/` — app config artifacts including entitlements and nightly security manifests
 - `Resources/` — bundled app assets
 - `scripts/entrypoints/` — implementations behind the thin root command wrappers
 

@@ -6,7 +6,7 @@
 
 ## Subsystems (62 Swift files)
 
-- `Audio/` (17 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, and merge helpers
+- `Audio/` (17 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (2 files) — shared app logger and JSONL file logger
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
