@@ -24,7 +24,9 @@ func testDictationReadinessWaitPolicy() {
     runSuite("DictationReadinessWaitPolicy — refreshes after failed recovery leaves input unready") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
-            inputFormatReady: false
+            inputFormatReady: false,
+            readinessRefreshes: 0,
+            recoveryStartAttempts: 0
         )
 
         assertEqual(action, .refreshInputReadiness, "failed recovery should trigger another readiness refresh")
@@ -56,5 +58,27 @@ func testDictationReadinessWaitPolicy() {
             inputFormatReady: recovery.inputFormatReady
         )
         assertEqual(postTimeoutAction, .refreshInputReadiness, "timeout should unblock dictation into a refresh path")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — stale unready input gets one recovery start") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 4,
+            recoveryStartAttempts: 0
+        )
+
+        assertEqual(action, .startRecoveryRecording, "repeated stale readiness refreshes should force one guarded recovery start")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — recovery start is bounded") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 8,
+            recoveryStartAttempts: 1
+        )
+
+        assertEqual(action, .refreshInputReadiness, "after one recovery start attempt the loop should go back to readiness refreshes")
     }
 }
