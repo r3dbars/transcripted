@@ -26,6 +26,7 @@ bash build-deps.sh
 bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
+bash run-daily-audio-reliability.sh
 swift test
 ```
 
@@ -36,6 +37,7 @@ Command ownership:
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
+- `run-daily-audio-reliability.sh` — thin root wrapper for the interactive daily audio reliability check
 - `swift test` — `TranscriptedCore` package seam tests
 
 For helper and legacy scripts, see `scripts/README.md`.
@@ -75,6 +77,7 @@ Use these docs for these jobs:
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/storage-paths.md` — canonical storage and fallback path map
+- `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
 - `docs/qa-parakeet-start-failure-smoke.md` — manual BET-88 validation checklist for Parakeet start-failure recovery
