@@ -13,6 +13,10 @@ enum TranscriptedStoragePreferences {
         if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !customPath.isEmpty {
+            guard customPath.hasPrefix("/") else {
+                return fileManager.transcriptedDefaultCaptureLibraryDir
+            }
+
             let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
             // Security: reject tampered preferences that target traversal or system
             // roots while preserving the user's ability to choose their own library.
@@ -43,6 +47,12 @@ enum TranscriptedStoragePreferences {
     }
 
     static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
+        // Security: reject relative paths from tampered preferences so Transcripted
+        // never resolves a capture library against the process working directory.
+        guard url.isFileURL, url.path.hasPrefix("/") else {
+            return false
+        }
+
         if url.pathComponents.contains("..") {
             return false
         }

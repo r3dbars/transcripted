@@ -132,4 +132,32 @@ func testTranscriptedStoragePaths() {
             "storage should fall back to the default Transcripted Library capture root"
         )
     }
+
+    runSuite("Transcripted capture library helpers — reject relative capture folders") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        UserDefaults.standard.set(
+            "relative-capture-root",
+            forKey: TranscriptedStoragePreferences.captureLibraryLocationKey
+        )
+
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            "relative capture-library paths should fall back to the default Transcripted Library capture root"
+        )
+        assertEqual(
+            FileManager.default.meetingSupportDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir.appendingPathComponent("meetings", isDirectory: true),
+            "meeting storage should also stay under the default root when preferences are tampered with"
+        )
+        assertEqual(
+            FileManager.default.dictationSupportDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir.appendingPathComponent("dictations", isDirectory: true),
+            "dictation storage should also stay under the default root when preferences are tampered with"
+        )
+    }
 }

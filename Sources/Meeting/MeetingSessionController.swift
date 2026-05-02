@@ -28,6 +28,8 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
+    static var runtimeDiagnosticsRecorder: RuntimeDiagnostics?
+
     enum StartTrigger: String {
         case hotkey = "hotkey"
         case menu = "menu"
@@ -290,6 +292,7 @@ final class MeetingSessionController: ObservableObject {
     /// the older transcript continues in the background.
     @discardableResult
     func startRecording(trigger: StartTrigger = .unknown) async -> Bool {
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_start_requested",
@@ -329,10 +332,12 @@ final class MeetingSessionController: ObservableObject {
                 startDecision.errorMessage
                     ?? "Turn on the required permissions in System Settings before recording a meeting."
             )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_permission")
             return false
         }
 
         guard await ensureModelsReadyForRecording(trigger: trigger) else {
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "models_unavailable")
             return false
         }
 
@@ -359,11 +364,13 @@ final class MeetingSessionController: ObservableObject {
                 properties: failureProperties
             )
             state = .error(failureMessage)
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
             return false
         }
 
         activeRecordingTrigger = trigger
         state = .recording
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -495,6 +502,7 @@ final class MeetingSessionController: ObservableObject {
         guard !isFinishingRecording else { return }
         isFinishingRecording = true
         defer { isFinishingRecording = false }
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
 
@@ -524,6 +532,7 @@ final class MeetingSessionController: ObservableObject {
         let durationMs = Int(finalRecordingDuration * 1000)
         activeRecordingTrigger = .unknown
         state = .transcribing
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
 
         DiagnosticsTrail.record(
             level: finalSystemAudioStatus.isWarning ? .warning : .info,
@@ -601,6 +610,15 @@ final class MeetingSessionController: ObservableObject {
         // from Settings → Meetings, where the pipeline will either succeed
         // on a now-finalized file or fail cleanly.
         if stopResult.didTimeOut {
+            Self.runtimeDiagnosticsRecorder?.recordStall(
+                kind: "meeting",
+                stage: "recording_stop_timeout",
+                durationSeconds: finalRecordingDuration,
+                extra: [
+                    "trigger": recordingTrigger.rawValue,
+                    "reason": reason.rawValue
+                ]
+            )
             failedManager.addFailedTranscription(
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
@@ -614,6 +632,7 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
             )
             state = .error("Recording didn't close cleanly. Open Settings → Meetings to retry.")
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
             return
         }
 
@@ -708,10 +727,12 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        let files = await capture.stopAndDiscardFiles()
+        let stopResult = await capture.stopAndDiscardFiles()
+        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
+        Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -723,7 +744,8 @@ final class MeetingSessionController: ObservableObject {
                     "reason": reason.rawValue,
                     "duration_ms": "\(durationMs)",
                     "mic_file_present": boolString(files.micURL != nil),
-                    "system_file_present": boolString(files.systemURL != nil)
+                    "system_file_present": boolString(files.systemURL != nil),
+                    "stop_timed_out": boolString(stopResult.didTimeOut)
                 ]
             )
         )
@@ -733,6 +755,7 @@ final class MeetingSessionController: ObservableObject {
                 [
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: Double(durationMs) / 1000),
                     "reason": reason.rawValue,
+                    "stop_timed_out": boolString(stopResult.didTimeOut),
                     "system_stream_present": boolString(files.systemURL != nil),
                     "trigger": recordingTrigger.rawValue,
                 ],
@@ -748,7 +771,7 @@ final class MeetingSessionController: ObservableObject {
                 reason: reason.rawValue,
                 durationSeconds: Double(durationMs) / 1000,
                 systemStreamPresent: files.systemURL != nil,
-                stopTimedOut: false
+                stopTimedOut: stopResult.didTimeOut
             )
         )
     }
@@ -766,6 +789,7 @@ final class MeetingSessionController: ObservableObject {
             message: "Imported meeting transcription requested",
             context: baseDiagnosticsContext(extra: ["trigger": StartTrigger.fileImport.rawValue])
         )
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "file_import_requested")
 
         if case .idle = state {
             await prepareModels()
@@ -799,6 +823,7 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
             state = .error(error.localizedDescription)
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_failed")
             return false
         }
 
@@ -830,6 +855,7 @@ final class MeetingSessionController: ObservableObject {
                 "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
             ]
         )
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         return true
     }
 
@@ -863,6 +889,7 @@ final class MeetingSessionController: ObservableObject {
             message: "Meeting transcription cancelled",
             context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
         )
+        Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcription_cancelled")
     }
 
     func prepareForTermination() async {
@@ -1345,6 +1372,7 @@ final class MeetingSessionController: ObservableObject {
                     uniquingKeysWith: { _, new in new }
                 )
             )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
@@ -1373,6 +1401,7 @@ final class MeetingSessionController: ObservableObject {
                     uniquingKeysWith: { _, new in new }
                 )
             )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")
             finalizeBackgroundTranscriptionStateIfNeeded()
         case .gettingReady:
             if previousStatus.diagnosticName != status.diagnosticName {
