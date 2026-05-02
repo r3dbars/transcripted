@@ -326,6 +326,7 @@ class DictationSessionController: ObservableObject {
         var recoveryStartAttempts = 0
         var readinessRefreshes = 0
         var forcedReadinessRecoveries = 0
+        var readinessRefreshTimedOut = false
         var nextReadinessRefreshAt = startedAt
         let readinessRefresher = DictationReadinessRefreshRunner()
         defer {
@@ -342,7 +343,28 @@ class DictationSessionController: ObservableObject {
         while CFAbsoluteTimeGetCurrent() < deadline {
             guard isDictating, !Task.isCancelled else { return }
 
-            let elapsed = CFAbsoluteTimeGetCurrent() - startedAt
+            let now = CFAbsoluteTimeGetCurrent()
+            if let staleRefresh = readinessRefresher.cancelIfTimedOut(now: now) {
+                readinessRefreshTimedOut = true
+                DiagnosticsTrail.record(
+                    logger: appState.logger,
+                    level: .warning,
+                    engine: "dictation",
+                    event: "dictation_readiness_refresh_timeout",
+                    message: "Dictation input-readiness refresh timed out while waiting to start",
+                    context: dictationContext(
+                        extra: [
+                            "operation": staleRefresh.operation,
+                            "elapsed_ms": "\(Int(staleRefresh.elapsed * 1000))",
+                            "readiness_refreshes": "\(readinessRefreshes)",
+                            "is_recovering": "\(appState.sttRouter.isRecovering)",
+                            "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                        ]
+                    )
+                )
+            }
+
+            let elapsed = now - startedAt
             let isRecovering = appState.sttRouter.isRecovering
             let inputFormatReady = appState.sttRouter.inputFormatReady
             overlayController.showLoadingState(
@@ -362,7 +384,8 @@ class DictationSessionController: ObservableObject {
                 inputFormatReady: inputFormatReady,
                 readinessRefreshes: readinessRefreshes,
                 forcedRecoveryAttempts: forcedReadinessRecoveries,
-                recoveryStartAttempts: recoveryStartAttempts
+                recoveryStartAttempts: recoveryStartAttempts,
+                readinessRefreshTimedOut: readinessRefreshTimedOut
             ) {
             case .waitForRecovery:
                 break
@@ -388,6 +411,7 @@ class DictationSessionController: ObservableObject {
             case .startRecoveryRecording:
                 startAttempts += 1
                 recoveryStartAttempts += 1
+                readinessRefreshTimedOut = false
                 DiagnosticsTrail.record(
                     logger: appState.logger,
                     level: .warning,
@@ -1282,33 +1306,72 @@ class DictationSessionController: ObservableObject {
 @MainActor
 private final class DictationReadinessRefreshRunner {
     private var task: Task<Void, Never>?
+    private var generation: UInt64 = 0
+    private var operation: String?
+    private var startedAt: TimeInterval?
 
     func start(appState: TranscriptedAppState) -> Bool {
-        start {
+        start(operation: "refresh_input_readiness") {
             await appState.sttRouter.refreshInputReadiness()
         }
     }
 
     func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool {
-        start {
+        start(operation: "force_input_recovery") {
             await appState.sttRouter.forceInputReadinessRecovery(reason: reason)
         }
     }
 
-    func cancel() {
+    func cancelIfTimedOut(now: TimeInterval) -> DictationReadinessRefreshTimeout? {
+        guard task != nil,
+              DictationReadinessRefreshTimeoutPolicy.timedOut(startedAt: startedAt, now: now) else {
+            return nil
+        }
+
+        let stale = DictationReadinessRefreshTimeout(
+            operation: operation ?? "unknown",
+            elapsed: now - (startedAt ?? now)
+        )
+        generation &+= 1
         task?.cancel()
         task = nil
+        operation = nil
+        startedAt = nil
+        return stale
     }
 
-    private func start(_ operation: @escaping @MainActor () async -> Void) -> Bool {
+    func cancel() {
+        generation &+= 1
+        task?.cancel()
+        task = nil
+        operation = nil
+        startedAt = nil
+    }
+
+    private func start(
+        operation operationName: String,
+        _ body: @escaping @MainActor () async -> Void
+    ) -> Bool {
         guard task == nil else { return false }
+        generation &+= 1
+        let taskGeneration = generation
+        operation = operationName
+        startedAt = CFAbsoluteTimeGetCurrent()
         task = Task { @MainActor [weak self] in
-            await operation()
+            await body()
             guard !Task.isCancelled else { return }
+            guard self?.generation == taskGeneration else { return }
             self?.task = nil
+            self?.operation = nil
+            self?.startedAt = nil
         }
         return true
     }
+}
+
+private struct DictationReadinessRefreshTimeout {
+    let operation: String
+    let elapsed: TimeInterval
 }
 
 private typealias DictationPasteOutcome = TextPasteOutcome

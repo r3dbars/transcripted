@@ -82,6 +82,10 @@ enum TranscriptedConstants {
     /// This lets a failed recovery get unstuck without hammering CoreAudio.
     static let dictationReadinessRefreshInterval: TimeInterval = 0.3
 
+    /// Max time a single user-started input-readiness refresh may block the
+    /// dictation wait loop before it is treated as stale.
+    static let dictationReadinessRefreshTimeout: TimeInterval = 0.9
+
     /// Number of active readiness refreshes before a user-started dictation
     /// performs a hard idle audio graph rebuild.
     static let dictationReadinessForcedRecoveryRefreshes: Int = 6
