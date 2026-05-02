@@ -26,6 +26,7 @@ not have to carry the full operational logic:
 
 ## Active helper scripts
 
+- `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up

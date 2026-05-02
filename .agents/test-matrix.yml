@@ -1,0 +1,85 @@
+# Path-to-verification map for coding agents.
+#
+# This file is intentionally simple YAML so humans and agents can read it
+# without a repo-specific parser. `scripts/dev/agent-preflight.sh` mirrors these
+# rules when it prints suggested checks for the current branch.
+
+rules:
+  - paths:
+      - "Sources/**/*.swift"
+      - "Tests/*.swift"
+    checks:
+      - "bash build.sh"
+      - "bash run-tests.sh"
+
+  - paths:
+      - "Sources/Meeting/**"
+      - "Sources/TranscriptedCore/**"
+      - "Tests/Integration/**"
+    checks:
+      - "bash build.sh"
+      - "bash run-tests.sh"
+      - "bash run-integration-smoke.sh"
+
+  - paths:
+      - "Package.swift"
+      - "Sources/TranscriptedCore/**"
+      - "Tests/TranscriptedCoreTests/**"
+    checks:
+      - "bash build.sh"
+      - "bash run-tests.sh"
+      - "bash run-integration-smoke.sh"
+      - "swift test"
+
+  - paths:
+      - "Sources/Observability/**"
+      - "Info.plist"
+      - "docs/sparkle-updates.md"
+      - "docs/appcast.xml"
+    checks:
+      - "bash build.sh"
+      - "bash run-tests.sh"
+
+  - paths:
+      - "build-beta.sh"
+      - "scripts/entrypoints/build-beta.sh"
+      - "scripts/release/**"
+      - "docs/release-packaging.md"
+      - "docs/sparkle-updates.md"
+      - "Casks/**"
+      - "docs/appcast.xml"
+    checks:
+      - "bash build.sh"
+      - "bash run-tests.sh"
+      - "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
+
+  - paths:
+      - "Tools/TranscriptedCLI/**"
+    checks:
+      - "swift test --package-path Tools/TranscriptedCLI"
+
+  - paths:
+      - "Tools/TranscriptedMCP/**"
+    checks:
+      - "swift test --package-path Tools/TranscriptedMCP"
+
+  - paths:
+      - "Tools/TranscriptedQA/**"
+    checks:
+      - "swift test --package-path Tools/TranscriptedQA"
+
+  - paths:
+      - "README.md"
+      - "AGENT_START.md"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "CONTRIBUTING.md"
+      - "docs/**"
+      - ".agents/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+
+notes:
+  - "If a change matches multiple rules, run the union of checks."
+  - "When in doubt, prefer the stricter AGENTS.md rule."
+  - "UI changes should include sanitized review visuals under .agent-review/visuals/."

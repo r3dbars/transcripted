@@ -9,6 +9,7 @@ Quick repo orientation before you jump in:
 - the old standalone Transcripted app is preserved on `legacy/transcripted-standalone`
   and `pre-draft-takeover-2026-04-06`
 - persisted app paths now default to Transcripted-named storage, though some helper names and standalone-tool fallbacks still reflect the Draft transition
+- coding agents should start with `AGENT_START.md`, then follow `AGENTS.md`
 
 In public docs and user-facing copy, prefer concrete present-tense claims about
 what the product does today. The broader "audio as a context layer" thesis is
@@ -60,6 +61,12 @@ is not the main app build.
 
 For the current script surface and legacy helpers, see `scripts/README.md`.
 For the active repo map and directory responsibilities, see `docs/repo-layout.md`.
+For the path-to-verification map used by agents, see `.agents/test-matrix.yml`
+or run:
+
+```bash
+scripts/dev/agent-preflight.sh
+```
 
 ## Product Framing
 
