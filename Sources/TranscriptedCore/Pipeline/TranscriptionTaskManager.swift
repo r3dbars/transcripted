@@ -25,6 +25,7 @@ public class TranscriptionTaskManager: ObservableObject {
     public let statsStore: (any StatsStore)?
     let retainedAudioDirectory: URL?
     private let retainedAudioDirectoryProvider: (() -> URL?)?
+    private let cleanupDirectories: [URL]
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -37,6 +38,7 @@ public class TranscriptionTaskManager: ObservableObject {
         diarization: any DiarizationEngine,
         speakerStore: any SpeakerStore,
         speakerClipsDirectory: URL = CoreStoragePaths.default.speakerClips,
+        cleanupDirectories: [URL]? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil,
         statsStore: (any StatsStore)? = nil,
@@ -47,6 +49,8 @@ public class TranscriptionTaskManager: ObservableObject {
         self.notifier = notifier
         self.retainedAudioDirectory = retainedAudioDirectory
         self.retainedAudioDirectoryProvider = retainedAudioDirectoryProvider
+        self.cleanupDirectories = (cleanupDirectories ?? [speakerClipsDirectory])
+            .map(Self.canonicalDirectoryURL)
         self.transcription = Transcription(
             speechToText: speechToText,
             diarization: diarization,
@@ -480,7 +484,18 @@ public class TranscriptionTaskManager: ObservableObject {
         notifier.notifyTranscriptionFailed(errorMessage: errorMessage)
     }
 
-    private func removeRecordingFile(_ url: URL, label: String) {
+    nonisolated private func removeRecordingFile(_ url: URL, label: String) {
+        // Security: only delete scratch files inside Transcripted-managed cleanup roots.
+        // `startImportedTranscription` accepts a URL from the caller, so without a containment
+        // check a misuse or tampered in-memory request could unlink arbitrary user files.
+        guard isSafeCleanupURL(url) else {
+            AppLogger.pipeline.error("Refused to delete out-of-sandbox recording file", [
+                "label": label,
+                "path": url.path
+            ])
+            return
+        }
+
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
@@ -494,6 +509,33 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func resolvedRetainedAudioDirectory() -> URL? {
         retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
+    }
+
+    nonisolated func removeManagedCleanupFile(_ url: URL?, label: String) {
+        guard let url else { return }
+        removeRecordingFile(url, label: label)
+    }
+
+    nonisolated private func isSafeCleanupURL(_ url: URL) -> Bool {
+        let canonicalURL = Self.canonicalURL(url)
+        return cleanupDirectories.contains { root in
+            Self.isFile(canonicalURL, containedIn: root)
+        }
+    }
+
+    private static func canonicalURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private static func canonicalDirectoryURL(_ url: URL) -> URL {
+        canonicalURL(url)
+    }
+
+    private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
+        let filePath = canonicalURL(fileURL).path
+        let directoryPath = canonicalDirectoryURL(directoryURL).path
+        let normalizedDirectoryPath = directoryPath.hasSuffix("/") ? directoryPath : directoryPath + "/"
+        return filePath.hasPrefix(normalizedDirectoryPath)
     }
 
     private func archiveFailedRecordingAudioIfConfigured(
