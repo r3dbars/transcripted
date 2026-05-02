@@ -194,7 +194,7 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
         }
 
         self.bufferCallback = bufferCallback
-        errorMessage = nil
+        publishErrorMessage(nil)
 
         do {
             // Setup tap if not already prepared
@@ -216,7 +216,7 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
             let errMsg = "Failed to start system audio capture: \(error.localizedDescription)"
             AppLogger.audioSystem.error("Start failed", ["error": errMsg])
             cleanup()
-            errorMessage = errMsg
+            publishErrorMessage(errMsg)
             throw error
         }
     }
@@ -280,6 +280,16 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
         }
 
         cleanup()
+    }
+
+    private func publishErrorMessage(_ message: String?) {
+        if Thread.isMainThread {
+            errorMessage = message
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.errorMessage = message
+            }
+        }
     }
 
     deinit {
