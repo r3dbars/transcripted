@@ -523,15 +523,15 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
-    private static func canonicalURL(_ url: URL) -> URL {
+    nonisolated private static func canonicalURL(_ url: URL) -> URL {
         url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
-    private static func canonicalDirectoryURL(_ url: URL) -> URL {
+    nonisolated private static func canonicalDirectoryURL(_ url: URL) -> URL {
         canonicalURL(url)
     }
 
-    private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
+    nonisolated private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
         let filePath = canonicalURL(fileURL).path
         let directoryPath = canonicalDirectoryURL(directoryURL).path
         let normalizedDirectoryPath = directoryPath.hasSuffix("/") ? directoryPath : directoryPath + "/"
