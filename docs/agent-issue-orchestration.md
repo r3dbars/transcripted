@@ -142,3 +142,5 @@ This is a trusted local runner. Codex runs in an isolated clone, but the default
 Only allowed issue authors can trigger the runner. The allowlist lives in `WORKFLOW.md` under `tracker.allowed_authors`. The public issue template does not auto-apply `agent todo`; add that label only after checking the issue is really work Justin wants to run.
 
 Review the draft PR before merging. Do not put secrets or private customer data in issues.
+
+After a linked PR is merged, close the issue or move it to agent done so human review stays clean.
