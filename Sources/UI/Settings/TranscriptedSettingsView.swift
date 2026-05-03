@@ -638,21 +638,25 @@ struct TranscriptedSettingsView: View {
     private var homeStatItems: [HomeStatItem] {
         [
             HomeStatItem(
+                id: "dictations",
                 symbolName: "text.bubble.fill",
                 value: formattedInteger(homeViewModel.totalDictationCount),
                 label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
+                id: "typing-time-saved",
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
                 label: "saved"
             ),
             HomeStatItem(
+                id: "meetings",
                 symbolName: "person.2.wave.2.fill",
                 value: formattedInteger(statsService.totalRecordings),
                 label: statsService.totalRecordings == 1 ? "meeting" : "meetings"
             ),
             HomeStatItem(
+                id: "meeting-hours",
                 symbolName: "clock.fill",
                 value: statsService.formattedTotalHours,
                 label: "hours"
