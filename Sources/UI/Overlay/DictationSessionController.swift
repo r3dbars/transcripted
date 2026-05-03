@@ -250,17 +250,6 @@ class DictationSessionController: ObservableObject {
         if let appState = appState,
            !appState.sttRouter.isRecovering,
            appState.sttRouter.inputFormatReady {
-            overlayController.showLoadingState(
-                near: sourceApp,
-                presentation: microphoneRecoveryPresentation(
-                    elapsed: 0,
-                    deviceName: appState.sttRouter.inputDeviceName,
-                    isRecovering: false,
-                    inputFormatReady: true,
-                    startAttempts: 0
-                ),
-                anchorRect: sessionAnchorRect
-            )
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -277,6 +266,9 @@ class DictationSessionController: ObservableObject {
                 if started {
                     self.recordingStartRetryTask = nil
                     overlayController.state = .listening
+                    if !overlayController.isVisible {
+                        overlayController.showPanel(near: sourceApp, anchorRect: self.sessionAnchorRect)
+                    }
                     self.resizePanelToCompact()
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                     appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
