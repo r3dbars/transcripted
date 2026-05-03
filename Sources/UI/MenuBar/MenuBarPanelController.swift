@@ -17,6 +17,7 @@ final class MenuBarPanelController: NSViewController {
     private var latestDictation: SavedDictationEntry?
     private var latestDictationLoaded = false
     private var latestDictationTask: Task<Void, Never>?
+    private var scheduledRefreshTask: Task<Void, Never>?
 
     init(
         appState: TranscriptedAppState,
@@ -33,6 +34,11 @@ final class MenuBarPanelController: NSViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit {
+        latestDictationTask?.cancel()
+        scheduledRefreshTask?.cancel()
+    }
 
     override func loadView() {
         let content = MenuBarContentView(frame: NSRect(x: 0, y: 0, width: MenuTokens.panelWidth, height: MenuTokens.panelHeight))
@@ -56,6 +62,9 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func refresh() {
+        scheduledRefreshTask?.cancel()
+        scheduledRefreshTask = nil
+
         guard let content = contentView else { return }
 
         appState.contextCapture.refreshShortcutStatus()
@@ -126,21 +135,21 @@ final class MenuBarPanelController: NSViewController {
         appState.meetingSession.$warmupStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
         appState.meetingSession.$state
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
         appState.sttRouter.$modelDownloadState
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
@@ -148,28 +157,28 @@ final class MenuBarPanelController: NSViewController {
             .combineLatest(appState.contextCapture.$meetingShortcutDisplay)
             .receive(on: RunLoop.main)
             .sink { [weak self] _, _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
         appState.contextCapture.$hotkeyError
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
         appState.sparkleUpdater.$updateStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
         NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                self?.refresh()
+                self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
@@ -181,6 +190,16 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
+    }
+
+    private func scheduleRefresh() {
+        guard scheduledRefreshTask == nil else { return }
+        scheduledRefreshTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled else { return }
+            self.scheduledRefreshTask = nil
+            self.refresh()
+        }
     }
 
     func prepareForClose() {

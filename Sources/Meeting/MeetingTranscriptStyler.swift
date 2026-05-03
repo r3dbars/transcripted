@@ -6,6 +6,8 @@ struct StyledMeetingTranscript {
 }
 
 enum MeetingTranscriptStyler {
+    private static let frontmatterPreviewByteLimit = 64 * 1024
+
     private static let parseFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -62,6 +64,10 @@ enum MeetingTranscriptStyler {
     }
 
     private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
+        if !persistChanges, let title = frontmatterTitle(at: url) {
+            return StyledMeetingTranscript(url: url, title: title)
+        }
+
         let raw: String
         do {
             raw = try String(contentsOf: url, encoding: .utf8)
@@ -132,11 +138,10 @@ enum MeetingTranscriptStyler {
     }
 
     private static func previewString(at url: URL, byteLimit: Int = 64 * 1024) throws -> String {
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        guard data.count > byteLimit else {
-            return String(decoding: data, as: UTF8.self)
-        }
-        return String(decoding: data.prefix(byteLimit), as: UTF8.self)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: byteLimit) ?? Data()
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func isMeetingTranscript(_ raw: String) -> Bool {
@@ -146,24 +151,11 @@ enum MeetingTranscriptStyler {
     private static func parseDocument(_ raw: String, fallbackURL: URL) -> ParsedDocument? {
         guard let body = stripFrontmatter(from: raw),
               raw.hasPrefix("---\n"),
-              let endRange = raw.range(
-                of: "\n---\n",
-                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
-              ) else {
+              let frontmatterLines = frontmatterLines(in: raw) else {
             return nil
         }
 
-        let frontmatterText = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
-        let frontmatterLines = frontmatterText.components(separatedBy: "\n")
-
-        var values: [String: String] = [:]
-        for line in frontmatterLines {
-            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-        }
+        let values = frontmatterValues(from: frontmatterLines)
 
         let recordedAt = parseRecordedAt(values: values, fallbackURL: fallbackURL)
         let transcriptEntries = extractTranscriptEntries(from: body)
@@ -182,6 +174,42 @@ enum MeetingTranscriptStyler {
             totalUtterances: utterances,
             transcriptEntries: transcriptEntries
         )
+    }
+
+    private static func frontmatterTitle(at url: URL) -> String? {
+        guard let raw = try? previewString(at: url, byteLimit: frontmatterPreviewByteLimit),
+              let frontmatterLines = frontmatterLines(in: raw) else {
+            return nil
+        }
+
+        let title = frontmatterValues(from: frontmatterLines)["title"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title?.isEmpty == false ? title : nil
+    }
+
+    private static func frontmatterLines(in raw: String) -> [String]? {
+        guard raw.hasPrefix("---\n"),
+              let endRange = raw.range(
+                of: "\n---\n",
+                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
+              ) else {
+            return nil
+        }
+
+        let frontmatterText = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        return frontmatterText.components(separatedBy: "\n")
+    }
+
+    private static func frontmatterValues(from lines: [String]) -> [String: String] {
+        var values: [String: String] = [:]
+        for line in lines {
+            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        }
+        return values
     }
 
     private static func parseRecordedAt(values: [String: String], fallbackURL: URL) -> Date {

@@ -237,7 +237,7 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
 // MARK: - Stats summary
 
 struct HomeStatItem: Identifiable {
-    let id = UUID()
+    let id: String
     let symbolName: String
     let value: String
     let label: String

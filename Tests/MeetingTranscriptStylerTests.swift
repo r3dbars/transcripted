@@ -6,6 +6,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts()
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
+        testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
@@ -75,6 +76,34 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
     assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
     assertEqual(styled.url.lastPathComponent, "Customer Interview April.md", "Explicit titles should drive the final transcript filename")
     assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
+}
+
+private func testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Customer Interview April.md")
+    let frontmatter = """
+    ---
+    title: "Customer Interview April"
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    ---
+
+    """
+    var data = Data(frontmatter.utf8)
+    data.append(Data(repeating: UInt8(ascii: "x"), count: 70_000))
+    data.append(0xff)
+    try? data.write(to: transcriptURL)
+
+    let styled = MeetingTranscriptStyler.displayTranscript(at: transcriptURL)
+
+    assertEqual(
+        styled.title,
+        "Customer Interview April",
+        "Display-only titles should come from frontmatter without requiring a full transcript body read"
+    )
 }
 
 private func testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata() {
