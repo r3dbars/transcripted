@@ -97,6 +97,7 @@ enum TranscriptedSupportActions {
             meetingState: meetingState,
             meetingRecording: meetingRecording,
             meetingDurationBucket: meetingDurationBucket,
+            reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries(),
             recentLogLines: appState.logger.entries
         )
     }

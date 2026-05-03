@@ -9,6 +9,8 @@ anonymous analytics, and Sparkle update plumbing.
 
 - `AppLogger.swift` — developer-facing debug log writer
 - `EventReporter.swift` — structured event capture
+- `ObservabilityEvent.swift` — shared structured event payload used by local event logging and derived reliability packets
+- `ReliabilityPacketRecorder.swift` — writes privacy-safe `reliability.jsonl` packets for important dictation, meeting, and runtime outcomes so support feedback can include failure shape without raw audio or transcript data
 - `JSONLWriter.swift` — shared append-only JSONL writer that reuses file handles and falls back cleanly if log files are rotated or recreated
 - `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
@@ -39,6 +41,7 @@ anonymous analytics, and Sparkle update plumbing.
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
+- `ReliabilityPacketRecorder` derives packets from already-reviewed observability events. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
 - Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
 
 ## Verification
@@ -67,4 +70,5 @@ Useful files while testing:
 
 - `~/Library/Application Support/Transcripted/logs/debug.log`
 - `~/Library/Application Support/Transcripted/logs/events.jsonl`
+- `~/Library/Application Support/Transcripted/logs/reliability.jsonl` for privacy-safe outcome packets attached to support diagnostics
 - `~/Library/Application Support/Transcripted/logs/app.jsonl` for embedded `TranscriptedCore` JSONL logs and QA validation

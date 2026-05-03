@@ -14,17 +14,6 @@ enum EventLevel: String, Codable {
     case info
 }
 
-struct ObservabilityEvent: Codable {
-    let timestamp: String
-    let level: String
-    let engine: String
-    let event: String
-    let message: String
-    let context: [String: String]?
-    let appVersion: String
-    let osVersion: String
-}
-
 // MARK: - File Writer (Actor)
 
 private actor EventFileWriter {
@@ -154,6 +143,7 @@ final class EventReporter {
         Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
         }
+        ReliabilityPacketRecorder.record(event: entry)
 
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {

@@ -93,7 +93,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
-- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events
+- `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events, including recent coarse reliability packet summaries
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback, copied diagnostics, and manually queued diagnostic events
 
 Cross-cutting permission checks now live in `Sources/Support/TranscriptedPermissionAccess.swift`
