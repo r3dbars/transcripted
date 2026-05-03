@@ -17,13 +17,19 @@ struct SupportDiagnosticsSnapshot: Equatable {
     var meetingState: String
     var meetingRecording: Bool
     var meetingDurationBucket: String
+    var reliabilityPackets: [String]
     var recentLogLines: [String]
 }
 
 enum SupportDiagnosticsBundle {
     static let maxRecentLogLines = 20
+    static let maxReliabilityPackets = 8
 
     static func text(snapshot: SupportDiagnosticsSnapshot, now: Date = Date()) -> String {
+        let reliabilityPackets = snapshot.reliabilityPackets
+            .suffix(maxReliabilityPackets)
+            .map(AnalyticsPayloadSanitizer.redact)
+            .filter { !$0.isEmpty }
         let recentLogs = snapshot.recentLogLines
             .suffix(maxRecentLogLines)
             .map(AnalyticsPayloadSanitizer.redact)
@@ -59,6 +65,9 @@ enum SupportDiagnosticsBundle {
         Recording: \(bool(snapshot.meetingRecording))
         Duration: \(snapshot.meetingDurationBucket)
 
+        Reliability Packets
+        \(reliabilityPackets.isEmpty ? "No recent reliability packets." : reliabilityPackets.joined(separator: "\n"))
+
         Recent Events
         \(recentLogs.isEmpty ? "No recent in-app events." : recentLogs.joined(separator: "\n"))
 
@@ -81,8 +90,12 @@ enum SupportDiagnosticsBundle {
             "meeting_state": snapshot.meetingState,
             "microphone_status": snapshot.microphoneStatus,
             "pasteback_granted": bool(snapshot.pastebackGranted),
+            "reliability_packet_count": "\(min(snapshot.reliabilityPackets.count, maxReliabilityPackets))",
             "system_audio_recording_granted": bool(snapshot.systemAudioRecordingGranted),
         ]
+        if let latest = snapshot.reliabilityPackets.last {
+            context["latest_reliability_packet"] = latest
+        }
 
         for (key, value) in snapshot.audioRoute {
             context["route_\(key)"] = value

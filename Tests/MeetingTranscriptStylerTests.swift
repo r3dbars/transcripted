@@ -7,6 +7,8 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
         testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
+        testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
+        testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
     }
@@ -102,6 +104,30 @@ private func testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead
         "Customer Interview April",
         "Display-only titles should come from frontmatter without requiring a full transcript body read"
     )
+}
+
+private func testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    let oversizedBody = String(repeating: "extra transcript text\n", count: 8_000)
+    try? (sampleImportedTranscript() + "\n" + oversizedBody).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let preview = MeetingTranscriptStyler.displayTranscriptPreview(at: transcriptURL)
+
+    assertEqual(preview?.title, "Customer Interview April", "Preview should derive the same title without requiring a full restyle pass")
+    assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite the transcript")
+}
+
+private func testMeetingTranscriptStylerPreviewRejectsPlainMarkdown() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let noteURL = directory.appendingPathComponent("notes.md")
+    try? "# Notes\n\nNot a Transcripted meeting.".write(to: noteURL, atomically: true, encoding: .utf8)
+
+    assertNil(MeetingTranscriptStyler.displayTranscriptPreview(at: noteURL), "Preview should skip non-meeting markdown files")
 }
 
 private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {

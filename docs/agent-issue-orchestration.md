@@ -118,6 +118,8 @@ to scan:
 - `packet failed`
 
 Visual artifacts are embedded from files committed under `.agent-review/visuals/` on the PR branch.
+Those images are PR evidence only. Do not treat older `.agent-review` images as
+current design truth.
 
 ## Revision Loop
 

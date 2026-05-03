@@ -64,14 +64,15 @@ extension Audio {
         let inputDevice = try? AudioObjectID.readDefaultInputDevice()
         let outputDevice = try? AudioObjectID.readDefaultOutputDevice()
         let systemOutputDevice = try? AudioObjectID.readDefaultSystemOutputDevice()
+        let actualInputDevice = currentInputDeviceID() ?? inputDevice
         let inputFormat = currentInputFormatSnapshot()
         let systemFormat = systemAudioCapture?.audioFormat
 
         return AudioPipelineDiagnosticsSnapshot(
-            inputDeviceClass: Self.deviceClass(for: inputDevice),
+            inputDeviceClass: Self.deviceClass(for: actualInputDevice),
             outputDeviceClass: Self.deviceClass(for: outputDevice),
             systemOutputDeviceClass: Self.deviceClass(for: systemOutputDevice),
-            inputRateHz: Self.rateString(inputFormat?.sampleRate ?? Self.nominalRate(for: inputDevice)),
+            inputRateHz: Self.rateString(inputFormat?.sampleRate ?? Self.nominalRate(for: actualInputDevice)),
             outputRateHz: Self.rateString(Self.nominalRate(for: outputDevice)),
             systemOutputRateHz: Self.rateString(Self.nominalRate(for: systemOutputDevice)),
             systemRateHz: Self.rateString(systemFormat?.sampleRate),
@@ -95,6 +96,14 @@ extension Audio {
         withAudioGraphLock {
             guard let inputNode else { return nil }
             return AudioRecordingFormatPolicy.snapshot(recordingFormat(for: inputNode))
+        }
+    }
+
+    private func currentInputDeviceID() -> AudioDeviceID? {
+        withAudioGraphLock {
+            guard let inputNode else { return nil }
+            let deviceID = inputNode.auAudioUnit.deviceID
+            return deviceID.isValid ? deviceID : nil
         }
     }
 

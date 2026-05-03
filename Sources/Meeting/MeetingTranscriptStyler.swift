@@ -39,6 +39,30 @@ enum MeetingTranscriptStyler {
         styledTranscript(at: url, persistChanges: false)
     }
 
+    static func displayTranscriptPreview(at url: URL) -> StyledMeetingTranscript? {
+        let raw: String
+        do {
+            raw = try previewString(at: url)
+        } catch {
+            logFailure(
+                event: "meeting_transcript_preview_read_failed",
+                message: "Failed to read meeting transcript preview",
+                context: [
+                    "file": url.lastPathComponent,
+                    "error": error.localizedDescription
+                ]
+            )
+            return nil
+        }
+
+        guard isMeetingTranscript(raw) else { return nil }
+        guard let document = parseDocument(raw, fallbackURL: url) else {
+            return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
+        }
+
+        return StyledMeetingTranscript(url: url, title: buildTitle(for: document))
+    }
+
     private static func styledTranscript(at url: URL, persistChanges: Bool) -> StyledMeetingTranscript {
         if !persistChanges, let title = frontmatterTitle(at: url) {
             return StyledMeetingTranscript(url: url, title: title)
@@ -113,6 +137,17 @@ enum MeetingTranscriptStyler {
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func previewString(at url: URL, byteLimit: Int = 64 * 1024) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: byteLimit) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func isMeetingTranscript(_ raw: String) -> Bool {
+        raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
+    }
+
     private static func parseDocument(_ raw: String, fallbackURL: URL) -> ParsedDocument? {
         guard let body = stripFrontmatter(from: raw),
               raw.hasPrefix("---\n"),
@@ -142,7 +177,7 @@ enum MeetingTranscriptStyler {
     }
 
     private static func frontmatterTitle(at url: URL) -> String? {
-        guard let raw = readPrefix(at: url, limit: frontmatterPreviewByteLimit),
+        guard let raw = try? previewString(at: url, byteLimit: frontmatterPreviewByteLimit),
               let frontmatterLines = frontmatterLines(in: raw) else {
             return nil
         }
@@ -175,19 +210,6 @@ enum MeetingTranscriptStyler {
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
         }
         return values
-    }
-
-    private static func readPrefix(at url: URL, limit: Int) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else {
-            return nil
-        }
-        defer { try? handle.close() }
-
-        guard let data = try? handle.read(upToCount: limit),
-              !data.isEmpty else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
     }
 
     private static func parseRecordedAt(values: [String: String], fallbackURL: URL) -> Date {

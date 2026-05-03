@@ -15,6 +15,7 @@ extension Audio {
 
         let (engine, inputNode, recordingFormat, recordingSnapshot) = try withAudioGraphLock { () throws -> (AVAudioEngine, AVAudioInputNode, AVAudioFormat, AudioRecordingFormatSnapshot) in
             let (engine, inputNode) = try ensureEngineInitialized()
+            applyPreferredMeetingInputDevice(to: inputNode, operation: "start_recording")
             armVoiceProcessing(on: inputNode)
 
             // When VPIO is off (the default — see `enableVoiceProcessing`), run
@@ -24,7 +25,7 @@ extension Audio {
             // other apps' audio output; software AGC has no such side effect.
             realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
 
-            // Use system default microphone (whatever macOS has configured).
+            // Read the selected microphone's format after any headset fallback.
             // recordingFormat(for:) returns:
             //   - VPIO output format when armVoiceProcessing enabled it (mono
             //     Float32 at the unit's preferred rate), which matches what the

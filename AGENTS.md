@@ -27,6 +27,7 @@
 
 ## Read this first
 
+0. `AGENT_START.md` for the short agent entrypoint
 1. `README.md`
 2. `AGENTS.md`
 3. `docs/repo-layout.md`
@@ -52,6 +53,8 @@
 23. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
 
 Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
+Use `.agents/test-matrix.yml` as the quick path-to-verification map, with this
+file taking precedence when there is any conflict.
 
 ## Build and test
 

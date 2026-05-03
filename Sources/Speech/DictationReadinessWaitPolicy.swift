@@ -2,6 +2,8 @@
 // Small policy for deciding how dictation should react while waiting for
 // Parakeet input readiness.
 
+import Foundation
+
 enum DictationReadinessWaitAction: Equatable {
     case waitForRecovery
     case refreshInputReadiness
@@ -20,7 +22,8 @@ struct DictationReadinessWaitPolicy {
         forcedRecoveryAttempts: Int = 0,
         forcedRecoveryRefreshThreshold: Int = TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
         maxForcedRecoveryAttempts: Int = TranscriptedConstants.dictationReadinessForcedRecoveryAttempts,
-        recoveryStartAttempts: Int = 0
+        recoveryStartAttempts: Int = 0,
+        readinessRefreshTimedOut: Bool = false
     ) -> DictationReadinessWaitAction {
         if isRecovering {
             return .waitForRecovery
@@ -28,6 +31,10 @@ struct DictationReadinessWaitPolicy {
 
         if inputFormatReady {
             return .startRecording
+        }
+
+        if readinessRefreshTimedOut, recoveryStartAttempts == 0 {
+            return .startRecoveryRecording
         }
 
         if readinessRefreshes >= refreshesBeforeRecoveryStart,
@@ -41,5 +48,16 @@ struct DictationReadinessWaitPolicy {
         }
 
         return .refreshInputReadiness
+    }
+}
+
+struct DictationReadinessRefreshTimeoutPolicy {
+    static func timedOut(
+        startedAt: TimeInterval?,
+        now: TimeInterval,
+        timeout: TimeInterval = TranscriptedConstants.dictationReadinessRefreshTimeout
+    ) -> Bool {
+        guard timeout > 0, let startedAt else { return false }
+        return now - startedAt >= timeout
     }
 }

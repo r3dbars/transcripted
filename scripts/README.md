@@ -26,6 +26,7 @@ not have to carry the full operational logic:
 
 ## Active helper scripts
 
+- `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
@@ -37,6 +38,10 @@ not have to carry the full operational logic:
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
+  - Usage: `bash run-daily-audio-reliability.sh`
+  - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`
+  - Writes local-only evidence under `/tmp/transcripted-repro-lab/<run-id>/`
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Optional built-app verification: `python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json`
