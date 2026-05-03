@@ -8,7 +8,7 @@ Keep it short. Focus on what a user would notice or care about.
 ## Candidate summary
 
 - One sentence on what this candidate is trying to improve.
-- Call out the version gap plainly if `Info.plist` and GitHub Releases still match.
+- If `HEAD` is ahead of the latest shipped tag but `Info.plist` and GitHub Releases still match, say plainly that this is post-release `main` work and not a versioned candidate yet.
 - Say whether Sparkle and Homebrew already point at this version, or still lag.
 
 ## User-visible changes
