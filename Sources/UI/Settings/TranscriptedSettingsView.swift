@@ -45,7 +45,7 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
-    @State private var autoEnterAppCandidates = AutoEnterAppCandidate.runningApps()
+    @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
@@ -142,6 +142,9 @@ struct TranscriptedSettingsView: View {
         }
         .onChange(of: navigation.selectedPage) { _, page in
             refreshRecentCaptures()
+            if page == .shortcuts {
+                refreshAutoEnterPreferences(includeCandidates: true)
+            }
             trackSettingsPageViewed(page, source: "navigation")
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
@@ -1864,10 +1867,7 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
-        autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
-        autoEnterKey = DictationAutoSendPreferences.sendKey()
-        autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
-        refreshAutoEnterAppCandidates()
+        refreshAutoEnterPreferences(includeCandidates: navigation.selectedPage == .shortcuts)
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
@@ -2158,6 +2158,15 @@ struct TranscriptedSettingsView: View {
 
     private func refreshAutoEnterAppCandidates() {
         autoEnterAppCandidates = AutoEnterAppCandidate.runningApps()
+    }
+
+    private func refreshAutoEnterPreferences(includeCandidates: Bool) {
+        autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
+        autoEnterKey = DictationAutoSendPreferences.sendKey()
+        autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
+        if includeCandidates {
+            refreshAutoEnterAppCandidates()
+        }
     }
 
     private func chooseAutoEnterApp() {
