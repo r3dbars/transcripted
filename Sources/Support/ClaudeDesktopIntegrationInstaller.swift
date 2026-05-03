@@ -105,13 +105,6 @@ enum ClaudeDesktopIntegrationInstaller {
             return helperURL
         }
 
-        if let resourceURL = bundle.resourceURL {
-            let legacyResourceURL = resourceURL.appendingPathComponent(helperBinaryName, isDirectory: false)
-            if fileManager.isExecutableFile(atPath: legacyResourceURL.path) {
-                return legacyResourceURL
-            }
-        }
-
         return nil
     }
 

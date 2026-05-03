@@ -100,4 +100,55 @@ func testClaudeDesktopIntegrationInstaller() {
         assertTrue(status.isInstalled, "installed convenience flag should be true")
         assertEqual(status.configuredCommandPath, binaryURL.path, "status should expose configured command")
     }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL — uses Helpers bundle location only") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeBundleTests-\(UUID().uuidString)", isDirectory: true)
+        let appURL = tempRoot.appendingPathComponent("Transcripted.app", isDirectory: true)
+        let contentsURL = appURL.appendingPathComponent("Contents", isDirectory: true)
+        let helpersURL = contentsURL.appendingPathComponent("Helpers", isDirectory: true)
+        let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+        let helperURL = helpersURL.appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let legacyResourceURL = resourcesURL.appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: helpersURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+        try? """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>app.transcripted.test</string>
+            <key>CFBundleName</key>
+            <string>Transcripted</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        </dict>
+        </plist>
+        """.write(to: contentsURL.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: legacyResourceURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: legacyResourceURL.path)
+
+        guard let bundle = Bundle(url: appURL) else {
+            assertTrue(false, "test bundle should be loadable")
+            return
+        }
+
+        let missingHelpersResult = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(
+            bundle: bundle,
+            fileManager: .default
+        )
+        assertNil(missingHelpersResult, "resource fallback should not be accepted")
+
+        try? "#!/bin/sh\nexit 0\n".write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: helperURL.path)
+
+        let helpersResult = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(
+            bundle: bundle,
+            fileManager: .default
+        )
+        assertEqual(helpersResult?.path, helperURL.path, "Helpers location should be accepted")
+    }
 }
