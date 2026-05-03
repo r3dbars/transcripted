@@ -22,6 +22,7 @@ wrapper at the root and keep the implementation under `scripts/`.
 Use these as the active command surface:
 
 ```bash
+bash scripts/dev/agent-preflight.sh
 bash build-deps.sh
 bash build.sh
 bash run-tests.sh
@@ -32,6 +33,7 @@ swift test
 
 Command ownership:
 
+- `scripts/dev/agent-preflight.sh` — agent preflight and suggested verification map for the current branch
 - `build-deps.sh` — thin root wrapper for the dependency build entrypoint
 - `build.sh` — thin root wrapper for the authoritative local app build
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
@@ -44,6 +46,8 @@ For helper and legacy scripts, see `scripts/README.md`.
 
 ## Directory Map
 
+- `.agents/` — machine-readable agent maps, currently the path-to-verification matrix
+- `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `Sources/` — macOS app target
 - `Sources/Accessibility/` — AX helpers for overlay positioning
 - `Sources/Beta/` — beta-only configuration
@@ -70,6 +74,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 Use these docs for these jobs:
 
 - `README.md` — public product overview and quick start
+- `AGENT_START.md` — short agent entrypoint
 - `CONTRIBUTING.md` — contributor setup and contribution norms
 - `AGENTS.md` — Codex-specific workflow rules
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
@@ -82,6 +87,7 @@ Use these docs for these jobs:
 - `docs/sparkle-updates.md` — Sparkle update contract
 - `docs/qa-parakeet-start-failure-smoke.md` — manual BET-88 validation checklist for Parakeet start-failure recovery
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
+- `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes
 
 ## Historical Zones
@@ -91,4 +97,5 @@ Treat these as reference, not current product surface:
 - `archive/backend-beta-worker/`
 - `archive/evals/`
 - `docs/archive/`
+- `docs/archive/screenshots/`
 - `.claude/`

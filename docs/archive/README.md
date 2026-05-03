@@ -7,6 +7,7 @@ Current subfolders:
 
 - `merge/` - old merge / extraction planning notes
 - `reviews/` - dated audit artifacts kept for historical reference
+- `screenshots/` - historical screenshots that do not represent current UI truth
 - `todo/` - archived backlog and review notes
 
 Use the live repo docs for current behavior, build steps, and storage guidance.

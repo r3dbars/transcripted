@@ -6,7 +6,7 @@ historical, and which local doc to read before editing a subsystem.
 
 ## Read Order
 
-1. `README.md`
+1. `AGENT_START.md`
 2. `AGENTS.md` or root `CLAUDE.md`
 3. `docs/repo-layout.md`
 4. `docs/agent-onboarding.md`
@@ -33,6 +33,8 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
 - `README.md`
   Product intent and repo truth.
+- `AGENT_START.md`
+  Shortest safe start path for coding agents.
 - `AGENTS.md`
   Codex-oriented workflow rules and build/test guardrails.
 - `CLAUDE.md`
@@ -47,6 +49,8 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Canonical map for thin root wrappers vs script implementations.
 - `Tests/README.md`
   Verification surfaces and fast-test runner rules.
+- `.agents/test-matrix.yml`
+  Machine-readable path-to-verification map for agents.
 - `docs/storage-paths.md`
   Canonical app, tool, and fallback storage layout.
 - `docs/release-packaging.md` + `docs/sparkle-updates.md`
@@ -79,6 +83,7 @@ distinct:
 
 Rule of thumb:
 
+- run `scripts/dev/agent-preflight.sh` when starting or handing off a branch
 - after Swift edits, run `bash build.sh` and `bash run-tests.sh`
 - if you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
   `bash run-integration-smoke.sh`
@@ -113,6 +118,7 @@ Rule of thumb:
 Treat these as reference, not source of truth for runtime behavior on `main`:
 
 - `docs/archive/*`
+- `docs/archive/screenshots/*`
 - `archive/backend-beta-worker/*`
 - older cloud/API references in comments or outdated docs
 

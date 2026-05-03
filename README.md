@@ -246,9 +246,16 @@ swift test
 
 More details:
 
+- [AGENT_START.md](AGENT_START.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [docs/repo-layout.md](docs/repo-layout.md)
 - [SECURITY.md](SECURITY.md)
+
+Coding agents can run:
+
+```bash
+scripts/dev/agent-preflight.sh
+```
 
 ## License
 
