@@ -114,8 +114,9 @@ enum RecentMeetingsScanner {
 
         var recentItems: [RecentMeetingItem] = []
         for entry in candidates.sorted(by: { $0.date > $1.date }) {
-            guard isMeetingTranscript(entry.url) else { continue }
-            let styled = MeetingTranscriptStyler.displayTranscript(at: entry.url)
+            guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
+                continue
+            }
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
@@ -143,10 +144,5 @@ enum RecentMeetingsScanner {
         }
 
         return true
-    }
-
-    private static func isMeetingTranscript(_ url: URL) -> Bool {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        return raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
     }
 }
