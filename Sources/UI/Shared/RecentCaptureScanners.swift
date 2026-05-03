@@ -90,6 +90,7 @@ private final class LoadTaskBox: @unchecked Sendable {
 
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
+    private static let transcriptProbeByteLimit = 64 * 1024
 
     static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }
@@ -146,7 +147,37 @@ enum RecentMeetingsScanner {
     }
 
     private static func isMeetingTranscript(_ url: URL) -> Bool {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        return raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
+        guard let probe = readPrefix(at: url, limit: transcriptProbeByteLimit),
+              probe.text.hasPrefix("---\n") else {
+            return false
+        }
+
+        if containsTranscriptMarker(probe.text) {
+            return true
+        }
+
+        guard probe.reachedLimit,
+              let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+        return containsTranscriptMarker(raw)
+    }
+
+    private static func containsTranscriptMarker(_ text: String) -> Bool {
+        text.contains("\n## Full Transcript") || text.contains("\n## Transcript")
+    }
+
+    private static func readPrefix(at url: URL, limit: Int) -> (text: String, reachedLimit: Bool)? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        guard let data = try? handle.read(upToCount: limit),
+              !data.isEmpty,
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return (text, data.count == limit)
     }
 }
