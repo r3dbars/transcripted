@@ -35,6 +35,12 @@ The meetings capture folder contains user-facing artifacts:
 - markdown transcripts: `<capture-library>/meetings/*.md`
 - retained recording audio: `<capture-library>/meetings/audio/*_audio/`
 
+After a successful transcript save, app-managed retained `.wav` audio is
+converted to `.m4a` and the original `.wav` is removed only after conversion
+succeeds. The Storage settings page controls whether retained audio is deleted
+after 7 days, 30 days, or never. Markdown transcripts are not removed by audio
+retention cleanup.
+
 App-owned meeting state is stored separately under:
 
 - speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`

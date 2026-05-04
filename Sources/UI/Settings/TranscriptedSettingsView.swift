@@ -60,6 +60,7 @@ struct TranscriptedSettingsView: View {
     @State private var showSupportFolders = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+    @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeActivityTab: HomeActivityTab = .meetings
     @State private var homeHeroMode: HomeHeroMode = .meeting
@@ -1353,6 +1354,42 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Audio Storage",
+                detail: "Transcripted keeps transcripts and shrinks retained meeting audio."
+            ) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "waveform.badge.magnifyingglass")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Compress WAV to M4A automatically")
+                            .font(.subheadline.weight(.medium))
+                        Text("After a transcript is saved, Transcripted keeps replay audio in a smaller format and removes the original WAV only after conversion succeeds.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Picker("Delete audio after", selection: Binding(
+                    get: { audioRetentionWindow },
+                    set: { updateAudioRetentionWindow($0) }
+                )) {
+                    ForEach(AudioRetentionWindow.allCases) { window in
+                        Text(window.title).tag(window)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 320)
+
+                Text(audioRetentionWindow.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
                 title: "Support Folders",
                 detail: "Logs, cache, app state, and temporary audio."
             ) {
@@ -1923,6 +1960,18 @@ struct TranscriptedSettingsView: View {
 
     private func refreshStoragePaths() {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    }
+
+    private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {
+        audioRetentionWindow = window
+        trackSettingsAction("audio_retention_changed", page: .storage)
+        AudioStoragePreferences.setDeleteAudioAfter(window)
+        Task.detached(priority: .utility) {
+            MeetingAudioStorageManager.pruneRetainedAudio(
+                in: MeetingStoragePaths.transcriptsFolder,
+                retentionWindow: window
+            )
+        }
     }
 
     private func refreshRecentCaptures() {
