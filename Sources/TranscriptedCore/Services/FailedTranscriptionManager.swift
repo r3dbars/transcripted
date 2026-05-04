@@ -158,6 +158,10 @@ public class FailedTranscriptionManager: ObservableObject {
         if let systemURL = failed.systemAudioURL {
             removeAudioFile(systemURL, label: "system audio")
         }
+        removeEmptyAudioArchiveDirectoryIfNeeded(containing: failed.micAudioURL)
+        if let systemURL = failed.systemAudioURL {
+            removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
+        }
 
         // Remove from queue
         removeFailedTranscription(id: id)
@@ -199,6 +203,10 @@ public class FailedTranscriptionManager: ObservableObject {
             if let systemURL = failure.systemAudioURL {
                 removeAudioFile(systemURL, label: "cleanup system audio")
             }
+            removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
+            if let systemURL = failure.systemAudioURL {
+                removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
+            }
         }
 
         let removedIds = Set(toRemove.map { $0.id })
@@ -223,6 +231,10 @@ public class FailedTranscriptionManager: ObservableObject {
             removeAudioFile(failure.micAudioURL, label: "old failure mic audio")
             if let systemURL = failure.systemAudioURL {
                 removeAudioFile(systemURL, label: "old failure system audio")
+            }
+            removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
+            if let systemURL = failure.systemAudioURL {
+                removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
             }
         }
 
@@ -255,6 +267,27 @@ public class FailedTranscriptionManager: ObservableObject {
                 "label": label,
                 "file": url.lastPathComponent,
                 "error": error.localizedDescription
+            ])
+        }
+    }
+
+    private func removeEmptyAudioArchiveDirectoryIfNeeded(containing url: URL) {
+        let directory = url.deletingLastPathComponent()
+        guard directory.lastPathComponent.hasSuffix("_audio"),
+              isSafeAudioURL(directory),
+              let remaining = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+              ),
+              remaining.isEmpty else {
+            return
+        }
+
+        do {
+            try FileManager.default.removeItem(at: directory)
+        } catch {
+            AppLogger.pipeline.warning("Failed to remove empty failed-audio directory", [
+                "errorType": "\(type(of: error))"
             ])
         }
     }

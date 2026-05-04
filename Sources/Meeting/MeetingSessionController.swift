@@ -1054,6 +1054,10 @@ final class MeetingSessionController: ObservableObject {
                 let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
                 self.lastSavedTranscriptURL = styled.url
                 self.lastSavedTitle = styled.title
+                let transcriptURL = styled.url
+                Task.detached(priority: .utility) {
+                    await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
+                }
                 DiagnosticsTrail.record(
                     engine: "meeting",
                     event: "meeting_transcript_artifact_ready",

@@ -10,6 +10,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
+        testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
     }
 }
@@ -150,6 +151,35 @@ private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {
     assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.path), "Retained audio directory should follow the transcript rename")
     assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.appendingPathComponent("microphone.wav").path), "Retained audio files should move with the directory")
     assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "Original retained audio directory should be replaced")
+}
+
+private func testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let originalStem = "Call_2026-04-07_09-14-00"
+    let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
+    let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+    let originalAudioDirectory = audioRoot.appendingPathComponent("\(originalStem)_audio", isDirectory: true)
+    let existingAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex_audio", isDirectory: true)
+    let movedAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex 2_audio", isDirectory: true)
+    try? FileManager.default.createDirectory(at: originalAudioDirectory, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(at: existingAudioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: originalAudioDirectory.appendingPathComponent("microphone.wav").path,
+        contents: Data("mic".utf8)
+    )
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertEqual(styled.url.lastPathComponent, "Meeting with Alex 2.md", "Styler should avoid transcript/audio collisions together")
+    assertTrue(FileManager.default.fileExists(atPath: movedAudioDirectory.path), "Audio directory should keep the matching transcript stem")
+    assertTrue(
+        FileManager.default.fileExists(atPath: movedAudioDirectory.appendingPathComponent("microphone.wav").path),
+        "Retained audio should move to the collision-free matching directory"
+    )
+    assertTrue(FileManager.default.fileExists(atPath: existingAudioDirectory.path), "Existing audio directory should not be overwritten")
 }
 
 private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {

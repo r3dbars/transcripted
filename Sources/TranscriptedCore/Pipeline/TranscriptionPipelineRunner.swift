@@ -435,15 +435,15 @@ extension TranscriptionTaskManager {
                 archiveRoot: retainedAudioDirectory
             )
             AppLogger.pipeline.info("Retained meeting audio files", [
-                "directory": retainedAudio.directory.lastPathComponent,
-                "mic": retainedAudio.micURL?.lastPathComponent ?? "none",
-                "system": retainedAudio.systemURL?.lastPathComponent ?? "none"
+                "hasMic": "\(retainedAudio.micURL != nil)",
+                "hasSystem": "\(retainedAudio.systemURL != nil)"
             ])
             return true
         } catch {
             AppLogger.pipeline.warning("Failed to retain meeting audio; leaving scratch files in place", [
-                "transcript": savedURL.lastPathComponent,
-                "error": error.localizedDescription
+                "hasMic": "\(micURL != nil)",
+                "hasSystem": "true",
+                "errorType": "\(type(of: error))"
             ])
             return false
         }

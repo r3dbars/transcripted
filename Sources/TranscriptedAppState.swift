@@ -23,6 +23,7 @@ class TranscriptedAppState: ObservableObject {
 
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
+    private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
@@ -77,6 +78,7 @@ class TranscriptedAppState: ObservableObject {
 
         // Kick off shared runtime prep once; wake recovery can await or reuse it.
         startRuntimeReadinessIfNeeded()
+        startAudioStorageMaintenanceIfNeeded()
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
@@ -142,6 +144,8 @@ class TranscriptedAppState: ObservableObject {
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil
+        audioStorageMaintenanceTask?.cancel()
+        audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
@@ -171,6 +175,16 @@ class TranscriptedAppState: ObservableObject {
             if #available(macOS 14.0, *) {
                 await self.meetingSession.prepareModels(showLoadingUI: false)
             }
+        }
+    }
+
+    private func startAudioStorageMaintenanceIfNeeded() {
+        guard audioStorageMaintenanceTask == nil else { return }
+
+        audioStorageMaintenanceTask = Task.detached(priority: .utility) {
+            await MeetingAudioStorageManager.processExistingRetainedAudio(
+                in: MeetingStoragePaths.transcriptsFolder
+            )
         }
     }
 
