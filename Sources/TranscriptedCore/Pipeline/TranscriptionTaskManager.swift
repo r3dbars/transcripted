@@ -89,13 +89,17 @@ public class TranscriptionTaskManager: ObservableObject {
         guard systemURL != nil else {
             let errorMessage = PipelineError.missingSystemAudio.localizedDescription
             AppLogger.pipeline.warning("Rejecting transcription — system audio capture is missing")
-            archiveFailedRecordingAudioIfConfigured(
+            let retainedAudio = archiveFailedRecordingAudioIfConfigured(
                 micURL: micURL,
                 systemURL: nil,
                 taskId: UUID()
             )
+            let failedMicURL = retainedAudio?.micURL ?? micURL
+            if retainedAudio?.micURL != nil {
+                removeManagedCleanupFile(micURL, label: "archived failed mic scratch")
+            }
             failedTranscriptionManager.addFailedTranscription(
-                micAudioURL: micURL,
+                micAudioURL: failedMicURL,
                 systemAudioURL: nil,
                 errorMessage: errorMessage
             )
@@ -186,15 +190,23 @@ public class TranscriptionTaskManager: ObservableObject {
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
                 await MainActor.run {
-                    self.archiveFailedRecordingAudioIfConfigured(
+                    let retainedAudio = self.archiveFailedRecordingAudioIfConfigured(
                         micURL: micURL,
                         systemURL: systemURL,
                         taskId: task.id
                     )
+                    let failedMicURL = retainedAudio?.micURL ?? micURL
+                    let failedSystemURL = retainedAudio?.systemURL ?? systemURL
+                    if retainedAudio?.micURL != nil {
+                        self.removeManagedCleanupFile(micURL, label: "archived failed mic scratch")
+                    }
+                    if retainedAudio?.systemURL != nil {
+                        self.removeManagedCleanupFile(systemURL, label: "archived failed system scratch")
+                    }
                     self.displayStatus = .failed(message: "Transcription failed")
                     self.failedTranscriptionManager.addFailedTranscription(
-                        micAudioURL: micURL,
-                        systemAudioURL: systemURL,
+                        micAudioURL: failedMicURL,
+                        systemAudioURL: failedSystemURL,
                         errorMessage: error.localizedDescription
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
@@ -542,8 +554,8 @@ public class TranscriptionTaskManager: ObservableObject {
         micURL: URL?,
         systemURL: URL?,
         taskId: UUID
-    ) {
-        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return }
+    ) -> RetainedRecordingAudio? {
+        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return nil }
 
         let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
         let placeholderTranscriptURL = retainedAudioDirectory
@@ -558,15 +570,16 @@ public class TranscriptionTaskManager: ObservableObject {
                 archiveRoot: retainedAudioDirectory
             )
             AppLogger.pipeline.info("Retained failed meeting audio files", [
-                "directory": retainedAudio.directory.lastPathComponent,
-                "mic": retainedAudio.micURL?.lastPathComponent ?? "none",
-                "system": retainedAudio.systemURL?.lastPathComponent ?? "none"
+                "hasMic": "\(retainedAudio.micURL != nil)",
+                "hasSystem": "\(retainedAudio.systemURL != nil)"
             ])
+            return retainedAudio
         } catch {
             AppLogger.pipeline.warning("Failed to retain failed meeting audio", [
                 "taskId": taskId.uuidString,
-                "error": error.localizedDescription
+                "errorType": "\(type(of: error))"
             ])
+            return nil
         }
     }
 }

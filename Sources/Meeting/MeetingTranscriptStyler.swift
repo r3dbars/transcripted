@@ -488,9 +488,9 @@ enum MeetingTranscriptStyler {
                 event: "meeting_transcript_rename_failed",
                 message: "Failed to rename styled transcript",
                 context: [
-                    "from": url.lastPathComponent,
-                    "to": targetURL.lastPathComponent,
-                    "error": error.localizedDescription
+                    "sourceExists": "\(fm.fileExists(atPath: url.path))",
+                    "targetExists": "\(fm.fileExists(atPath: targetURL.path))",
+                    "errorType": "\(type(of: error))"
                 ]
             )
             return url
@@ -517,9 +517,9 @@ enum MeetingTranscriptStyler {
                 event: "meeting_audio_directory_rename_failed",
                 message: "Failed to rename retained meeting audio",
                 context: [
-                    "from": sourceURL.lastPathComponent,
-                    "to": finalURL.lastPathComponent,
-                    "error": error.localizedDescription
+                    "sourceExists": "\(fm.fileExists(atPath: sourceURL.path))",
+                    "targetExists": "\(fm.fileExists(atPath: finalURL.path))",
+                    "errorType": "\(type(of: error))"
                 ]
             )
         }
@@ -573,12 +573,16 @@ enum MeetingTranscriptStyler {
         let fm = FileManager.default
         var candidateStem = preferredStem
         var suffix = 2
+        let originalAudioDirectory = audioDirectoryURL(for: originalURL)
 
         while suffix <= 999 {
             let candidateURL = directory.appendingPathComponent(candidateStem).appendingPathExtension("md")
             let markdownTaken = candidateURL != originalURL && fm.fileExists(atPath: candidateURL.path)
+            let candidateAudioDirectory = audioDirectoryURL(for: candidateURL)
+            let audioTaken = candidateAudioDirectory != originalAudioDirectory
+                && fm.fileExists(atPath: candidateAudioDirectory.path)
 
-            if !markdownTaken {
+            if !markdownTaken && !audioTaken {
                 return candidateURL
             }
 

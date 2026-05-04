@@ -7,6 +7,7 @@
 ## Files
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles and retry metadata
+- `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
 - `MeetingCaptureBridge+LivePreview.swift` — bridge extension for recording health snapshots plus mic/system live-preview buffer forwarding
@@ -40,8 +41,9 @@
 10. `MeetingSessionController.importAudioFile(...)` routes standalone recordings through `MeetingImportedAudioPreparer` and into the same save / naming / restyling pipeline used by live captures.
 11. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
 12. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
-13. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
-14. Failed meetings can be retried, deleted, or dismissed from the Settings meetings page, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts.
+14. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
+15. Failed meetings can be retried, deleted, or dismissed from the Settings meetings page, with `MeetingFailureKind` providing stable failure categories and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
 ## Key invariants
 
@@ -49,6 +51,7 @@
 - `MeetingSTTAdapter.cleanup()` only clears the prepared meeting model. `TranscriptedAppState` owns STT engine lifecycle for the whole app.
 - Meeting captures should follow the current capture library, while databases, logs, and temp recordings stay under the app-owned Transcripted Application Support folders.
 - Imported meeting audio should be copied into app-controlled scratch space before transcription so later cleanup and metadata writes stay consistent with live captures.
+- Retained-audio maintenance must only manage Transcripted meeting transcripts and app-owned retained audio filenames. A transcript is only storage-owned when its frontmatter has `capture_type: meeting` and a valid `capture_id` or `transcript_id`. Be very conservative with deletion: Markdown transcripts stay, unrelated files in capture folders stay, symlinked audio folders are ignored, and converted or pre-existing M4A files should be owner-only.
 - Meeting recording cancellation must be explicit, visible, and confirmed because discard deletes the captured audio. Do not wire Escape to meeting cancellation.
 - `MeetingPromptDetector` can prompt from either upcoming calendar events or recently active supported meeting apps (Zoom, Teams, Webex, FaceTime, plus browser-hosted providers like Google Meet).
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
@@ -66,6 +69,8 @@ Meeting capture artifacts live under `<capture-library>/meetings/`:
 
 - `*.md`
 - `audio/*_audio/` retained mic/system audio copied from successful meeting captures
+- retained audio is compressed from WAV to M4A after transcript save; retention cleanup uses Transcripted transcript frontmatter date, not Markdown edit time
+- retained-audio backfill skips orphaned, failed, non-Transcripted, and symlinked audio folders instead of guessing ownership
 
 App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:
 
@@ -106,6 +111,7 @@ Relevant direct coverage:
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
 - `Tests/MeetingPromptDetectorTests.swift`
 - `Tests/MeetingSessionUIPolicyTests.swift`
+- `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`

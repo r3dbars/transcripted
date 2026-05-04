@@ -101,6 +101,37 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(message, "System audio required")
     }
 
+    func testMissingSystemAudioQueuesRetainedArchiveAndRemovesScratch() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: micScratchDirectory, withIntermediateDirectories: true)
+        let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: nil,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(
+            failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"),
+            "failed queue should point at retained archive audio, not scratch audio"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archiving")
+
+        let archivedDirectory = failed.micAudioURL.deletingLastPathComponent()
+        manager.failedTranscriptionManager.deleteFailedTranscription(id: failed.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: failed.micAudioURL.path), "delete should remove archived failed audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path), "delete should remove the empty failed-audio directory")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
         let manager = makeManager()
         let externalURL = tempDirectory.appendingPathComponent("outside.wav")

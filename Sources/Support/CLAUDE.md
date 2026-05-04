@@ -4,9 +4,10 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (19 Swift files)
+## Files (20 Swift files)
 
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
+- `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges Claude's config JSON, and runs the helper self-test
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -39,6 +40,7 @@
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - `MicrophoneProcessingPreferences` is the canonical switch for meeting-mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording.
+- `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
 ## Verification
 
@@ -53,6 +55,7 @@ Relevant direct coverage includes:
 
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
+- `Tests/AudioStoragePreferencesTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`
