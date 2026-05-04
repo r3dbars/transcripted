@@ -12,7 +12,8 @@ func testMeetingAudioStorageManager() async {
 
         let converted = await MeetingAudioStorageManager.compressWAVAudio(
             in: audioDirectory,
-            converter: FakeMeetingAudioConverter()
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
         )
 
         assertEqual(converted, 1, "one WAV file should be converted")
@@ -34,7 +35,8 @@ func testMeetingAudioStorageManager() async {
 
         let converted = await MeetingAudioStorageManager.compressWAVAudio(
             in: audioDirectory,
-            converter: FakeMeetingAudioConverter(shouldFail: true)
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator()
         )
 
         assertEqual(converted, 0, "failed conversion should not count as converted")
@@ -43,6 +45,71 @@ func testMeetingAudioStorageManager() async {
             FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("microphone.m4a").path),
             "failed conversion should not leave a final M4A"
         )
+    }
+
+    await runSuite("MeetingAudioStorageManager does not trust unusable existing M4A files") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Invalid Existing Audio", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        let wavURL = audioDirectory.appendingPathComponent("recording.wav")
+        let m4aURL = audioDirectory.appendingPathComponent("recording.m4a")
+        try! Data("wav".utf8).write(to: wavURL)
+        try! Data("not audio".utf8).write(to: m4aURL)
+
+        let converted = await MeetingAudioStorageManager.compressWAVAudio(
+            in: audioDirectory,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        )
+
+        assertEqual(converted, 1, "invalid existing M4A should be replaced by a fresh conversion")
+        assertFalse(FileManager.default.fileExists(atPath: wavURL.path), "WAV should be removed only after replacement succeeds")
+        assertEqual(try? Data(contentsOf: m4aURL), Data("m4a".utf8), "existing invalid M4A should be replaced")
+    }
+
+    await runSuite("MeetingAudioStorageManager keeps WAVs when converted M4A is unusable") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Bad Conversion", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        let wavURL = audioDirectory.appendingPathComponent("recording.wav")
+        try! Data("wav".utf8).write(to: wavURL)
+
+        let converted = await MeetingAudioStorageManager.compressWAVAudio(
+            in: audioDirectory,
+            converter: FakeMeetingAudioConverter(output: Data("bad".utf8)),
+            validator: FakeMeetingAudioValidator()
+        )
+
+        assertEqual(converted, 0, "unusable converted audio should not count as converted")
+        assertTrue(FileManager.default.fileExists(atPath: wavURL.path), "WAV should remain when validation fails")
+        assertFalse(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("recording.m4a").path),
+            "bad temp output should not be promoted to final M4A"
+        )
+    }
+
+    await runSuite("MeetingAudioStorageManager removes WAV when existing M4A is already usable") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Already Converted", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        let wavURL = audioDirectory.appendingPathComponent("recording.wav")
+        try! Data("wav".utf8).write(to: wavURL)
+        try! Data("m4a".utf8).write(to: audioDirectory.appendingPathComponent("recording.m4a"))
+
+        let converted = await MeetingAudioStorageManager.compressWAVAudio(
+            in: audioDirectory,
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator()
+        )
+
+        assertEqual(converted, 0, "already converted audio should not run conversion again")
+        assertFalse(FileManager.default.fileExists(atPath: wavURL.path), "duplicate WAV should be removed when M4A is usable")
     }
 
     runSuite("MeetingAudioStorageManager prunes retained audio by transcript age") {
@@ -98,7 +165,8 @@ func testMeetingAudioStorageManager() async {
         let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
             in: directory,
             retentionWindow: .never,
-            converter: FakeMeetingAudioConverter()
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
         )
 
         assertEqual(
@@ -128,7 +196,8 @@ func testMeetingAudioStorageManager() async {
             in: directory,
             retentionWindow: .sevenDays,
             now: Date(),
-            converter: FakeMeetingAudioConverter()
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
         )
 
         assertEqual(
@@ -152,7 +221,8 @@ func testMeetingAudioStorageManager() async {
             in: directory,
             retentionWindow: .thirtyDays,
             now: Date(),
-            converter: FakeMeetingAudioConverter()
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
         )
 
         assertEqual(
@@ -167,12 +237,20 @@ func testMeetingAudioStorageManager() async {
 
 private struct FakeMeetingAudioConverter: MeetingAudioFileConverting {
     var shouldFail = false
+    var output = Data("m4a".utf8)
 
     func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws {
         if shouldFail {
             throw MeetingAudioStorageError.conversionFailed
         }
-        try Data("m4a".utf8).write(to: destinationURL)
+        try output.write(to: destinationURL)
+    }
+}
+
+private struct FakeMeetingAudioValidator: MeetingAudioFileValidating {
+    func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool {
+        guard fileManager.fileExists(atPath: url.path) else { return false }
+        return (try? Data(contentsOf: url)) == Data("m4a".utf8)
     }
 }
 

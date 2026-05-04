@@ -5,6 +5,10 @@ protocol MeetingAudioFileConverting {
     func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws
 }
 
+protocol MeetingAudioFileValidating {
+    func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool
+}
+
 struct AVFoundationMeetingAudioConverter: MeetingAudioFileConverting {
     func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws {
         let asset = AVURLAsset(url: sourceURL)
@@ -15,6 +19,23 @@ struct AVFoundationMeetingAudioConverter: MeetingAudioFileConverting {
         session.shouldOptimizeForNetworkUse = false
 
         try await session.export(to: destinationURL, as: .m4a)
+    }
+}
+
+struct AVFoundationMeetingAudioValidator: MeetingAudioFileValidating {
+    func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool {
+        guard hasNonEmptyFile(at: url, fileManager: fileManager),
+              let file = try? AVAudioFile(forReading: url) else {
+            return false
+        }
+
+        return file.length > 0 && file.fileFormat.sampleRate > 0
+    }
+
+    private func hasNonEmptyFile(at url: URL, fileManager: FileManager) -> Bool {
+        guard fileManager.fileExists(atPath: url.path) else { return false }
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        return values?.isRegularFile == true && (values?.fileSize ?? 0) > 0
     }
 }
 
@@ -37,7 +58,8 @@ enum MeetingAudioStorageManager {
         retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
         now: Date = Date(),
         fileManager: FileManager = .default,
-        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter()
+        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
     ) async -> MeetingAudioStorageMaintenanceResult {
         let prunedDirectories = pruneRetainedAudio(
             in: meetingsFolder,
@@ -56,7 +78,8 @@ enum MeetingAudioStorageManager {
             convertedFiles += await compressWAVAudio(
                 in: directory,
                 fileManager: fileManager,
-                converter: converter
+                converter: converter,
+                validator: validator
             )
         }
 
@@ -72,13 +95,15 @@ enum MeetingAudioStorageManager {
         retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
         now: Date = Date(),
         fileManager: FileManager = .default,
-        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter()
+        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
     ) async {
         let audioDirectory = audioDirectoryURL(forTranscript: transcriptURL)
         await compressWAVAudio(
             in: audioDirectory,
             fileManager: fileManager,
-            converter: converter
+            converter: converter,
+            validator: validator
         )
 
         pruneRetainedAudio(
@@ -129,7 +154,8 @@ enum MeetingAudioStorageManager {
     static func compressWAVAudio(
         in audioDirectory: URL,
         fileManager: FileManager = .default,
-        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter()
+        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
     ) async -> Int {
         guard let files = try? fileManager.contentsOfDirectory(
             at: audioDirectory,
@@ -143,7 +169,7 @@ enum MeetingAudioStorageManager {
         for sourceURL in files where isWAVFile(sourceURL, fileManager: fileManager) {
             let destinationURL = sourceURL.deletingPathExtension().appendingPathExtension("m4a")
 
-            if hasNonEmptyFile(at: destinationURL, fileManager: fileManager) {
+            if validator.isUsableAudioFile(at: destinationURL, fileManager: fileManager) {
                 try? fileManager.removeItem(at: sourceURL)
                 continue
             }
@@ -154,7 +180,7 @@ enum MeetingAudioStorageManager {
 
             do {
                 try await converter.convertWAVToM4A(sourceURL: sourceURL, destinationURL: tempURL)
-                guard hasNonEmptyFile(at: tempURL, fileManager: fileManager) else {
+                guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
                     throw MeetingAudioStorageError.emptyConvertedFile
                 }
                 if fileManager.fileExists(atPath: destinationURL.path) {
