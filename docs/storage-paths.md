@@ -41,6 +41,11 @@ succeeds. The Storage settings page controls whether retained audio is deleted
 after 7 days, 30 days, or never. Markdown transcripts are not removed by audio
 retention cleanup.
 
+On launch, Transcripted also performs the same best-effort compression pass for
+existing retained audio folders that already have matching Markdown transcripts.
+Failed or orphaned audio without a saved transcript is left alone for the
+failed-meeting retry/delete flow.
+
 App-owned meeting state is stored separately under:
 
 - speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`

@@ -24,7 +24,49 @@ enum MeetingAudioStorageError: Error {
     case emptyConvertedFile
 }
 
+struct MeetingAudioStorageMaintenanceResult: Equatable {
+    let scannedDirectories: Int
+    let convertedFiles: Int
+    let prunedDirectories: Int
+}
+
 enum MeetingAudioStorageManager {
+    @discardableResult
+    static func processExistingRetainedAudio(
+        in meetingsFolder: URL,
+        retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
+        now: Date = Date(),
+        fileManager: FileManager = .default,
+        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter()
+    ) async -> MeetingAudioStorageMaintenanceResult {
+        let prunedDirectories = pruneRetainedAudio(
+            in: meetingsFolder,
+            retentionWindow: retentionWindow,
+            now: now,
+            fileManager: fileManager
+        )
+
+        let directories = audioArchiveDirectoriesWithTranscripts(
+            in: meetingsFolder,
+            fileManager: fileManager
+        )
+
+        var convertedFiles = 0
+        for directory in directories {
+            convertedFiles += await compressWAVAudio(
+                in: directory,
+                fileManager: fileManager,
+                converter: converter
+            )
+        }
+
+        return MeetingAudioStorageMaintenanceResult(
+            scannedDirectories: directories.count,
+            convertedFiles: convertedFiles,
+            prunedDirectories: prunedDirectories
+        )
+    }
+
     static func processSavedTranscript(
         at transcriptURL: URL,
         retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
@@ -57,24 +99,20 @@ enum MeetingAudioStorageManager {
         guard let days = retentionWindow.days else { return 0 }
         guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: now) else { return 0 }
 
-        let audioRoot = meetingsFolder.appendingPathComponent("audio", isDirectory: true)
-        guard let directories = try? fileManager.contentsOfDirectory(
-            at: audioRoot,
-            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return 0
-        }
+        let directories = audioArchiveDirectoriesWithTranscripts(
+            in: meetingsFolder,
+            fileManager: fileManager
+        )
 
         var removedCount = 0
-        for directory in directories where isAudioArchiveDirectory(directory, fileManager: fileManager) {
-            let referenceDate = transcriptDate(
+        for directory in directories {
+            guard let referenceDate = transcriptDate(
                 forAudioDirectory: directory,
                 meetingsFolder: meetingsFolder,
                 fileManager: fileManager
-            ) ?? modificationDate(for: directory)
-
-            guard let referenceDate, referenceDate < cutoff else { continue }
+            ), referenceDate < cutoff else {
+                continue
+            }
 
             do {
                 try fileManager.removeItem(at: directory)
@@ -132,6 +170,29 @@ enum MeetingAudioStorageManager {
         }
 
         return convertedCount
+    }
+
+    private static func audioArchiveDirectoriesWithTranscripts(
+        in meetingsFolder: URL,
+        fileManager: FileManager
+    ) -> [URL] {
+        let audioRoot = meetingsFolder.appendingPathComponent("audio", isDirectory: true)
+        guard let directories = try? fileManager.contentsOfDirectory(
+            at: audioRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return directories.filter { directory in
+            isAudioArchiveDirectory(directory, fileManager: fileManager)
+                && transcriptDate(
+                    forAudioDirectory: directory,
+                    meetingsFolder: meetingsFolder,
+                    fileManager: fileManager
+                ) != nil
+        }
     }
 
     private static func audioDirectoryURL(forTranscript transcriptURL: URL) -> URL {

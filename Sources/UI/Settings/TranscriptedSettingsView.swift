@@ -1967,7 +1967,7 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction("audio_retention_changed", page: .storage)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
-            MeetingAudioStorageManager.pruneRetainedAudio(
+            await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder,
                 retentionWindow: window
             )
