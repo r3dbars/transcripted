@@ -52,6 +52,8 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
 }
 
 enum MeetingAudioStorageManager {
+    private static let staleTemporaryM4AAge: TimeInterval = 10 * 60
+
     @discardableResult
     static func processExistingRetainedAudio(
         in meetingsFolder: URL,
@@ -77,6 +79,7 @@ enum MeetingAudioStorageManager {
         for directory in directories {
             convertedFiles += await compressWAVAudio(
                 in: directory,
+                now: now,
                 fileManager: fileManager,
                 converter: converter,
                 validator: validator
@@ -101,6 +104,7 @@ enum MeetingAudioStorageManager {
         let audioDirectory = audioDirectoryURL(forTranscript: transcriptURL)
         await compressWAVAudio(
             in: audioDirectory,
+            now: now,
             fileManager: fileManager,
             converter: converter,
             validator: validator
@@ -153,10 +157,13 @@ enum MeetingAudioStorageManager {
     @discardableResult
     static func compressWAVAudio(
         in audioDirectory: URL,
+        now: Date = Date(),
         fileManager: FileManager = .default,
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
         validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
     ) async -> Int {
+        removeStaleTemporaryM4AFiles(in: audioDirectory, now: now, fileManager: fileManager)
+
         guard let files = try? fileManager.contentsOfDirectory(
             at: audioDirectory,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
@@ -196,6 +203,37 @@ enum MeetingAudioStorageManager {
         }
 
         return convertedCount
+    }
+
+    @discardableResult
+    static func removeStaleTemporaryM4AFiles(
+        in audioDirectory: URL,
+        now: Date = Date(),
+        minimumAge: TimeInterval = staleTemporaryM4AAge,
+        fileManager: FileManager = .default
+    ) -> Int {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: audioDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+            options: []
+        ) else {
+            return 0
+        }
+
+        var removedCount = 0
+        for file in files where isStaleTemporaryM4AFile(
+            file,
+            now: now,
+            minimumAge: minimumAge
+        ) {
+            do {
+                try fileManager.removeItem(at: file)
+                removedCount += 1
+            } catch {
+                continue
+            }
+        }
+        return removedCount
     }
 
     private static func audioArchiveDirectoriesWithTranscripts(
@@ -255,6 +293,31 @@ enum MeetingAudioStorageManager {
         guard url.pathExtension.localizedCaseInsensitiveCompare("wav") == .orderedSame else { return false }
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
         return values?.isRegularFile == true
+    }
+
+    private static func isStaleTemporaryM4AFile(
+        _ url: URL,
+        now: Date,
+        minimumAge: TimeInterval
+    ) -> Bool {
+        guard isTranscriptedTemporaryM4AFileName(url) else { return false }
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+        guard values?.isRegularFile == true, let modified = values?.contentModificationDate else {
+            return false
+        }
+        return now.timeIntervalSince(modified) >= max(0, minimumAge)
+    }
+
+    private static func isTranscriptedTemporaryM4AFileName(_ url: URL) -> Bool {
+        guard url.pathExtension.localizedCaseInsensitiveCompare("m4a") == .orderedSame else { return false }
+        let hiddenStem = url.deletingPathExtension().lastPathComponent
+        guard hiddenStem.hasPrefix(".") else { return false }
+        let stem = String(hiddenStem.dropFirst())
+        guard stem.count > 37 else { return false }
+        let separatorIndex = stem.index(stem.endIndex, offsetBy: -37)
+        guard stem[separatorIndex] == "-" else { return false }
+        let uuidString = String(stem.suffix(36))
+        return UUID(uuidString: uuidString) != nil
     }
 
     private static func hasNonEmptyFile(at url: URL, fileManager: FileManager) -> Bool {
