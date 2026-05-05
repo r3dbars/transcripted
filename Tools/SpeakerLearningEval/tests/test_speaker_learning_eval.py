@@ -152,10 +152,15 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             recognition_experiment = report["auto_recognition_experiment"]
             self.assertGreater(recognition_experiment["experiment_policy_count"], 0)
             self.assertEqual(recognition_experiment["candidate_events_total"], 2)
+            self.assertEqual(recognition_experiment["maturity_source"], "raw_profile_maturity")
             self.assertEqual(
                 recognition_experiment["current_product_gate_projection"]["false_automatic_matches"],
                 0,
             )
+            self.assertGreater(len(recognition_experiment["risk_frontier_by_false_match_budget"]), 0)
+            after_merge = report["auto_recognition_after_oracle_merge_experiment"]
+            self.assertEqual(after_merge["maturity_source"], "oracle_merged_profile_maturity")
+            self.assertEqual(after_merge["candidate_events_total"], 2)
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -223,6 +228,8 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(faster_policy["correct_automatic_matches"], 4)
             self.assertEqual(faster_policy["false_automatic_matches"], 0)
             self.assertEqual(faster_policy["median_meetings_after_first_seen"], 2)
+            after_merge = report["auto_recognition_after_oracle_merge_experiment"]
+            self.assertEqual(after_merge["current_product_gate_projection"]["false_automatic_matches"], 0)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:

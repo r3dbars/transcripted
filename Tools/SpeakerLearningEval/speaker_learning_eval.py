@@ -39,10 +39,10 @@ CONFIRMATION_SIMILARITY_BANDS = [
     ("0.85-0.90", 0.85, 0.90),
     ("below 0.85", None, 0.85),
 ]
-AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS = [3, 4, 5, 6]
-AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS = [1, 2, 3, 4]
-AUTO_RECOGNITION_EXPERIMENT_SIMILARITIES = [0.98, 0.985, 0.99]
-AUTO_RECOGNITION_EXPERIMENT_SEPARATIONS: list[float | None] = [None, 0.05, 0.10]
+AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS = [2, 3, 4, 5, 6, 8, 10]
+AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS = [0, 1, 2, 3, 4, 5]
+AUTO_RECOGNITION_EXPERIMENT_SIMILARITIES = [0.95, 0.97, 0.98, 0.985, 0.99, 0.995]
+AUTO_RECOGNITION_EXPERIMENT_SEPARATIONS: list[float | None] = [None, 0.02, 0.05, 0.10, 0.15, 0.20]
 
 
 @dataclass(frozen=True)
@@ -378,10 +378,12 @@ def evaluate_audio_corpus(
     false_match_cases: list[dict[str, Any]] = []
     confirmation_suggestions: list[dict[str, Any]] = []
     auto_recognition_candidates: list[dict[str, Any]] = []
+    speaker_observation_events: list[dict[str, Any]] = []
     duplicate_profile_cases: list[dict[str, Any]] = []
     missed_speaker_cases: list[dict[str, Any]] = []
     meeting_results: list[dict[str, Any]] = []
     total_diarization_seconds = 0.0
+    observation_index = 0
 
     provider = diarization_provider or (
         lambda audio_path, channel, meeting, cache_dir: run_transcripted_diarizer(
@@ -467,6 +469,19 @@ def evaluate_audio_corpus(
             profile = profiles[profile_id]
             prediction = predictions_by_profile.get(profile_id)
             was_matched = bool(prediction and prediction["status"] == "matched")
+            observation_index += 1
+            speaker_observation_events.append(
+                {
+                    "observation_index": observation_index,
+                    "meeting_id": meeting_id,
+                    "ordinal": ordinal,
+                    "profile_id": profile.profile_id,
+                    "expected_real_speaker": canonical,
+                    "profile_real_speaker": profile.assigned_label,
+                    "was_matched": was_matched,
+                    "duration_seconds": round(label_scores[canonical], 2),
+                }
+            )
             auto_accepted = (
                 was_matched
                 and profile.assigned_label is not None
@@ -480,6 +495,7 @@ def evaluate_audio_corpus(
                     {
                         "meeting_id": meeting_id,
                         "ordinal": ordinal,
+                        "observation_index": observation_index,
                         "profile_id": profile.profile_id,
                         "expected_real_speaker": canonical,
                         "profile_real_speaker": profile.assigned_label,
@@ -637,6 +653,19 @@ def evaluate_audio_corpus(
         first_seen=real_speaker_first_seen,
         include_speaker_labels=include_speaker_labels,
     )
+    auto_recognition_after_merge_experiment = build_auto_recognition_experiment(
+        candidates=with_oracle_merged_maturity(
+            candidates=auto_recognition_candidates,
+            observations=speaker_observation_events,
+        ),
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=real_speaker_first_seen,
+        include_speaker_labels=include_speaker_labels,
+        maturity_source="oracle_merged_profile_maturity",
+        total_observation_field="oracle_merged_total_observation_count",
+        prior_meeting_field="oracle_merged_prior_meeting_count",
+    )
 
     report = {
         "schema_version": 1,
@@ -684,6 +713,7 @@ def evaluate_audio_corpus(
         "confirmation_simulation": confirmation_simulation,
         "duplicate_merge_review": duplicate_merge_review,
         "auto_recognition_experiment": auto_recognition_experiment,
+        "auto_recognition_after_oracle_merge_experiment": auto_recognition_after_merge_experiment,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -1600,6 +1630,9 @@ def build_auto_recognition_experiment(
     real_speaker_ids: dict[str, str],
     first_seen: dict[str, int],
     include_speaker_labels: bool,
+    maturity_source: str = "raw_profile_maturity",
+    total_observation_field: str = "profile_total_observation_count",
+    prior_meeting_field: str = "profile_prior_meeting_count",
 ) -> dict[str, Any]:
     policies = [
         auto_recognition_policy_report(
@@ -1612,6 +1645,9 @@ def build_auto_recognition_experiment(
             minimum_prior_meetings=minimum_prior_meetings,
             minimum_similarity=minimum_similarity,
             minimum_similarity_separation=minimum_similarity_separation,
+            maturity_source=maturity_source,
+            total_observation_field=total_observation_field,
+            prior_meeting_field=prior_meeting_field,
         )
         for minimum_total_observations in AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS
         for minimum_prior_meetings in AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS
@@ -1628,6 +1664,9 @@ def build_auto_recognition_experiment(
         minimum_prior_meetings=1,
         minimum_similarity=0.98,
         minimum_similarity_separation=None,
+        maturity_source=maturity_source,
+        total_observation_field=total_observation_field,
+        prior_meeting_field=prior_meeting_field,
         policy_name="current_product_gate",
     )
     zero_false = [
@@ -1646,10 +1685,14 @@ def build_auto_recognition_experiment(
         ),
     )
     return {
+        "maturity_source": maturity_source,
+        "total_observation_field": total_observation_field,
+        "prior_meeting_field": prior_meeting_field,
         "candidate_events_total": len(candidates),
         "experiment_policy_count": len(policies),
         "current_product_gate_projection": current_policy,
         "best_zero_false_policies": best_zero_false[:10],
+        "risk_frontier_by_false_match_budget": risk_frontier_by_false_match_budget(policies),
         "policies": policies,
         "notes": [
             "Eval-only sweep. Product auto-naming behavior is not changed.",
@@ -1669,6 +1712,9 @@ def auto_recognition_policy_report(
     minimum_prior_meetings: int,
     minimum_similarity: float,
     minimum_similarity_separation: float | None,
+    maturity_source: str = "raw_profile_maturity",
+    total_observation_field: str = "profile_total_observation_count",
+    prior_meeting_field: str = "profile_prior_meeting_count",
     policy_name: str | None = None,
 ) -> dict[str, Any]:
     accepted = [
@@ -1679,6 +1725,8 @@ def auto_recognition_policy_report(
             minimum_prior_meetings=minimum_prior_meetings,
             minimum_similarity=minimum_similarity,
             minimum_similarity_separation=minimum_similarity_separation,
+            total_observation_field=total_observation_field,
+            prior_meeting_field=prior_meeting_field,
         )
     ]
     correct = [candidate for candidate in accepted if candidate["correct"]]
@@ -1702,6 +1750,7 @@ def auto_recognition_policy_report(
             minimum_similarity,
             minimum_similarity_separation,
         ),
+        "maturity_source": maturity_source,
         "minimum_total_observations": minimum_total_observations,
         "minimum_prior_meetings": minimum_prior_meetings,
         "minimum_similarity": minimum_similarity,
@@ -1728,12 +1777,14 @@ def auto_recognition_candidate_passes(
     minimum_prior_meetings: int,
     minimum_similarity: float,
     minimum_similarity_separation: float | None,
+    total_observation_field: str = "profile_total_observation_count",
+    prior_meeting_field: str = "profile_prior_meeting_count",
 ) -> bool:
     if float(candidate["similarity"]) <= minimum_similarity:
         return False
-    if int(candidate.get("profile_total_observation_count") or 0) < minimum_total_observations:
+    if int(candidate.get(total_observation_field) or 0) < minimum_total_observations:
         return False
-    if int(candidate.get("profile_prior_meeting_count") or 0) < minimum_prior_meetings:
+    if int(candidate.get(prior_meeting_field) or 0) < minimum_prior_meetings:
         return False
     if minimum_similarity_separation is None:
         return True
@@ -1766,6 +1817,78 @@ def recognition_curve(gaps: list[int]) -> dict[str, int]:
         f"within_{limit}_meetings": sum(1 for gap in gaps if gap <= limit)
         for limit in [1, 2, 3, 4, 5]
     }
+
+
+def risk_frontier_by_false_match_budget(policies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    frontier: list[dict[str, Any]] = []
+    for false_budget in [0, 1, 2, 5, 10, 20]:
+        candidates = [
+            policy for policy in policies
+            if policy["automatic_matches_total"] > 0
+            and policy["false_automatic_matches"] <= false_budget
+        ]
+        if not candidates:
+            continue
+        best = sorted(
+            candidates,
+            key=lambda policy: (
+                -policy["recognized_recurring_speakers"],
+                -policy["correct_automatic_matches"],
+                policy["false_automatic_matches"],
+                policy["median_meetings_after_first_seen"]
+                if policy["median_meetings_after_first_seen"] is not None
+                else 999,
+                -policy["automatic_matches_total"],
+            ),
+        )[0]
+        frontier.append(
+            {
+                "false_match_budget": false_budget,
+                "policy": best["policy"],
+                "automatic_matches_total": best["automatic_matches_total"],
+                "correct_automatic_matches": best["correct_automatic_matches"],
+                "false_automatic_matches": best["false_automatic_matches"],
+                "recognized_recurring_speakers": best["recognized_recurring_speakers"],
+                "median_meetings_after_first_seen": best["median_meetings_after_first_seen"],
+                "minimum_total_observations": best["minimum_total_observations"],
+                "minimum_prior_meetings": best["minimum_prior_meetings"],
+                "minimum_similarity": best["minimum_similarity"],
+                "minimum_similarity_separation": best["minimum_similarity_separation"],
+            }
+        )
+    return frontier
+
+
+def with_oracle_merged_maturity(
+    candidates: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sorted_candidates = sorted(candidates, key=lambda item: item["observation_index"])
+    sorted_observations = sorted(observations, key=lambda item: item["observation_index"])
+    prior_counts: dict[str, int] = {}
+    prior_meetings: dict[str, set[str]] = {}
+    observation_cursor = 0
+    enriched: list[dict[str, Any]] = []
+
+    for candidate in sorted_candidates:
+        while (
+            observation_cursor < len(sorted_observations)
+            and sorted_observations[observation_cursor]["observation_index"] < candidate["observation_index"]
+        ):
+            observation = sorted_observations[observation_cursor]
+            canonical = observation["expected_real_speaker"]
+            prior_counts[canonical] = prior_counts.get(canonical, 0) + 1
+            prior_meetings.setdefault(canonical, set()).add(observation["meeting_id"])
+            observation_cursor += 1
+
+        profile_label = candidate["profile_real_speaker"]
+        candidate_with_maturity = dict(candidate)
+        candidate_with_maturity["oracle_merged_prior_observation_count"] = prior_counts.get(profile_label, 0)
+        candidate_with_maturity["oracle_merged_total_observation_count"] = prior_counts.get(profile_label, 0) + 1
+        candidate_with_maturity["oracle_merged_prior_meeting_count"] = len(prior_meetings.get(profile_label, set()))
+        enriched.append(candidate_with_maturity)
+
+    return enriched
 
 
 def build_confirmation_safety_filter_reports(
