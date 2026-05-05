@@ -18,6 +18,7 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass, field, replace
+from itertools import combinations
 from pathlib import Path
 from statistics import median
 from typing import Any, Callable, Iterable, Optional
@@ -1300,6 +1301,10 @@ def build_confirmation_simulation(
         suggestions=suggestions,
         duplicate_counts=duplicate_counts,
     )
+    compound_strategy_search = build_confirmation_compound_strategy_search(
+        suggestions=suggestions,
+        duplicate_counts=duplicate_counts,
+    )
     safe_filters = [
         report for report in safety_filters
         if report["suggestions_shown"] > 0 and report["wrong_suggestions"] == 0
@@ -1327,9 +1332,15 @@ def build_confirmation_simulation(
         ),
         "safe_candidate_filter_count": len(safe_filters),
         "best_precision_filters": best_precision_filters,
+        "compound_strategy_search": compound_strategy_search,
         "safety_filter_conclusion": (
-            "At least one tested non-transcript filter had zero wrong suggestions."
-            if safe_filters
+            "At least one tested non-transcript filter or compound strategy had zero wrong suggestions."
+            if (
+                safe_filters
+                or compound_strategy_search["zero_wrong_compound_strategy_min_coverage_count"] > 0
+            )
+            else "Zero-wrong compound strategies existed only at tiny coverage; no broadly safe strategy was found."
+            if compound_strategy_search["zero_wrong_compound_strategy_count"] > 0
             else "None of the tested non-transcript filters or compound strategies had zero wrong suggestions."
         ),
         "recommended_show_suggestion_threshold": recommended_threshold,
@@ -1360,7 +1371,21 @@ def build_confirmation_safety_filter_reports(
     suggestions: list[dict[str, Any]],
     duplicate_counts: dict[str, int],
 ) -> list[dict[str, Any]]:
-    filter_specs = [
+    return [
+        confirmation_filter_report(
+            suggestions=suggestions,
+            duplicate_counts=duplicate_counts,
+            filter_name=spec["filter"],
+            category=spec["category"],
+            criteria=spec["criteria"],
+            predicate=spec["predicate"],
+        )
+        for spec in confirmation_safety_filter_specs()
+    ]
+
+
+def confirmation_safety_filter_specs() -> list[dict[str, Any]]:
+    return [
         *threshold_filter_specs(
             field="profile_prior_meeting_count",
             label="profile meetings seen",
@@ -1396,54 +1421,63 @@ def build_confirmation_safety_filter_reports(
             "filter": "current_channel_system_only",
             "category": "channel",
             "criteria": "current channel is system",
+            "group": "current_channel",
             "predicate": lambda suggestion: suggestion.get("channel") == "system",
         },
         {
             "filter": "current_channel_microphone_only",
             "category": "channel",
             "criteria": "current channel is microphone",
+            "group": "current_channel",
             "predicate": lambda suggestion: suggestion.get("channel") == "microphone",
         },
         {
             "filter": "profile_seen_on_same_channel",
             "category": "channel",
             "criteria": "profile was previously seen on the same channel",
+            "group": "profile_channel_history",
             "predicate": lambda suggestion: suggestion.get("channel") in set(suggestion.get("profile_source_channels", [])),
         },
         {
             "filter": "profile_same_channel_only",
             "category": "channel",
             "criteria": "profile was previously seen only on the current channel",
+            "group": "profile_channel_history",
             "predicate": lambda suggestion: set(suggestion.get("profile_source_channels", [])) == {suggestion.get("channel")},
         },
         {
             "filter": "profile_cross_channel_history",
             "category": "channel",
             "criteria": "profile has prior cross-channel history or lacks current channel history",
+            "group": "profile_channel_history",
             "predicate": lambda suggestion: set(suggestion.get("profile_source_channels", [])) != {suggestion.get("channel")},
         },
         {
             "filter": "profile_seen_multiple_prior_meetings",
             "category": "repeat_evidence",
             "criteria": "profile was seen in at least two prior meetings",
+            "group": "profile_prior_meeting_count",
             "predicate": lambda suggestion: int(suggestion.get("profile_prior_meeting_count") or 0) >= 2,
         },
         {
             "filter": "no_microphone_bleed_suppression_in_meeting",
             "category": "recording_quality",
             "criteria": "meeting had no microphone-bleed suppression",
+            "group": "microphone_bleed_suppression",
             "predicate": lambda suggestion: not suggestion.get("meeting_had_microphone_bleed_suppression", False),
         },
         {
             "filter": "profile_not_created_in_same_meeting",
             "category": "profile_origin",
             "criteria": "profile existed before this meeting",
+            "group": "profile_created_in_same_meeting",
             "predicate": lambda suggestion: not suggestion.get("profile_created_in_same_meeting", False),
         },
         {
             "filter": "profile_has_prior_manual_name",
             "category": "profile_origin",
             "criteria": "profile already has a user-confirmed/manual name",
+            "group": "profile_has_prior_manual_name",
             "predicate": lambda suggestion: bool(suggestion.get("profile_has_prior_manual_name")),
         },
         {
@@ -1516,18 +1550,6 @@ def build_confirmation_safety_filter_reports(
         },
     ]
 
-    return [
-        confirmation_filter_report(
-            suggestions=suggestions,
-            duplicate_counts=duplicate_counts,
-            filter_name=spec["filter"],
-            category=spec["category"],
-            criteria=spec["criteria"],
-            predicate=spec["predicate"],
-        )
-        for spec in filter_specs
-    ]
-
 
 def threshold_filter_specs(
     field: str,
@@ -1544,6 +1566,7 @@ def threshold_filter_specs(
                 "filter": f"{field}_at_least_{suffix}",
                 "category": category,
                 "criteria": f"{label} >= {threshold}",
+                "group": field,
                 "predicate": (
                     lambda suggestion, field=field, threshold=threshold, missing_passes=missing_passes:
                     value_at_least(suggestion.get(field), threshold, missing_passes)
@@ -1560,6 +1583,96 @@ def value_at_least(value: Any, threshold: int | float, missing_passes: bool = Fa
         return float(value) >= float(threshold)
     except (TypeError, ValueError):
         return False
+
+
+def build_confirmation_compound_strategy_search(
+    suggestions: list[dict[str, Any]],
+    duplicate_counts: dict[str, int],
+) -> dict[str, Any]:
+    searchable_specs = [
+        spec
+        for spec in confirmation_safety_filter_specs()
+        if spec["category"] != "compound_strategy"
+    ]
+    reports: list[dict[str, Any]] = []
+    searched = 0
+    for size in range(2, 5):
+        for combo in combinations(searchable_specs, size):
+            groups = [spec.get("group", spec["filter"]) for spec in combo]
+            if len(set(groups)) != len(groups):
+                continue
+            searched += 1
+            filter_name = "all_of__" + "__".join(spec["filter"] for spec in combo)
+            criteria = " AND ".join(spec["criteria"] for spec in combo)
+            report = confirmation_filter_report(
+                suggestions=suggestions,
+                duplicate_counts=duplicate_counts,
+                filter_name=filter_name,
+                category="compound_search",
+                criteria=criteria,
+                predicate=lambda suggestion, combo=combo: all(
+                    spec["predicate"](suggestion)
+                    for spec in combo
+                ),
+            )
+            if report["suggestions_shown"] == 0:
+                continue
+            reports.append(report)
+
+    zero_wrong = [report for report in reports if report["wrong_suggestions"] == 0]
+    ranked_zero_wrong = sorted(
+        zero_wrong,
+        key=lambda item: (
+            -item["correct_suggestions"],
+            -item["suggestions_shown"],
+            -item["projected_duplicate_reduction_upper_bound"],
+            item["filter"],
+        ),
+    )
+    best_precision = sorted(
+        reports,
+        key=lambda item: (
+            -(item["precision"] if item["precision"] is not None else -1),
+            -item["correct_suggestions"],
+            -item["suggestions_shown"],
+            -item["projected_duplicate_reduction_upper_bound"],
+            item["filter"],
+        ),
+    )
+    zero_wrong_min_coverage = [
+        report for report in ranked_zero_wrong
+        if report["suggestions_shown"] >= 3
+    ]
+    best_min_3 = [
+        report for report in best_precision
+        if report["suggestions_shown"] >= 3
+    ]
+    best_min_10 = [
+        report for report in best_precision
+        if report["suggestions_shown"] >= 10
+    ]
+    max_zero_wrong_suggestions = max(
+        (report["suggestions_shown"] for report in zero_wrong),
+        default=0,
+    )
+    return {
+        "minimum_coverage_for_candidate_strategy": 3,
+        "searched_strategy_count": searched,
+        "strategies_with_suggestions": len(reports),
+        "zero_wrong_compound_strategy_count": len(zero_wrong),
+        "zero_wrong_compound_strategy_min_coverage_count": len(zero_wrong_min_coverage),
+        "max_zero_wrong_suggestions_shown": max_zero_wrong_suggestions,
+        "zero_wrong_compound_strategies": ranked_zero_wrong[:10],
+        "zero_wrong_compound_strategies_min_3_suggestions": zero_wrong_min_coverage[:10],
+        "best_precision_compound_strategies": best_precision[:10],
+        "best_precision_compound_strategies_min_3_suggestions": best_min_3[:10],
+        "best_precision_compound_strategies_min_10_suggestions": best_min_10[:10],
+        "search_notes": [
+            "Eval-only exploratory search over conjunctions of non-transcript safety filters.",
+            "Strategies are scored with Zoom labels only after filtering; labels are not part of the filter criteria.",
+            "Zero wrong suggestions on this corpus is evidence to investigate, not enough by itself for automatic naming.",
+        ],
+    }
 
 
 def confirmation_filter_report(

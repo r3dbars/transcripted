@@ -136,6 +136,11 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(filter_reports["current_channel_system_only"]["wrong_suggestions"], 1)
             self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["suggestions_shown"], 1)
             self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 1)
+            search = simulation["compound_strategy_search"]
+            self.assertEqual(search["minimum_coverage_for_candidate_strategy"], 3)
+            self.assertGreater(search["searched_strategy_count"], 0)
+            self.assertIn("best_precision_compound_strategies_min_3_suggestions", search)
+            self.assertIn("best_precision_compound_strategies_min_10_suggestions", search)
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -183,6 +188,9 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 0)
             self.assertTrue(filter_reports["profile_seen_multiple_prior_meetings"]["safe_for_confirmation_suggestion"])
             self.assertGreaterEqual(simulation["safe_candidate_filter_count"], 1)
+            search = simulation["compound_strategy_search"]
+            self.assertGreaterEqual(search["zero_wrong_compound_strategy_min_coverage_count"], 1)
+            self.assertGreaterEqual(search["max_zero_wrong_suggestions_shown"], 3)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:
