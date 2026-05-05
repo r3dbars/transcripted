@@ -131,6 +131,11 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 1)
             self.assertEqual(simulation["projected_unknown_labels_after_review"], 4)
             self.assertIsNone(simulation["recommended_show_suggestion_threshold"])
+            filter_reports = {item["filter"]: item for item in simulation["confirmation_safety_filters"]}
+            self.assertEqual(filter_reports["current_channel_system_only"]["suggestions_shown"], 2)
+            self.assertEqual(filter_reports["current_channel_system_only"]["wrong_suggestions"], 1)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["suggestions_shown"], 1)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 1)
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -173,6 +178,11 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 3)
             self.assertEqual(simulation["projected_unknown_labels_after_review"], 1)
             self.assertEqual(simulation["recommended_show_suggestion_threshold"], 0.98)
+            filter_reports = {item["filter"]: item for item in simulation["confirmation_safety_filters"]}
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["suggestions_shown"], 2)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 0)
+            self.assertTrue(filter_reports["profile_seen_multiple_prior_meetings"]["safe_for_confirmation_suggestion"])
+            self.assertGreaterEqual(simulation["safe_candidate_filter_count"], 1)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:

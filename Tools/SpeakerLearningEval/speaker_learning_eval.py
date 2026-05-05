@@ -503,6 +503,19 @@ def evaluate_audio_corpus(
                         "expected_real_speaker": canonical,
                         "profile_real_speaker": profile.assigned_label,
                         "similarity": similarity,
+                        "second_best_similarity": prediction.get("second_best_similarity") if prediction else None,
+                        "similarity_separation": prediction.get("similarity_separation") if prediction else None,
+                        "channel": prediction.get("channel") if prediction else None,
+                        "profile_source_channels": prediction.get("profile_source_channels", []) if prediction else [],
+                        "profile_prior_meeting_count": prediction.get("profile_prior_meeting_count", 0) if prediction else 0,
+                        "profile_prior_call_count": prediction.get("profile_prior_call_count", 0) if prediction else 0,
+                        "profile_first_seen_ordinal": prediction.get("profile_first_seen_ordinal") if prediction else None,
+                        "segment_count": prediction.get("segment_count", 0) if prediction else 0,
+                        "embedding_count": prediction.get("embedding_count", 0) if prediction else 0,
+                        "speaker_duration_seconds": prediction.get("speaker_duration_seconds", 0.0) if prediction else 0.0,
+                        "meeting_had_microphone_bleed_suppression": meeting_suppressed_microphone_bleed > 0,
+                        "profile_created_in_same_meeting": profile.first_seen_meeting_id == meeting_id,
+                        "profile_has_prior_manual_name": profile.assigned_label is not None,
                         "duration_seconds": round(label_scores[canonical], 2),
                         "correct": profile.assigned_label == canonical,
                     }
@@ -1032,6 +1045,8 @@ def classify_audio_speakers(
         threshold = adaptive_match_threshold(len(embeddings))
         match = match_against_audio_profiles(mean, existing_profiles, threshold)
         channel = key.split(":", 1)[0]
+        grouped_segments = segments_by_key[key]
+        speaker_duration_seconds = sum(segment.duration_seconds for segment in grouped_segments)
         if match is not None:
             profile = profiles[match["profile_id"]]
             update_audio_profile(profile, mean)
@@ -1056,8 +1071,22 @@ def classify_audio_speakers(
             "status": status,
             "similarity": similarity,
             "embedding_count": len(embeddings),
+            "segment_count": len(grouped_segments),
+            "speaker_duration_seconds": round(speaker_duration_seconds, 4),
+            "channel": channel,
             "threshold": threshold,
         }
+        if match is not None:
+            predictions[key].update(
+                {
+                    "second_best_similarity": match["second_best_similarity"],
+                    "similarity_separation": match["similarity_separation"],
+                    "profile_prior_call_count": match["profile_call_count"],
+                    "profile_prior_meeting_count": match["profile_meeting_count"],
+                    "profile_first_seen_ordinal": match["profile_first_seen_ordinal"],
+                    "profile_source_channels": match["profile_source_channels"],
+                }
+            )
     return predictions
 
 
@@ -1148,15 +1177,14 @@ def match_against_audio_profiles(
         if profile.dispute_count != 0:
             continue
         similarity = cosine_similarity(embedding, profile.embedding)
-        if similarity >= threshold:
-            if similarity > best_similarity:
-                second_best_similarity = best_similarity
-                best_similarity = similarity
-                best_profile = profile
-            elif similarity > second_best_similarity:
-                second_best_similarity = similarity
+        if similarity > best_similarity:
+            second_best_similarity = best_similarity
+            best_similarity = similarity
+            best_profile = profile
+        elif similarity > second_best_similarity:
+            second_best_similarity = similarity
 
-    if best_profile is None:
+    if best_profile is None or best_similarity < threshold:
         return None
 
     maturity_bonus = 0.08 if best_profile.call_count <= 2 else 0.04 if best_profile.call_count <= 4 else 0.0
@@ -1164,7 +1192,21 @@ def match_against_audio_profiles(
         return None
     if second_best_similarity >= threshold and (best_similarity - second_best_similarity) < 0.05:
         return None
-    return {"profile_id": best_profile.profile_id, "similarity": best_similarity}
+    normalized_second_best = second_best_similarity if second_best_similarity >= 0 else None
+    return {
+        "profile_id": best_profile.profile_id,
+        "similarity": best_similarity,
+        "second_best_similarity": normalized_second_best,
+        "similarity_separation": (
+            best_similarity - normalized_second_best
+            if normalized_second_best is not None
+            else None
+        ),
+        "profile_call_count": best_profile.call_count,
+        "profile_meeting_count": len(best_profile.meetings_seen),
+        "profile_first_seen_ordinal": best_profile.first_seen_ordinal,
+        "profile_source_channels": sorted(best_profile.source_channels),
+    }
 
 
 def should_auto_accept_audio_profile(profile: AudioSpeakerProfile, similarity: float) -> bool:
@@ -1254,6 +1296,23 @@ def build_confirmation_simulation(
         for label, min_similarity, max_similarity in CONFIRMATION_SIMILARITY_BANDS
     ]
     recommended_threshold = recommended_confirmation_threshold(bands)
+    safety_filters = build_confirmation_safety_filter_reports(
+        suggestions=suggestions,
+        duplicate_counts=duplicate_counts,
+    )
+    safe_filters = [
+        report for report in safety_filters
+        if report["suggestions_shown"] > 0 and report["wrong_suggestions"] == 0
+    ]
+    best_precision_filters = sorted(
+        (report for report in safety_filters if report["suggestions_shown"] > 0),
+        key=lambda item: (
+            -(item["precision"] if item["precision"] is not None else -1),
+            -item["correct_suggestions"],
+            -item["suggestions_shown"],
+            item["filter"],
+        ),
+    )[:5]
 
     return {
         "confirmation_suggestions_total": total,
@@ -1261,6 +1320,18 @@ def build_confirmation_simulation(
         "confirmation_suggestions_wrong": len(wrong),
         "confirmation_precision": ratio(len(correct), total),
         "confirmation_bands_by_similarity": bands,
+        "confirmation_safety_filters": safety_filters,
+        "safe_candidate_filters": sorted(
+            safe_filters,
+            key=lambda item: (-item["correct_suggestions"], -item["suggestions_shown"], item["filter"]),
+        ),
+        "safe_candidate_filter_count": len(safe_filters),
+        "best_precision_filters": best_precision_filters,
+        "safety_filter_conclusion": (
+            "At least one tested non-transcript filter had zero wrong suggestions."
+            if safe_filters
+            else "None of the tested non-transcript filters or compound strategies had zero wrong suggestions."
+        ),
         "recommended_show_suggestion_threshold": recommended_threshold,
         "recommendation_basis": (
             "lowest observed similarity band with no wrong suggestions across that band and all higher bands"
@@ -1282,6 +1353,241 @@ def build_confirmation_simulation(
             _redacted_label_case(suggestion, real_speaker_ids, include_speaker_labels)
             for suggestion in wrong[:10]
         ],
+    }
+
+
+def build_confirmation_safety_filter_reports(
+    suggestions: list[dict[str, Any]],
+    duplicate_counts: dict[str, int],
+) -> list[dict[str, Any]]:
+    filter_specs = [
+        *threshold_filter_specs(
+            field="profile_prior_meeting_count",
+            label="profile meetings seen",
+            category="profile_maturity",
+            thresholds=[2, 3, 5],
+        ),
+        *threshold_filter_specs(
+            field="profile_prior_call_count",
+            label="profile call count",
+            category="profile_maturity",
+            thresholds=[3, 5, 10],
+        ),
+        *threshold_filter_specs(
+            field="speaker_duration_seconds",
+            label="current speaking duration seconds",
+            category="current_evidence",
+            thresholds=[10, 30, 60, 120, 300],
+        ),
+        *threshold_filter_specs(
+            field="segment_count",
+            label="current segment count",
+            category="current_evidence",
+            thresholds=[3, 5, 10],
+        ),
+        *threshold_filter_specs(
+            field="similarity_separation",
+            label="similarity separation from second-best profile",
+            category="ambiguity",
+            thresholds=[0.10, 0.15, 0.20, 0.30],
+            missing_passes=True,
+        ),
+        {
+            "filter": "current_channel_system_only",
+            "category": "channel",
+            "criteria": "current channel is system",
+            "predicate": lambda suggestion: suggestion.get("channel") == "system",
+        },
+        {
+            "filter": "current_channel_microphone_only",
+            "category": "channel",
+            "criteria": "current channel is microphone",
+            "predicate": lambda suggestion: suggestion.get("channel") == "microphone",
+        },
+        {
+            "filter": "profile_seen_on_same_channel",
+            "category": "channel",
+            "criteria": "profile was previously seen on the same channel",
+            "predicate": lambda suggestion: suggestion.get("channel") in set(suggestion.get("profile_source_channels", [])),
+        },
+        {
+            "filter": "profile_same_channel_only",
+            "category": "channel",
+            "criteria": "profile was previously seen only on the current channel",
+            "predicate": lambda suggestion: set(suggestion.get("profile_source_channels", [])) == {suggestion.get("channel")},
+        },
+        {
+            "filter": "profile_cross_channel_history",
+            "category": "channel",
+            "criteria": "profile has prior cross-channel history or lacks current channel history",
+            "predicate": lambda suggestion: set(suggestion.get("profile_source_channels", [])) != {suggestion.get("channel")},
+        },
+        {
+            "filter": "profile_seen_multiple_prior_meetings",
+            "category": "repeat_evidence",
+            "criteria": "profile was seen in at least two prior meetings",
+            "predicate": lambda suggestion: int(suggestion.get("profile_prior_meeting_count") or 0) >= 2,
+        },
+        {
+            "filter": "no_microphone_bleed_suppression_in_meeting",
+            "category": "recording_quality",
+            "criteria": "meeting had no microphone-bleed suppression",
+            "predicate": lambda suggestion: not suggestion.get("meeting_had_microphone_bleed_suppression", False),
+        },
+        {
+            "filter": "profile_not_created_in_same_meeting",
+            "category": "profile_origin",
+            "criteria": "profile existed before this meeting",
+            "predicate": lambda suggestion: not suggestion.get("profile_created_in_same_meeting", False),
+        },
+        {
+            "filter": "profile_has_prior_manual_name",
+            "category": "profile_origin",
+            "criteria": "profile already has a user-confirmed/manual name",
+            "predicate": lambda suggestion: bool(suggestion.get("profile_has_prior_manual_name")),
+        },
+        {
+            "filter": "system_duration_300_separation_0_3",
+            "category": "compound_strategy",
+            "criteria": "system channel, current speaking duration >= 300s, similarity separation >= 0.30",
+            "predicate": lambda suggestion: (
+                suggestion.get("channel") == "system"
+                and value_at_least(suggestion.get("speaker_duration_seconds"), 300)
+                and value_at_least(suggestion.get("similarity_separation"), 0.30, missing_passes=True)
+            ),
+        },
+        {
+            "filter": "system_duration_120_separation_0_2",
+            "category": "compound_strategy",
+            "criteria": "system channel, current speaking duration >= 120s, similarity separation >= 0.20",
+            "predicate": lambda suggestion: (
+                suggestion.get("channel") == "system"
+                and value_at_least(suggestion.get("speaker_duration_seconds"), 120)
+                and value_at_least(suggestion.get("similarity_separation"), 0.20, missing_passes=True)
+            ),
+        },
+        {
+            "filter": "profile_meetings_2_system_duration_120",
+            "category": "compound_strategy",
+            "criteria": "profile seen in >= 2 prior meetings, system channel, current speaking duration >= 120s",
+            "predicate": lambda suggestion: (
+                value_at_least(suggestion.get("profile_prior_meeting_count"), 2)
+                and suggestion.get("channel") == "system"
+                and value_at_least(suggestion.get("speaker_duration_seconds"), 120)
+            ),
+        },
+        {
+            "filter": "profile_meetings_2_same_channel_separation_0_2",
+            "category": "compound_strategy",
+            "criteria": "profile seen in >= 2 prior meetings, same-channel profile history, similarity separation >= 0.20",
+            "predicate": lambda suggestion: (
+                value_at_least(suggestion.get("profile_prior_meeting_count"), 2)
+                and suggestion.get("channel") in set(suggestion.get("profile_source_channels", []))
+                and value_at_least(suggestion.get("similarity_separation"), 0.20, missing_passes=True)
+            ),
+        },
+        {
+            "filter": "no_bleed_system_separation_0_2",
+            "category": "compound_strategy",
+            "criteria": "no microphone-bleed suppression in meeting, system channel, similarity separation >= 0.20",
+            "predicate": lambda suggestion: (
+                not suggestion.get("meeting_had_microphone_bleed_suppression", False)
+                and suggestion.get("channel") == "system"
+                and value_at_least(suggestion.get("similarity_separation"), 0.20, missing_passes=True)
+            ),
+        },
+        {
+            "filter": "profile_call_count_5_duration_120",
+            "category": "compound_strategy",
+            "criteria": "profile call count >= 5, current speaking duration >= 120s",
+            "predicate": lambda suggestion: (
+                value_at_least(suggestion.get("profile_prior_call_count"), 5)
+                and value_at_least(suggestion.get("speaker_duration_seconds"), 120)
+            ),
+        },
+        {
+            "filter": "profile_meetings_3_duration_300",
+            "category": "compound_strategy",
+            "criteria": "profile seen in >= 3 prior meetings, current speaking duration >= 300s",
+            "predicate": lambda suggestion: (
+                value_at_least(suggestion.get("profile_prior_meeting_count"), 3)
+                and value_at_least(suggestion.get("speaker_duration_seconds"), 300)
+            ),
+        },
+    ]
+
+    return [
+        confirmation_filter_report(
+            suggestions=suggestions,
+            duplicate_counts=duplicate_counts,
+            filter_name=spec["filter"],
+            category=spec["category"],
+            criteria=spec["criteria"],
+            predicate=spec["predicate"],
+        )
+        for spec in filter_specs
+    ]
+
+
+def threshold_filter_specs(
+    field: str,
+    label: str,
+    category: str,
+    thresholds: list[int | float],
+    missing_passes: bool = False,
+) -> list[dict[str, Any]]:
+    specs = []
+    for threshold in thresholds:
+        suffix = str(threshold).replace(".", "_")
+        specs.append(
+            {
+                "filter": f"{field}_at_least_{suffix}",
+                "category": category,
+                "criteria": f"{label} >= {threshold}",
+                "predicate": (
+                    lambda suggestion, field=field, threshold=threshold, missing_passes=missing_passes:
+                    value_at_least(suggestion.get(field), threshold, missing_passes)
+                ),
+            }
+        )
+    return specs
+
+
+def value_at_least(value: Any, threshold: int | float, missing_passes: bool = False) -> bool:
+    if value is None:
+        return missing_passes
+    try:
+        return float(value) >= float(threshold)
+    except (TypeError, ValueError):
+        return False
+
+
+def confirmation_filter_report(
+    suggestions: list[dict[str, Any]],
+    duplicate_counts: dict[str, int],
+    filter_name: str,
+    category: str,
+    criteria: str,
+    predicate: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any]:
+    shown = [suggestion for suggestion in suggestions if predicate(suggestion)]
+    correct = [suggestion for suggestion in shown if suggestion["correct"]]
+    wrong = len(shown) - len(correct)
+    confirmed_speakers = {suggestion["expected_real_speaker"] for suggestion in correct}
+    return {
+        "filter": filter_name,
+        "category": category,
+        "criteria": criteria,
+        "suggestions_shown": len(shown),
+        "correct_suggestions": len(correct),
+        "wrong_suggestions": wrong,
+        "precision": ratio(len(correct), len(shown)),
+        "projected_unknown_label_reduction": len(correct),
+        "projected_duplicate_reduction_upper_bound": sum(
+            duplicate_counts.get(canonical, 0)
+            for canonical in confirmed_speakers
+        ),
+        "safe_for_confirmation_suggestion": len(shown) > 0 and wrong == 0,
     }
 
 
