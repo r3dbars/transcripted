@@ -149,6 +149,13 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(merge_review["merge_candidates_correct"], 1)
             self.assertEqual(merge_review["merge_candidates_wrong"], 0)
             self.assertEqual(merge_review["projected_duplicate_reduction_upper_bound"], 1)
+            recognition_experiment = report["auto_recognition_experiment"]
+            self.assertGreater(recognition_experiment["experiment_policy_count"], 0)
+            self.assertEqual(recognition_experiment["candidate_events_total"], 2)
+            self.assertEqual(
+                recognition_experiment["current_product_gate_projection"]["false_automatic_matches"],
+                0,
+            )
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -200,6 +207,22 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             search = simulation["compound_strategy_search"]
             self.assertGreaterEqual(search["zero_wrong_compound_strategy_min_coverage_count"], 1)
             self.assertGreaterEqual(search["max_zero_wrong_suggestions_shown"], 3)
+            recognition_experiment = report["auto_recognition_experiment"]
+            current_policy = recognition_experiment["current_product_gate_projection"]
+            self.assertEqual(current_policy["correct_automatic_matches"], 2)
+            self.assertEqual(current_policy["false_automatic_matches"], 0)
+            self.assertEqual(current_policy["recognized_recurring_speakers"], 1)
+            self.assertEqual(current_policy["median_meetings_after_first_seen"], 4)
+            faster_policy = next(
+                policy for policy in recognition_experiment["policies"]
+                if policy["minimum_total_observations"] == 3
+                and policy["minimum_prior_meetings"] == 1
+                and policy["minimum_similarity"] == 0.98
+                and policy["minimum_similarity_separation"] is None
+            )
+            self.assertEqual(faster_policy["correct_automatic_matches"], 4)
+            self.assertEqual(faster_policy["false_automatic_matches"], 0)
+            self.assertEqual(faster_policy["median_meetings_after_first_seen"], 2)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -39,6 +39,10 @@ CONFIRMATION_SIMILARITY_BANDS = [
     ("0.85-0.90", 0.85, 0.90),
     ("below 0.85", None, 0.85),
 ]
+AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS = [3, 4, 5, 6]
+AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS = [1, 2, 3, 4]
+AUTO_RECOGNITION_EXPERIMENT_SIMILARITIES = [0.98, 0.985, 0.99]
+AUTO_RECOGNITION_EXPERIMENT_SEPARATIONS: list[float | None] = [None, 0.05, 0.10]
 
 
 @dataclass(frozen=True)
@@ -373,6 +377,7 @@ def evaluate_audio_corpus(
     diarization_failures: list[dict[str, Any]] = []
     false_match_cases: list[dict[str, Any]] = []
     confirmation_suggestions: list[dict[str, Any]] = []
+    auto_recognition_candidates: list[dict[str, Any]] = []
     duplicate_profile_cases: list[dict[str, Any]] = []
     missed_speaker_cases: list[dict[str, Any]] = []
     meeting_results: list[dict[str, Any]] = []
@@ -469,6 +474,26 @@ def evaluate_audio_corpus(
                 and prediction["similarity"] is not None
                 and should_auto_accept_audio_profile(profile, float(prediction["similarity"]))
             )
+            if was_matched and profile.assigned_label and prediction and prediction["similarity"] is not None:
+                similarity = float(prediction["similarity"])
+                auto_recognition_candidates.append(
+                    {
+                        "meeting_id": meeting_id,
+                        "ordinal": ordinal,
+                        "profile_id": profile.profile_id,
+                        "expected_real_speaker": canonical,
+                        "profile_real_speaker": profile.assigned_label,
+                        "similarity": similarity,
+                        "similarity_separation": prediction.get("similarity_separation"),
+                        "profile_prior_call_count": prediction.get("profile_prior_call_count", 0),
+                        "profile_total_observation_count": int(prediction.get("profile_prior_call_count", 0)) + 1,
+                        "profile_prior_meeting_count": prediction.get("profile_prior_meeting_count", 0),
+                        "embedding_count": prediction.get("embedding_count", 0),
+                        "segment_count": prediction.get("segment_count", 0),
+                        "speaker_duration_seconds": prediction.get("speaker_duration_seconds", 0.0),
+                        "correct": profile.assigned_label == canonical,
+                    }
+                )
 
             if auto_accepted and profile.assigned_label:
                 if profile.assigned_label == canonical:
@@ -605,6 +630,13 @@ def evaluate_audio_corpus(
         for canonical in recurring_labels
         if canonical in real_speaker_first_recognition
     ]
+    auto_recognition_experiment = build_auto_recognition_experiment(
+        candidates=auto_recognition_candidates,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=real_speaker_first_seen,
+        include_speaker_labels=include_speaker_labels,
+    )
 
     report = {
         "schema_version": 1,
@@ -651,6 +683,7 @@ def evaluate_audio_corpus(
         },
         "confirmation_simulation": confirmation_simulation,
         "duplicate_merge_review": duplicate_merge_review,
+        "auto_recognition_experiment": auto_recognition_experiment,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -1559,6 +1592,180 @@ def projected_duplicate_merge_reduction(candidates: list[dict[str, Any]]) -> int
     for profile_id in list(parent):
         components.setdefault(find(profile_id), set()).add(profile_id)
     return sum(max(0, len(profile_ids) - 1) for profile_ids in components.values())
+
+
+def build_auto_recognition_experiment(
+    candidates: list[dict[str, Any]],
+    recurring_labels: list[str],
+    real_speaker_ids: dict[str, str],
+    first_seen: dict[str, int],
+    include_speaker_labels: bool,
+) -> dict[str, Any]:
+    policies = [
+        auto_recognition_policy_report(
+            candidates=candidates,
+            recurring_labels=recurring_labels,
+            real_speaker_ids=real_speaker_ids,
+            first_seen=first_seen,
+            include_speaker_labels=include_speaker_labels,
+            minimum_total_observations=minimum_total_observations,
+            minimum_prior_meetings=minimum_prior_meetings,
+            minimum_similarity=minimum_similarity,
+            minimum_similarity_separation=minimum_similarity_separation,
+        )
+        for minimum_total_observations in AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS
+        for minimum_prior_meetings in AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS
+        for minimum_similarity in AUTO_RECOGNITION_EXPERIMENT_SIMILARITIES
+        for minimum_similarity_separation in AUTO_RECOGNITION_EXPERIMENT_SEPARATIONS
+    ]
+    current_policy = auto_recognition_policy_report(
+        candidates=candidates,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=first_seen,
+        include_speaker_labels=include_speaker_labels,
+        minimum_total_observations=5,
+        minimum_prior_meetings=1,
+        minimum_similarity=0.98,
+        minimum_similarity_separation=None,
+        policy_name="current_product_gate",
+    )
+    zero_false = [
+        policy for policy in policies
+        if policy["false_automatic_matches"] == 0 and policy["automatic_matches_total"] > 0
+    ]
+    best_zero_false = sorted(
+        zero_false,
+        key=lambda item: (
+            -item["recognized_recurring_speakers"],
+            -item["correct_automatic_matches"],
+            item["median_meetings_after_first_seen"] if item["median_meetings_after_first_seen"] is not None else 999,
+            item["minimum_total_observations"],
+            item["minimum_prior_meetings"],
+            item["minimum_similarity"],
+        ),
+    )
+    return {
+        "candidate_events_total": len(candidates),
+        "experiment_policy_count": len(policies),
+        "current_product_gate_projection": current_policy,
+        "best_zero_false_policies": best_zero_false[:10],
+        "policies": policies,
+        "notes": [
+            "Eval-only sweep. Product auto-naming behavior is not changed.",
+            "minimum_total_observations means the current hearing counts, so 5 means recognize on the fifth observed match or later.",
+            "Zoom labels are used only after the fact to score whether each simulated automatic recognition would be correct.",
+        ],
+    }
+
+
+def auto_recognition_policy_report(
+    candidates: list[dict[str, Any]],
+    recurring_labels: list[str],
+    real_speaker_ids: dict[str, str],
+    first_seen: dict[str, int],
+    include_speaker_labels: bool,
+    minimum_total_observations: int,
+    minimum_prior_meetings: int,
+    minimum_similarity: float,
+    minimum_similarity_separation: float | None,
+    policy_name: str | None = None,
+) -> dict[str, Any]:
+    accepted = [
+        candidate for candidate in candidates
+        if auto_recognition_candidate_passes(
+            candidate,
+            minimum_total_observations=minimum_total_observations,
+            minimum_prior_meetings=minimum_prior_meetings,
+            minimum_similarity=minimum_similarity,
+            minimum_similarity_separation=minimum_similarity_separation,
+        )
+    ]
+    correct = [candidate for candidate in accepted if candidate["correct"]]
+    wrong = [candidate for candidate in accepted if not candidate["correct"]]
+    recurring_set = set(recurring_labels)
+    first_recognition: dict[str, int] = {}
+    for candidate in sorted(correct, key=lambda item: (item["ordinal"], item["meeting_id"], item["profile_id"])):
+        canonical = candidate["expected_real_speaker"]
+        if canonical in recurring_set:
+            first_recognition.setdefault(canonical, int(candidate["ordinal"]))
+
+    gaps = [
+        first_recognition[canonical] - first_seen[canonical]
+        for canonical in recurring_labels
+        if canonical in first_recognition
+    ]
+    return {
+        "policy": policy_name or auto_recognition_policy_name(
+            minimum_total_observations,
+            minimum_prior_meetings,
+            minimum_similarity,
+            minimum_similarity_separation,
+        ),
+        "minimum_total_observations": minimum_total_observations,
+        "minimum_prior_meetings": minimum_prior_meetings,
+        "minimum_similarity": minimum_similarity,
+        "minimum_similarity_separation": minimum_similarity_separation,
+        "automatic_matches_total": len(accepted),
+        "correct_automatic_matches": len(correct),
+        "false_automatic_matches": len(wrong),
+        "precision": ratio(len(correct), len(accepted)),
+        "recognized_recurring_speakers": len(gaps),
+        "never_recognized_recurring_speakers": len(recurring_labels) - len(gaps),
+        "median_meetings_after_first_seen": median(gaps) if gaps else None,
+        "max_meetings_after_first_seen": max(gaps) if gaps else None,
+        "recognized_by_meetings_after_first_seen": recognition_curve(gaps),
+        "wrong_cases": [
+            _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
+            for candidate in wrong[:10]
+        ],
+    }
+
+
+def auto_recognition_candidate_passes(
+    candidate: dict[str, Any],
+    minimum_total_observations: int,
+    minimum_prior_meetings: int,
+    minimum_similarity: float,
+    minimum_similarity_separation: float | None,
+) -> bool:
+    if float(candidate["similarity"]) <= minimum_similarity:
+        return False
+    if int(candidate.get("profile_total_observation_count") or 0) < minimum_total_observations:
+        return False
+    if int(candidate.get("profile_prior_meeting_count") or 0) < minimum_prior_meetings:
+        return False
+    if minimum_similarity_separation is None:
+        return True
+    separation = candidate.get("similarity_separation")
+    return separation is None or float(separation) >= minimum_similarity_separation
+
+
+def auto_recognition_policy_name(
+    minimum_total_observations: int,
+    minimum_prior_meetings: int,
+    minimum_similarity: float,
+    minimum_similarity_separation: float | None,
+) -> str:
+    similarity = str(minimum_similarity).replace(".", "_")
+    separation = (
+        "any"
+        if minimum_similarity_separation is None
+        else str(minimum_similarity_separation).replace(".", "_")
+    )
+    return (
+        f"heard_{minimum_total_observations}_times_"
+        f"prior_meetings_{minimum_prior_meetings}_"
+        f"similarity_{similarity}_"
+        f"separation_{separation}"
+    )
+
+
+def recognition_curve(gaps: list[int]) -> dict[str, int]:
+    return {
+        f"within_{limit}_meetings": sum(1 for gap in gaps if gap <= limit)
+        for limit in [1, 2, 3, 4, 5]
+    }
 
 
 def build_confirmation_safety_filter_reports(
