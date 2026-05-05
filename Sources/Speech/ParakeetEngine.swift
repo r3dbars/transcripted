@@ -351,6 +351,28 @@ private struct ParakeetInputDeviceApplication {
     let errorDescription: String?
 }
 
+private final class ParakeetRetiredAudioEngineStore {
+    static let shared = ParakeetRetiredAudioEngineStore()
+
+    private let lock = NSLock()
+    private var engines: [AVAudioEngine] = []
+
+    func retire(_ engine: AVAudioEngine, reason: String) {
+        lock.withLock {
+            engines.append(engine)
+        }
+
+        let delay = ParakeetAudioEngineRetirementPolicy.deferredReleaseDelayNanoseconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .nanoseconds(Int(delay))) { [weak self, engine] in
+            guard let self else { return }
+            self.lock.withLock {
+                guard let index = self.engines.firstIndex(where: { $0 === engine }) else { return }
+                self.engines.remove(at: index)
+            }
+        }
+    }
+}
+
 @MainActor
 class ParakeetEngine: ObservableObject {
     @Published var isRecording = false
@@ -1566,7 +1588,9 @@ class ParakeetEngine: ObservableObject {
                 self.audioEngine.stop()
             }
             self.audioEngine.reset()
+            let retiredEngine = self.audioEngine
             self.audioEngine = AVAudioEngine()
+            ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
         }
         inputTapInstalled = false
         isEnginePrewarmed = false
@@ -2678,6 +2702,8 @@ class ParakeetEngine: ObservableObject {
             if audioEngine.isRunning {
                 audioEngine.stop()
             }
+            audioEngine.reset()
+            ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
         }
         let mgr = asrManager
         Task { mgr?.cleanup() }

@@ -83,6 +83,14 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
     }
 
+    runSuite("ParakeetAudioEngineRetirementPolicy outlives CoreAudio recovery") {
+        assertTrue(
+            ParakeetAudioEngineRetirementPolicy.deferredReleaseDelayNanoseconds
+                > TranscriptedConstants.audioDeviceRecoveryTimeout,
+            "retired AVAudioEngine instances should stay alive beyond the route recovery timeout"
+        )
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,
