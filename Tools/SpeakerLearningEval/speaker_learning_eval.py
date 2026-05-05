@@ -31,6 +31,13 @@ TRANSCRIPTED_DEFAULT_PAIRWISE_MERGE_THRESHOLD = 0.78
 TRANSCRIPTED_DB_SPLIT_THRESHOLD = 0.62
 MICROPHONE_BLEED_OVERLAP_THRESHOLD = 0.70
 MICROPHONE_BLEED_SIMILARITY_THRESHOLD = 0.30
+CONFIRMATION_SIMILARITY_BANDS = [
+    ("0.98+", 0.98, None),
+    ("0.95-0.98", 0.95, 0.98),
+    ("0.90-0.95", 0.90, 0.95),
+    ("0.85-0.90", 0.85, 0.90),
+    ("below 0.85", None, 0.85),
+]
 
 
 @dataclass(frozen=True)
@@ -364,6 +371,7 @@ def evaluate_audio_corpus(
     suppressed_microphone_bleed_segments = 0
     diarization_failures: list[dict[str, Any]] = []
     false_match_cases: list[dict[str, Any]] = []
+    confirmation_suggestions: list[dict[str, Any]] = []
     duplicate_profile_cases: list[dict[str, Any]] = []
     missed_speaker_cases: list[dict[str, Any]] = []
     meeting_results: list[dict[str, Any]] = []
@@ -487,6 +495,18 @@ def evaluate_audio_corpus(
                 continue
 
             if was_matched and profile.assigned_label:
+                similarity = float(prediction["similarity"]) if prediction and prediction["similarity"] is not None else 0.0
+                confirmation_suggestions.append(
+                    {
+                        "meeting_id": meeting_id,
+                        "profile_id": profile.profile_id,
+                        "expected_real_speaker": canonical,
+                        "profile_real_speaker": profile.assigned_label,
+                        "similarity": similarity,
+                        "duration_seconds": round(label_scores[canonical], 2),
+                        "correct": profile.assigned_label == canonical,
+                    }
+                )
                 confirmation_labels_required += 1
                 meeting_confirmation += 1
                 deferred_profile_matches += 1
@@ -549,6 +569,13 @@ def evaluate_audio_corpus(
         canonical: max(0, len(profile_ids) - 1)
         for canonical, profile_ids in real_speaker_profiles.items()
     }
+    confirmation_simulation = build_confirmation_simulation(
+        suggestions=confirmation_suggestions,
+        duplicate_counts=duplicate_counts,
+        unknown_labels_required=unknown_labels_required,
+        real_speaker_ids=real_speaker_ids,
+        include_speaker_labels=include_speaker_labels,
+    )
     recurring_labels = [
         canonical for canonical, meeting_ids in real_speaker_meetings.items()
         if len(meeting_ids) > 1
@@ -599,6 +626,7 @@ def evaluate_audio_corpus(
             "diarization_processing_seconds": round(total_diarization_seconds, 4),
             "diarization_failure_count": len(diarization_failures),
         },
+        "confirmation_simulation": confirmation_simulation,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -623,6 +651,7 @@ def evaluate_audio_corpus(
                 if item["unknown_labels_required"] > 0
             ],
             "false_match_cases": false_match_cases[:10],
+            "confirmation_wrong_suggestions": confirmation_simulation["wrong_suggestion_cases"][:10],
             "duplicate_profile_cases": duplicate_profile_cases[:10],
             "missed_real_speaker_cases": missed_speaker_cases[:10],
             "diarization_failures": diarization_failures[:10],
@@ -1200,6 +1229,109 @@ def _redacted_label_case(
                 redacted[f"{key}_label"] = canonical
             del redacted[key]
     return redacted
+
+
+def build_confirmation_simulation(
+    suggestions: list[dict[str, Any]],
+    duplicate_counts: dict[str, int],
+    unknown_labels_required: int,
+    real_speaker_ids: dict[str, str],
+    include_speaker_labels: bool,
+) -> dict[str, Any]:
+    total = len(suggestions)
+    correct = [suggestion for suggestion in suggestions if suggestion["correct"]]
+    wrong = [suggestion for suggestion in suggestions if not suggestion["correct"]]
+    confirmed_speakers = {suggestion["expected_real_speaker"] for suggestion in correct}
+    oracle_duplicate_reduction = sum(duplicate_counts.get(canonical, 0) for canonical in confirmed_speakers)
+    duplicate_total = sum(duplicate_counts.values())
+    bands = [
+        confirmation_band_report(
+            label=label,
+            min_similarity=min_similarity,
+            max_similarity=max_similarity,
+            suggestions=suggestions,
+        )
+        for label, min_similarity, max_similarity in CONFIRMATION_SIMILARITY_BANDS
+    ]
+    recommended_threshold = recommended_confirmation_threshold(bands)
+
+    return {
+        "confirmation_suggestions_total": total,
+        "confirmation_suggestions_correct": len(correct),
+        "confirmation_suggestions_wrong": len(wrong),
+        "confirmation_precision": ratio(len(correct), total),
+        "confirmation_bands_by_similarity": bands,
+        "recommended_show_suggestion_threshold": recommended_threshold,
+        "recommendation_basis": (
+            "lowest observed similarity band with no wrong suggestions across that band and all higher bands"
+            if recommended_threshold is not None
+            else "no observed similarity-only band can be recommended without wrong suggestions"
+        ),
+        "projected_unknown_label_reduction_if_confirmed": len(correct),
+        "projected_unknown_labels_after_review": unknown_labels_required + len(wrong),
+        "projected_duplicate_reduction_if_confirmed": 0,
+        "projected_duplicate_profiles_after_confirmation": duplicate_total,
+        "oracle_duplicate_reduction_for_confirmed_real_speakers": oracle_duplicate_reduction,
+        "oracle_duplicate_profiles_after_confirmed_speaker_merges": max(0, duplicate_total - oracle_duplicate_reduction),
+        "projection_notes": [
+            "Correct confirmations avoid typed unknown labels but do not auto-apply names.",
+            "Confirmation-only matches existing profiles, so direct duplicate reduction is zero.",
+            "Oracle duplicate reduction is an eval-only upper bound using ground-truth labels to estimate merge upside.",
+        ],
+        "wrong_suggestion_cases": [
+            _redacted_label_case(suggestion, real_speaker_ids, include_speaker_labels)
+            for suggestion in wrong[:10]
+        ],
+    }
+
+
+def confirmation_band_report(
+    label: str,
+    min_similarity: float | None,
+    max_similarity: float | None,
+    suggestions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    band_suggestions = [
+        suggestion
+        for suggestion in suggestions
+        if similarity_in_band(float(suggestion["similarity"]), min_similarity, max_similarity)
+    ]
+    correct = sum(1 for suggestion in band_suggestions if suggestion["correct"])
+    wrong = len(band_suggestions) - correct
+    return {
+        "band": label,
+        "min_similarity": min_similarity,
+        "max_similarity": max_similarity,
+        "suggestions_total": len(band_suggestions),
+        "suggestions_correct": correct,
+        "suggestions_wrong": wrong,
+        "precision": ratio(correct, len(band_suggestions)),
+        "safe_for_looks_like": bool(band_suggestions) and wrong == 0,
+    }
+
+
+def similarity_in_band(similarity: float, min_similarity: float | None, max_similarity: float | None) -> bool:
+    if min_similarity is not None and similarity < min_similarity:
+        return False
+    if max_similarity is not None and similarity >= max_similarity:
+        return False
+    return True
+
+
+def recommended_confirmation_threshold(bands: list[dict[str, Any]]) -> float | None:
+    recommended: float | None = None
+    for band in bands:
+        if band["suggestions_wrong"] > 0:
+            break
+        if band["suggestions_total"] > 0:
+            recommended = band["min_similarity"]
+    return recommended
+
+
+def ratio(numerator: int, denominator: int) -> float | None:
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 4)
 
 
 def _audio_recognition_summary(

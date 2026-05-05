@@ -123,6 +123,14 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(summary["deferred_profile_matches"], 2)
             self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
             self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 0)
+            simulation = report["confirmation_simulation"]
+            self.assertEqual(simulation["confirmation_suggestions_total"], 2)
+            self.assertEqual(simulation["confirmation_suggestions_correct"], 1)
+            self.assertEqual(simulation["confirmation_suggestions_wrong"], 1)
+            self.assertEqual(simulation["confirmation_precision"], 0.5)
+            self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 1)
+            self.assertEqual(simulation["projected_unknown_labels_after_review"], 4)
+            self.assertIsNone(simulation["recommended_show_suggestion_threshold"])
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -157,6 +165,14 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(summary["deferred_profile_matches"], 3)
             self.assertEqual(summary["correct_automatic_matches"], 2)
             self.assertEqual(summary["false_automatic_matches"], 0)
+            simulation = report["confirmation_simulation"]
+            self.assertEqual(simulation["confirmation_suggestions_total"], 3)
+            self.assertEqual(simulation["confirmation_suggestions_correct"], 3)
+            self.assertEqual(simulation["confirmation_suggestions_wrong"], 0)
+            self.assertEqual(simulation["confirmation_precision"], 1.0)
+            self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 3)
+            self.assertEqual(simulation["projected_unknown_labels_after_review"], 1)
+            self.assertEqual(simulation["recommended_show_suggestion_threshold"], 0.98)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:
