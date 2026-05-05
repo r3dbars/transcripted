@@ -1453,7 +1453,15 @@ def build_duplicate_merge_review_report(
     real_speaker_ids: dict[str, str],
     include_speaker_labels: bool,
 ) -> dict[str, Any]:
-    candidates = duplicate_merge_candidates_from_profiles(profiles)
+    all_candidates = duplicate_merge_candidates_from_profiles(profiles, include_voice_only=True)
+    candidates = [
+        candidate for candidate in all_candidates
+        if candidate["reason"] != "similar_voice"
+    ]
+    held_back = [
+        candidate for candidate in all_candidates
+        if candidate["reason"] == "similar_voice"
+    ]
     correct = [candidate for candidate in candidates if candidate["correct"]]
     wrong = [candidate for candidate in candidates if not candidate["correct"]]
     reason_reports = [
@@ -1473,28 +1481,45 @@ def build_duplicate_merge_review_report(
         "merge_candidates_correct": len(correct),
         "merge_candidates_wrong": len(wrong),
         "merge_candidate_precision": ratio(len(correct), len(candidates)),
+        "held_back_voice_only_candidates": len(held_back),
+        "held_back_voice_only_candidates_correct": sum(1 for candidate in held_back if candidate["correct"]),
+        "held_back_voice_only_candidates_wrong": sum(1 for candidate in held_back if not candidate["correct"]),
         "projected_duplicate_reduction_upper_bound": projected_reduction,
         "projected_duplicate_profiles_after_perfect_review": max(0, duplicate_total - projected_reduction),
         "candidates_by_reason": reason_reports,
+        "held_back_candidates_by_reason": [
+            duplicate_merge_reason_report("similar_voice", held_back),
+        ],
         "wrong_candidate_cases": [
             _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
             for candidate in wrong[:10]
         ],
+        "held_back_wrong_candidate_cases": [
+            _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
+            for candidate in held_back
+            if not candidate["correct"]
+        ][:10],
         "report_notes": [
             "Merge candidates are reported separately from confirmation suggestions.",
             "Candidate filters use profile names, profile metadata, and voice embeddings only; Zoom labels are used only to score correctness.",
+            "Voice-only pairs are held out of the default review queue because the corpus still shows wrong voice-only duplicate candidates.",
             "The product flow should show these as possible duplicates and require an explicit user merge.",
         ],
     }
 
 
-def duplicate_merge_candidates_from_profiles(profiles: list[AudioSpeakerProfile]) -> list[dict[str, Any]]:
+def duplicate_merge_candidates_from_profiles(
+    profiles: list[AudioSpeakerProfile],
+    include_voice_only: bool = False,
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     sorted_profiles = sorted(profiles, key=lambda profile: profile.profile_id)
     for index, lhs in enumerate(sorted_profiles):
         for rhs in sorted_profiles[index + 1:]:
             reason, similarity = duplicate_merge_candidate_reason(lhs, rhs)
             if reason is None:
+                continue
+            if reason == "similar_voice" and not include_voice_only:
                 continue
             target, source = duplicate_merge_default_order(lhs, rhs)
             candidates.append(

@@ -33,7 +33,7 @@ func testSpeakerDuplicateReviewPolicy() {
         assertEqual(candidates[0].target.id, newer.id, "the higher-call profile should be the default keeper")
     }
 
-    runSuite("SpeakerDuplicateReviewPolicy requires stronger voice evidence for conflicting names") {
+    runSuite("SpeakerDuplicateReviewPolicy holds voice-only matches out of the default queue") {
         let first = speakerProfile(name: "Alex", embedding: [1, 0, 0], callCount: 3)
         let weakConflict = speakerProfile(name: "Jordan", embedding: [0.94, 0.35, 0], callCount: 3)
         let strongConflict = speakerProfile(name: "Taylor", embedding: [0.99, 0.01, 0], callCount: 3)
@@ -42,8 +42,7 @@ func testSpeakerDuplicateReviewPolicy() {
         let strongCandidates = SpeakerDuplicateReviewPolicy.candidates(from: [first, strongConflict])
 
         assertEqual(weakCandidates.count, 0, "conflicting names need very strong voice similarity")
-        assertEqual(strongCandidates.count, 1)
-        assertEqual(strongCandidates[0].reason, .voiceMatch)
+        assertEqual(strongCandidates.count, 0, "voice-only pairs are not safe enough for the default duplicate queue")
     }
 
     runSuite("SpeakerDuplicateReviewPolicy keeps the queue capped for the settings surface") {

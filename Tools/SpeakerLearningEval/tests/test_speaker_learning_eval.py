@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from speaker_learning_eval import (
     AudioSegment,
     AudioSpeakerProfile,
+    build_duplicate_merge_review_report,
     evaluate_audio_corpus,
     evaluate_corpus,
     parse_zoom_turns,
@@ -148,6 +149,7 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(merge_review["merge_candidates_total"], 1)
             self.assertEqual(merge_review["merge_candidates_correct"], 1)
             self.assertEqual(merge_review["merge_candidates_wrong"], 0)
+            self.assertEqual(merge_review["held_back_voice_only_candidates"], 0)
             self.assertEqual(merge_review["projected_duplicate_reduction_upper_bound"], 1)
             recognition_experiment = report["auto_recognition_experiment"]
             self.assertGreater(recognition_experiment["experiment_policy_count"], 0)
@@ -230,6 +232,37 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(faster_policy["median_meetings_after_first_seen"], 2)
             after_merge = report["auto_recognition_after_oracle_merge_experiment"]
             self.assertEqual(after_merge["current_product_gate_projection"]["false_automatic_matches"], 0)
+
+    def test_duplicate_merge_review_holds_back_voice_only_pairs(self):
+        first = AudioSpeakerProfile(
+            profile_id="profile_0001",
+            embedding=[1.0, 0.0],
+            first_seen_meeting_id="meeting-0001",
+            first_seen_ordinal=1,
+            assigned_label="Speaker Alpha",
+            call_count=5,
+        )
+        second = AudioSpeakerProfile(
+            profile_id="profile_0002",
+            embedding=[0.99, 0.01],
+            first_seen_meeting_id="meeting-0002",
+            first_seen_ordinal=2,
+            assigned_label="Speaker Beta",
+            call_count=4,
+        )
+
+        report = build_duplicate_merge_review_report(
+            profiles=[first, second],
+            duplicate_counts={},
+            real_speaker_ids={},
+            include_speaker_labels=False,
+        )
+
+        self.assertEqual(report["merge_candidates_total"], 0)
+        self.assertEqual(report["merge_candidates_wrong"], 0)
+        self.assertEqual(report["held_back_voice_only_candidates"], 1)
+        self.assertEqual(report["held_back_voice_only_candidates_wrong"], 1)
+        self.assertEqual(report["held_back_candidates_by_reason"][0]["reason"], "similar_voice")
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:

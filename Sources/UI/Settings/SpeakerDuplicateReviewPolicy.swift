@@ -28,6 +28,10 @@ enum SpeakerDuplicateReason: Int {
             return false
         }
     }
+
+    var shouldShowInDefaultReviewQueue: Bool {
+        self != .voiceMatch
+    }
 }
 
 struct SpeakerDuplicateCandidate: Identifiable {
@@ -73,6 +77,9 @@ enum SpeakerDuplicateReviewPolicy {
                 let rhs = profiles[rhsIndex]
                 let voiceSimilarity = cosineSimilarity(lhs.embedding, rhs.embedding)
                 guard let reason = duplicateReason(lhs, rhs, voiceSimilarity: voiceSimilarity) else {
+                    continue
+                }
+                guard reason.shouldShowInDefaultReviewQueue else {
                     continue
                 }
 
