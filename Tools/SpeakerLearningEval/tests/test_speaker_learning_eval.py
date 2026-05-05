@@ -9,7 +9,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from speaker_learning_eval import AudioSegment, evaluate_audio_corpus, evaluate_corpus, parse_zoom_turns
+from speaker_learning_eval import (
+    AudioSegment,
+    AudioSpeakerProfile,
+    evaluate_audio_corpus,
+    evaluate_corpus,
+    parse_zoom_turns,
+    should_auto_accept_audio_profile,
+)
 
 
 class SpeakerLearningEvalTests(unittest.TestCase):
@@ -109,11 +116,58 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             summary = report["summary"]
 
             self.assertEqual(summary["meetings_evaluated"], 3)
-            self.assertEqual(summary["unknown_labels_required"], 3)
-            self.assertEqual(summary["correct_automatic_matches"], 1)
-            self.assertEqual(summary["false_automatic_matches"], 1)
+            self.assertEqual(summary["unknown_labels_required"], 5)
+            self.assertEqual(summary["correct_automatic_matches"], 0)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["deferred_profile_matches"], 2)
             self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
-            self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 1)
+            self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 0)
+
+    def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index in range(1, 7):
+                self._write_meeting(root, f"meeting-000{index}", ["Speaker A"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=[1.0, 0.0],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+
+            self.assertEqual(summary["unknown_labels_required"], 4)
+            self.assertEqual(summary["deferred_profile_matches"], 3)
+            self.assertEqual(summary["correct_automatic_matches"], 2)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+
+    def test_audio_auto_accept_gate_rejects_near_matches(self):
+        profile = AudioSpeakerProfile(
+            profile_id="profile_0001",
+            embedding=[1.0, 0.0],
+            first_seen_meeting_id="meeting-0001",
+            first_seen_ordinal=1,
+            assigned_label="Speaker A",
+            call_count=8,
+        )
+
+        self.assertFalse(should_auto_accept_audio_profile(profile, 0.97))
+        self.assertTrue(should_auto_accept_audio_profile(profile, 0.99))
 
     def test_report_redacts_labels_and_transcript_text_by_default(self):
         with tempfile.TemporaryDirectory() as temp:

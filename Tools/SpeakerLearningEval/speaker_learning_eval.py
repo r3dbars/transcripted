@@ -356,6 +356,7 @@ def evaluate_audio_corpus(
     unknown_labels_required = 0
     correct_automatic_matches = 0
     false_automatic_matches = 0
+    deferred_profile_matches = 0
     missed_real_speaker_instances = 0
     diarization_failures: list[dict[str, Any]] = []
     false_match_cases: list[dict[str, Any]] = []
@@ -443,8 +444,15 @@ def evaluate_audio_corpus(
             profile = profiles[profile_id]
             prediction = predictions_by_profile.get(profile_id)
             was_matched = bool(prediction and prediction["status"] == "matched")
+            auto_accepted = (
+                was_matched
+                and profile.assigned_label is not None
+                and prediction is not None
+                and prediction["similarity"] is not None
+                and should_auto_accept_audio_profile(profile, float(prediction["similarity"]))
+            )
 
-            if was_matched and profile.assigned_label:
+            if auto_accepted and profile.assigned_label:
                 if profile.assigned_label == canonical:
                     correct_automatic_matches += 1
                     meeting_correct += 1
@@ -471,6 +479,10 @@ def evaluate_audio_corpus(
 
             unknown_labels_required += 1
             meeting_unknown += 1
+            if was_matched and profile.assigned_label:
+                deferred_profile_matches += 1
+                continue
+
             profile.assigned_label = canonical
             assigned_profiles = real_speaker_profiles.setdefault(canonical, [])
             if profile.profile_id not in assigned_profiles:
@@ -553,6 +565,7 @@ def evaluate_audio_corpus(
             "unknown_labels_required": unknown_labels_required,
             "correct_automatic_matches": correct_automatic_matches,
             "false_automatic_matches": false_automatic_matches,
+            "deferred_profile_matches": deferred_profile_matches,
             "missed_real_speaker_instances": missed_real_speaker_instances,
             "duplicate_profiles_per_real_speaker": {
                 "total": sum(duplicate_counts.values()),
@@ -1032,6 +1045,15 @@ def match_against_audio_profiles(
     if second_best_similarity >= threshold and (best_similarity - second_best_similarity) < 0.05:
         return None
     return {"profile_id": best_profile.profile_id, "similarity": best_similarity}
+
+
+def should_auto_accept_audio_profile(profile: AudioSpeakerProfile, similarity: float) -> bool:
+    return (
+        profile.assigned_label is not None
+        and profile.dispute_count == 0
+        and similarity > 0.98
+        and profile.call_count > 4
+    )
 
 
 def update_audio_profile(profile: AudioSpeakerProfile, embedding: list[float]) -> None:

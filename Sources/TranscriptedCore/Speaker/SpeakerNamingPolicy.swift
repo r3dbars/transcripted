@@ -1,10 +1,12 @@
 import Foundation
 
 enum SpeakerNamingPolicy {
+    private static let autoAcceptSimilarityThreshold = 0.98
+
     static func shouldAutoAccept(profile: SpeakerProfile, similarity: Double) -> Bool {
         profile.displayName != nil
             && profile.disputeCount == 0
-            && similarity > 0.88
+            && similarity > autoAcceptSimilarityThreshold
             && profile.callCount > 4
     }
 
