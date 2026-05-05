@@ -24,7 +24,30 @@ struct DiarizeConfig: Codable {
     var convergenceTolerance: Double?
 
     func toOfflineDiarizerConfig() -> OfflineDiarizerConfig {
-        OfflineDiarizerConfig.default
+        TranscriptedDiarizerConfig.make(overrides: self)
+    }
+}
+
+enum TranscriptedDiarizerConfig {
+    static func make(overrides: DiarizeConfig? = nil) -> OfflineDiarizerConfig {
+        // Same values used by Sources/TranscriptedCore/Services/DiarizationService.swift.
+        OfflineDiarizerConfig(
+            clusteringThreshold: overrides?.clusteringThreshold ?? 0.6,
+            Fa: overrides?.Fa ?? 0.25,
+            Fb: overrides?.Fb ?? 0.63,
+            windowDuration: overrides?.windowDuration ?? 10.0,
+            segmentationStepRatio: overrides?.segmentationStepRatio ?? 0.266,
+            embeddingBatchSize: overrides?.embeddingBatchSize ?? 32,
+            embeddingExcludeOverlap: overrides?.embeddingExcludeOverlap ?? true,
+            minSegmentDuration: overrides?.minSegmentDuration ?? 1.1821,
+            minGapDuration: overrides?.minGapDuration ?? 0.2874,
+            speechOnsetThreshold: overrides?.speechOnsetThreshold ?? 0.4472,
+            speechOffsetThreshold: overrides?.speechOffsetThreshold ?? 0.4472,
+            segmentationMinDurationOn: overrides?.segmentationMinDurationOn ?? 0.0,
+            segmentationMinDurationOff: overrides?.segmentationMinDurationOff ?? 0.2738,
+            maxVBxIterations: overrides?.maxVBxIterations ?? 24,
+            convergenceTolerance: overrides?.convergenceTolerance ?? 0.0001
+        )
     }
 }
 

@@ -2,9 +2,9 @@
 
 Local-only cold-start scoreboard for Transcripted speaker learning.
 
-The first harness uses Zoom transcript speaker labels as ground truth. It does
-not tune thresholds, run audio models, upload data, print transcript text, or
-persist transcript text.
+The baseline harness uses Zoom transcript speaker labels as ground truth. It
+does not tune thresholds, upload data, print transcript text, or persist
+transcript text.
 
 Run the 3-meeting smoke eval:
 
@@ -35,6 +35,32 @@ The JSON report tracks:
 
 Speaker labels are redacted by default. Use `--include-speaker-labels` only for
 local debugging.
+
+Run the audio-backed 3-meeting smoke eval:
+
+```bash
+python3 Tools/SpeakerLearningEval/speaker_learning_eval.py \
+  --mode audio \
+  --corpus /Users/redbars/Downloads/meeting-corpus \
+  --limit 3 \
+  --output .transcripted-speaker-eval/audio-smoke-3.json \
+  --audio-cache .transcripted-speaker-eval/audio-cache
+```
+
+Run the full audio-backed eval:
+
+```bash
+python3 Tools/SpeakerLearningEval/speaker_learning_eval.py \
+  --mode audio \
+  --corpus /Users/redbars/Downloads/meeting-corpus \
+  --output .transcripted-speaker-eval/audio-full-25.json \
+  --audio-cache .transcripted-speaker-eval/audio-cache
+```
+
+Audio mode runs Transcripted's offline diarization CLI against both
+`system_audio` and `microphone` tracks, captures per-segment embeddings in the
+local cache, and scores profile matches against Zoom speaker labels. The cache
+and reports stay under `.transcripted-speaker-eval/`, which is ignored by git.
 
 Run the harness tests:
 

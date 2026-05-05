@@ -36,6 +36,8 @@ They also honor:
 ### Offline Audio
 
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
+  - `--transcripted-defaults` uses the same offline diarizer config as meetings
+  - `--include-embeddings` adds local-only per-segment embeddings to JSON
 - `transcripted-cli batch <directory>` — diarize matching audio files in a directory
 
 ## Files
