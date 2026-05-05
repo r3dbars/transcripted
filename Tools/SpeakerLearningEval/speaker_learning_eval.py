@@ -29,6 +29,8 @@ ZOOM_LABEL_LINE = re.compile(
 )
 TRANSCRIPTED_DEFAULT_PAIRWISE_MERGE_THRESHOLD = 0.78
 TRANSCRIPTED_DB_SPLIT_THRESHOLD = 0.62
+MICROPHONE_BLEED_OVERLAP_THRESHOLD = 0.70
+MICROPHONE_BLEED_SIMILARITY_THRESHOLD = 0.30
 
 
 @dataclass(frozen=True)
@@ -354,10 +356,12 @@ def evaluate_audio_corpus(
     real_speaker_profiles: dict[str, list[str]] = {}
 
     unknown_labels_required = 0
+    confirmation_labels_required = 0
     correct_automatic_matches = 0
     false_automatic_matches = 0
     deferred_profile_matches = 0
     missed_real_speaker_instances = 0
+    suppressed_microphone_bleed_segments = 0
     diarization_failures: list[dict[str, Any]] = []
     false_match_cases: list[dict[str, Any]] = []
     duplicate_profile_cases: list[dict[str, Any]] = []
@@ -410,6 +414,10 @@ def evaluate_audio_corpus(
         for channel in ("system", "microphone"):
             segments = [segment for segment in channel_segments if segment.channel == channel]
             processed_segments.extend(post_process_audio_segments(segments, snapshot))
+        pre_suppression_segment_count = len(processed_segments)
+        processed_segments = suppress_overlapping_microphone_bleed(processed_segments)
+        meeting_suppressed_microphone_bleed = pre_suppression_segment_count - len(processed_segments)
+        suppressed_microphone_bleed_segments += meeting_suppressed_microphone_bleed
 
         predictions = classify_audio_speakers(
             segments=processed_segments,
@@ -433,6 +441,7 @@ def evaluate_audio_corpus(
                 predictions_by_profile[profile_id] = prediction
 
         meeting_unknown = 0
+        meeting_confirmation = 0
         meeting_correct = 0
         meeting_false = 0
         meeting_duplicates = 0
@@ -477,12 +486,14 @@ def evaluate_audio_corpus(
                     )
                 continue
 
-            unknown_labels_required += 1
-            meeting_unknown += 1
             if was_matched and profile.assigned_label:
+                confirmation_labels_required += 1
+                meeting_confirmation += 1
                 deferred_profile_matches += 1
                 continue
 
+            unknown_labels_required += 1
+            meeting_unknown += 1
             profile.assigned_label = canonical
             assigned_profiles = real_speaker_profiles.setdefault(canonical, [])
             if profile.profile_id not in assigned_profiles:
@@ -522,9 +533,11 @@ def evaluate_audio_corpus(
                 "post_processed_audio_segment_count": len(processed_segments),
                 "predicted_persistent_speaker_count": len(label_scores_by_profile),
                 "unknown_labels_required": meeting_unknown,
+                "confirmation_labels_required": meeting_confirmation,
                 "correct_automatic_matches": meeting_correct,
                 "false_automatic_matches": meeting_false,
                 "duplicate_profiles_created": meeting_duplicates,
+                "suppressed_microphone_bleed_segments": meeting_suppressed_microphone_bleed,
                 "missed_real_speaker_instances": len(missed_labels),
                 "runtime_seconds": round(time.perf_counter() - meeting_start, 4),
                 "diarization_processing_seconds": round(meeting_diarization_seconds, 4),
@@ -557,16 +570,19 @@ def evaluate_audio_corpus(
             "speaker_db": "temporary cold-start profile store reset for each eval run",
             "transcript_text_policy": "utterance text is never printed or persisted",
             "speaker_labels_redacted": not include_speaker_labels,
+            "microphone_bleed_policy": "microphone clusters mostly overlapping similar system audio are suppressed before scoring",
         },
         "summary": {
             "meetings_evaluated": len(meetings),
             "distinct_real_speakers": len(real_speaker_ids),
             "recurring_speakers": len(recurring_labels),
             "unknown_labels_required": unknown_labels_required,
+            "confirmation_labels_required": confirmation_labels_required,
             "correct_automatic_matches": correct_automatic_matches,
             "false_automatic_matches": false_automatic_matches,
             "deferred_profile_matches": deferred_profile_matches,
             "missed_real_speaker_instances": missed_real_speaker_instances,
+            "suppressed_microphone_bleed_segments": suppressed_microphone_bleed_segments,
             "duplicate_profiles_per_real_speaker": {
                 "total": sum(duplicate_counts.values()),
                 "max": max(duplicate_counts.values(), default=0),
@@ -735,6 +751,81 @@ def post_process_audio_segments(
     result = absorb_small_audio_clusters(result)
     result = db_informed_split_audio_segments(result, existing_profiles)
     return result
+
+
+def suppress_overlapping_microphone_bleed(
+    segments: list[AudioSegment],
+    overlap_threshold: float = MICROPHONE_BLEED_OVERLAP_THRESHOLD,
+    similarity_threshold: float = MICROPHONE_BLEED_SIMILARITY_THRESHOLD,
+) -> list[AudioSegment]:
+    system_segments = [segment for segment in segments if segment.channel == "system"]
+    microphone_segments = [segment for segment in segments if segment.channel == "microphone"]
+    if not system_segments or not microphone_segments:
+        return segments
+
+    system_by_speaker: dict[str, list[AudioSegment]] = {}
+    microphone_by_speaker: dict[str, list[AudioSegment]] = {}
+    for segment in system_segments:
+        system_by_speaker.setdefault(segment.speaker_id, []).append(segment)
+    for segment in microphone_segments:
+        microphone_by_speaker.setdefault(segment.speaker_id, []).append(segment)
+
+    system_means = {
+        speaker_id: mean_embedding_for_segments(grouped_segments)
+        for speaker_id, grouped_segments in system_by_speaker.items()
+    }
+
+    suppressed_speaker_ids: set[str] = set()
+    for speaker_id, grouped_segments in microphone_by_speaker.items():
+        total_duration = sum(segment.duration_seconds for segment in grouped_segments)
+        if total_duration <= 0:
+            continue
+
+        overlapped_duration = sum(
+            max((segment_overlap(segment, system_segment) for system_segment in system_segments), default=0.0)
+            for segment in grouped_segments
+        )
+        overlap_fraction = overlapped_duration / total_duration
+        if overlap_fraction < overlap_threshold:
+            continue
+
+        microphone_mean = mean_embedding_for_segments(grouped_segments)
+        best_system_similarity = max(
+            (
+                cosine_similarity(microphone_mean, system_mean)
+                for system_mean in system_means.values()
+                if microphone_mean and system_mean
+            ),
+            default=-1.0,
+        )
+        if best_system_similarity >= similarity_threshold:
+            suppressed_speaker_ids.add(speaker_id)
+
+    if not suppressed_speaker_ids:
+        return segments
+
+    return [
+        segment
+        for segment in segments
+        if not (segment.channel == "microphone" and segment.speaker_id in suppressed_speaker_ids)
+    ]
+
+
+def segment_overlap(left: AudioSegment, right: AudioSegment) -> float:
+    return max(0.0, min(left.end_seconds, right.end_seconds) - max(left.start_seconds, right.start_seconds))
+
+
+def mean_embedding_for_segments(segments: list[AudioSegment]) -> list[float]:
+    quality_filtered = [
+        segment.embedding
+        for segment in segments
+        if segment.embedding and segment.quality_score >= 0.3 and segment.duration_seconds >= 1.0
+    ]
+    if quality_filtered:
+        return mean_embedding(quality_filtered)
+
+    fallback = [segment.embedding for segment in segments if segment.embedding]
+    return mean_embedding(fallback) if fallback else []
 
 
 def pairwise_merge_audio_segments(segments: list[AudioSegment], threshold: float) -> list[AudioSegment]:
@@ -1288,6 +1379,7 @@ def print_summary(report: dict[str, Any], output_path: Path | None) -> None:
         "speaker-learning eval complete "
         f"meetings={summary['meetings_evaluated']} "
         f"unknown_labels={summary['unknown_labels_required']} "
+        f"confirmations={summary.get('confirmation_labels_required', 0)} "
         f"correct_auto_matches={summary['correct_automatic_matches']} "
         f"false_matches={false_matches} "
         f"duplicates={summary['duplicate_profiles_per_real_speaker']['total']} "

@@ -116,7 +116,8 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             summary = report["summary"]
 
             self.assertEqual(summary["meetings_evaluated"], 3)
-            self.assertEqual(summary["unknown_labels_required"], 5)
+            self.assertEqual(summary["unknown_labels_required"], 3)
+            self.assertEqual(summary["confirmation_labels_required"], 2)
             self.assertEqual(summary["correct_automatic_matches"], 0)
             self.assertEqual(summary["false_automatic_matches"], 0)
             self.assertEqual(summary["deferred_profile_matches"], 2)
@@ -151,10 +152,40 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
             summary = report["summary"]
 
-            self.assertEqual(summary["unknown_labels_required"], 4)
+            self.assertEqual(summary["unknown_labels_required"], 1)
+            self.assertEqual(summary["confirmation_labels_required"], 3)
             self.assertEqual(summary["deferred_profile_matches"], 3)
             self.assertEqual(summary["correct_automatic_matches"], 2)
             self.assertEqual(summary["false_automatic_matches"], 0)
+
+    def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Speaker A"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=[1.0, 0.0] if channel == "system" else [0.95, 0.05],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+
+            self.assertEqual(summary["unknown_labels_required"], 1)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 0)
+            self.assertEqual(summary["suppressed_microphone_bleed_segments"], 1)
 
     def test_audio_auto_accept_gate_rejects_near_matches(self):
         profile = AudioSpeakerProfile(
