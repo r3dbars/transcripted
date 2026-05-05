@@ -122,6 +122,9 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(summary["false_automatic_matches"], 0)
             self.assertEqual(summary["deferred_profile_matches"], 2)
             self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates_correct"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates_wrong"], 0)
             self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 0)
             simulation = report["confirmation_simulation"]
             self.assertEqual(simulation["confirmation_suggestions_total"], 2)
@@ -141,6 +144,11 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertGreater(search["searched_strategy_count"], 0)
             self.assertIn("best_precision_compound_strategies_min_3_suggestions", search)
             self.assertIn("best_precision_compound_strategies_min_10_suggestions", search)
+            merge_review = report["duplicate_merge_review"]
+            self.assertEqual(merge_review["merge_candidates_total"], 1)
+            self.assertEqual(merge_review["merge_candidates_correct"], 1)
+            self.assertEqual(merge_review["merge_candidates_wrong"], 0)
+            self.assertEqual(merge_review["projected_duplicate_reduction_upper_bound"], 1)
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -175,6 +183,7 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(summary["deferred_profile_matches"], 3)
             self.assertEqual(summary["correct_automatic_matches"], 2)
             self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["duplicate_merge_candidates"], 0)
             simulation = report["confirmation_simulation"]
             self.assertEqual(simulation["confirmation_suggestions_total"], 3)
             self.assertEqual(simulation["confirmation_suggestions_correct"], 3)

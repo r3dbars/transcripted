@@ -1,6 +1,6 @@
 // SpeakerNamingSheet.swift
 // Modal window prompted by TranscriptionTaskManager.$speakerNamingRequest.
-// Lets the user name unknown speakers and confirm suggestions after a meeting
+// Lets the user name unknown speakers and link voices after a meeting
 // transcript finishes. On close, calls `request.onComplete(updates)` so Core's
 // SpeakerNamingCoordinator can write the names back into the transcript.
 //
@@ -118,7 +118,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 final class SpeakerNamingContentView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "Review the speakers from this meeting")
-    private let subtitleLabel = NSTextField(labelWithString: "Confirm suggestions, link voices to existing people, or leave them unknown for now.")
+    private let subtitleLabel = NSTextField(labelWithString: "Name new speakers, choose an existing person, or leave them unknown for now.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
     private let saveButton = NSButton(title: "Save speaker decisions", target: nil, action: nil)
@@ -420,7 +420,7 @@ final class SpeakerRowView: NSView {
     private let sampleField = NSTextField(wrappingLabelWithString: "")
     private let nameField = SpeakerNameComboBox(frame: .zero)
     private let playButton = NSButton(title: "Play sample", target: nil, action: nil)
-    private let confirmButton = NSButton(title: "Use Suggested", target: nil, action: nil)
+    private let confirmButton = NSButton(title: "Link Existing", target: nil, action: nil)
     private let discardButton = NSButton(title: "Discard", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
@@ -484,7 +484,7 @@ final class SpeakerRowView: NSView {
         layer?.borderWidth = 1
 
         if let current = entry.currentName, !current.isEmpty {
-            labelField.stringValue = "Suggested match: \(current)"
+            labelField.stringValue = "Possible existing profile: \(current)"
         } else {
             labelField.stringValue = "Speaker \(entry.diarizerSpeakerId)"
         }
@@ -515,7 +515,7 @@ final class SpeakerRowView: NSView {
         nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
         nameField.font = NSFont.systemFont(ofSize: 12)
         if entry.currentName != nil {
-            nameField.placeholderString = "Use the suggestion or choose a different person"
+            nameField.placeholderString = "Choose this person or pick another"
         } else {
             nameField.placeholderString = "Type a new name or choose an existing person"
         }
@@ -638,7 +638,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName {
             nameField.stringValue = current
         }
-        confirmButton.title = "Using Suggested"
+        confirmButton.title = "Linking Existing"
         updateStatePresentation()
     }
 
@@ -865,14 +865,14 @@ final class SpeakerRowView: NSView {
     private func evidenceDescription() -> String {
         var parts: [String] = []
         if let similarity = entry.matchSimilarity {
-            parts.append("\(Int((similarity * 100).rounded()))% match")
+            parts.append("\(Int((similarity * 100).rounded()))% voice similarity")
         }
         if entry.callCount > 0 {
             let calls = entry.callCount == 1 ? "1 call" : "\(entry.callCount) calls"
             parts.append("seen in \(calls)")
         }
         if parts.isEmpty {
-            return entry.needsNaming ? "New speaker" : "Review this match"
+            return entry.needsNaming ? "New speaker" : "Review this voice"
         }
         return parts.joined(separator: " • ")
     }

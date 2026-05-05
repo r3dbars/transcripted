@@ -590,6 +590,12 @@ def evaluate_audio_corpus(
         real_speaker_ids=real_speaker_ids,
         include_speaker_labels=include_speaker_labels,
     )
+    duplicate_merge_review = build_duplicate_merge_review_report(
+        profiles=list(profiles.values()),
+        duplicate_counts=duplicate_counts,
+        real_speaker_ids=real_speaker_ids,
+        include_speaker_labels=include_speaker_labels,
+    )
     recurring_labels = [
         canonical for canonical, meeting_ids in real_speaker_meetings.items()
         if len(meeting_ids) > 1
@@ -624,6 +630,9 @@ def evaluate_audio_corpus(
             "deferred_profile_matches": deferred_profile_matches,
             "missed_real_speaker_instances": missed_real_speaker_instances,
             "suppressed_microphone_bleed_segments": suppressed_microphone_bleed_segments,
+            "duplicate_merge_candidates": duplicate_merge_review["merge_candidates_total"],
+            "duplicate_merge_candidates_correct": duplicate_merge_review["merge_candidates_correct"],
+            "duplicate_merge_candidates_wrong": duplicate_merge_review["merge_candidates_wrong"],
             "duplicate_profiles_per_real_speaker": {
                 "total": sum(duplicate_counts.values()),
                 "max": max(duplicate_counts.values(), default=0),
@@ -641,6 +650,7 @@ def evaluate_audio_corpus(
             "diarization_failure_count": len(diarization_failures),
         },
         "confirmation_simulation": confirmation_simulation,
+        "duplicate_merge_review": duplicate_merge_review,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -1264,12 +1274,19 @@ def _redacted_label_case(
     include_speaker_labels: bool,
 ) -> dict[str, Any]:
     redacted = dict(item)
-    for key in ("expected_real_speaker", "profile_real_speaker", "real_speaker"):
+    for key in (
+        "expected_real_speaker",
+        "profile_real_speaker",
+        "real_speaker",
+        "source_real_speaker",
+        "target_real_speaker",
+    ):
         if key in redacted:
             canonical = redacted[key]
-            redacted[f"{key}_id"] = _real_speaker_id(canonical, real_speaker_ids)
-            if include_speaker_labels:
-                redacted[f"{key}_label"] = canonical
+            if canonical is not None:
+                redacted[f"{key}_id"] = _real_speaker_id(canonical, real_speaker_ids)
+                if include_speaker_labels:
+                    redacted[f"{key}_label"] = canonical
             del redacted[key]
     return redacted
 
@@ -1365,6 +1382,183 @@ def build_confirmation_simulation(
             for suggestion in wrong[:10]
         ],
     }
+
+
+def build_duplicate_merge_review_report(
+    profiles: list[AudioSpeakerProfile],
+    duplicate_counts: dict[str, int],
+    real_speaker_ids: dict[str, str],
+    include_speaker_labels: bool,
+) -> dict[str, Any]:
+    candidates = duplicate_merge_candidates_from_profiles(profiles)
+    correct = [candidate for candidate in candidates if candidate["correct"]]
+    wrong = [candidate for candidate in candidates if not candidate["correct"]]
+    reason_reports = [
+        duplicate_merge_reason_report(reason, candidates)
+        for reason in [
+            "same_saved_name_and_similar_voice",
+            "same_saved_name",
+            "similar_saved_name_and_voice",
+            "similar_saved_name",
+            "similar_voice",
+        ]
+    ]
+    projected_reduction = projected_duplicate_merge_reduction(correct)
+    duplicate_total = sum(duplicate_counts.values())
+    return {
+        "merge_candidates_total": len(candidates),
+        "merge_candidates_correct": len(correct),
+        "merge_candidates_wrong": len(wrong),
+        "merge_candidate_precision": ratio(len(correct), len(candidates)),
+        "projected_duplicate_reduction_upper_bound": projected_reduction,
+        "projected_duplicate_profiles_after_perfect_review": max(0, duplicate_total - projected_reduction),
+        "candidates_by_reason": reason_reports,
+        "wrong_candidate_cases": [
+            _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
+            for candidate in wrong[:10]
+        ],
+        "report_notes": [
+            "Merge candidates are reported separately from confirmation suggestions.",
+            "Candidate filters use profile names, profile metadata, and voice embeddings only; Zoom labels are used only to score correctness.",
+            "The product flow should show these as possible duplicates and require an explicit user merge.",
+        ],
+    }
+
+
+def duplicate_merge_candidates_from_profiles(profiles: list[AudioSpeakerProfile]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    sorted_profiles = sorted(profiles, key=lambda profile: profile.profile_id)
+    for index, lhs in enumerate(sorted_profiles):
+        for rhs in sorted_profiles[index + 1:]:
+            reason, similarity = duplicate_merge_candidate_reason(lhs, rhs)
+            if reason is None:
+                continue
+            target, source = duplicate_merge_default_order(lhs, rhs)
+            candidates.append(
+                {
+                    "source_profile_id": source.profile_id,
+                    "target_profile_id": target.profile_id,
+                    "source_real_speaker": source.assigned_label,
+                    "target_real_speaker": target.assigned_label,
+                    "reason": reason,
+                    "voice_similarity": round(similarity, 4) if similarity is not None else None,
+                    "source_call_count": source.call_count,
+                    "target_call_count": target.call_count,
+                    "source_meeting_count": len(source.meetings_seen),
+                    "target_meeting_count": len(target.meetings_seen),
+                    "source_channel_count": len(source.source_channels),
+                    "target_channel_count": len(target.source_channels),
+                    "correct": (
+                        source.assigned_label is not None
+                        and source.assigned_label == target.assigned_label
+                    ),
+                }
+            )
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate["reason"],
+            -(candidate["voice_similarity"] or 0),
+            -(candidate["source_call_count"] + candidate["target_call_count"]),
+            candidate["source_profile_id"],
+            candidate["target_profile_id"],
+        ),
+    )
+
+
+def duplicate_merge_candidate_reason(
+    lhs: AudioSpeakerProfile,
+    rhs: AudioSpeakerProfile,
+) -> tuple[str | None, float | None]:
+    lhs_name = normalize_speaker_label(lhs.assigned_label or "")
+    rhs_name = normalize_speaker_label(rhs.assigned_label or "")
+    same_name = bool(lhs_name and lhs_name == rhs_name)
+    similar_name = bool(not same_name and names_look_related(lhs_name, rhs_name))
+    name_conflict = bool(lhs_name and rhs_name and not same_name and not similar_name)
+    similarity = cosine_similarity(lhs.embedding, rhs.embedding) if lhs.embedding and rhs.embedding else None
+    voice_threshold = 0.96 if name_conflict else 0.90
+    voice_match = lhs.dispute_count == 0 and rhs.dispute_count == 0 and (similarity or 0) >= voice_threshold
+
+    if same_name and voice_match:
+        return "same_saved_name_and_similar_voice", similarity
+    if same_name:
+        return "same_saved_name", similarity
+    if similar_name and voice_match:
+        return "similar_saved_name_and_voice", similarity
+    if similar_name:
+        return "similar_saved_name", similarity
+    if voice_match:
+        return "similar_voice", similarity
+    return None, similarity
+
+
+def duplicate_merge_default_order(
+    lhs: AudioSpeakerProfile,
+    rhs: AudioSpeakerProfile,
+) -> tuple[AudioSpeakerProfile, AudioSpeakerProfile]:
+    if lhs.call_count != rhs.call_count:
+        target = lhs if lhs.call_count > rhs.call_count else rhs
+    elif bool(lhs.assigned_label) != bool(rhs.assigned_label):
+        target = lhs if lhs.assigned_label else rhs
+    else:
+        target = lhs if lhs.first_seen_ordinal <= rhs.first_seen_ordinal else rhs
+    source = rhs if target.profile_id == lhs.profile_id else lhs
+    return target, source
+
+
+def names_look_related(lhs: str | None, rhs: str | None) -> bool:
+    if not lhs or not rhs or lhs == rhs:
+        return False
+    if len(lhs) >= 3 and len(rhs) >= 3 and (lhs in rhs or rhs in lhs):
+        return True
+    lhs_tokens = name_tokens(lhs)
+    rhs_tokens = name_tokens(rhs)
+    if not lhs_tokens or not rhs_tokens:
+        return False
+    return lhs_tokens.issubset(rhs_tokens) or rhs_tokens.issubset(lhs_tokens)
+
+
+def name_tokens(name: str) -> set[str]:
+    ignored_tokens = {"speaker", "unknown", "unnamed", "person", "profile"}
+    return {token for token in name.split() if len(token) >= 3 and token not in ignored_tokens}
+
+
+def duplicate_merge_reason_report(reason: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    matches = [candidate for candidate in candidates if candidate["reason"] == reason]
+    correct = [candidate for candidate in matches if candidate["correct"]]
+    return {
+        "reason": reason,
+        "candidates": len(matches),
+        "correct_candidates": len(correct),
+        "wrong_candidates": len(matches) - len(correct),
+        "precision": ratio(len(correct), len(matches)),
+        "projected_duplicate_reduction_upper_bound": projected_duplicate_merge_reduction(correct),
+    }
+
+
+def projected_duplicate_merge_reduction(candidates: list[dict[str, Any]]) -> int:
+    parent: dict[str, str] = {}
+
+    def find(profile_id: str) -> str:
+        parent.setdefault(profile_id, profile_id)
+        while parent[profile_id] != profile_id:
+            parent[profile_id] = parent[parent[profile_id]]
+            profile_id = parent[profile_id]
+        return profile_id
+
+    def union(lhs: str, rhs: str) -> None:
+        lhs_root = find(lhs)
+        rhs_root = find(rhs)
+        if lhs_root != rhs_root:
+            parent[rhs_root] = lhs_root
+
+    for candidate in candidates:
+        union(candidate["source_profile_id"], candidate["target_profile_id"])
+
+    components: dict[str, set[str]] = {}
+    for profile_id in list(parent):
+        components.setdefault(find(profile_id), set()).add(profile_id)
+    return sum(max(0, len(profile_ids) - 1) for profile_ids in components.values())
 
 
 def build_confirmation_safety_filter_reports(

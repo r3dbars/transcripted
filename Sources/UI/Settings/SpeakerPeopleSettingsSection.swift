@@ -25,11 +25,11 @@ enum SpeakerDuplicateReason: Int {
 
     var title: String {
         switch self {
-        case .sameNameAndVoice: return "Same name and voice"
-        case .sameName: return "Same name"
-        case .similarNameAndVoice: return "Similar name and voice"
-        case .similarName: return "Similar name"
-        case .voiceMatch: return "Voice match"
+        case .sameNameAndVoice: return "Same saved name and similar voice"
+        case .sameName: return "Same saved name"
+        case .similarNameAndVoice: return "Similar saved name and voice"
+        case .similarName: return "Similar saved name"
+        case .voiceMatch: return "Similar voice"
         }
     }
 
@@ -54,9 +54,9 @@ struct SpeakerDuplicateCandidate: Identifiable {
     }
 
     var detail: String {
-        let mergeLine = "Suggested merge: \(Self.displayName(for: source)) into \(Self.displayName(for: target))."
-        guard let voiceSimilarity else { return mergeLine }
-        return "\(Self.percentFormatter.string(from: NSNumber(value: voiceSimilarity)) ?? "High") voice match. \(mergeLine)"
+        guard let voiceSimilarity else { return reason.title }
+        let percent = Self.percentFormatter.string(from: NSNumber(value: voiceSimilarity)) ?? "similar"
+        return "\(reason.title) • \(percent) voice similarity"
     }
 
     static func displayName(for profile: SpeakerProfile) -> String {
@@ -83,7 +83,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
     private var duplicateProfileIDs: Set<UUID> = []
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
-    private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var refreshGeneration = 0
 
@@ -92,7 +91,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCandidates: [SpeakerDuplicateCandidate]
         let duplicateProfileIDs: Set<UUID>
         let duplicateCountsByProfileID: [UUID: Int]
-        let mergeTargetsByProfileID: [UUID: [SpeakerProfile]]
         let clipURLsByProfileID: [UUID: URL]
     }
 
@@ -256,15 +254,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID[profile.id] ?? 0
     }
 
-    func mergeTargets(for profile: SpeakerProfile) -> [SpeakerProfile] {
-        mergeTargetsByProfileID[profile.id] ?? []
-    }
-
     private func applySnapshot(_ snapshot: Snapshot) {
         duplicateCandidates = snapshot.duplicateCandidates
         duplicateProfileIDs = snapshot.duplicateProfileIDs
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
-        mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
         clipURLsByProfileID = snapshot.clipURLsByProfileID
         profiles = snapshot.profiles
     }
@@ -288,31 +281,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     ) -> Snapshot {
         let duplicateCandidates = duplicateCandidates(from: profiles)
         var duplicateCountsByProfileID: [UUID: Int] = [:]
-        var duplicatePeerIDsByProfileID: [UUID: Set<UUID>] = [:]
 
         for candidate in duplicateCandidates {
             let sourceID = candidate.source.id
             let targetID = candidate.target.id
             duplicateCountsByProfileID[sourceID, default: 0] += 1
             duplicateCountsByProfileID[targetID, default: 0] += 1
-            duplicatePeerIDsByProfileID[sourceID, default: []].insert(targetID)
-            duplicatePeerIDsByProfileID[targetID, default: []].insert(sourceID)
         }
 
         let duplicateProfileIDs = Set(duplicateCountsByProfileID.keys)
-        let mergeTargetsByProfileID = Dictionary(
-            uniqueKeysWithValues: profiles.map { profile in
-                (
-                    profile.id,
-                    sortedMergeTargets(
-                        for: profile,
-                        in: profiles,
-                        duplicatePeerIds: duplicatePeerIDsByProfileID[profile.id] ?? []
-                    )
-                )
-            }
-        )
-
         var clipURLsByProfileID: [UUID: URL] = [:]
         for profile in profiles {
             if let url = clipURL(
@@ -329,30 +306,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCandidates: duplicateCandidates,
             duplicateProfileIDs: duplicateProfileIDs,
             duplicateCountsByProfileID: duplicateCountsByProfileID,
-            mergeTargetsByProfileID: mergeTargetsByProfileID,
             clipURLsByProfileID: clipURLsByProfileID
         )
-    }
-
-    nonisolated private static func sortedMergeTargets(
-        for profile: SpeakerProfile,
-        in profiles: [SpeakerProfile],
-        duplicatePeerIds: Set<UUID>
-    ) -> [SpeakerProfile] {
-        profiles.filter { $0.id != profile.id }.sorted { lhs, rhs in
-            let lhsIsDuplicate = duplicatePeerIds.contains(lhs.id)
-            let rhsIsDuplicate = duplicatePeerIds.contains(rhs.id)
-            if lhsIsDuplicate != rhsIsDuplicate {
-                return lhsIsDuplicate && !rhsIsDuplicate
-            }
-
-            let lhsName = lhs.displayName ?? "Unnamed speaker"
-            let rhsName = rhs.displayName ?? "Unnamed speaker"
-            if lhsName == rhsName {
-                return lhs.callCount > rhs.callCount
-            }
-            return lhsName.localizedCaseInsensitiveCompare(rhsName) == .orderedAscending
-        }
     }
 
     nonisolated private static func sortedProfiles(from speakerDatabase: SpeakerDatabase) -> [SpeakerProfile] {
@@ -477,10 +432,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     nonisolated private static func nameTokens(_ name: String) -> Set<String> {
-        Set(name
+        let ignoredTokens: Set<String> = ["speaker", "unknown", "unnamed", "person", "profile"]
+        return Set(name
             .split { !$0.isLetter && !$0.isNumber }
             .map(String.init)
-            .filter { $0.count >= 3 })
+            .filter { $0.count >= 3 && !ignoredTokens.contains($0) })
     }
 
     nonisolated private static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double? {
@@ -572,8 +528,8 @@ struct SpeakerPeopleSettingsSection: View {
 
         if !model.profiles.isEmpty {
             SettingsSection(
-                title: "Possible Duplicates",
-                detail: "Same names and strong voice matches show up here."
+                title: "Duplicate Review",
+                detail: "Possible duplicates only. Nothing merges unless you choose it."
             ) {
                 let candidates = model.duplicateCandidates
                 if candidates.isEmpty {
@@ -601,7 +557,7 @@ struct SpeakerPeopleSettingsSection: View {
 
         SettingsSection(
             title: "People",
-            detail: "Rename, play samples, merge, or delete saved speaker profiles."
+            detail: "Rename, play samples, or delete saved speaker profiles."
         ) {
             HStack(spacing: 12) {
                 TextField("Search people or IDs", text: $model.searchText)
@@ -650,21 +606,31 @@ struct SpeakerPeopleSettingsSection: View {
     }
 }
 
+private struct SpeakerDuplicateMergeRequest: Identifiable {
+    let source: SpeakerProfile
+    let target: SpeakerProfile
+
+    var id: String {
+        "\(source.id.uuidString)-\(target.id.uuidString)"
+    }
+}
+
 private struct SpeakerDuplicateCandidateRow: View {
     let candidate: SpeakerDuplicateCandidate
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @State private var pendingMerge: SpeakerDuplicateMergeRequest?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: "person.2.badge.gearshape")
                     .foregroundStyle(.orange)
                     .font(.system(size: 14, weight: .semibold))
                     .frame(width: 20)
                     .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(candidate.reason.title)
+                    Text("Possible duplicate")
                         .font(.subheadline.weight(.semibold))
 
                     Text(candidate.detail)
@@ -674,26 +640,61 @@ private struct SpeakerDuplicateCandidateRow: View {
                 }
 
                 Spacer(minLength: 12)
-
-                Button {
-                    model.merge(source: candidate.source, into: candidate.target)
-                } label: {
-                    Label("Merge", systemImage: "arrow.triangle.merge")
-                }
-                .help("Merge \(SpeakerDuplicateCandidate.displayName(for: candidate.source)) into \(SpeakerDuplicateCandidate.displayName(for: candidate.target))")
             }
 
             HStack(alignment: .top, spacing: 12) {
-                DuplicatePersonSummary(profile: candidate.source, role: "Merge from", model: model)
+                DuplicatePersonSummary(profile: candidate.source, role: "Profile A", model: model)
 
-                Image(systemName: "arrow.right")
+                Image(systemName: "arrow.left.and.right")
                     .foregroundStyle(.secondary)
                     .frame(width: 20, height: 28)
 
-                DuplicatePersonSummary(profile: candidate.target, role: "Keep", model: model)
+                DuplicatePersonSummary(profile: candidate.target, role: "Profile B", model: model)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    pendingMerge = SpeakerDuplicateMergeRequest(
+                        source: candidate.target,
+                        target: candidate.source
+                    )
+                } label: {
+                    Label("Keep Profile A", systemImage: "arrow.triangle.merge")
+                }
+
+                Button {
+                    pendingMerge = SpeakerDuplicateMergeRequest(
+                        source: candidate.source,
+                        target: candidate.target
+                    )
+                } label: {
+                    Label("Keep Profile B", systemImage: "arrow.triangle.merge")
+                }
             }
         }
         .padding(.vertical, 8)
+        .alert("Merge speaker profiles?", isPresented: Binding(
+            get: { pendingMerge != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingMerge = nil
+                }
+            }
+        )) {
+            Button("Merge profiles", role: .destructive) {
+                if let request = pendingMerge {
+                    model.merge(source: request.source, into: request.target)
+                }
+                pendingMerge = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingMerge = nil
+            }
+        } message: {
+            if let request = pendingMerge {
+                Text("Transcripted will keep \(SpeakerDuplicateCandidate.displayName(for: request.target)) and remove \(SpeakerDuplicateCandidate.displayName(for: request.source)). Past transcripts stay readable.")
+            }
+        }
     }
 }
 
@@ -712,7 +713,7 @@ private struct DuplicatePersonSummary: View {
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
 
-            Text(profile.callCount == 1 ? "1 call" : "\(profile.callCount) calls")
+            Text(metadataLine)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -730,6 +731,18 @@ private struct DuplicatePersonSummary: View {
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
     }
+
+    private var metadataLine: String {
+        let calls = profile.callCount == 1 ? "1 call" : "\(profile.callCount) calls"
+        return "\(calls) • last seen \(Self.lastSeenFormatter.string(from: profile.lastSeen))"
+    }
+
+    private static let lastSeenFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 private struct SpeakerPersonRow: View {
@@ -751,11 +764,11 @@ private struct SpeakerPersonRow: View {
                         ForEach(statusBadges, id: \.self) { badge in
                             Text(badge)
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(badge == "Duplicate" ? Color.orange : Color.secondary)
+                                .foregroundStyle(badge == "Possible duplicate" ? Color.orange : Color.secondary)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
                                 .background(
-                                    Capsule().fill((badge == "Duplicate" ? Color.orange : Color.secondary).opacity(0.12))
+                                    Capsule().fill((badge == "Possible duplicate" ? Color.orange : Color.secondary).opacity(0.12))
                                 )
                         }
                     }
@@ -782,18 +795,6 @@ private struct SpeakerPersonRow: View {
                             isEditing = true
                         } label: {
                             Label(profile.displayName == nil ? "Name" : "Rename", systemImage: "pencil")
-                        }
-                    }
-
-                    if !model.mergeTargets(for: profile).isEmpty {
-                        Menu {
-                            ForEach(model.mergeTargets(for: profile), id: \.id) { target in
-                                Button(mergeLabel(for: target)) {
-                                    model.merge(source: profile, into: target)
-                                }
-                            }
-                        } label: {
-                            Label("Merge", systemImage: "arrow.triangle.merge")
                         }
                     }
 
@@ -861,7 +862,7 @@ private struct SpeakerPersonRow: View {
     private var statusBadges: [String] {
         var badges: [String] = []
         if model.duplicateCount(for: profile) > 0 {
-            badges.append("Duplicate")
+            badges.append("Possible duplicate")
         }
         if profile.disputeCount > 0 {
             badges.append("Review")
@@ -874,11 +875,6 @@ private struct SpeakerPersonRow: View {
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
-    }
-
-    private func mergeLabel(for target: SpeakerProfile) -> String {
-        let name = target.displayName ?? "Unnamed speaker"
-        return "\(name) (\(target.callCount))"
     }
 
     private static let lastSeenFormatter: DateFormatter = {
