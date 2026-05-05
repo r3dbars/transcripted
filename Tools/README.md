@@ -7,6 +7,7 @@
 - `TranscriptedCLI/` — local context and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
+- `SpeakerLearningEval/` — local cold-start speaker-learning scoreboard over the meeting corpus
 
 ## Read first
 
