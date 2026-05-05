@@ -163,6 +163,10 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             after_merge = report["auto_recognition_after_oracle_merge_experiment"]
             self.assertEqual(after_merge["maturity_source"], "oracle_merged_profile_maturity")
             self.assertEqual(after_merge["candidate_events_total"], 2)
+            confirmed_merge_projection = report["confirmed_merge_auto_naming_projection"]
+            self.assertEqual(confirmed_merge_projection["before"]["correct_automatic_matches"], 0)
+            self.assertEqual(confirmed_merge_projection["after_confirmed_merges"]["false_automatic_matches"], 0)
+            self.assertIn("unknown_labels_required", confirmed_merge_projection["delta"])
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -232,6 +236,56 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(faster_policy["median_meetings_after_first_seen"], 2)
             after_merge = report["auto_recognition_after_oracle_merge_experiment"]
             self.assertEqual(after_merge["current_product_gate_projection"]["false_automatic_matches"], 0)
+
+    def test_confirmed_merge_projection_strengthens_split_profiles_for_auto_naming(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index in range(1, 6):
+                self._write_meeting(root, f"meeting-000{index}", ["Speaker A"], include_audio=True)
+
+            split_a = [1.0, 0.0]
+            split_b = [0.90, 0.4358898943540673]
+            embeddings = {
+                "meeting-0001": split_a,
+                "meeting-0002": split_b,
+                "meeting-0003": split_a,
+                "meeting-0004": split_b,
+                "meeting-0005": split_a,
+            }
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=embeddings[meeting["id"]],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+            projection = report["confirmed_merge_auto_naming_projection"]
+
+            self.assertEqual(summary["correct_automatic_matches"], 0)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
+            self.assertEqual(projection["before"]["unknown_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["unknown_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["confirmation_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["correct_automatic_matches"], 1)
+            self.assertEqual(projection["after_confirmed_merges"]["false_automatic_matches"], 0)
+            self.assertEqual(projection["after_confirmed_merges"]["duplicate_profiles"], 0)
+            self.assertEqual(projection["delta"]["recognized_recurring_speakers"], 1)
 
     def test_duplicate_merge_review_holds_back_voice_only_pairs(self):
         first = AudioSpeakerProfile(

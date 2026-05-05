@@ -470,18 +470,19 @@ def evaluate_audio_corpus(
             prediction = predictions_by_profile.get(profile_id)
             was_matched = bool(prediction and prediction["status"] == "matched")
             observation_index += 1
-            speaker_observation_events.append(
-                {
-                    "observation_index": observation_index,
-                    "meeting_id": meeting_id,
-                    "ordinal": ordinal,
-                    "profile_id": profile.profile_id,
-                    "expected_real_speaker": canonical,
-                    "profile_real_speaker": profile.assigned_label,
-                    "was_matched": was_matched,
-                    "duration_seconds": round(label_scores[canonical], 2),
-                }
-            )
+            observation_event = {
+                "observation_index": observation_index,
+                "meeting_id": meeting_id,
+                "ordinal": ordinal,
+                "profile_id": profile.profile_id,
+                "expected_real_speaker": canonical,
+                "profile_real_speaker": profile.assigned_label,
+                "was_matched": was_matched,
+                "baseline_label_action": "pending",
+                "embedding": prediction.get("speaker_embedding") if prediction else None,
+                "duration_seconds": round(label_scores[canonical], 2),
+            }
+            speaker_observation_events.append(observation_event)
             auto_accepted = (
                 was_matched
                 and profile.assigned_label is not None
@@ -489,36 +490,43 @@ def evaluate_audio_corpus(
                 and prediction["similarity"] is not None
                 and should_auto_accept_audio_profile(profile, float(prediction["similarity"]))
             )
+            auto_candidate: dict[str, Any] | None = None
             if was_matched and profile.assigned_label and prediction and prediction["similarity"] is not None:
                 similarity = float(prediction["similarity"])
-                auto_recognition_candidates.append(
-                    {
-                        "meeting_id": meeting_id,
-                        "ordinal": ordinal,
-                        "observation_index": observation_index,
-                        "profile_id": profile.profile_id,
-                        "expected_real_speaker": canonical,
-                        "profile_real_speaker": profile.assigned_label,
-                        "similarity": similarity,
-                        "similarity_separation": prediction.get("similarity_separation"),
-                        "profile_prior_call_count": prediction.get("profile_prior_call_count", 0),
-                        "profile_total_observation_count": int(prediction.get("profile_prior_call_count", 0)) + 1,
-                        "profile_prior_meeting_count": prediction.get("profile_prior_meeting_count", 0),
-                        "embedding_count": prediction.get("embedding_count", 0),
-                        "segment_count": prediction.get("segment_count", 0),
-                        "speaker_duration_seconds": prediction.get("speaker_duration_seconds", 0.0),
-                        "correct": profile.assigned_label == canonical,
-                    }
-                )
+                auto_candidate = {
+                    "meeting_id": meeting_id,
+                    "ordinal": ordinal,
+                    "observation_index": observation_index,
+                    "profile_id": profile.profile_id,
+                    "expected_real_speaker": canonical,
+                    "profile_real_speaker": profile.assigned_label,
+                    "similarity": similarity,
+                    "similarity_separation": prediction.get("similarity_separation"),
+                    "profile_prior_call_count": prediction.get("profile_prior_call_count", 0),
+                    "profile_total_observation_count": int(prediction.get("profile_prior_call_count", 0)) + 1,
+                    "profile_prior_meeting_count": prediction.get("profile_prior_meeting_count", 0),
+                    "embedding_count": prediction.get("embedding_count", 0),
+                    "segment_count": prediction.get("segment_count", 0),
+                    "speaker_duration_seconds": prediction.get("speaker_duration_seconds", 0.0),
+                    "baseline_label_action": "pending",
+                    "correct": profile.assigned_label == canonical,
+                }
+                auto_recognition_candidates.append(auto_candidate)
 
             if auto_accepted and profile.assigned_label:
                 if profile.assigned_label == canonical:
+                    observation_event["baseline_label_action"] = "automatic_correct"
+                    if auto_candidate is not None:
+                        auto_candidate["baseline_label_action"] = "automatic_correct"
                     correct_automatic_matches += 1
                     meeting_correct += 1
                     profile.first_recognition_meeting_id = profile.first_recognition_meeting_id or meeting_id
                     profile.first_recognition_ordinal = profile.first_recognition_ordinal or ordinal
                     real_speaker_first_recognition.setdefault(canonical, ordinal)
                 else:
+                    observation_event["baseline_label_action"] = "automatic_false"
+                    if auto_candidate is not None:
+                        auto_candidate["baseline_label_action"] = "automatic_false"
                     false_automatic_matches += 1
                     meeting_false += 1
                     false_match_cases.append(
@@ -537,6 +545,9 @@ def evaluate_audio_corpus(
                 continue
 
             if was_matched and profile.assigned_label:
+                observation_event["baseline_label_action"] = "confirmation_needed"
+                if auto_candidate is not None:
+                    auto_candidate["baseline_label_action"] = "confirmation_needed"
                 similarity = float(prediction["similarity"]) if prediction and prediction["similarity"] is not None else 0.0
                 confirmation_suggestions.append(
                     {
@@ -569,6 +580,9 @@ def evaluate_audio_corpus(
 
             unknown_labels_required += 1
             meeting_unknown += 1
+            observation_event["baseline_label_action"] = "unknown_label"
+            if auto_candidate is not None:
+                auto_candidate["baseline_label_action"] = "unknown_label"
             profile.assigned_label = canonical
             assigned_profiles = real_speaker_profiles.setdefault(canonical, [])
             if profile.profile_id not in assigned_profiles:
@@ -653,11 +667,12 @@ def evaluate_audio_corpus(
         first_seen=real_speaker_first_seen,
         include_speaker_labels=include_speaker_labels,
     )
+    oracle_merged_candidates = with_oracle_merged_maturity(
+        candidates=auto_recognition_candidates,
+        observations=speaker_observation_events,
+    )
     auto_recognition_after_merge_experiment = build_auto_recognition_experiment(
-        candidates=with_oracle_merged_maturity(
-            candidates=auto_recognition_candidates,
-            observations=speaker_observation_events,
-        ),
+        candidates=oracle_merged_candidates,
         recurring_labels=recurring_labels,
         real_speaker_ids=real_speaker_ids,
         first_seen=real_speaker_first_seen,
@@ -665,6 +680,21 @@ def evaluate_audio_corpus(
         maturity_source="oracle_merged_profile_maturity",
         total_observation_field="oracle_merged_total_observation_count",
         prior_meeting_field="oracle_merged_prior_meeting_count",
+    )
+    confirmed_merge_auto_naming_projection = build_confirmed_merge_auto_naming_projection(
+        observations=speaker_observation_events,
+        safe_after_merge_candidates=oracle_merged_candidates,
+        safe_after_merge_policy=auto_recognition_after_merge_experiment["current_product_gate_projection"],
+        duplicate_merge_review=duplicate_merge_review,
+        duplicate_counts=duplicate_counts,
+        unknown_labels_required=unknown_labels_required,
+        confirmation_labels_required=confirmation_labels_required,
+        correct_automatic_matches=correct_automatic_matches,
+        false_automatic_matches=false_automatic_matches,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=real_speaker_first_seen,
+        include_speaker_labels=include_speaker_labels,
     )
 
     report = {
@@ -714,6 +744,7 @@ def evaluate_audio_corpus(
         "duplicate_merge_review": duplicate_merge_review,
         "auto_recognition_experiment": auto_recognition_experiment,
         "auto_recognition_after_oracle_merge_experiment": auto_recognition_after_merge_experiment,
+        "confirmed_merge_auto_naming_projection": confirmed_merge_auto_naming_projection,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -1144,6 +1175,7 @@ def classify_audio_speakers(
             "profile_id": profile.profile_id,
             "status": status,
             "similarity": similarity,
+            "speaker_embedding": mean,
             "embedding_count": len(embeddings),
             "segment_count": len(grouped_segments),
             "speaker_duration_seconds": round(speaker_duration_seconds, 4),
@@ -1914,6 +1946,202 @@ def with_oracle_merged_maturity(
         enriched.append(candidate_with_maturity)
 
     return enriched
+
+
+def build_confirmed_merge_auto_naming_projection(
+    observations: list[dict[str, Any]],
+    safe_after_merge_candidates: list[dict[str, Any]],
+    safe_after_merge_policy: dict[str, Any],
+    duplicate_merge_review: dict[str, Any],
+    duplicate_counts: dict[str, int],
+    unknown_labels_required: int,
+    confirmation_labels_required: int,
+    correct_automatic_matches: int,
+    false_automatic_matches: int,
+    recurring_labels: list[str],
+    real_speaker_ids: dict[str, str],
+    first_seen: dict[str, int],
+    include_speaker_labels: bool,
+) -> dict[str, Any]:
+    voice_anchor_candidates = confirmed_merged_profile_candidates(observations)
+    voice_anchor_policy = auto_recognition_policy_report(
+        candidates=voice_anchor_candidates,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=first_seen,
+        include_speaker_labels=include_speaker_labels,
+        minimum_total_observations=5,
+        minimum_prior_meetings=1,
+        minimum_similarity=0.98,
+        minimum_similarity_separation=None,
+        maturity_source="confirmed_merged_profile_anchors",
+        total_observation_field="confirmed_merged_total_observation_count",
+        prior_meeting_field="confirmed_merged_prior_meeting_count",
+        policy_name="current_product_gate_after_voice_anchor_merges",
+    )
+    accepted = [
+        candidate for candidate in safe_after_merge_candidates
+        if auto_recognition_candidate_passes(
+            candidate,
+            minimum_total_observations=5,
+            minimum_prior_meetings=1,
+            minimum_similarity=0.98,
+            minimum_similarity_separation=None,
+            total_observation_field="oracle_merged_total_observation_count",
+            prior_meeting_field="oracle_merged_prior_meeting_count",
+        )
+    ]
+    correct_accepted = [candidate for candidate in accepted if candidate["correct"]]
+    unknown_reduction = sum(
+        1 for candidate in correct_accepted
+        if candidate.get("baseline_label_action") == "unknown_label"
+    )
+    confirmation_reduction = sum(
+        1 for candidate in correct_accepted
+        if candidate.get("baseline_label_action") == "confirmation_needed"
+    )
+    duplicate_total = sum(duplicate_counts.values())
+    projected_duplicate_after = duplicate_merge_review["projected_duplicate_profiles_after_perfect_review"]
+    before = {
+        "unknown_labels_required": unknown_labels_required,
+        "confirmation_labels_required": confirmation_labels_required,
+        "correct_automatic_matches": correct_automatic_matches,
+        "false_automatic_matches": false_automatic_matches,
+        "duplicate_profiles": duplicate_total,
+        "recognized_recurring_speakers": current_baseline_recurring_count(
+            observations=observations,
+            recurring_labels=recurring_labels,
+        ),
+    }
+    after = {
+        "unknown_labels_required": max(0, unknown_labels_required - unknown_reduction),
+        "confirmation_labels_required": max(0, confirmation_labels_required - confirmation_reduction),
+        "correct_automatic_matches": safe_after_merge_policy["correct_automatic_matches"],
+        "false_automatic_matches": safe_after_merge_policy["false_automatic_matches"],
+        "duplicate_profiles": projected_duplicate_after,
+        "recognized_recurring_speakers": safe_after_merge_policy["recognized_recurring_speakers"],
+    }
+    return {
+        "projection_basis": (
+            "Eval-only simulation: user-approved duplicate merges share profile maturity before applying "
+            "the unchanged 0.98 automatic naming gate."
+        ),
+        "safe_merge_candidates_confirmed": duplicate_merge_review["merge_candidates_correct"],
+        "wrong_merge_candidates_shown": duplicate_merge_review["merge_candidates_wrong"],
+        "held_back_voice_only_candidates": duplicate_merge_review["held_back_voice_only_candidates"],
+        "candidate_events_total": len(safe_after_merge_candidates),
+        "current_product_gate_projection": safe_after_merge_policy,
+        "voice_anchor_candidate_events_total": len(voice_anchor_candidates),
+        "voice_anchor_current_product_gate_projection": voice_anchor_policy,
+        "before": before,
+        "after_confirmed_merges": after,
+        "delta": {
+            "unknown_labels_required": after["unknown_labels_required"] - before["unknown_labels_required"],
+            "confirmation_labels_required": after["confirmation_labels_required"] - before["confirmation_labels_required"],
+            "correct_automatic_matches": after["correct_automatic_matches"] - before["correct_automatic_matches"],
+            "false_automatic_matches": after["false_automatic_matches"] - before["false_automatic_matches"],
+            "duplicate_profiles": after["duplicate_profiles"] - before["duplicate_profiles"],
+            "recognized_recurring_speakers": (
+                after["recognized_recurring_speakers"] - before["recognized_recurring_speakers"]
+            ),
+        },
+        "label_reduction_sources": {
+            "unknown_labels_reduced_by_correct_auto_names": unknown_reduction,
+            "confirmation_labels_reduced_by_correct_auto_names": confirmation_reduction,
+        },
+        "report_notes": [
+            "This does not change product thresholds or auto-naming behavior.",
+            "Zoom labels are used only to score and simulate confirmed user outcomes in the eval.",
+            "The main projection shares maturity/history only; the voice-anchor stress test is reported separately.",
+            "Voice anchors are used transiently for local scoring and are not written into the report.",
+        ],
+    }
+
+
+def confirmed_merged_profile_candidates(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    candidates: list[dict[str, Any]] = []
+    for observation in sorted(observations, key=lambda item: item["observation_index"]):
+        embedding = observation.get("embedding")
+        expected = observation["expected_real_speaker"]
+        if embedding and states:
+            ranked = sorted(
+                (
+                    (label, max_anchor_similarity(embedding, state["embeddings"]), state)
+                    for label, state in states.items()
+                ),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            best_label, similarity, best_state = ranked[0]
+            second_best = ranked[1][1] if len(ranked) > 1 else None
+            candidates.append(
+                {
+                    "meeting_id": observation["meeting_id"],
+                    "ordinal": observation["ordinal"],
+                    "observation_index": observation["observation_index"],
+                    "profile_id": f"confirmed_merged_{_stable_hash(best_label)}",
+                    "expected_real_speaker": expected,
+                    "profile_real_speaker": best_label,
+                    "similarity": similarity,
+                    "second_best_similarity": second_best,
+                    "similarity_separation": (
+                        similarity - second_best
+                        if second_best is not None
+                        else None
+                    ),
+                    "confirmed_merged_prior_observation_count": best_state["observation_count"],
+                    "confirmed_merged_total_observation_count": best_state["observation_count"] + 1,
+                    "confirmed_merged_prior_meeting_count": len(best_state["meeting_ids"]),
+                    "baseline_label_action": observation.get("baseline_label_action"),
+                    "correct": best_label == expected,
+                }
+            )
+        if embedding:
+            update_confirmed_merged_profile_state(states, expected, embedding, observation["meeting_id"])
+    return candidates
+
+
+def update_confirmed_merged_profile_state(
+    states: dict[str, dict[str, Any]],
+    canonical: str,
+    embedding: list[float],
+    meeting_id: str,
+) -> None:
+    if canonical not in states:
+        states[canonical] = {
+            "embeddings": [list(embedding)],
+            "observation_count": 1,
+            "meeting_ids": {meeting_id},
+        }
+        return
+
+    state = states[canonical]
+    state["embeddings"].append(list(embedding))
+    state["observation_count"] += 1
+    state["meeting_ids"].add(meeting_id)
+
+
+def max_anchor_similarity(embedding: list[float], anchors: list[list[float]]) -> float:
+    return max((cosine_similarity(embedding, anchor) for anchor in anchors), default=0.0)
+
+
+def current_baseline_recurring_count(
+    observations: list[dict[str, Any]],
+    recurring_labels: list[str],
+) -> int:
+    recurring_set = set(recurring_labels)
+    recognized = {
+        observation["expected_real_speaker"]
+        for observation in observations
+        if observation.get("baseline_label_action") == "automatic_correct"
+        and observation["expected_real_speaker"] in recurring_set
+    }
+    return len(recognized)
+
+
+def _stable_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
 
 
 def build_confirmation_safety_filter_reports(
