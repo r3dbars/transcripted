@@ -441,8 +441,8 @@ final class SpeakerRowView: NSView {
         )
         self.knownPeopleByLabel = optionLabels.lookup
         if entry.channel == .mic,
-           !optionLabels.labels.contains(where: { SpeakerNameSelectionPolicy.normalizedSearchText($0) == "you" }) {
-            self.knownPeopleLabels = ["You"] + optionLabels.labels
+           !optionLabels.labels.contains(where: { SpeakerNameSelectionPolicy.isOwnerLabel($0) }) {
+            self.knownPeopleLabels = [SpeakerNameSelectionPolicy.ownerLabel] + optionLabels.labels
         } else {
             self.knownPeopleLabels = optionLabels.labels
         }
@@ -694,6 +694,10 @@ final class SpeakerRowView: NSView {
         }
 
         guard !typed.isEmpty else { return nil }
+
+        if entry.channel == .mic, SpeakerNameSelectionPolicy.isOwnerLabel(typed) {
+            return buildCollapsedToMeUpdate()
+        }
 
         if let option = knownPeopleOption(matching: typed) {
             return SpeakerNameUpdate(

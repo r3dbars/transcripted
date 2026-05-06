@@ -53,6 +53,12 @@ func testSpeakerNameSelectionPolicy() {
 
         assertEqual(option?.id, id, "duplicate-name labels should still map to their exact selected person")
     }
+
+    runSuite("SpeakerNameSelectionPolicy recognizes the owner label") {
+        assertTrue(SpeakerNameSelectionPolicy.isOwnerLabel("You"), "exact owner label should match")
+        assertTrue(SpeakerNameSelectionPolicy.isOwnerLabel("  you  "), "owner label should ignore case and surrounding whitespace")
+        assertFalse(SpeakerNameSelectionPolicy.isOwnerLabel("Young"), "nearby names should not collapse to the owner speaker")
+    }
 }
 
 private func makeSpeakerIdentityOption(name: String, calls: Int) -> SpeakerIdentityOption {

@@ -1,6 +1,8 @@
 import Foundation
 
 enum SpeakerNameSelectionPolicy {
+    static let ownerLabel = "You"
+
     static func makeIdentityLabels<Option>(
         for options: [Option],
         id: (Option) -> UUID,
@@ -95,6 +97,10 @@ enum SpeakerNameSelectionPolicy {
         }
         guard displayMatches.count == 1 else { return nil }
         return displayMatches[0]
+    }
+
+    static func isOwnerLabel(_ value: String) -> Bool {
+        normalizedSearchText(value) == normalizedSearchText(ownerLabel)
     }
 
     static func normalizedSearchText(_ value: String) -> String {
