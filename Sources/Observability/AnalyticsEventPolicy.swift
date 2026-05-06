@@ -503,6 +503,14 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]))
         ),
+        "meeting_transcript_skipped": .init(
+            name: "meeting_transcript_skipped",
+            allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
+                "failure_kind",
+                "queue_depth_bucket",
+                "trigger",
+            ]))
+        ),
         "meeting_file_imported": .init(
             name: "meeting_file_imported",
             allowedProperties: [

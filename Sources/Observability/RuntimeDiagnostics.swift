@@ -14,10 +14,10 @@ final class RuntimeDiagnostics {
         guard marker == nil else { return }
 
         if let previous = RuntimeDiagnosticsStore.load(from: markerURL),
-           !previous.cleanShutdown {
+           RuntimeDiagnosticsStore.shouldReportUncleanShutdown(previous: previous) {
             let context = RuntimeDiagnosticsStore.contextForUncleanShutdown(previous: previous)
             EventReporter.shared.capture(
-                level: .error,
+                level: .warning,
                 engine: "app",
                 event: "unclean_shutdown_detected",
                 message: "Previous app session did not shut down cleanly",
