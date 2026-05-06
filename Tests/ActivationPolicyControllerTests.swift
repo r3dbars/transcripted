@@ -184,6 +184,29 @@ func testActivationPolicyController() async {
         )
         assertEqual(controller.currentPolicy, .accessory, "cached policy should remain the user's hidden-Dock preference")
     }
+
+    runSuite("ActivationPolicyController repairs drift when the Dock preference notification repeats the same value") {
+        let recorder = PolicyRecorder()
+        var actualPolicy = NSApplication.ActivationPolicy.regular
+        let controller = ActivationPolicyController(
+            showInDock: false,
+            applyPolicy: { policy in
+                actualPolicy = policy
+                recorder.append(policy)
+            },
+            actualPolicy: { actualPolicy }
+        )
+
+        actualPolicy = .regular
+        controller.setShowInDock(false)
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .accessory],
+            "same-value Dock preference notifications should still repair activation-policy drift"
+        )
+        assertEqual(controller.currentPolicy, .accessory, "same-value repair should not mutate the cached policy")
+    }
 }
 
 /// Captures the sequence of activation policies applied by a controller.

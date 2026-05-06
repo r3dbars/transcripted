@@ -66,7 +66,10 @@ final class ActivationPolicyController {
     }
 
     func setShowInDock(_ visible: Bool) {
-        guard showInDock != visible else { return }
+        guard showInDock != visible else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         showInDock = visible
         reconcile()
     }
