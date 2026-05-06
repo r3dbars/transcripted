@@ -317,14 +317,14 @@ struct PermissionsOnboardingView: View {
     private func copyAgentItem(_ item: AgentCopyItem) {
         let value: String
         switch item {
-        case .claudePrompt:
-            value = AgentConnectionGuide.starterPrompt(filename: nil)
-        case .mcpConfig:
+        case .claudeDesktopSetup:
             value = """
             \(AgentConnectionGuide.mcpSetupText)
 
             \(AgentConnectionGuide.mcpConfigExample)
             """
+        case .localAgentPrompt:
+            value = AgentConnectionGuide.starterPrompt(filename: nil)
         }
 
         let pasteboard = NSPasteboard.general
@@ -419,8 +419,8 @@ private enum OnboardingStepKind: Hashable {
 }
 
 private enum AgentCopyItem: Hashable {
-    case claudePrompt
-    case mcpConfig
+    case claudeDesktopSetup
+    case localAgentPrompt
 }
 
 private enum OnboardingNavigationDirection {
@@ -1489,23 +1489,23 @@ private struct ConnectAgentStage: View {
                 AgentOptionCard(
                     eyebrow: "Option 1 - Start here",
                     title: "Claude Desktop",
-                    detail: "Copy one prompt for Claude Desktop. It can use Transcripted MCP when available, or fall back to local folders.",
+                    detail: "Copy the setup steps, then install Transcripted direct tools from Settings > Agent.",
                     glyph: "◆",
                     color: OnboardingTheme.claude,
-                    buttonTitle: copiedItem == .claudePrompt ? "Copied" : "Copy prompt"
+                    buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps"
                 ) {
-                    onCopy(.claudePrompt)
+                    onCopy(.claudeDesktopSetup)
                 }
 
                 AgentOptionCard(
                     eyebrow: "Option 2 - Other apps",
-                    title: "OpenClaw, Claude Code, Codex",
-                    detail: "Copy one MCP config for OpenClaw, Claude Code, Codex, and other tools that can read local MCP config.",
+                    title: "Claude Code, Codex, OpenClaw",
+                    detail: "Copy one prompt for local coding agents that can read your Transcripted Markdown folders.",
                     glyph: "●",
                     color: OnboardingTheme.codex,
-                    buttonTitle: copiedItem == .mcpConfig ? "Copied" : "Copy config"
+                    buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt"
                 ) {
-                    onCopy(.mcpConfig)
+                    onCopy(.localAgentPrompt)
                 }
             }
             .frame(height: 300)
