@@ -85,9 +85,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Crash reporting
         CrashReporter.setup()
 
-        let activationController = ActivationPolicyController()
+        let activationController = ActivationPolicyController(
+            actualPolicy: { NSApp.activationPolicy() }
+        )
         activationPolicyController = activationController
         wireActivationPolicy(controller: activationController)
+        DispatchQueue.main.async { [weak activationController] in
+            activationController?.reapplyCurrentPolicy()
+        }
 
         // Wire session controller
         sessionController.appState = appState
@@ -454,6 +459,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             .receive(on: DispatchQueue.main)
             .sink { [weak controller] _ in
                 controller?.setShowInDock(DockVisibilityPreferences.isVisible())
+            }
+            .store(in: &activationPolicySubscriptions)
+
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak controller] _ in
+                controller?.reapplyCurrentPolicy()
             }
             .store(in: &activationPolicySubscriptions)
 

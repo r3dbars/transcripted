@@ -161,6 +161,76 @@ func testActivationPolicyController() async {
 
         assertEqual(recorder.history, [.accessory, .regular], "redundant updates should not re-apply policy")
     }
+
+    runSuite("ActivationPolicyController reapplies hidden Dock preference when AppKit drifts back to regular") {
+        let recorder = PolicyRecorder()
+        var actualPolicy = NSApplication.ActivationPolicy.regular
+        let controller = ActivationPolicyController(
+            showInDock: false,
+            applyPolicy: { policy in
+                actualPolicy = policy
+                recorder.append(policy)
+            },
+            actualPolicy: { actualPolicy }
+        )
+
+        actualPolicy = .regular
+        controller.reapplyCurrentPolicy()
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .accessory],
+            "hidden-Dock preference should be enforced again if AppKit or an updater makes the app regular"
+        )
+        assertEqual(controller.currentPolicy, .accessory, "cached policy should remain the user's hidden-Dock preference")
+    }
+
+    runSuite("ActivationPolicyController repairs drift when the Dock preference notification repeats the same value") {
+        let recorder = PolicyRecorder()
+        var actualPolicy = NSApplication.ActivationPolicy.regular
+        let controller = ActivationPolicyController(
+            showInDock: false,
+            applyPolicy: { policy in
+                actualPolicy = policy
+                recorder.append(policy)
+            },
+            actualPolicy: { actualPolicy }
+        )
+
+        actualPolicy = .regular
+        controller.setShowInDock(false)
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .accessory],
+            "same-value Dock preference notifications should still repair activation-policy drift"
+        )
+        assertEqual(controller.currentPolicy, .accessory, "same-value repair should not mutate the cached policy")
+    }
+
+    runSuite("ActivationPolicyController repairs drift back to regular while recording") {
+        let recorder = PolicyRecorder()
+        var actualPolicy = NSApplication.ActivationPolicy.regular
+        let controller = ActivationPolicyController(
+            showInDock: false,
+            applyPolicy: { policy in
+                actualPolicy = policy
+                recorder.append(policy)
+            },
+            actualPolicy: { actualPolicy }
+        )
+
+        controller.setMeetingRecording(true)
+        actualPolicy = .accessory
+        controller.setMeetingRecording(true)
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .regular, .regular],
+            "repeated recording-state updates should repair drift so active capture stays force-quit-visible"
+        )
+        assertEqual(controller.currentPolicy, .regular, "cached policy should stay regular while recording")
+    }
 }
 
 /// Captures the sequence of activation policies applied by a controller.
