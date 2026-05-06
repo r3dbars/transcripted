@@ -151,6 +151,9 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             self.assertEqual(merge_review["merge_candidates_wrong"], 0)
             self.assertEqual(merge_review["held_back_voice_only_candidates"], 0)
             self.assertEqual(merge_review["projected_duplicate_reduction_upper_bound"], 1)
+            strategy_experiment = merge_review["strategy_experiment"]
+            self.assertGreater(strategy_experiment["strategy_count"], 0)
+            self.assertGreaterEqual(len(strategy_experiment["best_zero_wrong_strategies"]), 1)
             recognition_experiment = report["auto_recognition_experiment"]
             self.assertGreater(recognition_experiment["experiment_policy_count"], 0)
             self.assertEqual(recognition_experiment["candidate_events_total"], 2)
@@ -163,10 +166,20 @@ class SpeakerLearningEvalTests(unittest.TestCase):
             after_merge = report["auto_recognition_after_oracle_merge_experiment"]
             self.assertEqual(after_merge["maturity_source"], "oracle_merged_profile_maturity")
             self.assertEqual(after_merge["candidate_events_total"], 2)
+            quality_experiment = report["auto_recognition_quality_knob_experiment"]
+            self.assertGreater(quality_experiment["experiment_policy_count"], recognition_experiment["experiment_policy_count"])
+            self.assertIn("minimum_speaker_duration_seconds", quality_experiment["knobs"])
+            self.assertIn("channel_mode", quality_experiment["knobs"])
+            self.assertIn("most_correct_auto_names", quality_experiment["best_zero_false_by_goal"])
+            self.assertIn("most_recurring_speakers", quality_experiment["best_zero_false_by_goal"])
+            self.assertNotIn("policies", quality_experiment)
             confirmed_merge_projection = report["confirmed_merge_auto_naming_projection"]
             self.assertEqual(confirmed_merge_projection["before"]["correct_automatic_matches"], 0)
             self.assertEqual(confirmed_merge_projection["after_confirmed_merges"]["false_automatic_matches"], 0)
             self.assertIn("unknown_labels_required", confirmed_merge_projection["delta"])
+            tuning_lab = report["speaker_learning_tuning_lab"]
+            self.assertEqual(tuning_lab["tested_route_count"], len(tuning_lab["routes"]))
+            self.assertIn("duplicate-review queue", tuning_lab["recommended_next_experiment"])
 
     def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -317,6 +330,9 @@ class SpeakerLearningEvalTests(unittest.TestCase):
         self.assertEqual(report["held_back_voice_only_candidates"], 1)
         self.assertEqual(report["held_back_voice_only_candidates_wrong"], 1)
         self.assertEqual(report["held_back_candidates_by_reason"][0]["reason"], "similar_voice")
+        strategies = {item["strategy"]: item for item in report["strategy_experiment"]["strategies"]}
+        self.assertEqual(strategies["current_named_only"]["wrong_candidates"], 0)
+        self.assertGreater(strategies["include_voice_only_0_95"]["wrong_candidates"], 0)
 
     def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -43,6 +43,11 @@ AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS = [2, 3, 4, 5, 6, 8, 10]
 AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS = [0, 1, 2, 3, 4, 5]
 AUTO_RECOGNITION_EXPERIMENT_SIMILARITIES = [0.95, 0.97, 0.98, 0.985, 0.99, 0.995]
 AUTO_RECOGNITION_EXPERIMENT_SEPARATIONS: list[float | None] = [None, 0.02, 0.05, 0.10, 0.15, 0.20]
+AUTO_RECOGNITION_QUALITY_MIN_DURATIONS = [0, 15, 60, 120, 300]
+AUTO_RECOGNITION_QUALITY_MIN_EMBEDDINGS = [0, 2, 5, 10, 25, 50]
+AUTO_RECOGNITION_QUALITY_CHANNEL_MODES = ["any", "system_only", "microphone_only", "same_channel_history"]
+AUTO_RECOGNITION_QUALITY_SIMILARITIES = [0.95, 0.97, 0.98, 0.985, 0.99]
+AUTO_RECOGNITION_QUALITY_SEPARATIONS: list[float | None] = [None, 0.05, 0.10, 0.20]
 
 
 @dataclass(frozen=True)
@@ -508,6 +513,8 @@ def evaluate_audio_corpus(
                     "embedding_count": prediction.get("embedding_count", 0),
                     "segment_count": prediction.get("segment_count", 0),
                     "speaker_duration_seconds": prediction.get("speaker_duration_seconds", 0.0),
+                    "channel": prediction.get("channel"),
+                    "profile_source_channels": prediction.get("profile_source_channels", []),
                     "baseline_label_action": "pending",
                     "correct": profile.assigned_label == canonical,
                 }
@@ -681,6 +688,23 @@ def evaluate_audio_corpus(
         total_observation_field="oracle_merged_total_observation_count",
         prior_meeting_field="oracle_merged_prior_meeting_count",
     )
+    auto_recognition_quality_knob_experiment = build_auto_recognition_quality_knob_experiment(
+        candidates=auto_recognition_candidates,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=real_speaker_first_seen,
+        include_speaker_labels=include_speaker_labels,
+    )
+    auto_recognition_quality_after_merge_knob_experiment = build_auto_recognition_quality_knob_experiment(
+        candidates=oracle_merged_candidates,
+        recurring_labels=recurring_labels,
+        real_speaker_ids=real_speaker_ids,
+        first_seen=real_speaker_first_seen,
+        include_speaker_labels=include_speaker_labels,
+        maturity_source="oracle_merged_profile_maturity",
+        total_observation_field="oracle_merged_total_observation_count",
+        prior_meeting_field="oracle_merged_prior_meeting_count",
+    )
     confirmed_merge_auto_naming_projection = build_confirmed_merge_auto_naming_projection(
         observations=speaker_observation_events,
         safe_after_merge_candidates=oracle_merged_candidates,
@@ -696,6 +720,14 @@ def evaluate_audio_corpus(
         first_seen=real_speaker_first_seen,
         include_speaker_labels=include_speaker_labels,
     )
+    speaker_learning_tuning_lab = build_speaker_learning_tuning_lab(
+        duplicate_merge_review=duplicate_merge_review,
+        auto_recognition_experiment=auto_recognition_experiment,
+        auto_recognition_after_merge_experiment=auto_recognition_after_merge_experiment,
+        auto_recognition_quality_knob_experiment=auto_recognition_quality_knob_experiment,
+        auto_recognition_quality_after_merge_knob_experiment=auto_recognition_quality_after_merge_knob_experiment,
+        confirmed_merge_auto_naming_projection=confirmed_merge_auto_naming_projection,
+    )
 
     report = {
         "schema_version": 1,
@@ -703,7 +735,7 @@ def evaluate_audio_corpus(
         "assumptions": {
             "ground_truth": "Zoom transcript speaker labels aligned by timestamp",
             "evaluation_mode": "audio_backed_transcripted_diarization",
-            "threshold_tuning": "not_performed",
+            "threshold_tuning": "eval_only_grid_search",
             "diarization": "Transcripted offline diarization CLI with per-segment embeddings",
             "speaker_db": "temporary cold-start profile store reset for each eval run",
             "transcript_text_policy": "utterance text is never printed or persisted",
@@ -744,7 +776,10 @@ def evaluate_audio_corpus(
         "duplicate_merge_review": duplicate_merge_review,
         "auto_recognition_experiment": auto_recognition_experiment,
         "auto_recognition_after_oracle_merge_experiment": auto_recognition_after_merge_experiment,
+        "auto_recognition_quality_knob_experiment": auto_recognition_quality_knob_experiment,
+        "auto_recognition_quality_after_oracle_merge_knob_experiment": auto_recognition_quality_after_merge_knob_experiment,
         "confirmed_merge_auto_naming_projection": confirmed_merge_auto_naming_projection,
+        "speaker_learning_tuning_lab": speaker_learning_tuning_lab,
         "meetings": meeting_results,
         "speakers": _audio_speaker_reports(
             real_speaker_ids=real_speaker_ids,
@@ -1485,6 +1520,7 @@ def build_duplicate_merge_review_report(
     real_speaker_ids: dict[str, str],
     include_speaker_labels: bool,
 ) -> dict[str, Any]:
+    pair_facts = duplicate_merge_pair_facts(profiles)
     all_candidates = duplicate_merge_candidates_from_profiles(profiles, include_voice_only=True)
     candidates = [
         candidate for candidate in all_candidates
@@ -1522,6 +1558,10 @@ def build_duplicate_merge_review_report(
         "held_back_candidates_by_reason": [
             duplicate_merge_reason_report("similar_voice", held_back),
         ],
+        "strategy_experiment": build_duplicate_merge_strategy_experiment(
+            pair_facts=pair_facts,
+            duplicate_total=duplicate_total,
+        ),
         "wrong_candidate_cases": [
             _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
             for candidate in wrong[:10]
@@ -1537,6 +1577,157 @@ def build_duplicate_merge_review_report(
             "Voice-only pairs are held out of the default review queue because the corpus still shows wrong voice-only duplicate candidates.",
             "The product flow should show these as possible duplicates and require an explicit user merge.",
         ],
+    }
+
+
+def duplicate_merge_pair_facts(profiles: list[AudioSpeakerProfile]) -> list[dict[str, Any]]:
+    facts: list[dict[str, Any]] = []
+    sorted_profiles = sorted(profiles, key=lambda profile: profile.profile_id)
+    for index, lhs in enumerate(sorted_profiles):
+        for rhs in sorted_profiles[index + 1:]:
+            lhs_name = normalize_speaker_label(lhs.assigned_label or "")
+            rhs_name = normalize_speaker_label(rhs.assigned_label or "")
+            same_name = bool(lhs_name and lhs_name == rhs_name)
+            similar_name = bool(not same_name and names_look_related(lhs_name, rhs_name))
+            similarity = cosine_similarity(lhs.embedding, rhs.embedding) if lhs.embedding and rhs.embedding else None
+            target, source = duplicate_merge_default_order(lhs, rhs)
+            facts.append(
+                {
+                    "source_profile_id": source.profile_id,
+                    "target_profile_id": target.profile_id,
+                    "same_saved_name": same_name,
+                    "similar_saved_name": similar_name,
+                    "voice_similarity": similarity,
+                    "source_call_count": source.call_count,
+                    "target_call_count": target.call_count,
+                    "correct": (
+                        source.assigned_label is not None
+                        and source.assigned_label == target.assigned_label
+                    ),
+                }
+            )
+    return facts
+
+
+def build_duplicate_merge_strategy_experiment(
+    pair_facts: list[dict[str, Any]],
+    duplicate_total: int,
+) -> dict[str, Any]:
+    strategies = [
+        (
+            "current_named_only",
+            "same/similar saved names, voice-only held back",
+            lambda fact: fact["same_saved_name"] or fact["similar_saved_name"],
+        ),
+        (
+            "same_saved_name_only",
+            "same saved name only",
+            lambda fact: fact["same_saved_name"],
+        ),
+        (
+            "same_saved_name_and_voice_0_90",
+            "same saved name plus voice similarity >= 0.90",
+            lambda fact: fact["same_saved_name"] and value_at_least(fact.get("voice_similarity"), 0.90),
+        ),
+        (
+            "include_voice_only_0_90",
+            "same/similar saved names plus voice-only similarity >= 0.90",
+            lambda fact: (
+                fact["same_saved_name"]
+                or fact["similar_saved_name"]
+                or value_at_least(fact.get("voice_similarity"), 0.90)
+            ),
+        ),
+        (
+            "include_voice_only_0_95",
+            "same/similar saved names plus voice-only similarity >= 0.95",
+            lambda fact: (
+                fact["same_saved_name"]
+                or fact["similar_saved_name"]
+                or value_at_least(fact.get("voice_similarity"), 0.95)
+            ),
+        ),
+        (
+            "include_voice_only_0_98",
+            "same/similar saved names plus voice-only similarity >= 0.98",
+            lambda fact: (
+                fact["same_saved_name"]
+                or fact["similar_saved_name"]
+                or value_at_least(fact.get("voice_similarity"), 0.98)
+            ),
+        ),
+        (
+            "voice_only_0_95",
+            "voice-only similarity >= 0.95",
+            lambda fact: (
+                not fact["same_saved_name"]
+                and not fact["similar_saved_name"]
+                and value_at_least(fact.get("voice_similarity"), 0.95)
+            ),
+        ),
+        (
+            "voice_only_0_98",
+            "voice-only similarity >= 0.98",
+            lambda fact: (
+                not fact["same_saved_name"]
+                and not fact["similar_saved_name"]
+                and value_at_least(fact.get("voice_similarity"), 0.98)
+            ),
+        ),
+    ]
+    reports = [
+        duplicate_merge_strategy_report(
+            pair_facts=pair_facts,
+            duplicate_total=duplicate_total,
+            strategy_name=name,
+            criteria=criteria,
+            predicate=predicate,
+        )
+        for name, criteria, predicate in strategies
+    ]
+    zero_wrong = [
+        report for report in reports
+        if report["wrong_candidates"] == 0 and report["candidates"] > 0
+    ]
+    return {
+        "pair_count": len(pair_facts),
+        "strategy_count": len(reports),
+        "strategies": reports,
+        "best_zero_wrong_strategies": sorted(
+            zero_wrong,
+            key=lambda item: (
+                -item["projected_duplicate_reduction_upper_bound"],
+                -item["correct_candidates"],
+                item["strategy"],
+            ),
+        )[:5],
+        "notes": [
+            "Eval-only duplicate review strategy sweep.",
+            "Voice-only strategies are scored here, but product review still keeps voice-only pairs out of the default queue.",
+        ],
+    }
+
+
+def duplicate_merge_strategy_report(
+    pair_facts: list[dict[str, Any]],
+    duplicate_total: int,
+    strategy_name: str,
+    criteria: str,
+    predicate: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any]:
+    matches = [fact for fact in pair_facts if predicate(fact)]
+    correct = [fact for fact in matches if fact["correct"]]
+    wrong = len(matches) - len(correct)
+    projected_reduction = projected_duplicate_merge_reduction(correct)
+    return {
+        "strategy": strategy_name,
+        "criteria": criteria,
+        "candidates": len(matches),
+        "correct_candidates": len(correct),
+        "wrong_candidates": wrong,
+        "precision": ratio(len(correct), len(matches)),
+        "projected_duplicate_reduction_upper_bound": projected_reduction,
+        "projected_duplicate_profiles_after_perfect_review": max(0, duplicate_total - projected_reduction),
     }
 
 
@@ -1739,6 +1930,9 @@ def build_auto_recognition_experiment(
             item["minimum_total_observations"],
             item["minimum_prior_meetings"],
             item["minimum_similarity"],
+            item.get("minimum_speaker_duration_seconds", 0),
+            item.get("minimum_embedding_count", 0),
+            item.get("channel_mode", "any"),
         ),
     )
     return {
@@ -1759,6 +1953,197 @@ def build_auto_recognition_experiment(
     }
 
 
+def build_auto_recognition_quality_knob_experiment(
+    candidates: list[dict[str, Any]],
+    recurring_labels: list[str],
+    real_speaker_ids: dict[str, str],
+    first_seen: dict[str, int],
+    include_speaker_labels: bool,
+    maturity_source: str = "raw_profile_maturity",
+    total_observation_field: str = "profile_total_observation_count",
+    prior_meeting_field: str = "profile_prior_meeting_count",
+) -> dict[str, Any]:
+    policies: list[dict[str, Any]] = []
+    for minimum_total_observations in AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS:
+        for minimum_prior_meetings in AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS:
+            for minimum_similarity in AUTO_RECOGNITION_QUALITY_SIMILARITIES:
+                for minimum_similarity_separation in AUTO_RECOGNITION_QUALITY_SEPARATIONS:
+                    for minimum_speaker_duration_seconds in AUTO_RECOGNITION_QUALITY_MIN_DURATIONS:
+                        for minimum_embedding_count in AUTO_RECOGNITION_QUALITY_MIN_EMBEDDINGS:
+                            for channel_mode in AUTO_RECOGNITION_QUALITY_CHANNEL_MODES:
+                                policies.append(
+                                    auto_recognition_policy_report(
+                                        candidates=candidates,
+                                        recurring_labels=recurring_labels,
+                                        real_speaker_ids=real_speaker_ids,
+                                        first_seen=first_seen,
+                                        include_speaker_labels=include_speaker_labels,
+                                        minimum_total_observations=minimum_total_observations,
+                                        minimum_prior_meetings=minimum_prior_meetings,
+                                        minimum_similarity=minimum_similarity,
+                                        minimum_similarity_separation=minimum_similarity_separation,
+                                        minimum_speaker_duration_seconds=minimum_speaker_duration_seconds,
+                                        minimum_embedding_count=minimum_embedding_count,
+                                        channel_mode=channel_mode,
+                                        maturity_source=maturity_source,
+                                        total_observation_field=total_observation_field,
+                                        prior_meeting_field=prior_meeting_field,
+                                        wrong_case_limit=0,
+                                    )
+                                )
+
+    safe_policies = [
+        policy for policy in policies
+        if policy["false_automatic_matches"] == 0 and policy["automatic_matches_total"] > 0
+    ]
+    best_safe = sorted(safe_policies, key=auto_recognition_policy_sort_key)
+    return {
+        "maturity_source": maturity_source,
+        "candidate_events_total": len(candidates),
+        "experiment_policy_count": len(policies),
+        "knobs": {
+            "minimum_total_observations": AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS,
+            "minimum_prior_meetings": AUTO_RECOGNITION_EXPERIMENT_PRIOR_MEETINGS,
+            "minimum_similarity": AUTO_RECOGNITION_QUALITY_SIMILARITIES,
+            "minimum_similarity_separation": AUTO_RECOGNITION_QUALITY_SEPARATIONS,
+            "minimum_speaker_duration_seconds": AUTO_RECOGNITION_QUALITY_MIN_DURATIONS,
+            "minimum_embedding_count": AUTO_RECOGNITION_QUALITY_MIN_EMBEDDINGS,
+            "channel_mode": AUTO_RECOGNITION_QUALITY_CHANNEL_MODES,
+        },
+        "best_zero_false_policies": best_safe[:20],
+        "best_zero_false_by_goal": best_zero_false_by_goal(safe_policies),
+        "best_zero_false_by_heard_count": best_policies_by_field(
+            safe_policies,
+            "minimum_total_observations",
+            AUTO_RECOGNITION_EXPERIMENT_TOTAL_OBSERVATIONS,
+        ),
+        "best_zero_false_by_similarity": best_policies_by_field(
+            safe_policies,
+            "minimum_similarity",
+            AUTO_RECOGNITION_QUALITY_SIMILARITIES,
+        ),
+        "best_overall_by_similarity": best_policies_by_field(
+            policies,
+            "minimum_similarity",
+            AUTO_RECOGNITION_QUALITY_SIMILARITIES,
+        ),
+        "risk_frontier_by_false_match_budget": risk_frontier_by_false_match_budget(policies),
+        "notes": [
+            "Eval-only broader knob sweep. Product behavior is not changed.",
+            "This report intentionally stores only summaries, not every tested policy, to keep the JSON usable.",
+            "The extra knobs test duration, embedding count, and channel history on top of the existing maturity and similarity knobs.",
+        ],
+    }
+
+
+def best_zero_false_by_goal(safe_policies: list[dict[str, Any]]) -> dict[str, Any]:
+    if not safe_policies:
+        return {
+            "most_correct_auto_names": None,
+            "most_recurring_speakers": None,
+            "fastest_first_recognition": None,
+            "most_confirmation_prompts_avoided": None,
+        }
+    return {
+        "most_correct_auto_names": compact_auto_recognition_policy(
+            sorted(
+                safe_policies,
+                key=lambda policy: (
+                    -policy["correct_automatic_matches"],
+                    -policy["recognized_recurring_speakers"],
+                    policy["median_meetings_after_first_seen"]
+                    if policy["median_meetings_after_first_seen"] is not None
+                    else 999,
+                    policy["minimum_similarity"],
+                ),
+            )[0]
+        ),
+        "most_recurring_speakers": compact_auto_recognition_policy(
+            sorted(safe_policies, key=auto_recognition_policy_sort_key)[0]
+        ),
+        "fastest_first_recognition": compact_auto_recognition_policy(
+            sorted(
+                safe_policies,
+                key=lambda policy: (
+                    policy["median_meetings_after_first_seen"]
+                    if policy["median_meetings_after_first_seen"] is not None
+                    else 999,
+                    -policy["recognized_recurring_speakers"],
+                    -policy["correct_automatic_matches"],
+                    policy["false_automatic_matches"],
+                ),
+            )[0]
+        ),
+        "most_confirmation_prompts_avoided": compact_auto_recognition_policy(
+            sorted(
+                safe_policies,
+                key=lambda policy: (
+                    -policy["confirmation_labels_avoided"],
+                    -policy["correct_automatic_matches"],
+                    -policy["recognized_recurring_speakers"],
+                    policy["minimum_similarity"],
+                ),
+            )[0]
+        ),
+    }
+
+
+def best_policies_by_field(
+    policies: list[dict[str, Any]],
+    field: str,
+    values: Iterable[Any],
+) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for value in values:
+        matches = [policy for policy in policies if policy.get(field) == value and policy["automatic_matches_total"] > 0]
+        if not matches:
+            reports.append({"value": value, "best_policy": None})
+            continue
+        best = sorted(matches, key=auto_recognition_policy_sort_key)[0]
+        reports.append({"value": value, "best_policy": compact_auto_recognition_policy(best)})
+    return reports
+
+
+def auto_recognition_policy_sort_key(policy: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        -policy["recognized_recurring_speakers"],
+        -policy["correct_automatic_matches"],
+        policy["false_automatic_matches"],
+        policy["median_meetings_after_first_seen"]
+        if policy["median_meetings_after_first_seen"] is not None
+        else 999,
+        -policy["confirmation_labels_avoided"],
+        -policy["automatic_matches_total"],
+        policy["minimum_similarity"],
+        policy["minimum_total_observations"],
+        policy["minimum_prior_meetings"],
+        policy.get("minimum_speaker_duration_seconds", 0),
+        policy.get("minimum_embedding_count", 0),
+        policy.get("channel_mode", "any"),
+    )
+
+
+def compact_auto_recognition_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "policy",
+        "automatic_matches_total",
+        "correct_automatic_matches",
+        "false_automatic_matches",
+        "precision",
+        "confirmation_labels_avoided",
+        "recognized_recurring_speakers",
+        "median_meetings_after_first_seen",
+        "minimum_total_observations",
+        "minimum_prior_meetings",
+        "minimum_similarity",
+        "minimum_similarity_separation",
+        "minimum_speaker_duration_seconds",
+        "minimum_embedding_count",
+        "channel_mode",
+    ]
+    return {key: policy.get(key) for key in keys}
+
+
 def auto_recognition_policy_report(
     candidates: list[dict[str, Any]],
     recurring_labels: list[str],
@@ -1769,10 +2154,14 @@ def auto_recognition_policy_report(
     minimum_prior_meetings: int,
     minimum_similarity: float,
     minimum_similarity_separation: float | None,
+    minimum_speaker_duration_seconds: int | float = 0,
+    minimum_embedding_count: int = 0,
+    channel_mode: str = "any",
     maturity_source: str = "raw_profile_maturity",
     total_observation_field: str = "profile_total_observation_count",
     prior_meeting_field: str = "profile_prior_meeting_count",
     policy_name: str | None = None,
+    wrong_case_limit: int = 10,
 ) -> dict[str, Any]:
     accepted = [
         candidate for candidate in candidates
@@ -1782,6 +2171,9 @@ def auto_recognition_policy_report(
             minimum_prior_meetings=minimum_prior_meetings,
             minimum_similarity=minimum_similarity,
             minimum_similarity_separation=minimum_similarity_separation,
+            minimum_speaker_duration_seconds=minimum_speaker_duration_seconds,
+            minimum_embedding_count=minimum_embedding_count,
+            channel_mode=channel_mode,
             total_observation_field=total_observation_field,
             prior_meeting_field=prior_meeting_field,
         )
@@ -1806,16 +2198,26 @@ def auto_recognition_policy_report(
             minimum_prior_meetings,
             minimum_similarity,
             minimum_similarity_separation,
+            minimum_speaker_duration_seconds,
+            minimum_embedding_count,
+            channel_mode,
         ),
         "maturity_source": maturity_source,
         "minimum_total_observations": minimum_total_observations,
         "minimum_prior_meetings": minimum_prior_meetings,
         "minimum_similarity": minimum_similarity,
         "minimum_similarity_separation": minimum_similarity_separation,
+        "minimum_speaker_duration_seconds": minimum_speaker_duration_seconds,
+        "minimum_embedding_count": minimum_embedding_count,
+        "channel_mode": channel_mode,
         "automatic_matches_total": len(accepted),
         "correct_automatic_matches": len(correct),
         "false_automatic_matches": len(wrong),
         "precision": ratio(len(correct), len(accepted)),
+        "confirmation_labels_avoided": sum(
+            1 for candidate in correct
+            if candidate.get("baseline_label_action") == "confirmation_needed"
+        ),
         "recognized_recurring_speakers": len(gaps),
         "never_recognized_recurring_speakers": len(recurring_labels) - len(gaps),
         "median_meetings_after_first_seen": median(gaps) if gaps else None,
@@ -1823,7 +2225,7 @@ def auto_recognition_policy_report(
         "recognized_by_meetings_after_first_seen": recognition_curve(gaps),
         "wrong_cases": [
             _redacted_label_case(candidate, real_speaker_ids, include_speaker_labels)
-            for candidate in wrong[:10]
+            for candidate in wrong[:wrong_case_limit]
         ],
     }
 
@@ -1834,6 +2236,9 @@ def auto_recognition_candidate_passes(
     minimum_prior_meetings: int,
     minimum_similarity: float,
     minimum_similarity_separation: float | None,
+    minimum_speaker_duration_seconds: int | float = 0,
+    minimum_embedding_count: int = 0,
+    channel_mode: str = "any",
     total_observation_field: str = "profile_total_observation_count",
     prior_meeting_field: str = "profile_prior_meeting_count",
 ) -> bool:
@@ -1843,10 +2248,29 @@ def auto_recognition_candidate_passes(
         return False
     if int(candidate.get(prior_meeting_field) or 0) < minimum_prior_meetings:
         return False
+    if float(candidate.get("speaker_duration_seconds") or 0.0) < float(minimum_speaker_duration_seconds):
+        return False
+    if int(candidate.get("embedding_count") or 0) < minimum_embedding_count:
+        return False
+    if not auto_recognition_channel_mode_passes(candidate, channel_mode):
+        return False
     if minimum_similarity_separation is None:
         return True
     separation = candidate.get("similarity_separation")
     return separation is None or float(separation) >= minimum_similarity_separation
+
+
+def auto_recognition_channel_mode_passes(candidate: dict[str, Any], channel_mode: str) -> bool:
+    channel = candidate.get("channel")
+    if channel_mode == "any":
+        return True
+    if channel_mode == "system_only":
+        return channel == "system"
+    if channel_mode == "microphone_only":
+        return channel == "microphone"
+    if channel_mode == "same_channel_history":
+        return channel in set(candidate.get("profile_source_channels", []))
+    return False
 
 
 def auto_recognition_policy_name(
@@ -1854,6 +2278,9 @@ def auto_recognition_policy_name(
     minimum_prior_meetings: int,
     minimum_similarity: float,
     minimum_similarity_separation: float | None,
+    minimum_speaker_duration_seconds: int | float = 0,
+    minimum_embedding_count: int = 0,
+    channel_mode: str = "any",
 ) -> str:
     similarity = str(minimum_similarity).replace(".", "_")
     separation = (
@@ -1861,12 +2288,19 @@ def auto_recognition_policy_name(
         if minimum_similarity_separation is None
         else str(minimum_similarity_separation).replace(".", "_")
     )
-    return (
+    name = (
         f"heard_{minimum_total_observations}_times_"
         f"prior_meetings_{minimum_prior_meetings}_"
         f"similarity_{similarity}_"
         f"separation_{separation}"
     )
+    if minimum_speaker_duration_seconds:
+        name += f"_duration_{str(minimum_speaker_duration_seconds).replace('.', '_')}"
+    if minimum_embedding_count:
+        name += f"_embeddings_{minimum_embedding_count}"
+    if channel_mode != "any":
+        name += f"_channel_{channel_mode}"
+    return name
 
 
 def recognition_curve(gaps: list[int]) -> dict[str, int]:
@@ -1911,6 +2345,9 @@ def risk_frontier_by_false_match_budget(policies: list[dict[str, Any]]) -> list[
                 "minimum_prior_meetings": best["minimum_prior_meetings"],
                 "minimum_similarity": best["minimum_similarity"],
                 "minimum_similarity_separation": best["minimum_similarity_separation"],
+                "minimum_speaker_duration_seconds": best.get("minimum_speaker_duration_seconds", 0),
+                "minimum_embedding_count": best.get("minimum_embedding_count", 0),
+                "channel_mode": best.get("channel_mode", "any"),
             }
         )
     return frontier
@@ -2056,6 +2493,114 @@ def build_confirmed_merge_auto_naming_projection(
             "Voice anchors are used transiently for local scoring and are not written into the report.",
         ],
     }
+
+
+def build_speaker_learning_tuning_lab(
+    duplicate_merge_review: dict[str, Any],
+    auto_recognition_experiment: dict[str, Any],
+    auto_recognition_after_merge_experiment: dict[str, Any],
+    auto_recognition_quality_knob_experiment: dict[str, Any],
+    auto_recognition_quality_after_merge_knob_experiment: dict[str, Any],
+    confirmed_merge_auto_naming_projection: dict[str, Any],
+) -> dict[str, Any]:
+    raw_current = auto_recognition_experiment["current_product_gate_projection"]
+    after_merge_current = auto_recognition_after_merge_experiment["current_product_gate_projection"]
+    raw_goal_winners = auto_recognition_quality_knob_experiment["best_zero_false_by_goal"]
+    after_merge_goal_winners = auto_recognition_quality_after_merge_knob_experiment["best_zero_false_by_goal"]
+    raw_low_similarity = best_overall_for_similarity(auto_recognition_quality_knob_experiment, 0.95)
+    after_merge_low_similarity = best_overall_for_similarity(
+        auto_recognition_quality_after_merge_knob_experiment,
+        0.95,
+    )
+    voice_anchor_false = confirmed_merge_auto_naming_projection[
+        "voice_anchor_current_product_gate_projection"
+    ]["false_automatic_matches"]
+    return {
+        "plain_english_takeaway": (
+            "The best route is still clean speaker folders first, then retest auto-naming. "
+            "Lowering voice thresholds or blending voice anchors creates wrong names."
+        ),
+        "tested_route_count": 6,
+        "routes": [
+            {
+                "route": "keep_current_auto_name_gate",
+                "safe": raw_current["false_automatic_matches"] == 0,
+                "result": (
+                    f"{raw_current['correct_automatic_matches']} correct auto names, "
+                    f"{raw_current['false_automatic_matches']} wrong auto names"
+                ),
+                "next_action": "Keep this as the product safety floor.",
+            },
+            {
+                "route": "tune_auto_name_knobs_on_raw_folders",
+                "safe": bool(
+                    raw_goal_winners["most_correct_auto_names"]
+                    and raw_goal_winners["most_correct_auto_names"]["false_automatic_matches"] == 0
+                ),
+                "result": raw_goal_winners,
+                "next_action": "Use this only as eval guidance; raw folders are still too messy.",
+            },
+            {
+                "route": "manual_duplicate_review_then_current_gate",
+                "safe": after_merge_current["false_automatic_matches"] == 0,
+                "result": {
+                    "correct_automatic_matches_before": raw_current["correct_automatic_matches"],
+                    "correct_automatic_matches_after": after_merge_current["correct_automatic_matches"],
+                    "false_automatic_matches_after": after_merge_current["false_automatic_matches"],
+                    "duplicate_profiles_after_review": confirmed_merge_auto_naming_projection[
+                        "after_confirmed_merges"
+                    ]["duplicate_profiles"],
+                },
+                "next_action": "Best product route: make duplicate review easy and trusted.",
+            },
+            {
+                "route": "tune_auto_name_knobs_after_clean_folders",
+                "safe": bool(
+                    after_merge_goal_winners["most_correct_auto_names"]
+                    and after_merge_goal_winners["most_correct_auto_names"]["false_automatic_matches"] == 0
+                ),
+                "result": after_merge_goal_winners,
+                "next_action": "Retest after real user-confirmed merges; this is the most promising tuning surface.",
+            },
+            {
+                "route": "lower_similarity_to_0_95",
+                "safe": False,
+                "result": {
+                    "raw_best_0_95": raw_low_similarity,
+                    "after_merge_best_0_95": after_merge_low_similarity,
+                },
+                "next_action": "Do not ship this yet; it buys recall by allowing wrong names.",
+            },
+            {
+                "route": "blend_or_reuse_merged_voice_anchors",
+                "safe": voice_anchor_false == 0,
+                "result": {
+                    "false_automatic_matches": voice_anchor_false,
+                },
+                "next_action": "Do not ship this path until the voice-anchor model has zero false names.",
+            },
+        ],
+        "duplicate_review_summary": {
+            "merge_candidates_total": duplicate_merge_review["merge_candidates_total"],
+            "merge_candidates_correct": duplicate_merge_review["merge_candidates_correct"],
+            "merge_candidates_wrong": duplicate_merge_review["merge_candidates_wrong"],
+            "held_back_voice_only_candidates": duplicate_merge_review["held_back_voice_only_candidates"],
+            "projected_duplicate_reduction_upper_bound": duplicate_merge_review[
+                "projected_duplicate_reduction_upper_bound"
+            ],
+        },
+        "recommended_next_experiment": (
+            "Make the duplicate-review queue great, collect confirmed merges, then rerun the tuning lab "
+            "against the cleaner profile state."
+        ),
+    }
+
+
+def best_overall_for_similarity(experiment: dict[str, Any], similarity: float) -> dict[str, Any] | None:
+    for item in experiment["best_overall_by_similarity"]:
+        if item["value"] == similarity:
+            return item["best_policy"]
+    return None
 
 
 def confirmed_merged_profile_candidates(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
