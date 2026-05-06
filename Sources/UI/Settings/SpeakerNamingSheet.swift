@@ -695,10 +695,6 @@ final class SpeakerRowView: NSView {
 
         guard !typed.isEmpty else { return nil }
 
-        if entry.channel == .mic, SpeakerNameSelectionPolicy.isOwnerLabel(typed) {
-            return buildCollapsedToMeUpdate()
-        }
-
         if let option = knownPeopleOption(matching: typed) {
             return SpeakerNameUpdate(
                 persistentSpeakerId: entry.id,
