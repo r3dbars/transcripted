@@ -167,6 +167,46 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertTrue(try index.listRecentMeetings(count: 10).isEmpty)
     }
 
+    func testReconcileIndexesSymlinkedMeetingsRoot() throws {
+        let realMeetingsDir = makeTempDir()
+        defer { removeTempDir(realMeetingsDir) }
+
+        try writeFixture(
+            makeFixtureJSON(utterances: [("mic_0", 0.0, 3.0, "Symlink root roadmap")]),
+            filename: "Call_2026-03-29_10-00-00",
+            to: realMeetingsDir
+        )
+
+        let symlinkRoot = tempDir.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: symlinkRoot, withDestinationURL: realMeetingsDir)
+
+        try index.reconcile(meetingDirs: [symlinkRoot], dictationDirs: [])
+
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(
+            try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.count,
+            1
+        )
+    }
+
+    func testIndexSingleFileAllowsCanonicalSymlinkRootEvent() throws {
+        let realMeetingsDir = makeTempDir()
+        defer { removeTempDir(realMeetingsDir) }
+
+        let filename = "Call_2026-03-29_10-00-00"
+        try writeFixture(makeFixtureJSON(), filename: filename, to: realMeetingsDir)
+
+        let symlinkRoot = tempDir.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: symlinkRoot, withDestinationURL: realMeetingsDir)
+
+        try index.indexSingleFile(
+            realMeetingsDir.appendingPathComponent("\(filename).md"),
+            allowedRoots: [symlinkRoot]
+        )
+
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+    }
+
     func testFTS5SpecialCharacters() throws {
         let fixture = makeFixtureJSON(utterances: [
             ("mic_0", 0.0, 5.0, "The C++ implementation is ready"),

@@ -162,8 +162,9 @@ enum TranscriptLoader {
 
     static func enumerateArtifacts(in directory: URL) -> [ContextArtifactFile] {
         let fm = FileManager.default
+        let enumerationRoot = directory.resolvingSymlinksInPath().standardizedFileURL
         guard let files = try? fm.contentsOfDirectory(
-            at: directory,
+            at: enumerationRoot,
             includingPropertiesForKeys: [.contentModificationDateKey]
         ) else {
             return []

@@ -207,6 +207,116 @@ final class DataDirectoriesTests: XCTestCase {
         XCTAssertEqual(directories.indexDir.standardizedFileURL.path, customIndex.standardizedFileURL.path)
     }
 
+    func testResolveUsesAppDirectoryManifestBeforeDefaultCaptures() throws {
+        let customRoot = tempHome.appendingPathComponent("custom-captures", isDirectory: true)
+        let customMeetings = customRoot.appendingPathComponent("meetings", isDirectory: true)
+        let customDictations = customRoot.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: customMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: customDictations, withIntermediateDirectories: true)
+
+        let defaultMeetings = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("captures", isDirectory: true)
+            .appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: defaultMeetings, withIntermediateDirectories: true)
+
+        let manifestURL = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("mcp-directories.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        {
+          "version": 1,
+          "captureLibraryDirectory": "\(customRoot.path)",
+          "meetingsDirectory": "\(customMeetings.path)",
+          "dictationsDirectory": "\(customDictations.path)",
+          "updatedAt": "2026-05-06T00:00:00Z"
+        }
+        """.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            customMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            customDictations.standardizedFileURL.path,
+        ])
+    }
+
+    func testResolveUsesAppCaptureLibraryPreferenceWhenManifestIsMissing() throws {
+        let customRoot = tempHome.appendingPathComponent("preference-captures", isDirectory: true)
+        let preferencesURL = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Preferences", isDirectory: true)
+            .appendingPathComponent("com.justinbetker.draft.plist", isDirectory: false)
+        try FileManager.default.createDirectory(at: preferencesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": customRoot.path],
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: preferencesURL)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            customRoot.appendingPathComponent("meetings", isDirectory: true).standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            customRoot.appendingPathComponent("dictations", isDirectory: true).standardizedFileURL.path,
+        ])
+    }
+
+    func testResolveExplicitOverridesWinOverAppDirectoryManifest() throws {
+        let manifestRoot = tempHome.appendingPathComponent("manifest-captures", isDirectory: true)
+        let overrideMeetings = tempHome.appendingPathComponent("override-meetings", isDirectory: true)
+        let overrideDictations = tempHome.appendingPathComponent("override-dictations", isDirectory: true)
+        let manifestURL = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("mcp-directories.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        {
+          "version": 1,
+          "captureLibraryDirectory": "\(manifestRoot.path)",
+          "meetingsDirectory": "\(manifestRoot.appendingPathComponent("meetings", isDirectory: true).path)",
+          "dictationsDirectory": "\(manifestRoot.appendingPathComponent("dictations", isDirectory: true).path)",
+          "updatedAt": "2026-05-06T00:00:00Z"
+        }
+        """.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [
+                "TRANSCRIPTED_MEETINGS_DIR": overrideMeetings.path,
+                "TRANSCRIPTED_DICTATIONS_DIR": overrideDictations.path,
+            ],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            overrideMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            overrideDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveSkipsLegacySharedFolderWithoutCaptureMarkdown() throws {
         let legacyShared = tempHome
             .appendingPathComponent("Documents", isDirectory: true)

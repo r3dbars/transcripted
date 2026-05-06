@@ -6,7 +6,13 @@ It is read-only, independent from the app target, and builds its own SQLite inde
 
 ## What It Reads
 
-Default locations:
+App-selected locations:
+
+- MCP first checks `~/Library/Application Support/Transcripted/mcp-directories.json`
+  and the app's `transcriptSaveLocation` preference so it follows the capture
+  library chosen in Settings.
+
+Default locations when no custom capture library is configured:
 
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations`

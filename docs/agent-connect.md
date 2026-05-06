@@ -129,7 +129,7 @@ Example Claude Desktop config:
 Notes:
 
 - `transcripted-mcp` communicates over stdio, not HTTP.
-- By default it resolves Transcripted capture folders first, then falls back to legacy Draft or `~/Documents/Transcripted/` layouts if those are the only artifacts on disk.
+- By default it follows the capture library chosen in Transcripted Settings, then falls back to legacy Draft or `~/Documents/Transcripted/` layouts if those are the only artifacts on disk.
 - `TRANSCRIPTED_DATA_DIR` can point at a shared root with `meetings/` and `dictations/` subfolders. For `transcripted-mcp`, that shared root also becomes the default SQLite index location unless `TRANSCRIPTED_INDEX_DIR` is set.
 - If needed, override paths with `TRANSCRIPTED_DATA_DIR`,
   `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_DICTATIONS_DIR`, and
