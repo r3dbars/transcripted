@@ -175,6 +175,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
+    "Sources/Support/SpeakerNameSelectionPolicy.swift"
     "Sources/UI/Shared/AgentConnectionGuide.swift"
     "Sources/UI/Shared/FeedbackIssueBuilder.swift"
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"

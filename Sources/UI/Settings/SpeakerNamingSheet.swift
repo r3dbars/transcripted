@@ -433,11 +433,16 @@ final class SpeakerRowView: NSView {
 
     init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
         self.entry = entry
-        let optionLabels = Self.makeIdentityLabels(for: knownPeople.filter { $0.id != entry.id })
+        let optionLabels = SpeakerNameSelectionPolicy.makeIdentityLabels(
+            for: knownPeople.filter { $0.id != entry.id },
+            id: { $0.id },
+            displayName: { $0.displayName },
+            callCount: { $0.callCount }
+        )
         self.knownPeopleByLabel = optionLabels.lookup
         if entry.channel == .mic,
-           !optionLabels.labels.contains(where: { Self.normalizedSearchText($0) == "you" }) {
-            self.knownPeopleLabels = ["You"] + optionLabels.labels
+           !optionLabels.labels.contains(where: { SpeakerNameSelectionPolicy.isOwnerLabel($0) }) {
+            self.knownPeopleLabels = [SpeakerNameSelectionPolicy.ownerLabel] + optionLabels.labels
         } else {
             self.knownPeopleLabels = optionLabels.labels
         }
@@ -511,7 +516,7 @@ final class SpeakerRowView: NSView {
         nameField.usesDataSource = true
         nameField.dataSource = self
         nameField.delegate = self
-        nameField.completes = false
+        nameField.completes = true
         nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
         nameField.font = NSFont.systemFont(ofSize: 12)
         if entry.currentName != nil {
@@ -782,64 +787,21 @@ final class SpeakerRowView: NSView {
     private func visibleKnownPeopleLabels() -> [String] {
         let query = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return knownPeopleLabels }
-        return sortedKnownPeopleLabels(matching: query)
-    }
-
-    private func sortedKnownPeopleLabels(matching query: String) -> [String] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return knownPeopleLabels }
-        return knownPeopleLabels
-            .compactMap { label -> (label: String, rank: Int)? in
-                let rank = matchRank(for: label, query: trimmed)
-                guard rank < Int.max else { return nil }
-                return (label, rank)
-            }
-            .sorted { lhs, rhs in
-                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
-                let lhsCalls = knownPeopleByLabel[lhs.label]?.callCount ?? 0
-                let rhsCalls = knownPeopleByLabel[rhs.label]?.callCount ?? 0
-                if lhsCalls != rhsCalls { return lhsCalls > rhsCalls }
-                return lhs.label.localizedStandardCompare(rhs.label) == .orderedAscending
-            }
-            .map { $0.label }
+        return SpeakerNameSelectionPolicy.sortedLabels(
+            matching: query,
+            labels: knownPeopleLabels,
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName },
+            callCount: { $0.callCount }
+        )
     }
 
     private func knownPeopleOption(matching input: String) -> SpeakerIdentityOption? {
-        if let exact = knownPeopleByLabel[input] {
-            return exact
-        }
-
-        let normalizedInput = Self.normalizedSearchText(input)
-        let displayMatches = knownPeopleByLabel.values.filter {
-            Self.normalizedSearchText($0.displayName) == normalizedInput
-        }
-        guard displayMatches.count == 1 else { return nil }
-        return displayMatches[0]
-    }
-
-    private func matchRank(for label: String, query: String) -> Int {
-        let normalizedQuery = Self.normalizedSearchText(query)
-        guard !normalizedQuery.isEmpty else { return 0 }
-
-        let normalizedLabel = Self.normalizedSearchText(label)
-        let displayName = knownPeopleByLabel[label]?.displayName ?? label
-        let normalizedDisplayName = Self.normalizedSearchText(displayName)
-        let displayWords = normalizedDisplayName.split(separator: " ")
-
-        if normalizedDisplayName == normalizedQuery { return 0 }
-        if normalizedDisplayName.hasPrefix(normalizedQuery) { return 1 }
-        if displayWords.contains(where: { $0.hasPrefix(normalizedQuery) }) { return 2 }
-        if normalizedLabel.hasPrefix(normalizedQuery) { return 3 }
-        if normalizedDisplayName.contains(normalizedQuery) { return 4 }
-        if normalizedLabel.contains(normalizedQuery) { return 5 }
-        return Int.max
-    }
-
-    private static func normalizedSearchText(_ value: String) -> String {
-        value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+        SpeakerNameSelectionPolicy.option(
+            matching: input,
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName }
+        )
     }
 
     private static func disableExpansionFrame(for field: NSTextField) {
@@ -876,28 +838,6 @@ final class SpeakerRowView: NSView {
         }
         return parts.joined(separator: " • ")
     }
-
-    private static func makeIdentityLabels(
-        for options: [SpeakerIdentityOption]
-    ) -> (labels: [String], lookup: [String: SpeakerIdentityOption]) {
-        let duplicateCounts = Dictionary(grouping: options, by: { $0.displayName.lowercased() })
-            .mapValues(\.count)
-        var lookup: [String: SpeakerIdentityOption] = [:]
-
-        let labels = options.map { option in
-            let label: String
-            if duplicateCounts[option.displayName.lowercased(), default: 0] > 1 {
-                let calls = option.callCount == 1 ? "1 call" : "\(option.callCount) calls"
-                label = "\(option.displayName) • \(calls) • \(option.id.uuidString.prefix(8))"
-            } else {
-                label = option.displayName
-            }
-            lookup[label] = option
-            return label
-        }
-
-        return (labels, lookup)
-    }
 }
 
 @available(macOS 14.0, *)
@@ -913,7 +853,13 @@ extension SpeakerRowView: NSComboBoxDataSource, NSComboBoxDelegate {
     }
 
     func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
-        nil
+        SpeakerNameSelectionPolicy.completedLabel(
+            for: string,
+            labels: knownPeopleLabels,
+            optionsByLabel: knownPeopleByLabel,
+            displayName: { $0.displayName },
+            callCount: { $0.callCount }
+        )
     }
 
     func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
