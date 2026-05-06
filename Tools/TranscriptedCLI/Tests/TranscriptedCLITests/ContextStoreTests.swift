@@ -225,6 +225,58 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.title, "Hardware chat")
     }
 
+    func testSearchSpeakerMetadataMatchUsesFilteredSpeakerPreview() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let meeting = """
+        ---
+        capture_type: meeting
+        title: Hardware chat
+        date: 2026-04-16
+        time: 09:15:00
+        duration: "0:18"
+        speakers:
+          - id: "0"
+            name: Speaker 1
+            db_id: "system-1"
+          - id: "1"
+            name: Linus
+            db_id: "linus-1"
+        ---
+
+        # Hardware chat
+
+        ## Full Transcript
+
+        [00:03] [System/Speaker 1] Touch screen finally shipped.
+        [00:08] [Mic/Linus] Yellow.
+        """
+        try meeting.write(
+            to: meetingsDir.appendingPathComponent("Hardware chat.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let items = CLIContextStore.search(
+            query: "Linus",
+            speaker: "Linus",
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.preview, "Yellow.")
+    }
+
     func testRecentIncludesLegacyMeetingDirectories() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

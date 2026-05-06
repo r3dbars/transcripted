@@ -41,15 +41,18 @@ final class ActivationPolicyController {
     private var isMeetingRecording: Bool = false
     private var isDictationRecording: Bool = false
 
-    /// Indirection so tests can capture policy changes without touching
-    /// NSApp.
+    /// Indirections so tests can capture policy changes without touching
+    /// NSApp, and so the controller can correct AppKit/updater drift even
+    /// when its cached desired policy has not changed.
+    private let actualPolicy: (@MainActor () -> NSApplication.ActivationPolicy)?
     private let applyPolicy: @MainActor (NSApplication.ActivationPolicy) -> Void
 
     init(
         showInDock: Bool = DockVisibilityPreferences.isVisible(),
         applyPolicy: @escaping @MainActor (NSApplication.ActivationPolicy) -> Void = { policy in
             NSApp.setActivationPolicy(policy)
-        }
+        },
+        actualPolicy: (@MainActor () -> NSApplication.ActivationPolicy)? = nil
     ) {
         self.showInDock = showInDock
         self.currentPolicy = ActivationPolicyDecision.desiredPolicy(
@@ -57,26 +60,44 @@ final class ActivationPolicyController {
             isMeetingRecording: false,
             isDictationRecording: false
         )
+        self.actualPolicy = actualPolicy
         self.applyPolicy = applyPolicy
         applyPolicy(currentPolicy)
     }
 
     func setShowInDock(_ visible: Bool) {
-        guard showInDock != visible else { return }
+        guard showInDock != visible else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         showInDock = visible
         reconcile()
     }
 
     func setMeetingRecording(_ active: Bool) {
-        guard isMeetingRecording != active else { return }
+        guard isMeetingRecording != active else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         isMeetingRecording = active
         reconcile()
     }
 
     func setDictationRecording(_ active: Bool) {
-        guard isDictationRecording != active else { return }
+        guard isDictationRecording != active else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         isDictationRecording = active
         reconcile()
+    }
+
+    /// Re-enforces the currently desired policy without changing user state.
+    /// Sparkle relaunches, SwiftUI scene activation, and AppKit focus changes
+    /// can leave the process `.regular` even though the cached user setting is
+    /// hidden-Dock/accessory. This gives app lifecycle hooks a safe repair path.
+    func reapplyCurrentPolicy() {
+        applyIfDrifted(currentPolicy)
     }
 
     private func reconcile() {
@@ -85,8 +106,16 @@ final class ActivationPolicyController {
             isMeetingRecording: isMeetingRecording,
             isDictationRecording: isDictationRecording
         )
-        guard desired != currentPolicy else { return }
+        guard desired != currentPolicy else {
+            applyIfDrifted(desired)
+            return
+        }
         currentPolicy = desired
+        applyPolicy(desired)
+    }
+
+    private func applyIfDrifted(_ desired: NSApplication.ActivationPolicy) {
+        guard let actualPolicy, desired != actualPolicy() else { return }
         applyPolicy(desired)
     }
 }

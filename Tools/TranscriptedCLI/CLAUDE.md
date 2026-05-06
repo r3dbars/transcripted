@@ -19,10 +19,11 @@ By default these commands read:
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations`
 
-Fallback order when the Transcripted capture folders do not exist yet:
+Read order for default local context:
 
-- legacy Draft exports: `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
-- older shared layout: `~/Documents/Transcripted`
+- current Transcripted capture folders first
+- legacy Draft exports when they contain capture Markdown: `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
+- older shared layout when it contains capture Markdown: `~/Documents/Transcripted`
 
 They also honor:
 
