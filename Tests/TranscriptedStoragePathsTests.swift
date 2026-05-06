@@ -14,6 +14,19 @@ func testTranscriptedStoragePaths() {
         return attributes?[.posixPermissions] as? NSNumber
     }
 
+    let originalManifestURL = FileManager.default.transcriptedMCPDirectoriesManifestURL
+    let originalManifestExists = FileManager.default.fileExists(atPath: originalManifestURL.path)
+    let originalManifestData = try? Data(contentsOf: originalManifestURL)
+    defer {
+        if originalManifestExists, let originalManifestData {
+            try? FileManager.default.createPrivateDirectory(at: originalManifestURL.deletingLastPathComponent())
+            try? originalManifestData.write(to: originalManifestURL, options: [.atomic])
+            FileManager.default.restrictFileToOwnerOnly(at: originalManifestURL)
+        } else {
+            try? FileManager.default.removeItem(at: originalManifestURL)
+        }
+    }
+
     runSuite("FileManager.createPrivateDirectory — tightens existing directories to owner-only") {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedStoragePathsTests-existing-\(UUID().uuidString)", isDirectory: true)
@@ -63,6 +76,46 @@ func testTranscriptedStoragePaths() {
             permissions(of: file),
             NSNumber(value: 0o600),
             "owner-only file helper should tighten permissions to 0600"
+        )
+    }
+
+    runSuite("Transcripted MCP directory manifest — writes current capture roots") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-mcp-\(UUID().uuidString)", isDirectory: true)
+        let captureRoot = tempRoot.appendingPathComponent("captures", isDirectory: true)
+        let manifestURL = tempRoot
+            .appendingPathComponent("support", isDirectory: true)
+            .appendingPathComponent("mcp-directories.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.writeTranscriptedMCPDirectoriesManifestIfNeeded(
+            captureLibraryURL: captureRoot,
+            manifestURL: manifestURL,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: data) else {
+            assertTrue(false, "manifest should be readable JSON")
+            return
+        }
+
+        assertEqual(manifest.version, 1, "manifest should include a version")
+        assertEqual(manifest.captureLibraryDirectory, captureRoot.standardizedFileURL.path, "manifest should expose capture root")
+        assertEqual(
+            manifest.meetingsDirectory,
+            captureRoot.appendingPathComponent("meetings", isDirectory: true).standardizedFileURL.path,
+            "manifest should expose meetings root"
+        )
+        assertEqual(
+            manifest.dictationsDirectory,
+            captureRoot.appendingPathComponent("dictations", isDirectory: true).standardizedFileURL.path,
+            "manifest should expose dictations root"
+        )
+        assertEqual(
+            permissions(of: manifestURL),
+            NSNumber(value: 0o600),
+            "manifest should be restricted to owner-only access"
         )
     }
 

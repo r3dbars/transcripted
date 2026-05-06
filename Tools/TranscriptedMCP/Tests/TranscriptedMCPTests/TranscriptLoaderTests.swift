@@ -91,6 +91,23 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertTrue(artifacts.isEmpty)
     }
 
+    func testEnumerateArtifactsAllowsSymlinkedDirectoryRoot() throws {
+        let realMeetingsDir = makeTempDir()
+        defer { removeTempDir(realMeetingsDir) }
+
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: realMeetingsDir)
+
+        let symlinkRoot = tempDir.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: symlinkRoot, withDestinationURL: realMeetingsDir)
+
+        let artifacts = TranscriptLoader.enumerateArtifacts(in: symlinkRoot)
+        XCTAssertEqual(artifacts.count, 1)
+        XCTAssertEqual(
+            artifacts.first?.url.deletingLastPathComponent().standardizedFileURL.path,
+            realMeetingsDir.resolvingSymlinksInPath().standardizedFileURL.path
+        )
+    }
+
     func testResolveReadableFileRejectsSymlinkEscape() throws {
         let outsideDir = makeTempDir()
         defer { removeTempDir(outsideDir) }

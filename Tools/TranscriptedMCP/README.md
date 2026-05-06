@@ -34,7 +34,9 @@ Self-test:
 .build/release/transcripted-mcp --self-test
 ```
 
-The server reads:
+The server reads the app-selected capture library first when Transcripted has
+written its local directory manifest or `transcriptSaveLocation` preference.
+Without a custom library, it reads:
 
 ```text
 ~/Library/Application Support/Transcripted/captures/meetings

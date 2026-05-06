@@ -222,10 +222,11 @@ final class TranscriptIndex: @unchecked Sendable {
     func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
         try queue.sync {
             let standardizedURL = url.standardizedFileURL
+            let resolvedURL = standardizedURL.resolvingSymlinksInPath().standardizedFileURL
             guard allowedRoots.contains(where: { root in
-                let basePath = root.standardizedFileURL.path
-                return standardizedURL.path == basePath
-                    || standardizedURL.path.hasPrefix(basePath + "/")
+                let basePath = root.resolvingSymlinksInPath().standardizedFileURL.path
+                return resolvedURL.path == basePath
+                    || resolvedURL.path.hasPrefix(basePath + "/")
             }) else {
                 log("Skipping index update outside watched roots: \(url.path)")
                 return
