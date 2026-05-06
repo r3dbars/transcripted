@@ -75,13 +75,19 @@ final class ActivationPolicyController {
     }
 
     func setMeetingRecording(_ active: Bool) {
-        guard isMeetingRecording != active else { return }
+        guard isMeetingRecording != active else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         isMeetingRecording = active
         reconcile()
     }
 
     func setDictationRecording(_ active: Bool) {
-        guard isDictationRecording != active else { return }
+        guard isDictationRecording != active else {
+            applyIfDrifted(currentPolicy)
+            return
+        }
         isDictationRecording = active
         reconcile()
     }
