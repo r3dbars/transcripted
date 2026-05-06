@@ -161,6 +161,29 @@ func testActivationPolicyController() async {
 
         assertEqual(recorder.history, [.accessory, .regular], "redundant updates should not re-apply policy")
     }
+
+    runSuite("ActivationPolicyController reapplies hidden Dock preference when AppKit drifts back to regular") {
+        let recorder = PolicyRecorder()
+        var actualPolicy = NSApplication.ActivationPolicy.regular
+        let controller = ActivationPolicyController(
+            showInDock: false,
+            applyPolicy: { policy in
+                actualPolicy = policy
+                recorder.append(policy)
+            },
+            actualPolicy: { actualPolicy }
+        )
+
+        actualPolicy = .regular
+        controller.reapplyCurrentPolicy()
+
+        assertEqual(
+            recorder.history,
+            [.accessory, .accessory],
+            "hidden-Dock preference should be enforced again if AppKit or an updater makes the app regular"
+        )
+        assertEqual(controller.currentPolicy, .accessory, "cached policy should remain the user's hidden-Dock preference")
+    }
 }
 
 /// Captures the sequence of activation policies applied by a controller.
