@@ -1216,7 +1216,7 @@ struct TranscriptedSettingsView: View {
                 title: "Microphone Processing",
                 detail: "How Transcripted cleans up your mic for meetings."
             ) {
-                Toggle("Use macOS voice processing on the meeting mic", isOn: Binding(
+                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
                     get: { meetingVoiceProcessingEnabled },
                     set: { newValue in
                         meetingVoiceProcessingEnabled = newValue
@@ -1226,8 +1226,8 @@ struct TranscriptedSettingsView: View {
                 ))
 
                 Text(meetingVoiceProcessingEnabled
-                    ? "macOS voice processing is on. This restores volume in Safari/Firefox WebRTC meetings (Google Meet etc.) but quiets audio from other apps like Zoom while you record."
-                    : "Off — Transcripted boosts quiet mic input in software without affecting other apps. Turn this on only if you record meetings via Safari or Firefox and the recording still comes out too quiet."
+                    ? "May lower other app audio in Zoom/Meet."
+                    : "Off — Transcripted boosts the saved mic and live STT copy in software without changing system audio."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

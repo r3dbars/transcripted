@@ -4,6 +4,65 @@ import Foundation
 
 /// Privacy-safe audio pipeline facts used for PostHog and Sentry diagnostics.
 /// Never includes device names, UIDs, file paths, app names, transcript text, or raw audio.
+struct AudioSignalDiagnosticsSnapshot: Equatable, Sendable {
+    let micRawPeak: Float
+    let micProcessedPeak: Float
+    let systemAudioPeak: Float
+
+    var micRawPeakString: String { Self.peakString(micRawPeak) }
+    var micProcessedPeakString: String { Self.peakString(micProcessedPeak) }
+    var systemAudioPeakString: String { Self.peakString(systemAudioPeak) }
+
+    private static func peakString(_ value: Float) -> String {
+        guard value.isFinite else { return "0.00000" }
+        return String(format: "%.5f", max(0, min(1, value)))
+    }
+}
+
+struct AudioRouteVolumeSnapshot: Equatable, Sendable {
+    let defaultInputVolume: String
+    let defaultOutputVolume: String
+    let defaultSystemOutputVolume: String
+
+    static let unavailable = AudioRouteVolumeSnapshot(
+        defaultInputVolume: "unavailable",
+        defaultOutputVolume: "unavailable",
+        defaultSystemOutputVolume: "unavailable"
+    )
+
+    static func captureDefaultRoute() -> AudioRouteVolumeSnapshot {
+        let inputDevice = try? AudioObjectID.readDefaultInputDevice()
+        let outputDevice = try? AudioObjectID.readDefaultOutputDevice()
+        let systemOutputDevice = try? AudioObjectID.readDefaultSystemOutputDevice()
+
+        return AudioRouteVolumeSnapshot(
+            defaultInputVolume: volumeString(for: inputDevice, scope: kAudioDevicePropertyScopeInput),
+            defaultOutputVolume: volumeString(for: outputDevice, scope: kAudioDevicePropertyScopeOutput),
+            defaultSystemOutputVolume: volumeString(for: systemOutputDevice, scope: kAudioDevicePropertyScopeOutput)
+        )
+    }
+
+    func context(suffix: String) -> [String: String] {
+        [
+            "default_input_volume_\(suffix)": defaultInputVolume,
+            "default_output_volume_\(suffix)": defaultOutputVolume,
+            "default_system_output_volume_\(suffix)": defaultSystemOutputVolume,
+        ]
+    }
+
+    private static func volumeString(
+        for deviceID: AudioDeviceID?,
+        scope: AudioObjectPropertyScope
+    ) -> String {
+        guard let deviceID, deviceID.isValid,
+              let value = try? deviceID.readVolumeScalar(scope: scope),
+              value.isFinite else {
+            return "unavailable"
+        }
+        return String(format: "%.3f", max(0, min(1, value)))
+    }
+}
+
 public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let inputDeviceClass: String
     public let outputDeviceClass: String
@@ -25,15 +84,32 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let voiceProcessingRequested: Bool
     public let voiceProcessingActive: Bool
     public let realtimeAGCActive: Bool
+    public let micRawPeak: String
+    public let micProcessedPeak: String
+    public let systemAudioPeak: String
+    public let defaultInputVolumeBefore: String
+    public let defaultOutputVolumeBefore: String
+    public let defaultSystemOutputVolumeBefore: String
+    public let defaultInputVolumeDuring: String
+    public let defaultOutputVolumeDuring: String
+    public let defaultSystemOutputVolumeDuring: String
 
     public var privacySafeContext: [String: String] {
         [
             "buffer_success_bucket": bufferSuccessBucket,
+            "default_input_volume_before": defaultInputVolumeBefore,
+            "default_input_volume_during": defaultInputVolumeDuring,
+            "default_output_volume_before": defaultOutputVolumeBefore,
+            "default_output_volume_during": defaultOutputVolumeDuring,
+            "default_system_output_volume_before": defaultSystemOutputVolumeBefore,
+            "default_system_output_volume_during": defaultSystemOutputVolumeDuring,
             "gap_count": "\(gapCount)",
             "input_channels": inputChannels,
             "input_device_class": inputDeviceClass,
             "input_rate_hz": inputRateHz,
             "mic_processing": voiceProcessingRequested ? "apple_voice_processing" : "software_agc",
+            "mic_processed_peak": micProcessedPeak,
+            "mic_raw_peak": micRawPeak,
             "mic_recovering": boolString(micRecovering),
             "output_device_class": outputDeviceClass,
             "output_rate_hz": outputRateHz,
@@ -42,6 +118,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "route_change_count": "\(routeChangeCount)",
             "system_backend": systemBackend,
             "system_channels": systemChannels,
+            "system_peak": systemAudioPeak,
             "system_failed": boolString(systemFailed),
             "system_output_device_class": systemOutputDeviceClass,
             "system_output_rate_hz": systemOutputRateHz,
@@ -67,6 +144,9 @@ extension Audio {
         let actualInputDevice = currentInputDeviceID() ?? inputDevice
         let inputFormat = currentInputFormatSnapshot()
         let systemFormat = systemAudioCapture?.audioFormat
+        let signalSnapshot = signalDiagnosticsSnapshot
+        let routeVolumeBefore = recordingStartRouteVolumeSnapshot ?? .unavailable
+        let routeVolumeDuring = AudioRouteVolumeSnapshot.captureDefaultRoute()
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -88,7 +168,25 @@ extension Audio {
             systemFailed: systemAudioFailed,
             voiceProcessingRequested: enableVoiceProcessing,
             voiceProcessingActive: voiceProcessingEnabled,
-            realtimeAGCActive: realtimeAGC != nil
+            realtimeAGCActive: realtimeAGC != nil,
+            micRawPeak: signalSnapshot.micRawPeakString,
+            micProcessedPeak: signalSnapshot.micProcessedPeakString,
+            systemAudioPeak: signalSnapshot.systemAudioPeakString,
+            defaultInputVolumeBefore: routeVolumeBefore.defaultInputVolume,
+            defaultOutputVolumeBefore: routeVolumeBefore.defaultOutputVolume,
+            defaultSystemOutputVolumeBefore: routeVolumeBefore.defaultSystemOutputVolume,
+            defaultInputVolumeDuring: routeVolumeDuring.defaultInputVolume,
+            defaultOutputVolumeDuring: routeVolumeDuring.defaultOutputVolume,
+            defaultSystemOutputVolumeDuring: routeVolumeDuring.defaultSystemOutputVolume
+        )
+    }
+
+    public func createRouteVolumeDiagnosticsContext(currentPhase: String) -> [String: String] {
+        let before = recordingStartRouteVolumeSnapshot ?? .unavailable
+        let current = AudioRouteVolumeSnapshot.captureDefaultRoute()
+        return before.context(suffix: "before").merging(
+            current.context(suffix: currentPhase),
+            uniquingKeysWith: { _, new in new }
         )
     }
 

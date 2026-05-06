@@ -125,6 +125,20 @@ extension AudioObjectID {
         try read(kAudioDevicePropertyTransportType, defaultValue: UInt32(kAudioDeviceTransportTypeUnknown))
     }
 
+    /// Reads the device's scalar volume for the requested scope.
+    /// Returns the hardware value only; this never writes or adjusts volume.
+    func readVolumeScalar(scope: AudioObjectPropertyScope) throws -> Float32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectHasProperty(self, &address) else {
+            throw "Volume scalar unavailable for \(address)"
+        }
+        return try read(address, defaultValue: Float32.nan)
+    }
+
     private func requireSystemObject() throws {
         if self != .system { throw "Only supported for the system object." }
     }

@@ -35,6 +35,32 @@ extension Audio {
         }
     }
 
+    func linearPeak(buffer: AVAudioPCMBuffer) -> Float {
+        let frameCount = vDSP_Length(buffer.frameLength)
+        guard frameCount > 0,
+              let channelData = buffer.floatChannelData else {
+            return 0
+        }
+
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 0 else { return 0 }
+
+        if buffer.format.isInterleaved {
+            let totalLength = frameCount * vDSP_Length(channelCount)
+            var peak: Float = 0
+            vDSP_maxmgv(channelData[0], 1, &peak, totalLength)
+            return peak.isFinite ? peak : 0
+        }
+
+        var peak: Float = 0
+        for channel in 0..<channelCount {
+            var channelPeak: Float = 0
+            vDSP_maxmgv(channelData[channel], 1, &channelPeak, frameCount)
+            peak = max(peak, channelPeak)
+        }
+        return peak.isFinite ? peak : 0
+    }
+
     // MARK: - Silence Detection
 
     /// Updates silence tracking based on current audio level
@@ -69,6 +95,8 @@ extension Audio {
     // MARK: - System Audio Level
 
     func calculateSystemLevel(buffer: AVAudioPCMBuffer) {
+        recordSystemSignalPeak(linearPeak(buffer: buffer))
+
         // Throttle updates: only update every 4th callback (~2x faster than mic instead of ~8x)
         let shouldProcess: Bool = systemLevelLock.withLock {
             systemLevelUpdateCounter += 1

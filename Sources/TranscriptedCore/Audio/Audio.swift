@@ -372,6 +372,63 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // Per-recording signal diagnostics. These are amplitude-only facts used
+    // for issue #500 QA; they never include transcript text or raw audio.
+    private var _micRawPeak: Float = 0
+    private var _micProcessedPeak: Float = 0
+    private var _systemAudioPeak: Float = 0
+    private let signalDiagnosticsLock = NSLock()
+
+    var signalDiagnosticsSnapshot: AudioSignalDiagnosticsSnapshot {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        return AudioSignalDiagnosticsSnapshot(
+            micRawPeak: _micRawPeak,
+            micProcessedPeak: _micProcessedPeak,
+            systemAudioPeak: _systemAudioPeak
+        )
+    }
+
+    func resetSignalDiagnostics() {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        _micRawPeak = 0
+        _micProcessedPeak = 0
+        _systemAudioPeak = 0
+    }
+
+    func recordMicSignalPeaks(raw: Float, processed: Float) {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        _micRawPeak = max(_micRawPeak, raw)
+        _micProcessedPeak = max(_micProcessedPeak, processed)
+    }
+
+    func recordSystemSignalPeak(_ peak: Float) {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        _systemAudioPeak = max(_systemAudioPeak, peak)
+    }
+
+    // Default route volume at recording start. Used only for diagnostics so
+    // we can prove Transcripted observed volume scalars rather than changed
+    // them.
+    private var _recordingStartRouteVolumeSnapshot: AudioRouteVolumeSnapshot?
+    private let routeVolumeDiagnosticsLock = NSLock()
+
+    var recordingStartRouteVolumeSnapshot: AudioRouteVolumeSnapshot? {
+        get {
+            routeVolumeDiagnosticsLock.lock()
+            defer { routeVolumeDiagnosticsLock.unlock() }
+            return _recordingStartRouteVolumeSnapshot
+        }
+        set {
+            routeVolumeDiagnosticsLock.lock()
+            defer { routeVolumeDiagnosticsLock.unlock() }
+            _recordingStartRouteVolumeSnapshot = newValue
+        }
+    }
+
     // System audio status observation
     private var systemAudioCancellable: AnyCancellable?
     // Protected by systemSilenceLock — written from callback thread, reset on main thread
@@ -412,7 +469,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // MARK: - Live PCM buffer hooks (host app live-preview integration)
     //
-    // These callbacks let an embedder tap the raw PCM buffers as they arrive
+    // These callbacks let an embedder tap the PCM buffers as they arrive
     // from CoreAudio, in parallel with the WAV file writes. Used by the app to
     // drive live dual-channel transcription preview via FluidAudio's
     // StreamingEouAsrManager without a second audio engine.
@@ -423,13 +480,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // `onRecordingComplete`, optional reads are unsynchronized: set the hook
     // once before `start()` and do not reassign during recording.
     //
-    // Mic buffers arrive in the hardware's native format (possibly multi-
-    // channel at 44.1/48/96 kHz). System buffers arrive in the aggregate-
-    // device format (typically stereo at 48 kHz). Callers are responsible
-    // for any downmix/resample they need.
+    // Mic buffers are the same processed copy that is written to the saved mic
+    // WAV: software AGC when VPIO is off, or Apple's VPIO output when VPIO is
+    // on. System buffers are not processed by Transcripted; they arrive in the
+    // aggregate-device format (typically stereo at 48 kHz). Callers are
+    // responsible for any downmix/resample they need.
     //
     // Copy semantics:
-    //   onMicPCMBuffer  — raw reference from the CoreAudio tap; caller MUST copy before async dispatch.
+    //   onMicPCMBuffer  — owned processed mic copy; caller should still copy before async dispatch.
     //   onSystemPCMBuffer — owned for async use; SCK buffers already own memory, legacy tap buffers are copied.
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
     public var onSystemPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
@@ -631,6 +689,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
+        resetSignalDiagnostics()
+        recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking

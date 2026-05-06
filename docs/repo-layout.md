@@ -83,6 +83,7 @@ Use these docs for these jobs:
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
+- `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
 - `docs/qa-parakeet-start-failure-smoke.md` — manual BET-88 validation checklist for Parakeet start-failure recovery
