@@ -42,6 +42,12 @@ Transcripted daily test one two three.
 - retry path that feels calm, not broken
 - fast meeting start/stop races
 
+For the issue #500 meeting-volume matrix, use:
+
+```text
+docs/qa-issue-500-meeting-audio.md
+```
+
 ## Daily Pass Bar
 
 The run passes only when the normal flows work and any failed meeting can answer:

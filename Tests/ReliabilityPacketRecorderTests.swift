@@ -10,11 +10,20 @@ func testReliabilityPacketRecorder() {
             message: "Meeting recording stopped",
             context: [
                 "audio_gaps": "2",
+                "default_input_volume_after": "0.620",
+                "default_input_volume_before": "0.620",
+                "default_input_volume_during": "0.620",
+                "default_output_volume_after": "0.740",
+                "default_output_volume_before": "0.740",
+                "default_output_volume_during": "0.740",
                 "device_switches": "2",
                 "duration_ms": "143400",
                 "error": "/Users/redbars/private.txt should not be copied",
+                "mic_processed_peak": "0.36000",
+                "mic_raw_peak": "0.03000",
                 "reason": "overlay_stop_button",
                 "source_app_name": "Private App",
+                "system_peak": "0.25000",
                 "system_file_present": "true",
                 "trigger": "hotkey",
             ],
@@ -32,6 +41,11 @@ func testReliabilityPacketRecorder() {
         assertEqual(packet?.context["gap_count_bucket"], "2_3", "audio gaps should be bucketed")
         assertEqual(packet?.context["route_change_count_bucket"], "2_3", "device switches should be bucketed")
         assertEqual(packet?.context["system_stream_present"], "true", "system stream presence should stay coarse")
+        assertEqual(packet?.context["mic_raw_peak"], "0.03000", "raw mic peak should stay available for manual QA")
+        assertEqual(packet?.context["mic_processed_peak"], "0.36000", "processed mic peak should stay available for manual QA")
+        assertEqual(packet?.context["system_peak"], "0.25000", "system audio peak should stay available for manual QA")
+        assertEqual(packet?.context["default_output_volume_before"], "0.740", "before volume scalar should stay available for manual QA")
+        assertEqual(packet?.context["default_output_volume_after"], "0.740", "after volume scalar should stay available for manual QA")
         assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
         assertNil(packet?.context["source_app_name"], "source app names should not be copied into reliability packets")
     }

@@ -227,18 +227,32 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("voice_processing"), true, "meeting stop events should preserve whether VPIO was requested")
         assertEqual(healthPolicy?.allowedProperties.contains("stop_timed_out"), true, "health snapshot should preserve stop timeout state")
         assertEqual(startFailedPolicy?.allowedProperties.contains("failure_kind"), true, "meeting start failures should preserve normalized failure kinds")
+        assertEqual(policy?.allowedProperties.contains("mic_raw_peak"), true, "meeting stop events should preserve raw mic peak for issue 500 diagnostics")
+        assertEqual(policy?.allowedProperties.contains("mic_processed_peak"), true, "meeting stop events should preserve processed mic peak for issue 500 diagnostics")
+        assertEqual(policy?.allowedProperties.contains("system_peak"), true, "meeting stop events should preserve system audio peak for issue 500 diagnostics")
+        assertEqual(policy?.allowedProperties.contains("default_input_volume_before"), true, "meeting stop events should preserve input volume before recording")
+        assertEqual(policy?.allowedProperties.contains("default_output_volume_during"), true, "meeting stop events should preserve output volume during recording")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "buffer_success_bucket": "90_97",
+                "default_input_volume_before": "0.650",
+                "default_input_volume_during": "0.650",
+                "default_output_volume_before": "0.750",
+                "default_output_volume_during": "0.750",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_during": "0.750",
                 "gap_count_bucket": "1",
                 "input_device_class": "bluetooth",
                 "input_rate_hz": "48000",
                 "mic_processing": "software_agc",
+                "mic_processed_peak": "0.36000",
+                "mic_raw_peak": "0.03000",
                 "output_device_class": "built_in",
                 "recovery_attempt_bucket": "0",
                 "route_change_count_bucket": "2_3",
+                "system_peak": "0.25000",
                 "system_backend": "screen_capture_kit",
                 "system_stream_present": "true",
                 "system_status": "healthy",
@@ -247,13 +261,22 @@ func testAnalyticsEventPolicy() {
             ],
             allowedKeys: [
                 "buffer_success_bucket",
+                "default_input_volume_before",
+                "default_input_volume_during",
+                "default_output_volume_before",
+                "default_output_volume_during",
+                "default_system_output_volume_before",
+                "default_system_output_volume_during",
                 "gap_count_bucket",
                 "input_device_class",
                 "input_rate_hz",
                 "mic_processing",
+                "mic_processed_peak",
+                "mic_raw_peak",
                 "output_device_class",
                 "recovery_attempt_bucket",
                 "route_change_count_bucket",
+                "system_peak",
                 "system_backend",
                 "system_stream_present",
                 "system_status",
@@ -262,13 +285,18 @@ func testAnalyticsEventPolicy() {
             ]
         )
         assertEqual(sanitized["buffer_success_bucket"], "90_97", "buffer success buckets should survive sanitization")
+        assertEqual(sanitized["default_input_volume_before"], "0.650", "input volume before should survive sanitization")
+        assertEqual(sanitized["default_output_volume_during"], "0.750", "output volume during should survive sanitization")
         assertEqual(sanitized["gap_count_bucket"], "1", "gap count buckets should survive sanitization")
         assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input device class should survive sanitization")
         assertEqual(sanitized["input_rate_hz"], "48000", "input sample rate should survive sanitization")
         assertEqual(sanitized["mic_processing"], "software_agc", "coarse mic processing mode should survive sanitization")
+        assertEqual(sanitized["mic_raw_peak"], "0.03000", "raw mic peak should survive sanitization")
+        assertEqual(sanitized["mic_processed_peak"], "0.36000", "processed mic peak should survive sanitization")
         assertEqual(sanitized["output_device_class"], "built_in", "coarse output device class should survive sanitization")
         assertEqual(sanitized["recovery_attempt_bucket"], "0", "recovery attempt buckets should survive sanitization")
         assertEqual(sanitized["route_change_count_bucket"], "2_3", "route-change buckets should survive sanitization")
+        assertEqual(sanitized["system_peak"], "0.25000", "system audio peak should survive sanitization")
         assertEqual(sanitized["system_backend"], "screen_capture_kit", "capture backend should survive sanitization")
         assertEqual(sanitized["system_stream_present"], "true", "system_stream_present must survive sanitization — if empty the metric is always missing")
         assertEqual(sanitized["system_status"], "healthy", "system capture status should survive sanitization")

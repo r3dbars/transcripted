@@ -297,6 +297,7 @@ extension Audio {
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
     func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
         lastBufferTime = CACurrentMediaTime()
+        let rawPeak = linearPeak(buffer: buffer)
 
         // Meter + silence detection see the RAW signal so the user's
         // visible level reflects their actual mic input, and the
@@ -309,14 +310,13 @@ extension Audio {
         // benefit from AGC's normalized loudness.
         guard let bufferForAsyncUse = deepCopyBuffer(buffer) else {
             AppLogger.audioMic.warning("Failed to copy mic buffer for async write")
-            // Fallback: still notify consumer from the original buffer so a
-            // one-off allocation failure doesn't stall live preview.
-            self.onMicPCMBuffer?(buffer)
+            recordMicSignalPeaks(raw: rawPeak, processed: 0)
             return
         }
 
         // Apply real-time AGC to the working copy. No-op when VPIO is on.
         realtimeAGC?.process(buffer: bufferForAsyncUse)
+        recordMicSignalPeaks(raw: rawPeak, processed: linearPeak(buffer: bufferForAsyncUse))
 
         self.onMicPCMBuffer?(bufferForAsyncUse)
 

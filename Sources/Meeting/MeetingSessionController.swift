@@ -533,28 +533,36 @@ final class MeetingSessionController: ObservableObject {
 
         let stopResult = await capture.stopAndAwaitFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
+        let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         activeRecordingTrigger = .unknown
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
+        let stopDiagnosticsContext = meetingCaptureAnalyticsProperties(
+            snapshot: recordingSnapshot.pipelineSnapshot
+        ).merging(
+            afterStopVolumeContext,
+            uniquingKeysWith: { _, new in new }
+        ).merging(
+            [
+                "trigger": recordingSnapshot.trigger.rawValue,
+                "reason": reason.rawValue,
+                "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
+                "mic_file_present": boolString(files.micURL != nil),
+                "system_file_present": boolString(files.systemURL != nil),
+                "stop_timed_out": boolString(stopResult.didTimeOut),
+                "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
+                "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
 
         DiagnosticsTrail.record(
             level: recordingSnapshot.systemAudioStatus.isWarning ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
-            context: baseDiagnosticsContext(
-                extra: [
-                    "trigger": recordingSnapshot.trigger.rawValue,
-                    "reason": reason.rawValue,
-                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
-                    "mic_file_present": boolString(files.micURL != nil),
-                    "system_file_present": boolString(files.systemURL != nil),
-                    "stop_timed_out": boolString(stopResult.didTimeOut),
-                    "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
-                    "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
-                    "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
-                ]
-            )
+            context: baseDiagnosticsContext(extra: stopDiagnosticsContext)
         )
         AnalyticsReporter.track(
             "meeting_recording_stopped",
@@ -727,25 +735,33 @@ final class MeetingSessionController: ObservableObject {
 
         let stopResult = await capture.stopAndDiscardFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
+        let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
+        let cancelDiagnosticsContext = meetingCaptureAnalyticsProperties(
+            snapshot: recordingSnapshot.pipelineSnapshot
+        ).merging(
+            afterStopVolumeContext,
+            uniquingKeysWith: { _, new in new }
+        ).merging(
+            [
+                "trigger": recordingSnapshot.trigger.rawValue,
+                "reason": reason.rawValue,
+                "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
+                "mic_file_present": boolString(files.micURL != nil),
+                "system_file_present": boolString(files.systemURL != nil),
+                "stop_timed_out": boolString(stopResult.didTimeOut)
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
 
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_recording_cancelled",
             message: "Meeting recording cancelled",
-            context: baseDiagnosticsContext(
-                extra: [
-                    "trigger": recordingSnapshot.trigger.rawValue,
-                    "reason": reason.rawValue,
-                    "duration_ms": "\(recordingSnapshot.durationMilliseconds)",
-                    "mic_file_present": boolString(files.micURL != nil),
-                    "system_file_present": boolString(files.systemURL != nil),
-                    "stop_timed_out": boolString(stopResult.didTimeOut)
-                ]
-            )
+            context: baseDiagnosticsContext(extra: cancelDiagnosticsContext)
         )
         AnalyticsReporter.track(
             "meeting_recording_cancelled",

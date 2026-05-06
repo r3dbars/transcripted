@@ -148,6 +148,10 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.createPipelineDiagnosticsSnapshot(overrideSystemAudioStatus: overrideSystemAudioStatus)
     }
 
+    func routeVolumeDiagnosticsContext(currentPhase: String) -> [String: String] {
+        audio.createRouteVolumeDiagnosticsContext(currentPhase: currentPhase)
+    }
+
     // MARK: - Private
 
     private func finishPendingStartAttemptIfPossible() {
