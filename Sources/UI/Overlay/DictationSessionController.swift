@@ -779,7 +779,7 @@ class DictationSessionController: ObservableObject {
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
-                overlayController.showNoSpeechAndDismiss()
+                overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue)
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "no_speech")
                 return

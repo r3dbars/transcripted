@@ -463,9 +463,9 @@ class FloatingOverlayController {
     }
 
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
-    func showNoSpeechAndDismiss() {
+    func showNoSpeechAndDismiss(trigger: String = "unknown") {
         errorDismissTask?.cancel()
-        errorMessage = "No speech heard. Try speaking a little longer."
+        errorMessage = DictationNoSpeechPresentationPolicy.message(trigger: trigger)
         errorActionTitle = nil
         errorActionHandler = nil
         state = .drafting

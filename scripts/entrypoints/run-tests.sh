@@ -185,6 +185,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
+    "Sources/UI/Overlay/DictationNoSpeechPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationMicrophoneLoadingPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
