@@ -250,7 +250,7 @@ enum CLIContextStore {
                 let metadataMatch = meeting.title.localizedCaseInsensitiveContains(normalizedQuery)
                     || meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(normalizedQuery) })
                 guard let preview = textMatch.map({ String($0.text.prefix(220)) })
-                    ?? (metadataMatch ? recentMeetingPreview(for: meeting) : nil) else { return nil }
+                    ?? (metadataMatch ? recentMeetingPreview(for: meeting, preferredSpeaker: speaker) : nil) else { return nil }
                 return CLIContextItem(
                     kind: .meeting,
                     title: meeting.title,
@@ -528,7 +528,15 @@ enum CLIContextStore {
         return extractTitle(from: content) ?? filename
     }
 
-    private static func recentMeetingPreview(for meeting: MeetingRecord) -> String {
+    private static func recentMeetingPreview(for meeting: MeetingRecord, preferredSpeaker: String? = nil) -> String {
+        if let preferredSpeaker,
+           let matchingSpeakerUtterance = meeting.utterances.first(where: { utterance in
+               speakerMatches(filter: preferredSpeaker, speakerName: utterance.speakerId)
+                   && !utterance.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+           }) {
+            return String(matchingSpeakerUtterance.text.prefix(220))
+        }
+
         if let firstUtterance = meeting.utterances.first(where: {
             !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }) {
