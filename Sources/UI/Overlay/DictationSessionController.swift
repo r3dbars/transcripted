@@ -245,11 +245,15 @@ class DictationSessionController: ObservableObject {
         guard let overlayController = overlayController else { return }
         guard isDictating else { return }
 
-        // Fast path — engine is ready right now. The actual CoreAudio start
-        // still runs asynchronously so a slow device graph never blocks UI.
-        if let appState = appState,
-           !appState.sttRouter.isRecovering,
-           appState.sttRouter.inputFormatReady {
+        guard let appState = appState else { return }
+
+        switch DictationRecordingStartOverlayPolicy.plan(
+            isRecovering: appState.sttRouter.isRecovering,
+            inputFormatReady: appState.sttRouter.inputFormatReady
+        ) {
+        case .skipLoadingAndStartRecording:
+            // Fast path — engine is ready right now. The actual CoreAudio start
+            // still runs asynchronously so a slow device graph never blocks UI.
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -278,11 +282,8 @@ class DictationSessionController: ObservableObject {
                     await self.waitForEngineAndStart(sourceApp: sourceApp)
                 }
             }
-            return
-        }
-
-        // Slow path — engine is settling after a device change. Wait for it.
-        if let appState = appState {
+        case .showLoadingWhileWaiting:
+            // Slow path — engine is settling after a device change. Wait for it.
             overlayController.showLoadingState(
                 near: sourceApp,
                 presentation: microphoneRecoveryPresentation(
