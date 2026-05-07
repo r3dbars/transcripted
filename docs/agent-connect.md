@@ -106,6 +106,7 @@ the Claude Desktop button in Transcripted Settings.
 ```bash
 cd Tools/TranscriptedMCP
 swift build -c release
+./.build/release/transcripted-mcp --self-test
 ```
 
 Binary path after build:
@@ -129,6 +130,7 @@ Example Claude Desktop config:
 Notes:
 
 - `transcripted-mcp` communicates over stdio, not HTTP.
+- `--self-test` verifies directory resolution, creates missing local data/index directories, and exits without starting the MCP stdio server.
 - By default it follows the capture library chosen in Transcripted Settings, then also reads legacy Draft or `~/Documents/Transcripted/` layouts when those folders still contain capture Markdown.
 - `TRANSCRIPTED_DATA_DIR` can point at a shared root with `meetings/` and `dictations/` subfolders. For `transcripted-mcp`, that shared root also becomes the default SQLite index location unless `TRANSCRIPTED_INDEX_DIR` is set.
 - If needed, override paths with `TRANSCRIPTED_DATA_DIR`,
