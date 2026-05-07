@@ -31,9 +31,10 @@ The current compiled fast test set lives in `Tests/FastTests.manifest`.
 
 ## Core Package Tests
 
-`swift test` currently exercises the standalone package seam, including:
-
-- `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
+`swift test` currently exercises the standalone package seam under
+`Tests/TranscriptedCoreTests/`, including storage paths, audio startup,
+meeting-input selection, file logging, failed-transcription persistence,
+recording archiving, stats, speaker reconciliation, and transcript metadata.
 
 Use this when changing:
 
