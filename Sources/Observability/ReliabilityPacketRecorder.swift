@@ -160,6 +160,8 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "meeting", stage: "stop", defaultOutcome: "cancelled")
         case ("meeting", "meeting_transcript_saved"):
             return .init(feature: "meeting", stage: "save", defaultOutcome: "success")
+        case ("meeting", "meeting_transcript_skipped"):
+            return .init(feature: "meeting", stage: "transcribe", defaultOutcome: "skipped_expected")
         case ("meeting", "meeting_transcript_failed"):
             return .init(feature: "meeting", stage: "transcribe", defaultOutcome: "failed_retryable")
         case ("dictation", "dictation_started"):

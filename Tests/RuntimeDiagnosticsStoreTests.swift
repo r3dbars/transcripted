@@ -49,4 +49,50 @@ func testRuntimeDiagnosticsStore() {
 
         assertEqual(loaded, marker, "runtime diagnostics marker should round-trip through JSON")
     }
+
+    runSuite("RuntimeDiagnosticsStore suppresses idle launch-only shutdown markers") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "launch-only",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_001),
+            lastEvent: "app_launched",
+            sessionKind: "none",
+            sessionStage: "idle",
+            sessionActive: false
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_002)
+        )
+
+        assertEqual(shouldReport, false, "idle launch-only markers should not pollute shutdown health")
+    }
+
+    runSuite("RuntimeDiagnosticsStore reports unclean shutdowns during active work") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "active-session",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "meeting_recording",
+            sessionKind: "meeting",
+            sessionStage: "recording",
+            sessionActive: true
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_120)
+        )
+
+        assertEqual(shouldReport, true, "active meeting shutdowns should stay visible")
+    }
 }
