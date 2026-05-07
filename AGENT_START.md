@@ -22,12 +22,17 @@ exist for migration and reference only.
 ## Edit Map
 
 - `Sources/` - macOS app target
+- `Sources/Accessibility/` - focused-editor AX metadata and overlay placement
+- `Sources/Capture/` - global hotkeys and physical dictation trigger routing
+- `Sources/Dictation/` - dictation transcript persistence and timeout helpers
 - `Sources/Speech/` - dictation STT, audio recovery, device handling
 - `Sources/Meeting/` - app-side meeting flow and bridge into core
 - `Sources/TranscriptedCore/` - reusable meeting transcription library
 - `Sources/UI/` - overlay, menu bar, settings, onboarding, agent connect
 - `Sources/Support/` - preferences, permissions, paths, paste, launch behavior
 - `Sources/Observability/` - logs, diagnostics, Sentry, PostHog, Sparkle
+- `Sources/Reliability/` - wake / sleep recovery
+- `Sources/Beta/` - beta-build configuration
 - `Tests/` - fast tests and core package tests
 - `Tools/` - standalone CLI, MCP, and QA packages
 
