@@ -42,6 +42,9 @@ final class RuntimeDiagnostics {
         marker.lastEvent = "clean_shutdown"
         self.marker = marker
         RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        CrashReporter.setRuntimeDiagnosticsContext(
+            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
+        )
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
     }
@@ -139,5 +142,8 @@ final class RuntimeDiagnostics {
         marker.updatedAt = Date()
         self.marker = marker
         RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        CrashReporter.setRuntimeDiagnosticsContext(
+            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
+        )
     }
 }

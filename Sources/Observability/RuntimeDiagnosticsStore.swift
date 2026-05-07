@@ -92,4 +92,21 @@ enum RuntimeDiagnosticsStore {
             "session_stage": marker.sessionStage,
         ]
     }
+
+    static func contextForCurrentSession(
+        marker: RuntimeDiagnosticsMarker,
+        now: Date = Date()
+    ) -> [String: String] {
+        [
+            "app_version": marker.appVersion,
+            "build_version": marker.buildVersion,
+            "heartbeat_age_bucket": heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now),
+            "last_event": marker.lastEvent,
+            "os_major": "\(marker.osMajor)",
+            "previous_clean_shutdown": "\(marker.cleanShutdown)",
+            "session_active": "\(marker.sessionActive)",
+            "session_kind": marker.sessionKind,
+            "session_stage": marker.sessionStage,
+        ]
+    }
 }
