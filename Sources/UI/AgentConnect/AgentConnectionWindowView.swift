@@ -308,36 +308,6 @@ private struct AgentConnectionBodyText: View {
     }
 }
 
-private struct AgentConnectionInfoRow: View {
-    let symbolName: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbolName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AgentConnectionTheme.accent)
-                .frame(width: 24, height: 24)
-                .background(
-                    Circle()
-                        .fill(AgentConnectionTheme.badge)
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(AgentConnectionTheme.textPrimary)
-
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(AgentConnectionTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
 private struct AgentConnectionFileRow: View {
     let name: String
     let detail: String

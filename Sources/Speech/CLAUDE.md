@@ -10,7 +10,7 @@
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
 - `DictationAudioLevelMeter.swift` — normalizes live PCM buffers into a 0...1 level used by the dictation waveform UI
 - `DictationAudioRecovery.swift` — analyzes recorded dictation audio for usable speech signal and extracts focused, gain-normalized retry segments when an initial transcription attempt returns empty
-- `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades
+- `DictationInputDeviceSelectionPolicy.swift` — aliases the shared meeting/input policy so dictation and meeting capture avoid Bluetooth headset input the same way
 - `DictationReadinessWaitPolicy.swift` — tiny policy that decides whether dictation should keep waiting for recovery, refresh input readiness, or start recording immediately
 - `ParakeetModelInitDiagnostics.swift` — builds safe diagnostic context for model-initialization failures without leaking transcript or user-content data
 - `ParakeetPrewarmPolicy.swift` — central policy for deciding whether speech-engine input-readiness checks should proceed or be skipped based on microphone authorization state
@@ -26,7 +26,7 @@
 - `ParakeetEngine` consults `ParakeetPrewarmPolicy` before checking microphone input readiness. Idle readiness checks must not leave `AVAudioEngine` running, because that keeps the macOS microphone indicator active.
 - `ParakeetEngine` consults `ParakeetShortAudioGate` before spending work on extremely short clips, so short-tap behavior changes belong here rather than in UI controllers.
 - `ParakeetEngine` mirrors `ParakeetRecoveryState` flags into `@Published var isRecovering` and `@Published var inputFormatReady` (forwarded through `STTRouter`). `DictationSessionController` uses `DictationReadinessWaitPolicy` in its wait-for-ready loop so it can distinguish between "still recovering", "refresh input readiness", and "safe to start" instead of blindly retrying. AirPods Hands-Free Profile (24kHz hw / 48kHz output bus) is supported: the tap is installed with `format: nil` so buffers arrive at the output rate, and `nativeSampleRate` tracks the output rate so downstream resampling is correct.
-- `ParakeetEngine` consults `DictationInputDeviceSelectionPolicy` before recording so Bluetooth headset input does not unnecessarily hijack playback when a built-in mic fallback is available.
+- `ParakeetEngine` consults `DictationInputDeviceSelectionPolicy` before recording so Bluetooth headset input does not unnecessarily hijack playback when a built-in mic fallback is available. Keep this alias aligned with `Sources/TranscriptedCore/Audio/MeetingInputDeviceSelectionPolicy.swift`.
 - `ParakeetEngine` consults `ParakeetStartRecordingFailurePolicy` when startup fails so format-reset, engine rebuild, and prewarm-retry behavior stay consistent across direct starts and recovery attempts.
 - `ParakeetEngine` stays `@MainActor` for app state, published UI state, and event reporting, but all `AVAudioEngine` graph work runs through its private serial audio-engine queue. Keep recording start/stop/readiness APIs async so callers do not block the main actor while CoreAudio settles, starts, stops, or rebuilds.
 - `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.

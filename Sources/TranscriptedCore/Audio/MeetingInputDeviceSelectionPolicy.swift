@@ -2,7 +2,7 @@ import AudioToolbox
 @preconcurrency import AVFoundation
 import Foundation
 
-enum MeetingAudioTransport: String {
+public enum MeetingAudioTransport: String {
     case builtIn
     case bluetooth
     case bluetoothLE
@@ -12,32 +12,56 @@ enum MeetingAudioTransport: String {
     case other
 }
 
-struct MeetingAudioDevice: Equatable {
-    let id: AudioDeviceID
-    let name: String
-    let transport: MeetingAudioTransport
-    let inputChannelCount: UInt32
+public struct MeetingAudioDevice: Equatable {
+    public let id: AudioDeviceID
+    public let name: String
+    public let transport: MeetingAudioTransport
+    public let inputChannelCount: UInt32
+
+    public init(
+        id: AudioDeviceID,
+        name: String,
+        transport: MeetingAudioTransport,
+        inputChannelCount: UInt32
+    ) {
+        self.id = id
+        self.name = name
+        self.transport = transport
+        self.inputChannelCount = inputChannelCount
+    }
 }
 
-enum MeetingInputDeviceSelectionReason: String {
+public enum MeetingInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset
     case noBuiltInFallbackAvailable
 }
 
-struct MeetingInputDeviceSelection: Equatable {
-    let defaultInput: MeetingAudioDevice
-    let selectedInput: MeetingAudioDevice
-    let defaultOutput: MeetingAudioDevice?
-    let reason: MeetingInputDeviceSelectionReason
+public struct MeetingInputDeviceSelection: Equatable {
+    public let defaultInput: MeetingAudioDevice
+    public let selectedInput: MeetingAudioDevice
+    public let defaultOutput: MeetingAudioDevice?
+    public let reason: MeetingInputDeviceSelectionReason
 
-    var didOverrideDefault: Bool {
+    public var didOverrideDefault: Bool {
         selectedInput.id != defaultInput.id
+    }
+
+    public init(
+        defaultInput: MeetingAudioDevice,
+        selectedInput: MeetingAudioDevice,
+        defaultOutput: MeetingAudioDevice?,
+        reason: MeetingInputDeviceSelectionReason
+    ) {
+        self.defaultInput = defaultInput
+        self.selectedInput = selectedInput
+        self.defaultOutput = defaultOutput
+        self.reason = reason
     }
 }
 
-enum MeetingInputDeviceSelectionPolicy {
-    static func selection(
+public enum MeetingInputDeviceSelectionPolicy {
+    public static func selection(
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
         availableInputs: [MeetingAudioDevice]
@@ -66,6 +90,36 @@ enum MeetingInputDeviceSelectionPolicy {
             defaultOutput: defaultOutput,
             reason: .preferredBuiltInForBluetoothHeadset
         )
+    }
+
+    public static func deviceClass(for device: MeetingAudioDevice) -> String {
+        deviceClass(forName: device.name, transport: device.transport)
+    }
+
+    public static func deviceClass(
+        forName deviceName: String,
+        transport: MeetingAudioTransport = .other
+    ) -> String {
+        let normalized = normalize(deviceName)
+
+        if isBluetoothTransport(transport) || isBluetoothHeadsetName(normalized) {
+            return "bluetooth"
+        }
+
+        if isBuiltInCandidateName(normalized) || transport == .builtIn {
+            return "built_in"
+        }
+
+        if transport == .usb
+            || normalized.contains("usb")
+            || normalized.contains("scarlett")
+            || normalized.contains("rode")
+            || normalized.contains("shure")
+            || normalized.contains("yeti") {
+            return "external"
+        }
+
+        return "unknown"
     }
 
     private static func shouldAvoidBluetoothHeadsetInput(
@@ -159,6 +213,13 @@ enum MeetingInputDeviceSelectionPolicy {
             || normalized.contains("hfp")
     }
 
+    private static func isBuiltInCandidateName(_ normalized: String) -> Bool {
+        normalized.contains("macbook")
+            || normalized.contains("built-in")
+            || normalized.contains("built in")
+            || normalized.contains("studio display")
+    }
+
     private static func normalize(_ value: String) -> String {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,6 +227,7 @@ enum MeetingInputDeviceSelectionPolicy {
     }
 }
 
+#if !TRANSCRIPTED_FAST_TESTS
 private enum MeetingInputDeviceLookup {
     static func preferredInputSelection() throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
@@ -369,3 +431,4 @@ extension Audio {
         }
     }
 }
+#endif

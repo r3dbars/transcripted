@@ -189,35 +189,6 @@ public struct IdentifiedSpeaker: Codable, Sendable {
     }
 }
 
-/// Metadata about the transcription engines used
-public struct TranscriptionMetadata {
-    public let transcriptionEngine: String     // "parakeet_local"
-    public let diarizationEngine: String       // "pyannote_offline"
-    public let micWordCount: Int
-    public let systemWordCount: Int
-    public let micSpeakerCount: Int
-    public let systemSpeakerCount: Int
-    public let duration: Double
-
-    public init(
-        transcriptionEngine: String,
-        diarizationEngine: String,
-        micWordCount: Int,
-        systemWordCount: Int,
-        micSpeakerCount: Int,
-        systemSpeakerCount: Int,
-        duration: Double
-    ) {
-        self.transcriptionEngine = transcriptionEngine
-        self.diarizationEngine = diarizationEngine
-        self.micWordCount = micWordCount
-        self.systemWordCount = systemWordCount
-        self.micSpeakerCount = micSpeakerCount
-        self.systemSpeakerCount = systemSpeakerCount
-        self.duration = duration
-    }
-}
-
 // MARK: - Speaker Naming Flow Types
 
 /// Which audio channel a diarized speaker came from.

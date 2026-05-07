@@ -1,6 +1,5 @@
 // DictationSessionController.swift
-// Session orchestration for dictation mode plus compatibility stubs for the
-// removed draft mode.
+// Session orchestration for dictation mode.
 
 import AppKit
 import AVFoundation
@@ -8,8 +7,6 @@ import Combine
 
 @MainActor
 class DictationSessionController: ObservableObject {
-    private static let removedDraftModeMessage = "This build of Transcripted supports dictation and meetings only."
-
     enum DictationTrigger: String {
         case rightOptionTap = "right_option_tap"
         case physicalKey = "physical_key"
@@ -20,7 +17,6 @@ class DictationSessionController: ObservableObject {
         case unknown = "unknown"
     }
 
-    @Published var isInSession = false
     @Published var isDictating = false
     @Published var lastCompletedText: String?
 
@@ -35,9 +31,7 @@ class DictationSessionController: ObservableObject {
         didSet {
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self = self else { return }
-                if self.isInSession {
-                    self.cancelSession()
-                } else if self.isDictating {
+                if self.isDictating {
                     self.cancelDictation()
                 }
             }
@@ -85,27 +79,10 @@ class DictationSessionController: ObservableObject {
             .filter { $0 }
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                if self.isInSession {
-                    self.cancelSession(message: Self.removedDraftModeMessage)
-                } else if self.isDictating {
+                if self.isDictating {
                     self.handleDictationInterruption()
                 }
             }
-    }
-
-    // MARK: - Removed Draft Mode
-
-    // `cancelSession()` is still invoked by ContextCaptureEngine on interrupt paths.
-    // The `startSession` / `stopSessionAndDraft` stubs were removed — they had no callers.
-    func cancelSession() {
-        cancelSession(message: Self.removedDraftModeMessage)
-    }
-
-    private func cancelSession(message: String) {
-        guard let (_, overlayController) = readyState() else { return }
-        cancelActiveTasks(cancelRecording: false)
-        isInSession = false
-        overlayController.showError(message)
     }
 
     // MARK: - Dictation Mode (Option+Space)
@@ -117,7 +94,7 @@ class DictationSessionController: ObservableObject {
         anchorRect: NSRect? = nil
     ) {
         guard let (appState, overlayController) = readyState() else { return }
-        guard !isDictating, !isInSession else { return }
+        guard !isDictating else { return }
         isDictating = true
         sessionSourceApp = sourceApp
         sessionAnchorRect = anchorRect
@@ -888,10 +865,6 @@ class DictationSessionController: ObservableObject {
     }
 
     func finishDictationForTermination() async {
-        if isInSession {
-            cancelSession()
-        }
-
         guard isDictating else { return }
         stopDictationAndPaste(trigger: .unknown)
 
@@ -1092,12 +1065,7 @@ class DictationSessionController: ObservableObject {
         sessionTimeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.sessionTimeoutNanos)
             guard !Task.isCancelled, let self = self else { return }
-            if self.isInSession {
-                self.appState?.logger.log("SESSION | auto-cancelled after timeout")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "session_timeout",
-                    message: "Session auto-cancelled after 5 minutes")
-                self.cancelSession()
-            } else if self.isDictating {
+            if self.isDictating {
                 self.appState?.logger.log("DICTATION | auto-cancelled after timeout")
                 EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_timeout",
                     message: "Dictation auto-cancelled after 5 minutes")

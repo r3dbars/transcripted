@@ -102,7 +102,7 @@ Rules:
    - `bash build-deps.sh --force` when dependency tooling changes
    - `bash build.sh`
    - `bash run-tests.sh`
-   - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
+   - `SKIP_NOTARIZATION=1 bash build-beta.sh <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
 ## Observability, Sentry, and Analytics
 

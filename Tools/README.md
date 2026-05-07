@@ -5,6 +5,7 @@
 ## Packages
 
 - `TranscriptedCLI/` — local context and offline diarization CLI
+- `TranscriptedCaptureParsing/` — shared Markdown capture parser for the CLI and MCP packages
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
 

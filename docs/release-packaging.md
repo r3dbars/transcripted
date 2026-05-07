@@ -25,12 +25,13 @@ swift scripts/release/generate-dmg-background.swift
 the built-in Finder-layout fallback, so polished install windows no longer
 depend on `create-dmg` being present just to avoid a blank DMG.
 
-`build-beta.sh` also treats the per-user beta token as sensitive build input:
-it escapes the token before injecting it into `Sources/Beta/BetaConfig.swift`
-and only prints a masked preview in build logs.
-The packaged release archive is still versioned from `Info.plist`, so published
+`build-beta.sh` no longer injects a per-user beta token. Older
+`build-beta.sh <beta-token> <user-name>` calls are still accepted for
+compatibility, but the first argument is ignored and only printed as a masked
+legacy argument in build logs.
+The packaged release archive is versioned from `Info.plist`, so published
 artifacts keep the stable `Transcripted-<version>.dmg` name expected by Sparkle
-and Homebrew even when the embedded beta token is per-user.
+and Homebrew.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
@@ -71,7 +72,7 @@ To force a specific certificate for either build flow:
 
 ```bash
 SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
-SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
+SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <user-name>
 ```
 
 `build-beta.sh` now fails by default when the local Parakeet model bundle is
@@ -81,14 +82,14 @@ to download the speech model on first launch.
 If you deliberately want a thin local test artifact, you can opt out:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <user-name>
 ```
 
 ## Release Flow
 
 ```bash
 bash build-deps.sh --force
-NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
+NOTARY_PROFILE=<profile-name> bash build-beta.sh <user-name>
 ```
 
 Before you publish a user-facing release note, sanity-check the release state:
@@ -128,7 +129,7 @@ Gatekeeper rejection or “developer cannot be verified” block.
 For a dry run that still validates the signed app and DMG assembly:
 
 ```bash
-SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 bash build-beta.sh <user-name>
 ```
 
 ## Expected Validation

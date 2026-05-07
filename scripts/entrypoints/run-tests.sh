@@ -134,6 +134,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
+    "Sources/TranscriptedCore/Audio/MeetingInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
@@ -159,6 +160,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
+    "Sources/Observability/PayloadRedactor.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
@@ -197,6 +199,7 @@ echo "Compiling tests..."
 swiftc \
     "${FAST_TEST_SOURCES[@]}" \
     "${APP_SOURCES[@]}" \
+    -D TRANSCRIPTED_FAST_TESTS \
     -framework AppKit \
     -framework AVFoundation \
     -framework ApplicationServices \

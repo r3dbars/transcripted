@@ -1062,6 +1062,13 @@ struct HomeActivityTabsCard: View {
                 headerSpacing: 1,
                 row: row
             )
+            if canLoadMore {
+                HomeLoadMoreButton(
+                    title: loadMoreTitle,
+                    isLoading: isLoadingMore,
+                    action: loadMoreAction
+                )
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -128,7 +128,7 @@ Update docs in the same change whenever you modify:
 
 - build/test commands
 - storage locations
-- feature flags like `BETA_BUILD`
+- distribution-build feature flags
 - cross-module ownership boundaries
 - threading/actor-isolation assumptions
 - output schemas consumed by tools or agents

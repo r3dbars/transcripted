@@ -21,10 +21,6 @@ class FloatingOverlayController {
         )
     }
 
-    enum SessionMode {
-        case dictation
-    }
-
     enum OverlayState {
         case idle
         case loading      // Voice model still loading — waiting for readiness
