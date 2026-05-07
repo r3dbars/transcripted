@@ -95,6 +95,34 @@ func testSentryPayloadSanitizer() {
         assertNil(sanitized["source_app"], "source app identifiers should be dropped")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeContext keeps runtime crash context coarse") {
+        let sanitized = SentryPayloadSanitizer.sanitizeContext([
+            "app_version": "1.2.5",
+            "build_version": "458",
+            "heartbeat_age_bucket": "15_59s",
+            "last_event": "clean_shutdown",
+            "os_major": "26",
+            "previous_clean_shutdown": "true",
+            "session_active": "false",
+            "session_kind": "none",
+            "session_stage": "idle",
+            "transcript_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
+            "error": "private raw failure",
+        ])
+
+        assertEqual(sanitized["app_version"], "1.2.5", "app version should remain")
+        assertEqual(sanitized["build_version"], "458", "build version should remain")
+        assertEqual(sanitized["heartbeat_age_bucket"], "15_59s", "heartbeat bucket should remain")
+        assertEqual(sanitized["last_event"], "clean_shutdown", "last event should remain")
+        assertEqual(sanitized["os_major"], "26", "OS major should remain")
+        assertEqual(sanitized["previous_clean_shutdown"], "true", "clean shutdown state should remain")
+        assertEqual(sanitized["session_active"], "false", "session activity should remain")
+        assertEqual(sanitized["session_kind"], "none", "session kind should remain")
+        assertEqual(sanitized["session_stage"], "idle", "session stage should remain")
+        assertNil(sanitized["transcript_path"], "transcript paths should still be dropped")
+        assertNil(sanitized["error"], "free-form runtime errors should still be dropped")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts emails hostnames and non-home paths") {
         let input = "Contact me at person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)
