@@ -418,42 +418,14 @@ public class TranscriptionTaskManager: ObservableObject {
         lastSavedTranscriptURL = url
         let name = url.deletingPathExtension().lastPathComponent
         lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-        guard let yaml = readYAMLFrontmatter(from: url) else { return }
-        var speakers = 0
-        for line in yaml.components(separatedBy: "\n") {
-            let parts = line.split(separator: ":", maxSplits: 1).map { String($0).trimmingCharacters(in: .whitespaces) }
-            guard parts.count == 2 else { continue }
-            switch parts[0] {
-            case "title": lastSavedTitle = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            case "duration": lastSavedDuration = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            case "mic_speakers", "system_speakers": speakers += Int(parts[1]) ?? 0
-            default: break
-            }
+        guard let values = try? TranscriptFrontmatter.readValues(from: url) else { return }
+
+        if let title = values["title"] {
+            lastSavedTitle = title
         }
-        lastSavedSpeakerCount = speakers
-    }
-
-    private func readYAMLFrontmatter(from url: URL, chunkSize: Int = 2048, maxBytes: Int = 64 * 1024) -> String? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-
-        var data = Data()
-        let closingMarker = Data("\n---\n".utf8)
-
-        while data.count < maxBytes {
-            let remaining = maxBytes - data.count
-            let chunk = handle.readData(ofLength: min(chunkSize, remaining))
-            guard !chunk.isEmpty else { break }
-            data.append(chunk)
-
-            if data.starts(with: Data("---".utf8)),
-               let endRange = data.range(of: closingMarker, in: 3..<data.count),
-               let raw = String(data: data[..<endRange.lowerBound], encoding: .utf8) {
-                return String(raw.dropFirst(4))
-            }
-        }
-
-        return nil
+        lastSavedDuration = values["duration"]
+        lastSavedSpeakerCount = (Int(values["mic_speakers"] ?? "") ?? 0)
+            + (Int(values["system_speakers"] ?? "") ?? 0)
     }
 
     func scheduleStatusReset(delay: TimeInterval = 3) {

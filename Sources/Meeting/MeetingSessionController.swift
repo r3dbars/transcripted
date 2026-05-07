@@ -1603,14 +1603,14 @@ final class MeetingSessionController: ObservableObject {
     private func savedTranscriptAnalyticsProperties() -> [String: String] {
         guard let url = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL,
               let raw = try? String(contentsOf: url, encoding: .utf8),
-              let values = transcriptFrontmatterValues(from: raw) else {
+              let values = TranscriptFrontmatter.values(in: raw) else {
             return [:]
         }
 
         var properties: [String: String] = [:]
 
         if let duration = values["duration"],
-           let durationSeconds = transcriptDurationSeconds(from: duration) {
+           let durationSeconds = TranscriptFrontmatter.durationSeconds(from: duration) {
             properties["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: Double(durationSeconds))
         }
 
@@ -1625,39 +1625,6 @@ final class MeetingSessionController: ObservableObject {
         }
 
         return properties
-    }
-
-    private func transcriptFrontmatterValues(from raw: String) -> [String: String]? {
-        guard raw.hasPrefix("---\n"),
-              let endRange = raw.range(
-                of: "\n---\n",
-                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
-              ) else {
-            return nil
-        }
-
-        let frontmatter = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
-        var values: [String: String] = [:]
-        for line in frontmatter.components(separatedBy: "\n") {
-            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-        }
-        return values
-    }
-
-    private func transcriptDurationSeconds(from value: String) -> Int? {
-        let parts = value.split(separator: ":").compactMap { Int($0) }
-        switch parts.count {
-        case 2:
-            return parts[0] * 60 + parts[1]
-        case 3:
-            return parts[0] * 3600 + parts[1] * 60 + parts[2]
-        default:
-            return nil
-        }
     }
 
     /// Snapshot capture health before the stop call, since the system-audio

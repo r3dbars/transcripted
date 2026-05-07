@@ -94,84 +94,54 @@ public enum TranscriptScanner {
         var actionItemsCount = 0
         var captureID: String?
 
-        // Check for YAML frontmatter
-        if content.hasPrefix("---") {
-            if let endIndex = content.range(of: "---", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) {
-                let yaml = String(content[content.index(content.startIndex, offsetBy: 3)..<endIndex.lowerBound])
+        if let values = TranscriptFrontmatter.values(in: content) {
+            if let parsedDate = TranscriptFrontmatter.date(values: values) {
+                date = parsedDate
+            }
 
-                // Parse YAML fields
-                let lines = yaml.components(separatedBy: .newlines)
-                for line in lines {
-                    let parts = line.split(separator: ":", maxSplits: 1)
-                    guard parts.count == 2 else { continue }
-
-                    let key = String(parts[0]).trimmingCharacters(in: .whitespaces)
-                    // Security: trim only surrounding quotes rather than stripping all quotes (avoids mangling embedded escaped-quote values)
-                    let value = String(parts[1]).trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-
-                    switch key {
-                    case "date":
-                        let dateFormatter = DateFormatter()
-                        dateFormatter.dateFormat = "yyyy-MM-dd"
-                        if let parsedDate = dateFormatter.date(from: value) {
-                            date = parsedDate
-                        }
-
-                    case "time":
-                        // Combine with existing date
-                        let timeFormatter = DateFormatter()
-                        timeFormatter.dateFormat = "HH:mm:ss"
-                        if let time = timeFormatter.date(from: value) {
-                            let calendar = Calendar.current
-                            let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: time)
-                            date = calendar.date(bySettingHour: timeComponents.hour ?? 0,
-                                                minute: timeComponents.minute ?? 0,
-                                                second: timeComponents.second ?? 0,
-                                                of: date) ?? date
-                        }
-
-                    case "duration":
-                        // Parse "MM:SS" format
-                        let durationParts = value.split(separator: ":")
-                        if durationParts.count == 2 {
-                            let minutes = Int(durationParts[0]) ?? 0
-                            let seconds = Int(durationParts[1]) ?? 0
-                            durationSeconds = minutes * 60 + seconds
-                        }
-
-                    case "total_word_count":
-                        wordCount = Int(value) ?? 0
-
-                    case "mic_speakers", "system_speakers":
-                        speakerCount += Int(value) ?? 0
-
-                    case "processing_time":
-                        // Parse "X.Xs" format
-                        let numStr = value.replacingOccurrences(of: "s", with: "")
-                        if let seconds = Double(numStr) {
-                            processingTimeMs = Int(seconds * 1000)
-                        }
-
-                    case "action_items":
-                        actionItemsCount = Int(value) ?? 0
-
-                    case "capture_id", "transcript_id":
-                        // Security: cap length to prevent unbounded strings from an adversarially
-                        // crafted transcript file from being stored in the stats database.
-                        // A legitimate UUID is 36 chars; 256 gives generous slack for any future formats.
-                        if value.count > 256 {
-                            AppLogger.pipeline.warning("TranscriptScanner: oversized capture_id truncated", [
-                                "path": fileURL.lastPathComponent,
-                                "length": "\(value.count)"
-                            ])
-                        }
-                        captureID = String(value.prefix(256))
-
-                    default:
-                        break
-                    }
+            if let timeValue = values["time"] {
+                let timeFormatter = DateFormatter()
+                timeFormatter.dateFormat = "HH:mm:ss"
+                if let time = timeFormatter.date(from: timeValue) {
+                    let calendar = Calendar.current
+                    let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: time)
+                    date = calendar.date(
+                        bySettingHour: timeComponents.hour ?? 0,
+                        minute: timeComponents.minute ?? 0,
+                        second: timeComponents.second ?? 0,
+                        of: date
+                    ) ?? date
                 }
+            }
+
+            if let duration = TranscriptFrontmatter.durationSeconds(from: values["duration"]) {
+                durationSeconds = duration
+            }
+
+            wordCount = Int(values["total_word_count"] ?? "") ?? wordCount
+            speakerCount = (Int(values["mic_speakers"] ?? "") ?? 0)
+                + (Int(values["system_speakers"] ?? "") ?? 0)
+
+            if let processingTime = values["processing_time"] {
+                let numStr = processingTime.replacingOccurrences(of: "s", with: "")
+                if let seconds = Double(numStr) {
+                    processingTimeMs = Int(seconds * 1000)
+                }
+            }
+
+            actionItemsCount = Int(values["action_items"] ?? "") ?? actionItemsCount
+
+            if let rawCaptureID = values["transcript_id"] ?? values["capture_id"] {
+                // Security: cap length to prevent unbounded strings from an adversarially
+                // crafted transcript file from being stored in the stats database.
+                // A legitimate UUID is 36 chars; 256 gives generous slack for any future formats.
+                if rawCaptureID.count > 256 {
+                    AppLogger.pipeline.warning("TranscriptScanner: oversized capture_id truncated", [
+                        "path": fileURL.lastPathComponent,
+                        "length": "\(rawCaptureID.count)"
+                    ])
+                }
+                captureID = String(rawCaptureID.prefix(256))
             }
         }
 

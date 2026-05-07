@@ -1,5 +1,8 @@
 import AVFoundation
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 protocol MeetingAudioFileConverting {
     func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws
@@ -55,12 +58,6 @@ enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
     private static let staleTemporaryM4AAge: TimeInterval = 10 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
-    private static let transcriptDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
 
     @discardableResult
     static func processExistingRetainedAudio(
@@ -356,7 +353,7 @@ enum MeetingAudioStorageManager {
 
     private static func isTranscriptedMeetingTranscript(_ raw: String) -> Bool {
         guard raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"),
-              let values = frontmatterValues(in: raw),
+              let values = TranscriptFrontmatter.values(in: raw),
               values["capture_type"]?.lowercased() == "meeting" else {
             return false
         }
@@ -366,7 +363,7 @@ enum MeetingAudioStorageManager {
     }
 
     private static func transcriptReferenceDate(for url: URL, raw: String) -> Date {
-        if let frontmatterDate = frontmatterRecordedDate(in: raw) {
+        if let frontmatterDate = TranscriptFrontmatter.recordedAt(in: raw) {
             return frontmatterDate
         }
 
@@ -374,41 +371,9 @@ enum MeetingAudioStorageManager {
         return values?.creationDate ?? values?.contentModificationDate ?? Date()
     }
 
-    private static func frontmatterRecordedDate(in raw: String) -> Date? {
-        guard let values = frontmatterValues(in: raw) else { return nil }
-        guard let date = values["date"], let time = values["time"] else { return nil }
-        return transcriptDateFormatter.date(from: "\(date) \(time)")
-    }
-
-    private static func frontmatterValues(in raw: String) -> [String: String]? {
-        guard let lines = frontmatterLines(in: raw) else { return nil }
-        var values: [String: String] = [:]
-        for line in lines {
-            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-        }
-        return values
-    }
-
     private static func isValidTranscriptIdentifier(_ value: String?) -> Bool {
         guard let value else { return false }
         return UUID(uuidString: value) != nil
-    }
-
-    private static func frontmatterLines(in raw: String) -> [String]? {
-        guard raw.hasPrefix("---\n"),
-              let endRange = raw.range(
-                of: "\n---\n",
-                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
-              ) else {
-            return nil
-        }
-
-        let frontmatterText = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
-        return frontmatterText.components(separatedBy: "\n")
     }
 
     private static func isWAVFile(_ url: URL, fileManager: FileManager) -> Bool {
