@@ -60,6 +60,47 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(context["session_stage"], "transcribing", "context should keep coarse session stage")
     }
 
+    runSuite("RuntimeDiagnosticsStore current Sentry context stays privacy-safe and stable") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "launch-secret",
+            appVersion: "1.2.5",
+            buildVersion: "458",
+            osMajor: 26,
+            cleanShutdown: true,
+            startedAt: Date(timeIntervalSince1970: 3_000),
+            updatedAt: Date(timeIntervalSince1970: 3_015),
+            lastEvent: "clean_shutdown",
+            sessionKind: "none",
+            sessionStage: "idle",
+            sessionActive: false
+        )
+
+        let context = RuntimeDiagnosticsStore.contextForCurrentSession(
+            marker: marker,
+            now: Date(timeIntervalSince1970: 3_020)
+        )
+
+        assertEqual(
+            Set(context.keys),
+            [
+                "app_version",
+                "build_version",
+                "heartbeat_age_bucket",
+                "last_event",
+                "os_major",
+                "previous_clean_shutdown",
+                "session_active",
+                "session_kind",
+                "session_stage",
+            ],
+            "current Sentry context should stay limited to coarse runtime keys"
+        )
+        assertEqual(context["previous_clean_shutdown"], "true", "clean shutdown state should survive as a coarse boolean")
+        assertNil(context["launch_id"], "launch IDs should not leak into crash context")
+        assertNil(context["started_at"], "raw start timestamps should not leak into crash context")
+        assertNil(context["updated_at"], "raw heartbeat timestamps should not leak into crash context")
+    }
+
     runSuite("RuntimeDiagnosticsStore round-trips marker files") {
         let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RuntimeDiagnosticsStoreTests-\(UUID().uuidString)", isDirectory: true)
