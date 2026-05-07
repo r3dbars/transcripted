@@ -14,10 +14,10 @@ final class RuntimeDiagnostics {
         guard marker == nil else { return }
 
         if let previous = RuntimeDiagnosticsStore.load(from: markerURL),
-           !previous.cleanShutdown {
+           RuntimeDiagnosticsStore.shouldReportUncleanShutdown(previous: previous) {
             let context = RuntimeDiagnosticsStore.contextForUncleanShutdown(previous: previous)
             EventReporter.shared.capture(
-                level: .error,
+                level: .warning,
                 engine: "app",
                 event: "unclean_shutdown_detected",
                 message: "Previous app session did not shut down cleanly",
@@ -42,6 +42,9 @@ final class RuntimeDiagnostics {
         marker.lastEvent = "clean_shutdown"
         self.marker = marker
         RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        CrashReporter.setRuntimeDiagnosticsContext(
+            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
+        )
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
     }
@@ -139,5 +142,8 @@ final class RuntimeDiagnostics {
         marker.updatedAt = Date()
         self.marker = marker
         RuntimeDiagnosticsStore.save(marker, to: markerURL)
+        CrashReporter.setRuntimeDiagnosticsContext(
+            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
+        )
     }
 }

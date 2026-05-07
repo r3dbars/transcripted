@@ -70,4 +70,32 @@ func testSpeakerNamingPolicy() {
         assertNil(mapping.identifiedName, "disputed profiles should not auto-apply")
         assertEqual(mapping.displayName, "Speaker 0", "disputed profiles should stay generic until repaired")
     }
+
+    runSuite("SpeakerNamingPolicy keeps row-level You edits as normal mic renames") {
+        let entry = SpeakerNamingEntry(
+            id: UUID(),
+            diarizerSpeakerId: "1",
+            channel: .mic,
+            clipURL: URL(fileURLWithPath: "/tmp/speaker-row.wav"),
+            sampleText: "I am in the room.",
+            currentName: "Speaker 1",
+            matchSimilarity: nil,
+            needsNaming: true,
+            needsConfirmation: false
+        )
+
+        let update = SpeakerNamingPolicy.typedNameUpdate(
+            entry: entry,
+            typedName: "You",
+            optionsByLabel: [:]
+        )
+
+        assertEqual(update?.newName, "You", "row-level owner labels should still save the typed name")
+        assertEqual(update?.previousName, "Speaker 1", "row-level owner labels should preserve the previous mic name")
+        if case .corrected? = update?.action {
+            assertTrue(true, "manually typing You should stay a row-level correction")
+        } else {
+            assertTrue(false, "manually typing You should not collapse the whole local speaker set")
+        }
+    }
 }

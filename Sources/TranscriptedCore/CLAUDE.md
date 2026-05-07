@@ -6,7 +6,7 @@
 
 ## Subsystems (64 Swift files)
 
-- `Audio/` (17 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
+- `Audio/` (18 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (2 files) — shared app logger and JSONL file logger
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
@@ -31,6 +31,7 @@ These seams exist specifically so the app can embed the library without adopting
 
 - `Audio` can switch between the legacy CoreAudio path and the newer ScreenCaptureKit system-audio path through `SystemAudioCaptureEngine`.
 - `AudioCaptureStartState` is the canonical readiness policy for live meeting capture. Meeting capture should not report success until mic recording is running and the system-audio file exists.
+- `MeetingInputDeviceSelectionPolicy` avoids using Bluetooth headset input for meeting capture when a built-in mic fallback is available, so WebRTC-style playback downgrades do not get worse.
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.
 - `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
@@ -82,11 +83,13 @@ Also run when the package seam changes:
 Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
+- `Tests/TranscriptedCoreTests/AudioDiagnosticsSnapshotTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
 - `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
 - `Tests/TranscriptedCoreTests/FailedTranscriptionManagerTests.swift`
 - `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
+- `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/RealtimeAGCTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingAudioArchiverTests.swift`

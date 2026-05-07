@@ -74,6 +74,17 @@ final class CrashReporter {
         )
     }
 
+    static func setRuntimeDiagnosticsContext(_ context: [String: String]) {
+        guard Self.isAvailable, CrashReportingPreferences.isEnabled() else { return }
+
+        let sanitizedContext = SentryPayloadSanitizer.sanitizeContext(context)
+        guard !sanitizedContext.isEmpty else { return }
+
+        SentrySDK.configureScope { scope in
+            scope.setContext(value: sanitizedContext, key: "runtime")
+        }
+    }
+
     @discardableResult
     func captureSupportDiagnosticEvent(extra: [String: String]) -> String? {
         captureMessageEvent(

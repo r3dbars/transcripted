@@ -92,4 +92,43 @@ enum RuntimeDiagnosticsStore {
             "session_stage": marker.sessionStage,
         ]
     }
+
+    static func contextForCurrentSession(
+        marker: RuntimeDiagnosticsMarker,
+        now: Date = Date()
+    ) -> [String: String] {
+        [
+            "app_version": marker.appVersion,
+            "build_version": marker.buildVersion,
+            "heartbeat_age_bucket": heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now),
+            "last_event": marker.lastEvent,
+            "os_major": "\(marker.osMajor)",
+            "previous_clean_shutdown": "\(marker.cleanShutdown)",
+            "session_active": "\(marker.sessionActive)",
+            "session_kind": marker.sessionKind,
+            "session_stage": marker.sessionStage,
+        ]
+    }
+
+    static func shouldReportUncleanShutdown(
+        previous marker: RuntimeDiagnosticsMarker,
+        now: Date = Date()
+    ) -> Bool {
+        guard !marker.cleanShutdown else { return false }
+
+        if marker.sessionActive {
+            return true
+        }
+
+        if marker.sessionKind != "none" || marker.sessionStage != "idle" {
+            return true
+        }
+
+        let launchOnlyEvents: Set<String> = ["app_launched", "heartbeat"]
+        if launchOnlyEvents.contains(marker.lastEvent) {
+            return false
+        }
+
+        return heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now) != "lt_15s"
+    }
 }

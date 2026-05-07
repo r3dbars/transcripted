@@ -430,13 +430,6 @@ enum MeetingAudioStorageManager {
         return UUID(uuidString: uuidString) != nil
     }
 
-    private static func hasNonEmptyFile(at url: URL, fileManager: FileManager) -> Bool {
-        guard fileManager.fileExists(atPath: url.path) else { return false }
-        guard !isSymbolicLink(url, fileManager: fileManager) else { return false }
-        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-        return values?.isRegularFile == true && (values?.fileSize ?? 0) > 0
-    }
-
     private static func isSafeNonSymlinkDirectory(_ url: URL, fileManager: FileManager) -> Bool {
         guard !isSymbolicLink(url, fileManager: fileManager) else { return false }
         var isDirectory: ObjCBool = false

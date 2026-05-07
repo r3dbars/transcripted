@@ -1395,6 +1395,36 @@ final class MeetingSessionController: ObservableObject {
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
             let transcriptionTrigger = activeTranscriptionTrigger
+            let failureKind = MeetingFailureKind.classify(message: message)
+            if failureKind == .recordingTooShort {
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "meeting_transcript_skipped",
+                    message: "Meeting transcription skipped because the recording was too short",
+                    context: baseDiagnosticsContext(
+                        extra: [
+                            "failure_kind": failureKind.rawValue,
+                            "queue_depth": "\(queuedTranscriptionJobs.count)",
+                            "trigger": transcriptionTrigger.rawValue
+                        ]
+                    )
+                )
+                AnalyticsReporter.track(
+                    "meeting_transcript_skipped",
+                    properties: meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging(
+                        [
+                            "failure_kind": failureKind.rawValue,
+                            "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                            "trigger": transcriptionTrigger.rawValue,
+                        ],
+                        uniquingKeysWith: { _, new in new }
+                    )
+                )
+                Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "recording_too_short")
+                finalizeBackgroundTranscriptionStateIfNeeded()
+                return
+            }
+
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",

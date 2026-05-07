@@ -13,11 +13,14 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (51 Swift files)
+## Files (54 Swift files)
 
 ### Overlay/
 
 - `Overlay/DictationMeterPolicy.swift` — tiny presentation policy that decides when the dictation waveform meter should render and clamps its displayed level
+- `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
+- `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts
+- `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
 - `Overlay/DictationSessionController.swift` — dictation session orchestration; removed draft-mode methods are stubs
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
@@ -34,6 +37,8 @@ dictation overlay and the meeting prompt / recording overlay.
 `DictationMeterPolicy` keeps the live meter visibility rule out of view code, so
 UI tweaks to when the waveform shows up should land there instead of being
 re-implemented in controllers or views.
+The other dictation overlay policy files own startup/loading and no-speech copy
+so tiny transient states do not get duplicated inside controllers.
 `OverlayHeaderView` owns the inline dictation stop affordance and centered
 listening layout, while `OverlayRootView` decides when the pill should expand
 into a taller loading or error state.
@@ -143,3 +148,18 @@ Manual checks:
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
 - settings window still opens correctly
+
+Relevant direct coverage:
+
+- `Tests/AgentConnectionGuideTests.swift`
+- `Tests/DictationMeterPolicyTests.swift`
+- `Tests/DictationMicrophoneLoadingPresentationPolicyTests.swift`
+- `Tests/DictationNoSpeechPresentationPolicyTests.swift`
+- `Tests/DictationRecordingStartOverlayPolicyTests.swift`
+- `Tests/DictationSoundsTests.swift`
+- `Tests/FeedbackIssueBuilderTests.swift`
+- `Tests/FirstRunExperienceTests.swift`
+- `Tests/HomeMeetingPreviewFormatterTests.swift`
+- `Tests/MeetingAudioArchiveResolverTests.swift`
+- `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
+- `Tests/SupportDiagnosticsBundleTests.swift`

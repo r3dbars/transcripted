@@ -252,6 +252,47 @@ final class DataDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveIgnoresManifestWhenDirectoriesDoNotMatchCaptureLibrary() throws {
+        let manifestRoot = tempHome.appendingPathComponent("manifest-captures", isDirectory: true)
+        let unrelatedMeetings = tempHome.appendingPathComponent("unrelated-meetings", isDirectory: true)
+        let unrelatedDictations = tempHome.appendingPathComponent("unrelated-dictations", isDirectory: true)
+        let defaultCaptures = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("captures", isDirectory: true)
+        let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
+        let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
+        let manifestURL = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("mcp-directories.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        {
+          "version": 1,
+          "captureLibraryDirectory": "\(manifestRoot.path)",
+          "meetingsDirectory": "\(unrelatedMeetings.path)",
+          "dictationsDirectory": "\(unrelatedDictations.path)",
+          "updatedAt": "2026-05-06T00:00:00Z"
+        }
+        """.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            defaultMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            defaultDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveUsesAppCaptureLibraryPreferenceWhenManifestIsMissing() throws {
         let customRoot = tempHome.appendingPathComponent("preference-captures", isDirectory: true)
         let preferencesURL = tempHome

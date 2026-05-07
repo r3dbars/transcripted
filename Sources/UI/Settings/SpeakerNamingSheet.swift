@@ -694,35 +694,10 @@ final class SpeakerRowView: NSView {
         }
 
         guard !typed.isEmpty else { return nil }
-
-        if let option = knownPeopleOption(matching: typed) {
-            return SpeakerNameUpdate(
-                persistentSpeakerId: entry.id,
-                diarizerSpeakerId: entry.diarizerSpeakerId,
-                channel: entry.channel,
-                newName: option.displayName,
-                action: .merged(targetProfileId: option.id)
-            )
-        }
-
-        let action: SpeakerNameUpdate.NamingAction
-        if entry.suggestedProfileId != nil {
-            action = .named
-        } else if let current = entry.currentName, !current.isEmpty {
-            action = typed.caseInsensitiveCompare(current) == .orderedSame
-                ? .confirmed
-                : .corrected
-        } else {
-            action = .named
-        }
-
-        return SpeakerNameUpdate(
-            persistentSpeakerId: entry.id,
-            diarizerSpeakerId: entry.diarizerSpeakerId,
-            channel: entry.channel,
-            newName: typed,
-            previousName: entry.currentName,
-            action: action
+        return SpeakerNamingPolicy.typedNameUpdate(
+            entry: entry,
+            typedName: typed,
+            optionsByLabel: knownPeopleByLabel
         )
     }
 

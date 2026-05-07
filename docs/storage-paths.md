@@ -101,6 +101,6 @@ can follow the user-selected capture library.
 
 The standalone tools do not all resolve paths the same way:
 
-- `TranscriptedCLI` reads `~/Library/Application Support/Transcripted/captures/{meetings,dictations}/` first, then also merges legacy Draft `.../transcripts/` folders and `~/Documents/Transcripted/` when those folders still contain Markdown captures
+- `TranscriptedCLI` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current Transcripted capture folders, then legacy Draft `.../transcripts/`, then `~/Documents/Transcripted/`; explicit `--data-dir`, `--meetings-dir`, `--dictations-dir`, or matching env vars still override this
 - `TranscriptedMCP` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current-plus-legacy read order. It keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default; if `TRANSCRIPTED_DATA_DIR` is set, it instead keeps the index in that shared root unless `TRANSCRIPTED_INDEX_DIR` is also set
 - `TranscriptedQA` now defaults to the current Transcripted meetings/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
