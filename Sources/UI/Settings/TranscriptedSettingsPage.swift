@@ -57,7 +57,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .dictations:
             return "Paste-back and sound cues."
         case .people:
-            return "Speaker profiles and duplicates."
+            return "Deferred speaker names and duplicates."
         case .storage:
             return "Where your files live."
         case .connectAgent:

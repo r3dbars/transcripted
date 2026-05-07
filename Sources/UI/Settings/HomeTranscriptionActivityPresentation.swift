@@ -39,7 +39,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 symbolName: "waveform.badge.magnifyingglass",
                 title: "Transcribing audio",
                 status: displayStatus.statusText,
-                detail: "Transcripted is working through the recording now. Longer files can take a bit, and speaker review will open automatically if it is needed.",
+                detail: "Transcripted is working through the recording now. Longer files can take a bit, and speaker review can be done now or later in People.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -49,7 +49,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 symbolName: "square.and.arrow.down.fill",
                 title: "Saving transcript",
                 status: displayStatus.statusText,
-                detail: "Transcripted is writing the transcript now. If it found multiple people on the room mic, the speaker review window may appear next.",
+                detail: "Transcripted is writing the transcript now. If speaker review appears next, you can save names or choose Review Later.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -62,9 +62,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
             )
             let detail: String
             if let transcriptName {
-                detail = "\"\(transcriptName)\" is ready. Open it now, or keep going and let Transcripted prompt for speaker review if that step is needed."
+                detail = "\"\(transcriptName)\" is ready. Open it now, or finish any deferred speaker names later in People."
             } else {
-                detail = "Your transcript is ready. Open it now, or keep going and let Transcripted prompt for speaker review if that step is needed."
+                detail = "Your transcript is ready. Open it now, or finish any deferred speaker names later in People."
             }
 
             return HomeTranscriptionActivityPresentation(

@@ -6,8 +6,8 @@
 //
 // Pure AppKit — modal sheet over a borderless window. One text field per
 // speaker, with a "Save" button that builds `[SpeakerNameUpdate]` and fires
-// the completion handler. Cancel sends an empty array (Core treats that as
-// "keep the generic Speaker N labels").
+// the completion handler. "Review Later" sends an empty array; Core keeps the
+// transcript generic and preserves local review state for Settings > People.
 
 import AppKit
 import Combine
@@ -75,7 +75,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Review speakers"
+        window.title = "Name speakers"
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
@@ -117,12 +117,12 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 @MainActor
 final class SpeakerNamingContentView: NSView {
 
-    private let titleLabel = NSTextField(labelWithString: "Review the speakers from this meeting")
-    private let subtitleLabel = NSTextField(labelWithString: "Confirm suggestions, link voices to existing people, or leave them unknown for now.")
+    private let titleLabel = NSTextField(labelWithString: "Name the speakers from this meeting")
+    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name speakers now, or review them later in Settings > People.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
-    private let saveButton = NSButton(title: "Save speaker decisions", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "Skip", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Save names", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Review Later", target: nil, action: nil)
 
     // Local (mic) section header + "Keep as You" batch toggle
     private let localSectionLabel = NSTextField(labelWithString: "People in the room")
@@ -177,6 +177,7 @@ final class SpeakerNamingContentView: NSView {
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
+        cancelButton.toolTip = "Keep the transcript generic and finish speaker names later in Settings > People"
         addSubview(cancelButton)
 
         // Section headers live inside the document view so they scroll with rows.
@@ -538,6 +539,9 @@ final class SpeakerRowView: NSView {
         confirmButton.target = self
         confirmButton.action = #selector(handleConfirm)
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
+        if let current = entry.currentName, !current.isEmpty {
+            confirmButton.title = "Confirm \(current)"
+        }
         addSubview(confirmButton)
 
         discardButton.bezelStyle = .inline
@@ -643,7 +647,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName {
             nameField.stringValue = current
         }
-        confirmButton.title = "Using Suggested"
+        confirmButton.title = "Confirmed"
         updateStatePresentation()
     }
 

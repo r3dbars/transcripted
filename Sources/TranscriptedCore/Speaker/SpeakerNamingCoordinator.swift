@@ -9,6 +9,12 @@ extension TranscriptionTaskManager {
         let mutations: [PlannedSpeakerMutation]
     }
 
+    private struct DeferredReviewPlan {
+        let redirectedSpeakerIdsByKey: [String: UUID]
+        let reviewClipSpeakerIdsByKey: [String: UUID]
+        let mutations: [PlannedSpeakerMutation]
+    }
+
     private enum PlannedSpeakerMutation {
         case merge(sourceId: UUID, into: UUID)
         case setDisplayName(id: UUID, name: String)
@@ -36,6 +42,7 @@ extension TranscriptionTaskManager {
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
+        let clipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
         })
@@ -98,12 +105,24 @@ extension TranscriptionTaskManager {
                 return
             }
 
+            let deferredReviewPlan = updates.isEmpty
+                ? Self.planDeferredReview(clips)
+                : nil
+
             var didFinalizeTranscript = regularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
                 updates: plannedChanges.resolvedUpdates,
                 transcriptionResult: transcriptionResult,
                 speakerStore: speakerDB
             )
+
+            if didFinalizeTranscript, let deferredReviewPlan {
+                didFinalizeTranscript = TranscriptSaver.markSpeakerReviewDeferred(
+                    transcriptURL: resolvedURL,
+                    entries: clips,
+                    redirectedSpeakerIdsByKey: deferredReviewPlan.redirectedSpeakerIdsByKey
+                )
+            }
 
             if didFinalizeTranscript && !collapsedUpdates.isEmpty {
                 didFinalizeTranscript = TranscriptSaver.collapseMicSpeakersToYou(
@@ -121,9 +140,15 @@ extension TranscriptionTaskManager {
 
             if didFinalizeTranscript {
                 Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                if let deferredReviewPlan {
+                    Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                }
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
                     speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
-                    SpeakerClipExtractor.deletePersistedClip(for: update.persistentSpeakerId)
+                    SpeakerClipExtractor.deletePersistedClip(
+                        for: update.persistentSpeakerId,
+                        clipsDirectory: clipsDirectory
+                    )
                     AppLogger.speakers.info("Collapsed mic speaker — deleted newly-created profile", [
                         "profileId": update.persistentSpeakerId.uuidString,
                         "diarizerSpeakerId": update.diarizerSpeakerId
@@ -132,7 +157,15 @@ extension TranscriptionTaskManager {
                 Self.applyDiscardedSpeakerActions(
                     discardedUpdates,
                     clipsBySpeakerId: clipsBySpeakerId,
-                    speakerDB: speakerDB
+                    speakerDB: speakerDB,
+                    clipsDirectory: clipsDirectory
+                )
+                Self.persistReviewClips(
+                    clips,
+                    speakerIdsByKey: deferredReviewPlan?.reviewClipSpeakerIdsByKey
+                        ?? Self.reviewClipSpeakerIdsByKey(from: plannedChanges.resolvedUpdates),
+                    excludingSpeakerIds: Self.nonRetainedReviewSpeakerIds(from: collapsedUpdates + discardedUpdates),
+                    clipsDirectory: clipsDirectory
                 )
             }
 
@@ -345,10 +378,47 @@ extension TranscriptionTaskManager {
         }
     }
 
+    nonisolated private static func planDeferredReview(_ clips: [SpeakerNamingEntry]) -> DeferredReviewPlan {
+        var redirectedSpeakerIdsByKey: [String: UUID] = [:]
+        var reviewClipSpeakerIdsByKey: [String: UUID] = [:]
+        var mutations: [PlannedSpeakerMutation] = []
+
+        for clip in clips {
+            let key = clip.channel.speakerKey(diarizerSpeakerId: clip.diarizerSpeakerId)
+            guard let matchedProfile = clip.matchedProfileSnapshot,
+                  let embedding = clip.sessionEmbedding else {
+                reviewClipSpeakerIdsByKey[key] = clip.id
+                continue
+            }
+
+            let deferredProfileId = UUID()
+            redirectedSpeakerIdsByKey[key] = deferredProfileId
+            reviewClipSpeakerIdsByKey[key] = deferredProfileId
+            mutations.append(.restoreProfile(matchedProfile))
+            mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: deferredProfileId))
+        }
+
+        return DeferredReviewPlan(
+            redirectedSpeakerIdsByKey: redirectedSpeakerIdsByKey,
+            reviewClipSpeakerIdsByKey: reviewClipSpeakerIdsByKey,
+            mutations: mutations
+        )
+    }
+
+    nonisolated private static func reviewClipSpeakerIdsByKey(from updates: [SpeakerNameUpdate]) -> [String: UUID] {
+        Dictionary(uniqueKeysWithValues: updates.map { update in
+            (
+                update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId),
+                update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId
+            )
+        })
+    }
+
     nonisolated private static func applyDiscardedSpeakerActions(
         _ updates: [SpeakerNameUpdate],
         clipsBySpeakerId: [String: SpeakerNamingEntry],
-        speakerDB: any SpeakerStore
+        speakerDB: any SpeakerStore,
+        clipsDirectory: URL
     ) {
         for update in updates {
             let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
@@ -369,7 +439,10 @@ extension TranscriptionTaskManager {
                 ])
             } else if entry.currentName == nil && entry.matchSimilarity == nil {
                 speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
-                SpeakerClipExtractor.deletePersistedClip(for: update.persistentSpeakerId)
+                SpeakerClipExtractor.deletePersistedClip(
+                    for: update.persistentSpeakerId,
+                    clipsDirectory: clipsDirectory
+                )
                 AppLogger.speakers.info("Discarded newly-created speaker profile", [
                     "profileId": update.persistentSpeakerId.uuidString,
                     "diarizerSpeakerId": update.diarizerSpeakerId
@@ -380,6 +453,27 @@ extension TranscriptionTaskManager {
                     "diarizerSpeakerId": update.diarizerSpeakerId
                 ])
             }
+        }
+    }
+
+    nonisolated private static func nonRetainedReviewSpeakerIds(from updates: [SpeakerNameUpdate]) -> Set<UUID> {
+        Set(updates.map(\.persistentSpeakerId))
+    }
+
+    nonisolated private static func persistReviewClips(
+        _ clips: [SpeakerNamingEntry],
+        speakerIdsByKey: [String: UUID],
+        excludingSpeakerIds excludedSpeakerIds: Set<UUID>,
+        clipsDirectory: URL
+    ) {
+        for clip in clips where !excludedSpeakerIds.contains(clip.id) {
+            let key = clip.channel.speakerKey(diarizerSpeakerId: clip.diarizerSpeakerId)
+            let speakerId = speakerIdsByKey[key] ?? clip.id
+            SpeakerClipExtractor.persistClip(
+                from: clip.clipURL,
+                speakerId: speakerId,
+                clipsDirectory: clipsDirectory
+            )
         }
     }
 

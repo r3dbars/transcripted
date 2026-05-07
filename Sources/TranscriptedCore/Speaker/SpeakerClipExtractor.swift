@@ -36,7 +36,8 @@ public enum SpeakerClipExtractor {
         sourceAudioURL: URL,
         utterances: [TranscriptionUtterance],
         channel: UtteranceChannel,
-        speakerDB: any SpeakerStore
+        speakerDB: any SpeakerStore,
+        clipsDirectory: URL = defaultClipsDirectory
     ) throws -> [ClipResult] {
 
         let audioFile = try AVAudioFile(forReading: sourceAudioURL)
@@ -74,7 +75,8 @@ public enum SpeakerClipExtractor {
                 segments: clipSegments,
                 sampleRate: sampleRate,
                 speakerId: speakerId,
-                channel: channel
+                channel: channel,
+                clipsDirectory: clipsDirectory
             )
 
             // Pick a representative text sample (longest utterance text)
@@ -190,13 +192,14 @@ public enum SpeakerClipExtractor {
         segments: [TranscriptionUtterance],
         sampleRate: Double,
         speakerId: Int,
-        channel: UtteranceChannel
+        channel: UtteranceChannel,
+        clipsDirectory: URL
     ) throws -> URL {
         guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             throw ClipError.invalidAudioFormat
         }
 
-        let tempDir = defaultClipsDirectory
+        let tempDir = clipsDirectory
         // Security: keep temporary speaker clips inside Transcripted's owner-only
         // app tmp directory instead of the process-wide temp folder, so sensitive
         // voice samples do not spill into a broader shared scratch location.
