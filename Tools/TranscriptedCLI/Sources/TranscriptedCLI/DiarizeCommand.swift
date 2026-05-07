@@ -24,6 +24,12 @@ struct Diarize: AsyncParsableCommand {
     @Flag(name: .long, help: "Output JSON with full segment data instead of RTTM.")
     var json: Bool = false
 
+    @Flag(name: .long, help: "Use the same offline diarization config as Transcripted meetings.")
+    var transcriptedDefaults: Bool = false
+
+    @Flag(name: .long, help: "Include local-only per-segment embeddings in JSON output.")
+    var includeEmbeddings: Bool = false
+
     func run() async throws {
         let audioURL = URL(fileURLWithPath: audioPath)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
@@ -34,6 +40,8 @@ struct Diarize: AsyncParsableCommand {
         let diarizerConfig: OfflineDiarizerConfig
         if let configPath = config {
             diarizerConfig = try ConfigLoader.load(from: configPath)
+        } else if transcriptedDefaults {
+            diarizerConfig = TranscriptedDiarizerConfig.make()
         } else {
             diarizerConfig = OfflineDiarizerConfig.default
         }
@@ -79,6 +87,7 @@ struct Diarize: AsyncParsableCommand {
             let endSeconds: Float
             let durationSeconds: Float
             let qualityScore: Float
+            let embedding: [Float]?
         }
         struct TimingsOutput: Encodable {
             let segmentationSeconds: Double
@@ -93,7 +102,8 @@ struct Diarize: AsyncParsableCommand {
                 startSeconds: seg.startTimeSeconds,
                 endSeconds: seg.endTimeSeconds,
                 durationSeconds: seg.endTimeSeconds - seg.startTimeSeconds,
-                qualityScore: seg.qualityScore
+                qualityScore: seg.qualityScore,
+                embedding: includeEmbeddings ? seg.embedding : nil
             )
         }
 
@@ -145,6 +155,12 @@ struct Diarize: AsyncParsableCommand {
 
     @Flag(name: .long, help: "Output JSON with full segment data instead of RTTM.")
     var json: Bool = false
+
+    @Flag(name: .long, help: "Use the same offline diarization config as Transcripted meetings.")
+    var transcriptedDefaults: Bool = false
+
+    @Flag(name: .long, help: "Include local-only per-segment embeddings in JSON output.")
+    var includeEmbeddings: Bool = false
 
     func run() async throws {
         throw ValidationError("Offline diarization dependencies are unavailable. Run `bash build-deps.sh` from the repo root, then rebuild `transcripted-cli`.")

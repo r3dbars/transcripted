@@ -1,0 +1,458 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from speaker_learning_eval import (
+    AudioSegment,
+    AudioSpeakerProfile,
+    build_duplicate_merge_review_report,
+    evaluate_audio_corpus,
+    evaluate_corpus,
+    parse_zoom_turns,
+    should_auto_accept_audio_profile,
+)
+
+
+class SpeakerLearningEvalTests(unittest.TestCase):
+    def test_parse_zoom_turns_uses_labels_without_exposing_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.txt"
+            transcript.write_text(
+                "[Speaker One] 00:00:01\n"
+                "SECRET TRANSCRIPT TEXT SHOULD NOT ENTER REPORTS\n\n"
+                "[Speaker Two] 00:00:02\n"
+                "More private transcript text\n",
+                encoding="utf-8",
+            )
+
+            turns = parse_zoom_turns(transcript)
+
+            self.assertEqual([turn.speaker_label for turn in turns], ["Speaker One", "Speaker Two"])
+
+    def test_cold_start_metrics_track_unknowns_matches_and_recognition(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Speaker A", "Speaker B", "Speaker A"])
+            self._write_meeting(root, "meeting-0002", ["Speaker A", "Speaker C"])
+            self._write_meeting(root, "meeting-0003", ["Speaker B", "Speaker C", "Speaker C"])
+
+            report = evaluate_corpus(root)
+            summary = report["summary"]
+
+            self.assertEqual(summary["meetings_evaluated"], 3)
+            self.assertEqual(summary["distinct_real_speakers"], 3)
+            self.assertEqual(summary["unknown_labels_required"], 3)
+            self.assertEqual(summary["correct_automatic_matches"], 3)
+            self.assertEqual(summary["false_matches"], 0)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 0)
+            self.assertEqual(summary["turns"]["unknown_turns"], 4)
+            self.assertEqual(summary["turns"]["correct_automatic_match_turns"], 4)
+            self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 3)
+            self.assertEqual(summary["meetings_to_first_recognition"]["max_meetings_after_first_seen"], 2)
+
+    def test_zoom_turn_timestamps_are_relative_to_first_caption(self):
+        with tempfile.TemporaryDirectory() as temp:
+            transcript = Path(temp) / "transcript.txt"
+            transcript.write_text(
+                "[Speaker One] 08:04:08\n"
+                "private text\n\n"
+                "[Speaker Two] 08:04:18\n"
+                "private text\n",
+                encoding="utf-8",
+            )
+
+            turns = parse_zoom_turns(transcript)
+
+            self.assertEqual([turn.speaker_label for turn in turns], ["Speaker One", "Speaker Two"])
+            self.assertEqual([turn.start_seconds for turn in turns], [0.0, 10.0])
+
+    def test_audio_eval_tracks_matches_duplicates_and_false_matches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Speaker A", "Speaker B"], include_audio=True)
+            self._write_meeting(root, "meeting-0002", ["Speaker A", "Speaker B"], include_audio=True)
+            self._write_meeting(root, "meeting-0003", ["Speaker C"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                data = {
+                    "meeting-0001": [
+                        ("0", 0.0, 1.0, [1.0, 0.0, 0.0]),
+                        ("1", 1.0, 2.0, [0.0, 1.0, 0.0]),
+                    ],
+                    "meeting-0002": [
+                        ("0", 0.0, 1.0, [1.0, 0.0, 0.0]),
+                        ("1", 1.0, 2.0, [0.6, 0.0, 0.8]),
+                    ],
+                    "meeting-0003": [
+                        ("0", 0.0, 1.0, [1.0, 0.0, 0.0]),
+                    ],
+                }
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id=speaker_id,
+                        start_seconds=start,
+                        end_seconds=end,
+                        quality_score=0.95,
+                        embedding=embedding,
+                    )
+                    for speaker_id, start, end, embedding in data[meeting["id"]]
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+
+            self.assertEqual(summary["meetings_evaluated"], 3)
+            self.assertEqual(summary["unknown_labels_required"], 3)
+            self.assertEqual(summary["confirmation_labels_required"], 2)
+            self.assertEqual(summary["correct_automatic_matches"], 0)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["deferred_profile_matches"], 2)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates_correct"], 1)
+            self.assertEqual(summary["duplicate_merge_candidates_wrong"], 0)
+            self.assertEqual(summary["meetings_to_first_recognition"]["recognized_speakers"], 0)
+            simulation = report["confirmation_simulation"]
+            self.assertEqual(simulation["confirmation_suggestions_total"], 2)
+            self.assertEqual(simulation["confirmation_suggestions_correct"], 1)
+            self.assertEqual(simulation["confirmation_suggestions_wrong"], 1)
+            self.assertEqual(simulation["confirmation_precision"], 0.5)
+            self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 1)
+            self.assertEqual(simulation["projected_unknown_labels_after_review"], 4)
+            self.assertIsNone(simulation["recommended_show_suggestion_threshold"])
+            filter_reports = {item["filter"]: item for item in simulation["confirmation_safety_filters"]}
+            self.assertEqual(filter_reports["current_channel_system_only"]["suggestions_shown"], 2)
+            self.assertEqual(filter_reports["current_channel_system_only"]["wrong_suggestions"], 1)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["suggestions_shown"], 1)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 1)
+            search = simulation["compound_strategy_search"]
+            self.assertEqual(search["minimum_coverage_for_candidate_strategy"], 3)
+            self.assertGreater(search["searched_strategy_count"], 0)
+            self.assertIn("best_precision_compound_strategies_min_3_suggestions", search)
+            self.assertIn("best_precision_compound_strategies_min_10_suggestions", search)
+            merge_review = report["duplicate_merge_review"]
+            self.assertEqual(merge_review["merge_candidates_total"], 1)
+            self.assertEqual(merge_review["merge_candidates_correct"], 1)
+            self.assertEqual(merge_review["merge_candidates_wrong"], 0)
+            self.assertEqual(merge_review["held_back_voice_only_candidates"], 0)
+            self.assertEqual(merge_review["projected_duplicate_reduction_upper_bound"], 1)
+            strategy_experiment = merge_review["strategy_experiment"]
+            self.assertGreater(strategy_experiment["strategy_count"], 0)
+            self.assertGreaterEqual(len(strategy_experiment["best_zero_wrong_strategies"]), 1)
+            recognition_experiment = report["auto_recognition_experiment"]
+            self.assertGreater(recognition_experiment["experiment_policy_count"], 0)
+            self.assertEqual(recognition_experiment["candidate_events_total"], 2)
+            self.assertEqual(recognition_experiment["maturity_source"], "raw_profile_maturity")
+            self.assertEqual(
+                recognition_experiment["current_product_gate_projection"]["false_automatic_matches"],
+                0,
+            )
+            self.assertGreater(len(recognition_experiment["risk_frontier_by_false_match_budget"]), 0)
+            after_merge = report["auto_recognition_after_oracle_merge_experiment"]
+            self.assertEqual(after_merge["maturity_source"], "oracle_merged_profile_maturity")
+            self.assertEqual(after_merge["candidate_events_total"], 2)
+            quality_experiment = report["auto_recognition_quality_knob_experiment"]
+            self.assertGreater(quality_experiment["experiment_policy_count"], recognition_experiment["experiment_policy_count"])
+            self.assertIn("minimum_speaker_duration_seconds", quality_experiment["knobs"])
+            self.assertIn("channel_mode", quality_experiment["knobs"])
+            self.assertIn("most_correct_auto_names", quality_experiment["best_zero_false_by_goal"])
+            self.assertIn("most_recurring_speakers", quality_experiment["best_zero_false_by_goal"])
+            self.assertNotIn("policies", quality_experiment)
+            confirmed_merge_projection = report["confirmed_merge_auto_naming_projection"]
+            self.assertEqual(confirmed_merge_projection["before"]["correct_automatic_matches"], 0)
+            self.assertEqual(confirmed_merge_projection["after_confirmed_merges"]["false_automatic_matches"], 0)
+            self.assertIn("unknown_labels_required", confirmed_merge_projection["delta"])
+            tuning_lab = report["speaker_learning_tuning_lab"]
+            self.assertEqual(tuning_lab["tested_route_count"], len(tuning_lab["routes"]))
+            self.assertIn("duplicate-review queue", tuning_lab["recommended_next_experiment"])
+
+    def test_audio_eval_only_auto_accepts_mature_high_similarity_matches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index in range(1, 7):
+                self._write_meeting(root, f"meeting-000{index}", ["Speaker A"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=[1.0, 0.0],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+
+            self.assertEqual(summary["unknown_labels_required"], 1)
+            self.assertEqual(summary["confirmation_labels_required"], 3)
+            self.assertEqual(summary["deferred_profile_matches"], 3)
+            self.assertEqual(summary["correct_automatic_matches"], 2)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["duplicate_merge_candidates"], 0)
+            simulation = report["confirmation_simulation"]
+            self.assertEqual(simulation["confirmation_suggestions_total"], 3)
+            self.assertEqual(simulation["confirmation_suggestions_correct"], 3)
+            self.assertEqual(simulation["confirmation_suggestions_wrong"], 0)
+            self.assertEqual(simulation["confirmation_precision"], 1.0)
+            self.assertEqual(simulation["projected_unknown_label_reduction_if_confirmed"], 3)
+            self.assertEqual(simulation["projected_unknown_labels_after_review"], 1)
+            self.assertEqual(simulation["recommended_show_suggestion_threshold"], 0.98)
+            filter_reports = {item["filter"]: item for item in simulation["confirmation_safety_filters"]}
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["suggestions_shown"], 2)
+            self.assertEqual(filter_reports["profile_seen_multiple_prior_meetings"]["wrong_suggestions"], 0)
+            self.assertTrue(filter_reports["profile_seen_multiple_prior_meetings"]["safe_for_confirmation_suggestion"])
+            self.assertGreaterEqual(simulation["safe_candidate_filter_count"], 1)
+            search = simulation["compound_strategy_search"]
+            self.assertGreaterEqual(search["zero_wrong_compound_strategy_min_coverage_count"], 1)
+            self.assertGreaterEqual(search["max_zero_wrong_suggestions_shown"], 3)
+            recognition_experiment = report["auto_recognition_experiment"]
+            current_policy = recognition_experiment["current_product_gate_projection"]
+            self.assertEqual(current_policy["correct_automatic_matches"], 2)
+            self.assertEqual(current_policy["false_automatic_matches"], 0)
+            self.assertEqual(current_policy["recognized_recurring_speakers"], 1)
+            self.assertEqual(current_policy["median_meetings_after_first_seen"], 4)
+            faster_policy = next(
+                policy for policy in recognition_experiment["policies"]
+                if policy["minimum_total_observations"] == 3
+                and policy["minimum_prior_meetings"] == 1
+                and policy["minimum_similarity"] == 0.98
+                and policy["minimum_similarity_separation"] is None
+            )
+            self.assertEqual(faster_policy["correct_automatic_matches"], 4)
+            self.assertEqual(faster_policy["false_automatic_matches"], 0)
+            self.assertEqual(faster_policy["median_meetings_after_first_seen"], 2)
+            after_merge = report["auto_recognition_after_oracle_merge_experiment"]
+            self.assertEqual(after_merge["current_product_gate_projection"]["false_automatic_matches"], 0)
+
+    def test_confirmed_merge_projection_strengthens_split_profiles_for_auto_naming(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index in range(1, 6):
+                self._write_meeting(root, f"meeting-000{index}", ["Speaker A"], include_audio=True)
+
+            split_a = [1.0, 0.0]
+            split_b = [0.90, 0.4358898943540673]
+            embeddings = {
+                "meeting-0001": split_a,
+                "meeting-0002": split_b,
+                "meeting-0003": split_a,
+                "meeting-0004": split_b,
+                "meeting-0005": split_a,
+            }
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=embeddings[meeting["id"]],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+            projection = report["confirmed_merge_auto_naming_projection"]
+
+            self.assertEqual(summary["correct_automatic_matches"], 0)
+            self.assertEqual(summary["false_automatic_matches"], 0)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 1)
+            self.assertEqual(projection["before"]["unknown_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["unknown_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["confirmation_labels_required"], 2)
+            self.assertEqual(projection["after_confirmed_merges"]["correct_automatic_matches"], 1)
+            self.assertEqual(projection["after_confirmed_merges"]["false_automatic_matches"], 0)
+            self.assertEqual(projection["after_confirmed_merges"]["duplicate_profiles"], 0)
+            self.assertEqual(projection["delta"]["recognized_recurring_speakers"], 1)
+
+    def test_duplicate_merge_review_holds_back_voice_only_pairs(self):
+        first = AudioSpeakerProfile(
+            profile_id="profile_0001",
+            embedding=[1.0, 0.0],
+            first_seen_meeting_id="meeting-0001",
+            first_seen_ordinal=1,
+            assigned_label="Speaker Alpha",
+            call_count=5,
+        )
+        second = AudioSpeakerProfile(
+            profile_id="profile_0002",
+            embedding=[0.99, 0.01],
+            first_seen_meeting_id="meeting-0002",
+            first_seen_ordinal=2,
+            assigned_label="Speaker Beta",
+            call_count=4,
+        )
+
+        report = build_duplicate_merge_review_report(
+            profiles=[first, second],
+            duplicate_counts={},
+            real_speaker_ids={},
+            include_speaker_labels=False,
+        )
+
+        self.assertEqual(report["merge_candidates_total"], 0)
+        self.assertEqual(report["merge_candidates_wrong"], 0)
+        self.assertEqual(report["held_back_voice_only_candidates"], 1)
+        self.assertEqual(report["held_back_voice_only_candidates_wrong"], 1)
+        self.assertEqual(report["held_back_candidates_by_reason"][0]["reason"], "similar_voice")
+        strategies = {item["strategy"]: item for item in report["strategy_experiment"]["strategies"]}
+        self.assertEqual(strategies["current_named_only"]["wrong_candidates"], 0)
+        self.assertGreater(strategies["include_voice_only_0_95"]["wrong_candidates"], 0)
+
+    def test_audio_eval_suppresses_overlapping_microphone_bleed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Speaker A"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=[1.0, 0.0] if channel == "system" else [0.95, 0.05],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            summary = report["summary"]
+
+            self.assertEqual(summary["unknown_labels_required"], 1)
+            self.assertEqual(summary["duplicate_profiles_per_real_speaker"]["total"], 0)
+            self.assertEqual(summary["suppressed_microphone_bleed_segments"], 1)
+
+    def test_audio_auto_accept_gate_rejects_near_matches(self):
+        profile = AudioSpeakerProfile(
+            profile_id="profile_0001",
+            embedding=[1.0, 0.0],
+            first_seen_meeting_id="meeting-0001",
+            first_seen_ordinal=1,
+            assigned_label="Speaker A",
+            call_count=8,
+        )
+
+        self.assertFalse(should_auto_accept_audio_profile(profile, 0.97))
+        self.assertTrue(should_auto_accept_audio_profile(profile, 0.99))
+
+    def test_report_redacts_labels_and_transcript_text_by_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Sensitive Name"])
+
+            report = evaluate_corpus(root)
+            encoded = json.dumps(report)
+
+            self.assertNotIn("Sensitive Name", encoded)
+            self.assertNotIn("SECRET", encoded)
+            self.assertTrue(report["assumptions"]["speaker_labels_redacted"])
+
+    def test_audio_report_redacts_labels_and_transcript_text_by_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_meeting(root, "meeting-0001", ["Sensitive Name"], include_audio=True)
+
+            def fake_diarizer(
+                audio_path: Path,
+                channel: str,
+                meeting: dict,
+                cache_dir: Path | None,
+            ) -> list[AudioSegment]:
+                if channel != "system":
+                    return []
+                return [
+                    AudioSegment(
+                        channel=channel,
+                        speaker_id="0",
+                        start_seconds=0.0,
+                        end_seconds=1.0,
+                        quality_score=0.95,
+                        embedding=[1.0, 0.0],
+                    )
+                ]
+
+            report = evaluate_audio_corpus(root, diarization_provider=fake_diarizer)
+            encoded = json.dumps(report)
+
+            self.assertNotIn("Sensitive Name", encoded)
+            self.assertNotIn("SECRET", encoded)
+            self.assertTrue(report["assumptions"]["speaker_labels_redacted"])
+
+    def _write_meeting(self, root: Path, meeting_id: str, labels: list[str], include_audio: bool = False) -> None:
+        meeting_dir = root / meeting_id
+        zoom_dir = meeting_dir / "zoom"
+        zoom_dir.mkdir(parents=True)
+        transcript_blocks = []
+        for index, label in enumerate(labels):
+            transcript_blocks.append(f"[{label}] 00:00:0{index}\nSECRET turn {index}")
+        (zoom_dir / "transcript.txt").write_text("\n\n".join(transcript_blocks), encoding="utf-8")
+
+        speaker_names = list(dict.fromkeys(labels))
+        metadata = {
+            "id": meeting_id,
+            "start_local": f"2026-01-01T00:0{meeting_id[-1]}:00",
+            "usable_for_eval": True,
+            "zoom_transcript": {"path": "zoom/transcript.txt"},
+            "speaker_names": speaker_names,
+            "speaker_turn_count": len(labels),
+        }
+        if include_audio:
+            audio_dir = meeting_dir / "audio"
+            audio_dir.mkdir(parents=True)
+            (audio_dir / "system_audio.wav").write_bytes(b"fake system audio")
+            (audio_dir / "microphone.wav").write_bytes(b"fake microphone audio")
+            metadata["audio"] = {
+                "system_audio": {"path": "audio/system_audio.wav", "duration_seconds": len(labels)},
+                "microphone": {"path": "audio/microphone.wav", "duration_seconds": len(labels)},
+            }
+        (meeting_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+        manifest_path = root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else []
+        manifest.append(metadata)
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    unittest.main()

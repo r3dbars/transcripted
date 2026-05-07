@@ -7,6 +7,7 @@
 - `TranscriptedCLI/` — local context and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
+- `SpeakerLearningEval/` — local corpus scoreboard and autoresearch runner for meeting speaker learning
 
 ## Read first
 
@@ -15,6 +16,7 @@ Each package has its own local `CLAUDE.md` and `Package.swift`.
 - `Tools/TranscriptedCLI/CLAUDE.md`
 - `Tools/TranscriptedMCP/CLAUDE.md`
 - `Tools/TranscriptedQA/CLAUDE.md`
+- `Tools/SpeakerLearningEval/README.md`
 
 ## Why this exists
 

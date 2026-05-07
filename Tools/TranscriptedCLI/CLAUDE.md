@@ -37,6 +37,7 @@ They also honor:
 ### Offline Audio
 
 - `transcripted-cli diarize <audio>` — diarize one file, output RTTM or JSON
+- `transcripted-cli diarize <audio> --json --include-embeddings --transcripted-defaults` — local eval shape for speaker-learning experiments
 - `transcripted-cli batch <directory>` — diarize matching audio files in a directory
 
 ## Files
@@ -50,7 +51,7 @@ They also honor:
 | `ContextModels.swift` | Codable models used by the context commands |
 | `DiarizeCommand.swift` | Single-file diarization command |
 | `BatchCommand.swift` | Directory diarization command |
-| `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader |
+| `ConfigLoader.swift` | JSON-to-`OfflineDiarizerConfig` loader plus Transcripted meeting defaults |
 | `CLIPathSecurity.swift` | shared path-validation helper for direct dictation reads and other on-disk file access |
 | `RTTMWriter.swift` | RTTM output formatter |
 
@@ -72,6 +73,7 @@ swift run transcripted-cli context-search "roadmap"
 swift run transcripted-cli read-meeting "Product review"
 swift run transcripted-cli list-dictations --count 5
 swift run transcripted-cli diarize /path/to/audio.wav --json
+swift run transcripted-cli diarize /path/to/audio.wav --json --include-embeddings --transcripted-defaults
 ```
 
 ## Common Retrieval Recipes
