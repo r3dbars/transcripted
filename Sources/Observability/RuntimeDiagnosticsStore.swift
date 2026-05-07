@@ -109,4 +109,26 @@ enum RuntimeDiagnosticsStore {
             "session_stage": marker.sessionStage,
         ]
     }
+
+    static func shouldReportUncleanShutdown(
+        previous marker: RuntimeDiagnosticsMarker,
+        now: Date = Date()
+    ) -> Bool {
+        guard !marker.cleanShutdown else { return false }
+
+        if marker.sessionActive {
+            return true
+        }
+
+        if marker.sessionKind != "none" || marker.sessionStage != "idle" {
+            return true
+        }
+
+        let launchOnlyEvents: Set<String> = ["app_launched", "heartbeat"]
+        if launchOnlyEvents.contains(marker.lastEvent) {
+            return false
+        }
+
+        return heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now) != "lt_15s"
+    }
 }

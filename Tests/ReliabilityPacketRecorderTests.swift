@@ -65,6 +65,33 @@ func testReliabilityPacketRecorder() {
         assertNil(ReliabilityPacketRecorder.packet(from: event), "boring app launch should not create a packet")
     }
 
+    runSuite("ReliabilityPacketRecorder maps short meetings as expected skips") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-05-03T01:15:11.605Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_transcript_skipped",
+            message: "Meeting transcription skipped because the recording was too short",
+            context: [
+                "error": "private raw error should not be copied",
+                "failure_kind": "recording_too_short",
+                "queue_depth": "0",
+                "trigger": "hotkey",
+            ],
+            appVersion: "1.1.32",
+            osVersion: "Version 26.4.1"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertNotNil(packet, "short meeting skips should produce a reliability packet")
+        assertEqual(packet?.feature, "meeting", "packet feature should classify the flow")
+        assertEqual(packet?.stage, "transcribe", "packet stage should classify the skip")
+        assertEqual(packet?.outcome, "skipped_expected", "too-short meetings should not look like failures")
+        assertEqual(packet?.context["failure_kind"], "recording_too_short", "skip reason should stay normalized")
+        assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder renders recent packet summaries from JSONL") {
         let packets = [
             ReliabilityPacket(
