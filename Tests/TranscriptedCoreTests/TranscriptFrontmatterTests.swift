@@ -35,6 +35,10 @@ final class TranscriptFrontmatterTests: XCTestCase {
         XCTAssertEqual(TranscriptFrontmatter.durationSeconds(from: "12:34"), 754)
         XCTAssertEqual(TranscriptFrontmatter.durationSeconds(from: "1:02:03"), 3723)
         XCTAssertNil(TranscriptFrontmatter.durationSeconds(from: "not a duration"))
+        XCTAssertNil(TranscriptFrontmatter.durationSeconds(from: "1:bad"))
+        XCTAssertNil(TranscriptFrontmatter.durationSeconds(from: "1:02:bad"))
+        XCTAssertNil(TranscriptFrontmatter.durationSeconds(from: "1:"))
+        XCTAssertNil(TranscriptFrontmatter.durationSeconds(from: "-1:02"))
     }
 
     func testParsesRecordedAt() throws {

@@ -103,7 +103,11 @@ public enum TranscriptFrontmatter {
     public static func durationSeconds(from value: String?) -> Int? {
         guard let value else { return nil }
 
-        let parts = value.split(separator: ":").compactMap { Int($0) }
+        let rawParts = value.split(separator: ":", omittingEmptySubsequences: false)
+        let parts = rawParts.compactMap { Int($0) }
+        guard parts.count == rawParts.count else { return nil }
+        guard parts.allSatisfy({ $0 >= 0 }) else { return nil }
+
         switch parts.count {
         case 1:
             return parts[0]
