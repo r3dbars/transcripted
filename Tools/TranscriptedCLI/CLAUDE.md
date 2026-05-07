@@ -16,11 +16,12 @@ It does not build or run the app target.
 
 By default these commands read:
 
-- meetings: `~/Library/Application Support/Transcripted/captures/meetings`
-- dictations: `~/Library/Application Support/Transcripted/captures/dictations`
+- meetings: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/meetings`
+- dictations: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/dictations`
 
 Read order for default local context:
 
+- app-selected capture library first when Transcripted has written `~/Library/Application Support/Transcripted/mcp-directories.json` or a saved `transcriptSaveLocation` preference
 - current Transcripted capture folders first
 - legacy Draft exports when they contain capture Markdown: `~/Library/Application Support/Draft/{meetings,dictations}/transcripts`
 - older shared layout when it contains capture Markdown: `~/Documents/Transcripted`
@@ -114,6 +115,7 @@ instruction to run `bash build-deps.sh` from the repo root before rebuilding.
 - the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
 - retrieval-only commands should still build and run even when the diarization bundle is absent
 - `swift test` currently covers the agent-facing context path resolver and context-store loading behavior
-- the default context resolver prefers Transcripted capture folders, then falls back to Draft-era exports, then `~/Documents/Transcripted/`
+- the default context resolver prefers the app-selected capture library when Transcripted has one, then falls back to the current Transcripted capture folders, then Draft-era exports, then `~/Documents/Transcripted/`
+- when the user moved the capture library in Transcripted Settings, the CLI should follow that app-selected path before defaulting back to `~/Library/Application Support/Transcripted/captures`
 - `context-recent` is intentionally a mixed feed; if the user asks for the latest meeting specifically, add `--kind meeting`
 - changes here should be verified independently from the app build

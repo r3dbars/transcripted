@@ -1,6 +1,18 @@
 import ArgumentParser
 import Foundation
 
+private struct CLIAppDirectoryManifest: Decodable {
+    let version: Int
+    let captureLibraryDirectory: String
+    let meetingsDirectory: String
+    let dictationsDirectory: String
+}
+
+private struct CLIConfiguredCaptureDirectories {
+    let meetings: URL
+    let dictations: URL
+}
+
 struct CLIContextDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
@@ -78,17 +90,35 @@ struct CLIContextDirectories {
             .appendingPathComponent("Documents", isDirectory: true)
             .appendingPathComponent("Transcripted", isDirectory: true)
 
+        let appConfiguredCaptureDirectories = configuredCaptureDirectories(
+            homeDirectory: home,
+            fileManager: fileManager
+        )
         let meetingsURL = meetingsDir.map(URL.init(fileURLWithPath:))
             ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsURL = dictationsDir.map(URL.init(fileURLWithPath:))
             ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         let meetingDirs = meetingsURL.map { [$0] }
+            ?? appConfiguredCaptureDirectories.map {
+                captureDirectories(
+                    primary: $0.meetings,
+                    legacyCandidates: [legacyDraftMeetings, legacyShared],
+                    fileManager: fileManager
+                )
+            }
             ?? captureDirectories(
                 primary: defaultMeetings,
                 legacyCandidates: [legacyDraftMeetings, legacyShared],
                 fileManager: fileManager
             )
         let dictationDirs = dictationsURL.map { [$0] }
+            ?? appConfiguredCaptureDirectories.map {
+                captureDirectories(
+                    primary: $0.dictations,
+                    legacyCandidates: [legacyDraftDictations, legacyShared],
+                    fileManager: fileManager
+                )
+            }
             ?? captureDirectories(
                 primary: defaultDictations,
                 legacyCandidates: [legacyDraftDictations, legacyShared],
@@ -148,6 +178,83 @@ struct CLIContextDirectories {
         }
 
         return content.hasPrefix("---\n") && content.contains("\n---\n")
+    }
+
+    private static func configuredCaptureDirectories(
+        homeDirectory home: URL,
+        fileManager: FileManager
+    ) -> CLIConfiguredCaptureDirectories? {
+        manifestCaptureDirectories(homeDirectory: home, fileManager: fileManager)
+            ?? appPreferenceCaptureDirectories(homeDirectory: home)
+    }
+
+    private static func manifestCaptureDirectories(
+        homeDirectory home: URL,
+        fileManager: FileManager
+    ) -> CLIConfiguredCaptureDirectories? {
+        let manifestURL = home
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+            .appendingPathComponent("mcp-directories.json", isDirectory: false)
+
+        guard fileManager.fileExists(atPath: manifestURL.path),
+              let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(CLIAppDirectoryManifest.self, from: data),
+              manifest.version >= 1,
+              let meetings = validatedConfiguredDirectory(manifest.meetingsDirectory, homeDirectory: home),
+              let dictations = validatedConfiguredDirectory(manifest.dictationsDirectory, homeDirectory: home) else {
+            return nil
+        }
+
+        return CLIConfiguredCaptureDirectories(meetings: meetings, dictations: dictations)
+    }
+
+    private static func appPreferenceCaptureDirectories(homeDirectory home: URL) -> CLIConfiguredCaptureDirectories? {
+        for domain in appPreferenceDomains {
+            let preferenceURL = home
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Preferences", isDirectory: true)
+                .appendingPathComponent("\(domain).plist", isDirectory: false)
+
+            guard let data = try? Data(contentsOf: preferenceURL),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+                  let values = plist as? [String: Any],
+                  let rawPath = values["transcriptSaveLocation"] as? String,
+                  let captureLibrary = validatedConfiguredDirectory(rawPath, homeDirectory: home) else {
+                continue
+            }
+
+            return CLIConfiguredCaptureDirectories(
+                meetings: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
+                dictations: captureLibrary.appendingPathComponent("dictations", isDirectory: true)
+            )
+        }
+
+        return nil
+    }
+
+    private static var appPreferenceDomains: [String] {
+        [
+            "com.justinbetker.draft",
+            "app.transcripted.Transcripted",
+        ]
+    }
+
+    private static func validatedConfiguredDirectory(_ rawPath: String, homeDirectory home: URL) -> URL? {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.hasPrefix("/") else {
+            return nil
+        }
+
+        let configuredURL = URL(fileURLWithPath: trimmed, isDirectory: true)
+        let standardizedPath = configuredURL.standardizedFileURL.path
+        let homePath = home.standardizedFileURL.path
+        guard standardizedPath.hasPrefix(homePath) else {
+            return nil
+        }
+
+        return configuredURL
     }
 }
 
