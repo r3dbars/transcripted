@@ -117,6 +117,7 @@ This lets the server answer both meeting-specific queries (`who_is`, `read_meeti
 cd Tools/TranscriptedMCP
 swift build -c release
 swift test
+./.build/release/transcripted-mcp --self-test
 ```
 
 Binary path after build:
@@ -124,6 +125,9 @@ Binary path after build:
 ```text
 .build/release/transcripted-mcp
 ```
+
+`--self-test` verifies directory resolution, builds the SQLite index, prints a
+JSON status payload, and exits without starting the MCP stdio server.
 
 App builds also bundle a signed copy at:
 
