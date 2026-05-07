@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct StyledMeetingTranscript {
     let url: URL
@@ -7,13 +10,6 @@ struct StyledMeetingTranscript {
 
 enum MeetingTranscriptStyler {
     private static let frontmatterPreviewByteLimit = 64 * 1024
-
-    private static let parseFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
 
     private static let titleFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -133,7 +129,7 @@ enum MeetingTranscriptStyler {
             )
             return nil
         }
-        return stripFrontmatter(from: raw)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return TranscriptFrontmatter.body(in: raw)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -149,27 +145,25 @@ enum MeetingTranscriptStyler {
     }
 
     private static func parseDocument(_ raw: String, fallbackURL: URL) -> ParsedDocument? {
-        guard let body = stripFrontmatter(from: raw),
-              raw.hasPrefix("---\n"),
-              let frontmatterLines = frontmatterLines(in: raw) else {
+        guard let frontmatter = TranscriptFrontmatter.document(in: raw) else {
             return nil
         }
 
-        let values = frontmatterValues(from: frontmatterLines)
+        let values = frontmatter.values
 
         let recordedAt = parseRecordedAt(values: values, fallbackURL: fallbackURL)
-        let transcriptEntries = extractTranscriptEntries(from: body)
+        let transcriptEntries = extractTranscriptEntries(from: frontmatter.body)
 
         let duration = values["duration"] ?? "0:00"
         let words = Int(values["total_word_count"] ?? "") ?? 0
         let utterances = (Int(values["mic_utterances"] ?? "") ?? 0) + (Int(values["system_utterances"] ?? "") ?? 0)
 
         return ParsedDocument(
-            frontmatterLines: frontmatterLines,
+            frontmatterLines: frontmatter.lines,
             explicitTitle: values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
             recordedAt: recordedAt,
             duration: duration,
-            durationSeconds: parseDurationSeconds(duration),
+            durationSeconds: TranscriptFrontmatter.durationSeconds(from: duration) ?? 0,
             totalWords: words,
             totalUtterances: utterances,
             transcriptEntries: transcriptEntries
@@ -177,45 +171,20 @@ enum MeetingTranscriptStyler {
     }
 
     private static func frontmatterTitle(at url: URL) -> String? {
-        guard let raw = try? previewString(at: url, byteLimit: frontmatterPreviewByteLimit),
-              let frontmatterLines = frontmatterLines(in: raw) else {
+        guard let values = try? TranscriptFrontmatter.readValues(
+            from: url,
+            byteLimit: frontmatterPreviewByteLimit
+        ) else {
             return nil
         }
 
-        let title = frontmatterValues(from: frontmatterLines)["title"]?
+        let title = values["title"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return title?.isEmpty == false ? title : nil
     }
 
-    private static func frontmatterLines(in raw: String) -> [String]? {
-        guard raw.hasPrefix("---\n"),
-              let endRange = raw.range(
-                of: "\n---\n",
-                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
-              ) else {
-            return nil
-        }
-
-        let frontmatterText = String(raw[raw.index(raw.startIndex, offsetBy: 4)..<endRange.lowerBound])
-        return frontmatterText.components(separatedBy: "\n")
-    }
-
-    private static func frontmatterValues(from lines: [String]) -> [String: String] {
-        var values: [String: String] = [:]
-        for line in lines {
-            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            values[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-        }
-        return values
-    }
-
     private static func parseRecordedAt(values: [String: String], fallbackURL: URL) -> Date {
-        if let date = values["date"],
-           let time = values["time"],
-           let parsed = parsedRecordedAt(from: "\(date) \(time)") {
+        if let parsed = TranscriptFrontmatter.recordedAt(values: values) {
             return parsed
         }
 
@@ -282,18 +251,6 @@ enum MeetingTranscriptStyler {
         """
     }
 
-    private static func stripFrontmatter(from raw: String) -> String? {
-        guard raw.hasPrefix("---\n"),
-              let endRange = raw.range(
-                of: "\n---\n",
-                range: raw.index(raw.startIndex, offsetBy: 4)..<raw.endIndex
-              ) else {
-            return nil
-        }
-
-        return String(raw[endRange.upperBound...])
-    }
-
     private static func buildTitle(for document: ParsedDocument) -> String {
         if let explicitTitle = document.explicitTitle,
            !explicitTitle.isEmpty {
@@ -324,12 +281,6 @@ enum MeetingTranscriptStyler {
         return titleString(from: document.recordedAt)
     }
 
-    private static func parsedRecordedAt(from value: String) -> Date? {
-        formatterQueue.sync {
-            parseFormatter.date(from: value)
-        }
-    }
-
     private static func titleString(from date: Date) -> String {
         formatterQueue.sync {
             titleFormatter.string(from: date)
@@ -340,18 +291,6 @@ enum MeetingTranscriptStyler {
         formatterQueue.sync {
             detailFormatter.string(from: date)
         }
-    }
-
-    private static func parseDurationSeconds(_ duration: String) -> Int {
-        let components = duration.split(separator: ":").compactMap { Int($0) }
-        guard !components.isEmpty else { return 0 }
-        if components.count == 2 {
-            return components[0] * 60 + components[1]
-        }
-        if components.count == 3 {
-            return components[0] * 3600 + components[1] * 60 + components[2]
-        }
-        return components[0]
     }
 
     private static func parseTranscriptEntries(from block: String) -> [TranscriptEntry] {
