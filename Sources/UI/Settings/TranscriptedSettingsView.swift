@@ -2308,7 +2308,7 @@ struct TranscriptedSettingsView: View {
             if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
                 return "Transcripted is preparing version \(version). You only need to restart when it is ready."
             }
-            return "Version \(version) is ready."
+            return "Version \(version) is ready to install."
         case .downloading(let version):
             return "Version \(version) is downloading."
         case .readyToInstall(let version):
