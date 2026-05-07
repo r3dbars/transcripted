@@ -171,76 +171,21 @@ build_release_graph() {
     swift build --disable-dependency-cache -c release
 }
 # ---------------------------------------------------------------------------
-# Discover the TranscriptedCore source tree to inline into the unified deps build.
+# Use this checkout's TranscriptedCore source tree in the unified deps build.
 # ---------------------------------------------------------------------------
-# In the public `r3dbars/transcripted` repo, Draft and TranscriptedCore now live
-# together. Prefer the in-repo `Sources/TranscriptedCore` first so a fresh clone
-# builds without a sibling checkout.
-#
-# For private/legacy Draft-only checkouts, keep the old sibling-repo discovery as
-# a fallback.
-#
-# Previously this path was a committed symlink at $DRAFT_DIR/Transcripted ->
-# ../../../../Transcripted/.claude/worktrees/core-extract. That broke whenever
-# Draft was checked out to a different depth (e.g. a non-worktree clone) and
-# required callers to place both repos at matching positions. Replace it with
-# runtime discovery:
-#
-#   1. This repo itself (if it already contains Sources/TranscriptedCore)
-#   2. $DRAFT_TRANSCRIPTED_ROOT             — explicit override
-#   3. Sibling worktree with the same name  — e.g. both at .claude/worktrees/X
-#   4. Transcripted/.claude/worktrees/core-extract (canonical merge worktree)
-#   5. Transcripted main checkout (sibling dir to Draft)
 
-discover_transcripted() {
-    local searched=()
-
-    try_root() {
-        local candidate="$1"
-        searched+=("$candidate")
-        if [ -d "$candidate/Sources/TranscriptedCore" ] && [ -f "$candidate/Package.swift" ]; then
-            TRANSCRIPTED_ROOT="$candidate"
-            return 0
-        fi
-        return 1
-    }
-
-    try_root "$DRAFT_DIR" && return 0
-
-    if [ -n "$DRAFT_TRANSCRIPTED_ROOT" ]; then
-        try_root "$DRAFT_TRANSCRIPTED_ROOT" && return 0
-        echo "[build-deps] ERROR: DRAFT_TRANSCRIPTED_ROOT='$DRAFT_TRANSCRIPTED_ROOT' does not contain Sources/TranscriptedCore"
-        exit 1
+resolve_transcripted_core_root() {
+    if [ -d "$DRAFT_DIR/Sources/TranscriptedCore" ] && [ -f "$DRAFT_DIR/Package.swift" ]; then
+        TRANSCRIPTED_ROOT="$DRAFT_DIR"
+        return 0
     fi
 
-    local code_parent
-    case "$DRAFT_DIR" in
-        */.claude/worktrees/*)
-            # <code>/Draft/.claude/worktrees/<name> -> <code>
-            code_parent="$(cd "$DRAFT_DIR/../../../.." && pwd)"
-            local worktree_name
-            worktree_name="$(basename "$DRAFT_DIR")"
-            try_root "$code_parent/Transcripted/.claude/worktrees/$worktree_name" && return 0
-            ;;
-        *)
-            code_parent="$(cd "$DRAFT_DIR/.." && pwd)"
-            ;;
-    esac
-
-    try_root "$code_parent/Transcripted/.claude/worktrees/core-extract" && return 0
-    try_root "$code_parent/Transcripted" && return 0
-
-    echo "[build-deps] ERROR: Could not locate a Transcripted checkout with Sources/TranscriptedCore. Searched:"
-    for path in "${searched[@]}"; do
-        echo "[build-deps]   - $path"
-    done
-    echo "[build-deps]"
-    echo "[build-deps] Set DRAFT_TRANSCRIPTED_ROOT=/path/to/Transcripted to override, or clone"
-    echo "[build-deps] TranscriptedCore alongside Draft (e.g. merged repo root, or ~/code/Draft and ~/code/Transcripted)."
+    echo "[build-deps] ERROR: Sources/TranscriptedCore is missing from this checkout."
+    echo "[build-deps] Run build-deps.sh from a current r3dbars/transcripted clone."
     exit 1
 }
 
-discover_transcripted
+resolve_transcripted_core_root
 echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 
 # Skip if already built (use --force to rebuild).
