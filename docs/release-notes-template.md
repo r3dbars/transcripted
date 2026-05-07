@@ -8,6 +8,7 @@ Keep it short. Focus on what a user would notice or care about.
 ## Candidate summary
 
 - One sentence on what this candidate is trying to improve.
+- If `Info.plist`, GitHub Releases, Sparkle, and Homebrew already match and there is no meaningful merged work after that release, say plainly that there is no new candidate tonight.
 - If `HEAD` is ahead of the latest shipped tag but `Info.plist` and GitHub Releases still match, say plainly that this is post-release `main` work and not a versioned candidate yet.
 - Say whether Sparkle and Homebrew already point at this version, or still lag.
 
@@ -34,3 +35,4 @@ Keep it short. Focus on what a user would notice or care about.
 
 - Ship when the user-facing value is clear and the reliability fixes match live pain.
 - Wait when the branch is mostly internal cleanup, docs sync, or automation work.
+- Wait when the latest version already shipped and there is nothing new for users yet.
