@@ -202,8 +202,11 @@ struct CLIContextDirectories {
               let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(CLIAppDirectoryManifest.self, from: data),
               manifest.version >= 1,
+              let captureLibrary = validatedConfiguredDirectory(manifest.captureLibraryDirectory, homeDirectory: home),
               let meetings = validatedConfiguredDirectory(manifest.meetingsDirectory, homeDirectory: home),
-              let dictations = validatedConfiguredDirectory(manifest.dictationsDirectory, homeDirectory: home) else {
+              let dictations = validatedConfiguredDirectory(manifest.dictationsDirectory, homeDirectory: home),
+              isManifestDirectory(meetings, named: "meetings", under: captureLibrary),
+              isManifestDirectory(dictations, named: "dictations", under: captureLibrary) else {
             return nil
         }
 
@@ -255,6 +258,19 @@ struct CLIContextDirectories {
         }
 
         return configuredURL
+    }
+
+    private static func isManifestDirectory(_ directory: URL, named name: String, under captureLibrary: URL) -> Bool {
+        let expected = captureLibrary
+            .appendingPathComponent(name, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let actual = directory
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        return actual.path == expected.path
     }
 }
 
