@@ -144,6 +144,37 @@ def make_finding(
     return finding
 
 
+def make_watch_item(check_id: str, summary: str, detail: str, path: str | None = None) -> dict:
+    item = {
+        "check_id": check_id,
+        "summary": summary,
+        "detail": detail,
+    }
+    if path:
+        item["path"] = normalize_path(path)
+    return item
+
+
+def parse_release_version(value: str) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", value.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def is_next_patch_version(candidate: str, published: str) -> bool:
+    candidate_version = parse_release_version(candidate)
+    published_version = parse_release_version(published)
+    if candidate_version is None or published_version is None:
+        return False
+    return candidate_version[:2] == published_version[:2] and candidate_version[2] == published_version[2] + 1
+
+
+def git_tag_exists(root: Path, tag_name: str) -> bool:
+    result = run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag_name}"], cwd=root)
+    return result.returncode == 0
+
+
 def scan_tracked_files(root: Path, manifest: dict) -> list[dict]:
     allowlist = manifest["secret_scan"]["tracked_file_allowlist_globs"]
     result = run(["git", "ls-files", "-z"], cwd=root)
@@ -294,7 +325,7 @@ def check_info_plist(root: Path, manifest: dict) -> list[dict]:
     return findings
 
 
-def check_appcast(root: Path, manifest: dict) -> list[dict]:
+def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
     appcast_path = root / manifest["paths"]["appcast"]
     info_path = root / manifest["paths"]["info_plist"]
     with info_path.open("rb") as handle:
@@ -304,8 +335,9 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
     tree = ET.parse(appcast_path)
     channel = tree.getroot().find("channel")
     findings: list[dict] = []
+    watch_items: list[dict] = []
     if channel is None:
-        return [
+        findings.append(
             make_finding(
                 "release_integrity",
                 "high",
@@ -314,11 +346,12 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
                 "docs/appcast.xml should have a channel with at least one item.",
                 manifest["paths"]["appcast"],
             )
-        ]
+        )
+        return findings, watch_items
 
     latest = channel.find("item")
     if latest is None:
-        return [
+        findings.append(
             make_finding(
                 "release_integrity",
                 "high",
@@ -327,7 +360,8 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
                 "docs/appcast.xml should have at least one release item.",
                 manifest["paths"]["appcast"],
             )
-        ]
+        )
+        return findings, watch_items
 
     version = (
         latest.findtext("sparkle:shortVersionString", namespaces=namespaces)
@@ -336,16 +370,31 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
     ).strip()
     info_version = str(plist.get("CFBundleShortVersionString", "")).strip()
     if version != info_version:
-        findings.append(
-            make_finding(
-                "release_integrity",
-                "medium",
-                "appcast-version-mismatch",
-                "Latest appcast version drifted from Info.plist.",
-                f"Appcast has {version!r}, Info.plist has {info_version!r}.",
-                manifest["paths"]["appcast"],
-            )
+        unreleased_candidate = (
+            is_next_patch_version(info_version, version)
+            and git_tag_exists(root, f"v{version}")
+            and not git_tag_exists(root, f"v{info_version}")
         )
+        if unreleased_candidate:
+            watch_items.append(
+                make_watch_item(
+                    "appcast-release-candidate",
+                    "Info.plist is one unreleased patch version ahead of the appcast.",
+                    f"Appcast remains on published version {version!r}; Info.plist is prepared for {info_version!r}.",
+                    manifest["paths"]["appcast"],
+                )
+            )
+        else:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "medium",
+                    "appcast-version-mismatch",
+                    "Latest appcast version drifted from Info.plist.",
+                    f"Appcast has {version!r}, Info.plist has {info_version!r}.",
+                    manifest["paths"]["appcast"],
+                )
+            )
 
     minimum_version = (latest.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or "").strip()
     if minimum_version != str(plist.get("LSMinimumSystemVersion", "")).strip():
@@ -385,7 +434,7 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
                 manifest["paths"]["appcast"],
             )
         )
-        return findings
+        return findings, watch_items
 
     expected_url = f"https://github.com/{manifest['repo_slug']}/releases/download/v{version}/Transcripted-{version}.dmg"
     actual_url = enclosure.attrib.get("url", "")
@@ -427,7 +476,7 @@ def check_appcast(root: Path, manifest: dict) -> list[dict]:
             )
         )
 
-    return findings
+    return findings, watch_items
 
 
 def load_plist(path: Path) -> dict:
@@ -758,7 +807,14 @@ def score_report(findings: list[dict], manifest: dict) -> tuple[int, dict]:
     return total_score, category_results
 
 
-def build_report(root: Path, manifest: dict, findings: list[dict], app_bundle: str | None, automation_path: Path) -> dict:
+def build_report(
+    root: Path,
+    manifest: dict,
+    findings: list[dict],
+    watch_items: list[dict],
+    app_bundle: str | None,
+    automation_path: Path,
+) -> dict:
     score, category_results = score_report(findings, manifest)
     status = "pass" if not findings else "attention"
     return {
@@ -771,6 +827,7 @@ def build_report(root: Path, manifest: dict, findings: list[dict], app_bundle: s
         "score": score,
         "category_results": category_results,
         "findings": findings,
+        "watch_items": watch_items,
     }
 
 
@@ -784,14 +841,21 @@ def print_report(report: dict) -> None:
 
     if not report["findings"]:
         print("No deterministic findings.")
-        return
+    else:
+        print("")
+        print("Findings:")
+        for finding in report["findings"]:
+            location = f" [{finding['path']}]" if "path" in finding else ""
+            print(f"- {finding['severity'].upper()} {finding['check_id']}{location}: {finding['summary']}")
+            print(f"  {finding['detail']}")
 
-    print("")
-    print("Findings:")
-    for finding in report["findings"]:
-        location = f" [{finding['path']}]" if "path" in finding else ""
-        print(f"- {finding['severity'].upper()} {finding['check_id']}{location}: {finding['summary']}")
-        print(f"  {finding['detail']}")
+    if report.get("watch_items"):
+        print("")
+        print("Watch items:")
+        for item in report["watch_items"]:
+            location = f" [{item['path']}]" if "path" in item else ""
+            print(f"- {item['check_id']}{location}: {item['summary']}")
+            print(f"  {item['detail']}")
 
 
 def main() -> int:
@@ -805,14 +869,15 @@ def main() -> int:
     findings.extend(scan_recent_history(root, manifest))
     findings.extend(scan_shell_scripts(root))
     findings.extend(check_info_plist(root, manifest))
-    findings.extend(check_appcast(root, manifest))
+    appcast_findings, watch_items = check_appcast(root, manifest)
+    findings.extend(appcast_findings)
     findings.extend(check_entitlements(root, manifest))
     findings.extend(check_build_script_contract(root, manifest))
     findings.extend(check_built_app(root, manifest, args.app_bundle))
     findings.extend(check_automation_prompt(manifest, automation_path))
     findings.extend(check_sanitizer_corpus(root, manifest))
 
-    report = build_report(root, manifest, findings, args.app_bundle, automation_path)
+    report = build_report(root, manifest, findings, watch_items, args.app_bundle, automation_path)
     print_report(report)
 
     if args.write_report:
