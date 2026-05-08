@@ -1,5 +1,8 @@
 import Foundation
 
+private let logSuppressionLock = NSLock()
+private var logSuppressionDepth = 0
+
 enum ContextArtifactKind {
     case meeting
     case dictationDay
@@ -546,5 +549,24 @@ enum TranscriptLoader {
 
 /// Log to stderr (stdout is reserved for MCP JSON-RPC).
 func log(_ message: String) {
+    logSuppressionLock.lock()
+    let isSuppressed = logSuppressionDepth > 0
+    logSuppressionLock.unlock()
+
+    guard !isSuppressed else { return }
     fputs("[transcripted-mcp] \(message)\n", stderr)
+}
+
+func withLogsSuppressed<T>(_ body: () throws -> T) rethrows -> T {
+    logSuppressionLock.lock()
+    logSuppressionDepth += 1
+    logSuppressionLock.unlock()
+
+    defer {
+        logSuppressionLock.lock()
+        logSuppressionDepth = max(0, logSuppressionDepth - 1)
+        logSuppressionLock.unlock()
+    }
+
+    return try body()
 }

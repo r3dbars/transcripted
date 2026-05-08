@@ -100,8 +100,10 @@ struct TranscriptedMCP {
             }
         }
 
-        let index = try TranscriptIndex(indexDir: directories.indexDir)
-        try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+        try withLogsSuppressed {
+            let index = try TranscriptIndex(indexDir: directories.indexDir)
+            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+        }
 
         let result = TranscriptedMCPSelfTestResult(
             ok: true,
