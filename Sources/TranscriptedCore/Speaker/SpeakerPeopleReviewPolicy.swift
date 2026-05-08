@@ -3,7 +3,7 @@ import Foundation
 public enum SpeakerPeopleReviewPolicy {
     public static func needsReview(profile: SpeakerProfile, duplicateIds: Set<UUID>) -> Bool {
         duplicateIds.contains(profile.id)
-            || profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+            || !hasDisplayName(profile)
             || profile.disputeCount > 0
     }
 
@@ -18,11 +18,15 @@ public enum SpeakerPeopleReviewPolicy {
                 return lhsNeedsReview && !rhsNeedsReview
             }
 
-            let lhsNamed = lhs.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            let rhsNamed = rhs.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            let lhsNamed = hasDisplayName(lhs)
+            let rhsNamed = hasDisplayName(rhs)
             if lhsNamed != rhsNamed { return !lhsNamed && rhsNamed }
             if lhs.callCount != rhs.callCount { return lhs.callCount > rhs.callCount }
             return lhs.lastSeen > rhs.lastSeen
         }
+    }
+
+    private static func hasDisplayName(_ profile: SpeakerProfile) -> Bool {
+        profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 }
