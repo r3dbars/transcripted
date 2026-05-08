@@ -232,6 +232,49 @@ final class ContextDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveIgnoresManifestWhenDirectoriesDoNotMatchCaptureLibrary() throws {
+        let tempHome = makeTempDir()
+        defer { removeTempDir(tempHome) }
+
+        let transcriptedRoot = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+        let manifestRoot = tempHome.appendingPathComponent("manifest-captures", isDirectory: true)
+        let unrelatedMeetings = tempHome.appendingPathComponent("unrelated-meetings", isDirectory: true)
+        let unrelatedDictations = tempHome.appendingPathComponent("unrelated-dictations", isDirectory: true)
+        let defaultCaptures = transcriptedRoot.appendingPathComponent("captures", isDirectory: true)
+        let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
+        let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptedRoot, withIntermediateDirectories: true)
+
+        let manifestURL = transcriptedRoot.appendingPathComponent("mcp-directories.json", isDirectory: false)
+        try """
+        {
+          "version": 1,
+          "captureLibraryDirectory": "\(manifestRoot.path)",
+          "meetingsDirectory": "\(unrelatedMeetings.path)",
+          "dictationsDirectory": "\(unrelatedDictations.path)"
+        }
+        """.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let directories = CLIContextDirectories.resolve(
+            dataDir: nil,
+            meetingsDir: nil,
+            dictationsDir: nil,
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            defaultMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            defaultDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveUsesAppCaptureLibraryPreferenceWhenManifestIsMissing() throws {
         let tempHome = makeTempDir()
         defer { removeTempDir(tempHome) }
