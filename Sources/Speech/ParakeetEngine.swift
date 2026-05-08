@@ -1184,6 +1184,7 @@ class ParakeetEngine: ObservableObject {
 
             self.configRecoveryTimeoutTask = nil
             self.publishRecoveryState()
+            let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: wasRecording)
             AnalyticsReporter.track(
                 "dictation_audio_route_recovery_timeout",
                 properties: self.dictationRouteAnalyticsContext(
@@ -1196,11 +1197,18 @@ class ParakeetEngine: ObservableObject {
                     ]
                 )
             )
+            let diagnosticsEvent = failureAction.reportSentryFailure
+                ? "device_change_recovery_timeout"
+                : "device_change_recovery_deferred"
+            let diagnosticsLevel: EventLevel = failureAction.reportSentryFailure ? .error : .warning
+            let diagnosticsMessage = failureAction.reportSentryFailure
+                ? "Audio device recovery timed out"
+                : "Idle audio route still settling after device change"
             EventReporter.shared.capture(
-                level: .error,
+                level: diagnosticsLevel,
                 engine: "parakeet",
-                event: "device_change_recovery_timeout",
-                message: "Audio device recovery timed out",
+                event: diagnosticsEvent,
+                message: diagnosticsMessage,
                 context: self.dictationRouteDiagnosticsContext(
                     selection: Self.loadDictationInputDeviceSelection(),
                     extra: [
@@ -1211,7 +1219,7 @@ class ParakeetEngine: ObservableObject {
                     ]
                 )
             )
-            if wasRecording {
+            if failureAction.markRecordingInterrupted {
                 self.recordingInterrupted = true
                 EventReporter.shared.capture(
                     level: .error,
@@ -1228,8 +1236,10 @@ class ParakeetEngine: ObservableObject {
                 )
             }
             await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
-            self.prewarmRetryCount = 0
-            self.schedulePrewarmRetry()
+            if failureAction.schedulePrewarmRetry {
+                self.prewarmRetryCount = 0
+                self.schedulePrewarmRetry()
+            }
         }
     }
 
