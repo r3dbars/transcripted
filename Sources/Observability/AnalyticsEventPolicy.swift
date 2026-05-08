@@ -74,6 +74,7 @@ struct AnalyticsEventPolicy: Equatable {
         "reason",
         "recovering",
         "session_active",
+        "session_duration_bucket",
         "session_kind",
         "session_stage",
         "stall_kind",

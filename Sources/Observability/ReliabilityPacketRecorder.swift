@@ -282,6 +282,7 @@ enum ReliabilityPacketRecorder {
             "selection_overrode_default",
             "selection_reason",
             "session_active",
+            "session_duration_bucket",
             "session_kind",
             "session_stage",
             "stt_model",

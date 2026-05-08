@@ -104,6 +104,7 @@ func testSentryPayloadSanitizer() {
             "os_major": "26",
             "previous_clean_shutdown": "true",
             "session_active": "false",
+            "session_duration_bucket": "5_14m",
             "session_kind": "none",
             "session_stage": "idle",
             "transcript_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
@@ -117,6 +118,7 @@ func testSentryPayloadSanitizer() {
         assertEqual(sanitized["os_major"], "26", "OS major should remain")
         assertEqual(sanitized["previous_clean_shutdown"], "true", "clean shutdown state should remain")
         assertEqual(sanitized["session_active"], "false", "session activity should remain")
+        assertEqual(sanitized["session_duration_bucket"], "5_14m", "session duration bucket should remain")
         assertEqual(sanitized["session_kind"], "none", "session kind should remain")
         assertEqual(sanitized["session_stage"], "idle", "session stage should remain")
         assertNil(sanitized["transcript_path"], "transcript paths should still be dropped")

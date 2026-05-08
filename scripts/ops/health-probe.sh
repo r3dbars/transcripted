@@ -89,7 +89,7 @@ probe_posthog() {
     -H "Content-Type: application/json" \
     "https://us.i.posthog.com/api/projects/$POSTHOG_PROJECT_ID/query/" \
     -d '{
-      "query": "select countDistinct($device_id) as devices_7d, sum(case when event in (\"app_launched\",\"onboarding_completed\",\"dictation_started\",\"dictation_completed\",\"dictation_cancelled\",\"dictation_no_speech\",\"meeting_recording_started\",\"meeting_recording_stopped\",\"meeting_transcript_saved\",\"meeting_transcript_failed\") then 1 else 0 end) as allowed_events_7d from events where timestamp >= now() - interval 7 day"
+      "query": "select uniq(distinct_id) as devices_7d, sum(case when event in (\"app_launched\",\"app_unclean_shutdown_detected\",\"app_session_stall_detected\",\"onboarding_completed\",\"dictation_started\",\"dictation_start_failed\",\"dictation_completed\",\"dictation_cancelled\",\"dictation_no_speech\",\"dictation_audio_route_recovery_timeout\",\"meeting_recording_started\",\"meeting_recording_start_failed\",\"meeting_recording_stopped\",\"meeting_recording_cancelled\",\"meeting_transcript_saved\",\"meeting_transcript_failed\",\"meeting_transcript_skipped\") then 1 else 0 end) as workflow_events_7d from events where timestamp >= now() - interval 7 day"
     }')
 
   if [[ -z "$response" ]]; then
@@ -100,7 +100,7 @@ probe_posthog() {
   local devices events
   devices=$(echo "$response" | jq -r '.data[0][0]')
   events=$(echo "$response" | jq -r '.data[0][1]')
-  echo "PostHog (last 7d): devices=$devices, allowed_events=$events"
+  echo "PostHog (last 7d): devices=$devices, workflow_events=$events"
 }
 
 probe_cloudflare() {
