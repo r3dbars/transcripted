@@ -115,6 +115,11 @@ That report is the first pass, not the whole job. It should score the current
 state, flag repo/release/privacy drift, and only then hand the run off to agent
 judgment for a small high-confidence patch or a findings note.
 
+When `Info.plist` has been bumped one patch version ahead for a release
+candidate but the matching Git tag does not exist yet, the appcast should stay
+on the latest published release. The checker reports that as a watch item, not
+a release-integrity failure.
+
 If the run built a fresh app or needs build-output verification, rerun it with:
 
 ```bash
