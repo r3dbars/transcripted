@@ -2,11 +2,11 @@
 
 ## Current status
 
-`Sources/Beta/` currently contains only beta-build configuration.
+`Sources/Beta/` currently contains only beta-build token configuration.
 
 ## Important file
 
-- `BetaConfig.swift` — `#if BETA_BUILD` constants for proxy token and proxy base URL
+- `BetaConfig.swift` — `#if BETA_BUILD` token placeholder replaced by `build-beta.sh`
 
 ## Notes
 
