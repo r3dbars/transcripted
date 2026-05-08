@@ -17,8 +17,6 @@ enum BetaConfig {
         return token
     }()
 
-    /// Proxy base URL for beta-only proxy traffic.
-    static let proxyBaseURL = "https://draft-proxy.tz427gsydr.workers.dev"
 }
 
 #endif
