@@ -46,8 +46,9 @@ enum MeetingStoragePaths {
         FileManager.default.transcriptedLogsDir
     }
 
-    /// A transient scratch path kept under tmp/ so speaker clips are never persisted as
-    /// long-term state even if the naming flow uses them briefly.
+    /// Owner-only speaker review samples live under tmp/recordings. Temporary
+    /// per-meeting clips are cleaned after review; one UUID-keyed sample can stay
+    /// so Settings > People still has audio evidence when review is deferred.
     static var speakerClipsFolder: URL {
         let url = recordingsScratch.appendingPathComponent("speaker_clips", isDirectory: true)
         FileManager.default.ensurePrivateDirectory(at: url, context: "meeting speaker clips")

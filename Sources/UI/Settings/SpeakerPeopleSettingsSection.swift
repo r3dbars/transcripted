@@ -110,9 +110,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     var filteredProfiles: [SpeakerProfile] {
         let duplicateIds = duplicateProfileIDs
         let reviewProfiles: (SpeakerProfile) -> Bool = { profile in
-            duplicateIds.contains(profile.id)
-                || profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-                || profile.disputeCount > 0
+            SpeakerPeopleReviewPolicy.needsReview(profile: profile, duplicateIds: duplicateIds)
         }
 
         let baseProfiles: [SpeakerProfile]
@@ -124,15 +122,24 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
 
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return baseProfiles }
+        guard !trimmed.isEmpty else {
+            return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(baseProfiles, duplicateIds: duplicateIds)
+        }
 
         let query = trimmed.lowercased()
-        return baseProfiles.filter { profile in
+        let matches = baseProfiles.filter { profile in
             if let name = profile.displayName?.lowercased(), name.contains(query) {
                 return true
             }
             return profile.id.uuidString.lowercased().contains(query)
         }
+        return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
+    }
+
+    var needsReviewCount: Int {
+        profiles.filter {
+            SpeakerPeopleReviewPolicy.needsReview(profile: $0, duplicateIds: duplicateProfileIDs)
+        }.count
     }
 
     func refresh() {
@@ -216,7 +223,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 ?? sourceName
                 ?? "Speaker \(targetId.uuidString.prefix(8))"
 
-            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: sourceId, newName: resolvedName)
+            TranscriptSaver.retroactivelyMergeSpeaker(
+                sourceDbId: sourceId,
+                targetDbId: targetId,
+                targetName: resolvedName
+            )
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
@@ -565,9 +576,38 @@ struct SpeakerPeopleSettingsSection: View {
                 )
             )
 
-            Text("After a meeting, name each local speaker once. If the split looks wrong, choose \"Keep as You\".")
+            Text("After a meeting, name speakers right away or choose Review Later and finish here.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        if model.needsReviewCount > 0 {
+            SettingsSection(
+                title: "Needs Review",
+                detail: "Deferred speaker reviews and possible profile issues."
+            ) {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(needsReviewSummary)
+                            .font(.subheadline.weight(.semibold))
+
+                        Text("Play the sample, name the person, or merge duplicates when you have time.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button("Show Needs Review") {
+                        model.profileFilter = .needsReview
+                    }
+                }
+            }
         }
 
         if !model.profiles.isEmpty {
@@ -601,7 +641,7 @@ struct SpeakerPeopleSettingsSection: View {
 
         SettingsSection(
             title: "People",
-            detail: "Rename, play samples, merge, or delete saved speaker profiles."
+            detail: "Name deferred reviews, play samples, merge, or delete saved speaker profiles."
         ) {
             HStack(spacing: 12) {
                 TextField("Search people or IDs", text: $model.searchText)
@@ -644,9 +684,16 @@ struct SpeakerPeopleSettingsSection: View {
             return "No speaker profiles yet."
         }
         if model.profileFilter == .needsReview {
-            return "No people need review."
+            return "No deferred speaker reviews right now."
         }
         return "No people match that search."
+    }
+
+    private var needsReviewSummary: String {
+        let count = model.needsReviewCount
+        return count == 1
+            ? "1 person needs a name or review."
+            : "\(count) people need names or review."
     }
 }
 
@@ -749,13 +796,16 @@ private struct SpeakerPersonRow: View {
                             .font(.subheadline.weight(.semibold))
 
                         ForEach(statusBadges, id: \.self) { badge in
+                            let badgeColor = badge == "Duplicate" || badge == "Needs Name"
+                                ? Color.orange
+                                : Color.secondary
                             Text(badge)
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(badge == "Duplicate" ? Color.orange : Color.secondary)
+                                .foregroundStyle(badgeColor)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
                                 .background(
-                                    Capsule().fill((badge == "Duplicate" ? Color.orange : Color.secondary).opacity(0.12))
+                                    Capsule().fill(badgeColor.opacity(0.12))
                                 )
                         }
                     }
@@ -867,7 +917,7 @@ private struct SpeakerPersonRow: View {
             badges.append("Review")
         }
         if profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-            badges.append("Unnamed")
+            badges.append("Needs Name")
         }
         return badges
     }

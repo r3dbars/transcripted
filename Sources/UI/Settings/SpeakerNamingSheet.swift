@@ -6,8 +6,8 @@
 //
 // Pure AppKit — modal sheet over a borderless window. One text field per
 // speaker, with a "Save" button that builds `[SpeakerNameUpdate]` and fires
-// the completion handler. Cancel sends an empty array (Core treats that as
-// "keep the generic Speaker N labels").
+// the completion handler. "Review Later" sends an empty array; Core keeps the
+// transcript generic and preserves local review state for Settings > People.
 
 import AppKit
 import Combine
@@ -75,7 +75,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Review speakers"
+        window.title = "Name speakers"
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
@@ -117,12 +117,12 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 @MainActor
 final class SpeakerNamingContentView: NSView {
 
-    private let titleLabel = NSTextField(labelWithString: "Review the speakers from this meeting")
-    private let subtitleLabel = NSTextField(labelWithString: "Confirm suggestions, link voices to existing people, or leave them unknown for now.")
+    private let titleLabel = NSTextField(labelWithString: "Name the speakers from this meeting")
+    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name speakers now, or review them later in Settings > People.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
-    private let saveButton = NSButton(title: "Save speaker decisions", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "Skip", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Save names", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Review Later", target: nil, action: nil)
 
     // Local (mic) section header + "Keep as You" batch toggle
     private let localSectionLabel = NSTextField(labelWithString: "People in the room")
@@ -177,6 +177,7 @@ final class SpeakerNamingContentView: NSView {
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
+        cancelButton.toolTip = "Keep the transcript generic and finish speaker names later in Settings > People"
         addSubview(cancelButton)
 
         // Section headers live inside the document view so they scroll with rows.
@@ -185,7 +186,9 @@ final class SpeakerNamingContentView: NSView {
         remoteSectionLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         remoteSectionLabel.textColor = NSColor.labelColor
 
-        keepAsYouButton.bezelStyle = .inline
+        keepAsYouButton.bezelStyle = .rounded
+        keepAsYouButton.controlSize = .small
+        keepAsYouButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         keepAsYouButton.target = self
         keepAsYouButton.action = #selector(handleKeepAsYouToggle)
     }
@@ -205,7 +208,7 @@ final class SpeakerNamingContentView: NSView {
         if hasMicSection {
             documentView.addSubview(localSectionLabel)
             documentView.addSubview(keepAsYouButton)
-            keepAsYouButton.title = "Keep as You"
+            keepAsYouButton.title = "Keep mic as You"
             for entry in micEntries {
                 let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
                 documentView.addSubview(row)
@@ -274,10 +277,10 @@ final class SpeakerNamingContentView: NSView {
 
         // Layout rows + section headers inside the document view. Flipped coordinates:
         // rows stack top-down visually, laid out with bottom-up math.
-        let rowHeight: CGFloat = 128
-        let rowSpacing: CGFloat = 10
+        let rowHeight: CGFloat = 104
+        let rowSpacing: CGFloat = 12
         let headerHeight: CGFloat = 24
-        let headerGap: CGFloat = 14
+        let headerGap: CGFloat = 10
 
         let micCount = micRows.count
         let systemCount = systemRows.count
@@ -374,7 +377,7 @@ final class SpeakerNamingContentView: NSView {
 
     @objc private func handleKeepAsYouToggle() {
         localCollapsedToMe.toggle()
-        keepAsYouButton.title = localCollapsedToMe ? "Split into speakers" : "Keep as You"
+        keepAsYouButton.title = localCollapsedToMe ? "Split mic speakers" : "Keep mic as You"
         for row in micRows {
             row.setCollapsedToMe(localCollapsedToMe)
         }
@@ -484,9 +487,8 @@ final class SpeakerRowView: NSView {
     private func setupViews() {
         wantsLayer = true
         layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = NSColor.gray.withAlphaComponent(0.15).cgColor
         layer?.borderWidth = 1
+        updateSurfaceColors()
 
         if let current = entry.currentName, !current.isEmpty {
             labelField.stringValue = "Suggested match: \(current)"
@@ -507,7 +509,7 @@ final class SpeakerRowView: NSView {
         sampleField.stringValue = "\u{201C}\(entry.sampleText)\u{201D}"
         sampleField.font = NSFont.systemFont(ofSize: 11)
         sampleField.textColor = NSColor.secondaryLabelColor
-        sampleField.maximumNumberOfLines = 3
+        sampleField.maximumNumberOfLines = 2
         sampleField.lineBreakMode = .byWordWrapping
         Self.disableExpansionFrame(for: sampleField)
         addSubview(sampleField)
@@ -538,6 +540,9 @@ final class SpeakerRowView: NSView {
         confirmButton.target = self
         confirmButton.action = #selector(handleConfirm)
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
+        if let current = entry.currentName, !current.isEmpty {
+            confirmButton.title = "Confirm \(current)"
+        }
         addSubview(confirmButton)
 
         discardButton.bezelStyle = .inline
@@ -561,6 +566,11 @@ final class SpeakerRowView: NSView {
                 self?.syncPlayButtonState()
             }
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateSurfaceColors()
     }
 
     override func layout() {
@@ -589,9 +599,9 @@ final class SpeakerRowView: NSView {
         )
         sampleField.frame = NSRect(
             x: pad,
-            y: evidenceField.frame.minY - 38,
+            y: evidenceField.frame.minY - 30,
             width: w,
-            height: 34
+            height: 26
         )
 
         let fieldH: CGFloat = 22
@@ -643,7 +653,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName {
             nameField.stringValue = current
         }
-        confirmButton.title = "Using Suggested"
+        confirmButton.title = "Confirmed"
         updateStatePresentation()
     }
 
@@ -777,6 +787,20 @@ final class SpeakerRowView: NSView {
             optionsByLabel: knownPeopleByLabel,
             displayName: { $0.displayName }
         )
+    }
+
+    private func updateSurfaceColors() {
+        guard let layer else { return }
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let background = dark
+            ? NSColor(calibratedWhite: 1.0, alpha: 0.055)
+            : NSColor.controlBackgroundColor
+        let border = dark
+            ? NSColor.white.withAlphaComponent(0.08)
+            : NSColor.black.withAlphaComponent(0.08)
+
+        layer.backgroundColor = background.cgColor
+        layer.borderColor = border.cgColor
     }
 
     private static func disableExpansionFrame(for field: NSTextField) {

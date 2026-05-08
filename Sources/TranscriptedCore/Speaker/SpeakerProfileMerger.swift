@@ -391,17 +391,28 @@ extension SpeakerDatabase {
         // Only prune profiles created more than 1 hour ago — don't prune profiles from
         // the current recording that are about to be named in the speaker naming flow.
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
+        let protectedIds = persistedReviewClipSpeakerIds()
+        let protectedClause: String
+        if protectedIds.isEmpty {
+            protectedClause = ""
+        } else {
+            protectedClause = "AND id NOT IN (\(Array(repeating: "?", count: protectedIds.count).joined(separator: ",")))"
+        }
 
         let sql = """
         DELETE FROM speakers
         WHERE display_name IS NULL
           AND call_count <= 1
           AND confidence <= 0.5
-          AND first_seen < ?;
+          AND first_seen < ?
+          \(protectedClause);
         """
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             sqlite3_bind_text(statement, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            for (offset, id) in protectedIds.enumerated() {
+                sqlite3_bind_text(statement, Int32(offset + 2), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            }
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to prune weak profiles", ["sqlite_error": dbErrorMessage()])
             } else {
@@ -414,6 +425,47 @@ extension SpeakerDatabase {
             AppLogger.speakers.error("Failed to prepare pruneWeakProfiles", ["sqlite_error": dbErrorMessage()])
         }
         sqlite3_finalize(statement)
+    }
+
+    private func persistedReviewClipSpeakerIds() -> Set<UUID> {
+        var ids = Set<UUID>()
+        let fileManager = FileManager.default
+        for directory in reviewClipDirectories() {
+            guard let files = try? fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for file in files where file.pathExtension.lowercased() == "wav" {
+                let stem = file.deletingPathExtension().lastPathComponent
+                if let id = UUID(uuidString: stem) {
+                    ids.insert(id)
+                }
+            }
+        }
+        return ids
+    }
+
+    private func reviewClipDirectories() -> [URL] {
+        let stateDirectory = dbPath.deletingLastPathComponent()
+        let appSupportDirectory = stateDirectory.deletingLastPathComponent()
+        let candidates = [
+            SpeakerClipExtractor.defaultClipsDirectory,
+            stateDirectory.appendingPathComponent("speaker_clips", isDirectory: true),
+            appSupportDirectory
+                .appendingPathComponent("tmp", isDirectory: true)
+                .appendingPathComponent("recordings", isDirectory: true)
+                .appendingPathComponent("speaker_clips", isDirectory: true),
+        ]
+
+        var seen = Set<String>()
+        return candidates.filter { directory in
+            let path = directory.standardizedFileURL.path
+            guard !seen.contains(path) else { return false }
+            seen.insert(path)
+            return true
+        }
     }
 
     // MARK: - Name Variant Detection

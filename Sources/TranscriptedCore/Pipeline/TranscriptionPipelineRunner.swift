@@ -305,7 +305,8 @@ extension TranscriptionTaskManager {
                     sourceAudioURL: systemURL,
                     utterances: actionUtterances,
                     channel: .system,
-                    speakerDB: speakerDB
+                    speakerDB: speakerDB,
+                    clipsDirectory: transcription.speakerClipsDirectory
                 )
                 for clip in clips {
                     namingEntries.append(SpeakerNamingEntry(
@@ -340,7 +341,8 @@ extension TranscriptionTaskManager {
                     sourceAudioURL: micURL,
                     utterances: micUtterancesWithProfiles,
                     channel: .mic,
-                    speakerDB: speakerDB
+                    speakerDB: speakerDB,
+                    clipsDirectory: transcription.speakerClipsDirectory
                 )
                 for clip in micClips {
                     namingEntries.append(SpeakerNamingEntry(

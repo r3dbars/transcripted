@@ -74,6 +74,75 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains(#"[System/C:\Users\Dana]"#))
     }
 
+    func testRetroactivelyUpdateSpeakerRenamesMicLabels() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("mic.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Local Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [Mic/Speaker 1] hello there
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Jamie",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Jamie""#))
+        XCTAssertTrue(updated.contains("[Mic/Jamie]"))
+        XCTAssertTrue(updated.contains("- **Jamie:** 1 utterances"))
+        XCTAssertFalse(updated.contains("[Mic/Speaker 1]"))
+    }
+
+    func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
+        let sourceId = UUID()
+        let targetId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("merge.md")
+        try markdown(
+            speakerId: sourceId,
+            speakerName: "Alex Old"
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyMergeSpeaker(
+            sourceDbId: sourceId,
+            targetDbId: targetId,
+            targetName: "Alex",
+            in: temporaryDirectory
+        )
+
+        var updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(updated.contains(#"db_id: "\#(sourceId.uuidString)""#))
+        XCTAssertTrue(updated.contains(#"db_id: "\#(targetId.uuidString)""#))
+        XCTAssertTrue(updated.contains(#"name: "Alex""#))
+        XCTAssertTrue(updated.contains("[System/Alex]"))
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: targetId,
+            newName: "Alicia",
+            in: temporaryDirectory
+        )
+
+        updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Alicia""#))
+        XCTAssertTrue(updated.contains("[System/Alicia]"))
+    }
+
     func testUpdateSpeakerNamesInsertsDbIdWhenTranscriptStartedGeneric() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("generic.md")
@@ -97,6 +166,58 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(markdown.contains(#"db_id: "\#(speakerId.uuidString)""#))
         XCTAssertTrue(markdown.contains(#"name: "Alex""#))
         XCTAssertTrue(markdown.contains("[System/Alex]"))
+    }
+
+    func testMarkSpeakerReviewDeferredRepointsPendingDbIdWithoutRenamingTranscript() throws {
+        let originalProfileId = UUID()
+        let deferredProfileId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("deferred.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(originalProfileId.uuidString)"
+            name: "Speaker 1"
+            confidence: medium
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Speaker 1] hello there
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.markSpeakerReviewDeferred(
+            transcriptURL: transcriptURL,
+            entries: [
+                SpeakerNamingEntry(
+                    id: originalProfileId,
+                    diarizerSpeakerId: "1",
+                    channel: .system,
+                    clipURL: temporaryDirectory.appendingPathComponent("clip.wav"),
+                    sampleText: "hello there",
+                    currentName: "Alex",
+                    matchSimilarity: 0.9,
+                    needsNaming: false,
+                    needsConfirmation: true
+                )
+            ],
+            redirectedSpeakerIdsByKey: ["system_1": deferredProfileId]
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains(#"db_id: "\#(originalProfileId.uuidString)""#))
+        XCTAssertTrue(markdown.contains(#"db_id: "\#(deferredProfileId.uuidString)""#))
+        XCTAssertTrue(markdown.contains(#"name: "Speaker 1""#))
+        XCTAssertTrue(markdown.contains("source: db_pending"))
+        XCTAssertTrue(markdown.contains("[System/Speaker 1]"))
+        XCTAssertFalse(markdown.contains("[System/Alex]"))
     }
 
     private struct MarkdownSpeaker {

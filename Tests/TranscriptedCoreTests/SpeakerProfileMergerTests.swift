@@ -56,4 +56,35 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertNotNil(database.getSpeaker(id: first.id))
         XCTAssertNotNil(database.getSpeaker(id: second.id))
     }
+
+    func testPruneWeakProfilesKeepsDeferredProfilesWithReviewSamples() throws {
+        let profileId = UUID()
+        _ = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: profileId
+        )
+        let staleProfile = SpeakerProfile(
+            id: profileId,
+            displayName: nil,
+            nameSource: nil,
+            embedding: [Float](repeating: 0.25, count: 256),
+            firstSeen: Date().addingTimeInterval(-7200),
+            lastSeen: Date().addingTimeInterval(-7200),
+            callCount: 1,
+            confidence: 0.5,
+            disputeCount: 0
+        )
+        database.restoreProfile(staleProfile)
+
+        let clipsDirectory = tempDirectory.appendingPathComponent("speaker_clips", isDirectory: true)
+        try FileManager.default.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
+        try Data("clip".utf8).write(to: clipsDirectory.appendingPathComponent("\(profileId.uuidString).wav"))
+
+        database.pruneWeakProfiles()
+
+        XCTAssertNotNil(
+            database.getSpeaker(id: profileId),
+            "deferred unnamed profiles with review samples should survive pruning"
+        )
+    }
 }

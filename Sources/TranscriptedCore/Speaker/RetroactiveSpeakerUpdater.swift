@@ -22,6 +22,31 @@ extension TranscriptSaver {
         }
     }
 
+    /// After Settings merges two people, rewrite old source profile references to the
+    /// kept profile id so future renames of the kept person still reach older transcripts.
+    public static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String) {
+        fileUpdateQueue.sync {
+            _retroactivelyMergeSpeakerImpl(
+                sourceDbId: sourceDbId,
+                targetDbId: targetDbId,
+                targetName: targetName,
+                directory: defaultSaveDirectory
+            )
+        }
+    }
+
+    /// Internal overload for tests — scans a specific directory instead of `defaultSaveDirectory`.
+    static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String, in directory: URL) {
+        fileUpdateQueue.sync {
+            _retroactivelyMergeSpeakerImpl(
+                sourceDbId: sourceDbId,
+                targetDbId: targetDbId,
+                targetName: targetName,
+                directory: directory
+            )
+        }
+    }
+
     private static func _retroactivelyUpdateSpeakerImpl(
         dbId: UUID,
         newName: String,
@@ -75,7 +100,108 @@ extension TranscriptSaver {
         }
     }
 
+    private static func _retroactivelyMergeSpeakerImpl(
+        sourceDbId: UUID,
+        targetDbId: UUID,
+        targetName: String,
+        directory: URL
+    ) {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "md" }) else { return }
+
+        let sourceIdString = sourceDbId.uuidString
+        let targetIdString = targetDbId.uuidString
+        var updatedCount = 0
+
+        for fileURL in files {
+            guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
+                  content.contains("db_id: \"\(sourceIdString)\"") else { continue }
+
+            let lines = content.components(separatedBy: "\n")
+            var oldNames: [String] = []
+            for (index, line) in lines.enumerated() where line.contains("db_id: \"\(sourceIdString)\"") {
+                guard index + 1 < lines.count else { continue }
+                if let oldName = extractYAMLQuotedString(from: lines[index + 1], prefix: "name: "),
+                   oldName != targetName,
+                   !oldNames.contains(oldName) {
+                    oldNames.append(oldName)
+                }
+            }
+
+            for oldName in oldNames {
+                applyNameReplacement(in: &content, oldName: oldName, newName: targetName, updateSpeakerTag: true)
+            }
+            content = content.replacingOccurrences(
+                of: "db_id: \"\(sourceIdString)\"",
+                with: "db_id: \"\(targetIdString)\""
+            )
+
+            do {
+                try content.write(to: fileURL, atomically: true, encoding: .utf8)
+                updatedCount += 1
+            } catch {
+                AppLogger.pipeline.warning("Failed to update merged speaker transcript", [
+                    "file": fileURL.lastPathComponent,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+
+        if updatedCount > 0 {
+            AppLogger.pipeline.info("Retroactively merged speaker in transcripts", [
+                "sourceDbId": sourceIdString,
+                "targetDbId": targetIdString,
+                "files": "\(updatedCount)"
+            ])
+        }
+    }
+
     // MARK: - Speaker Name Updating (Post-Naming Flow)
+
+    /// Preserve a deferred speaker review without applying a name.
+    /// This keeps transcript labels generic, but refreshes frontmatter db_id/source
+    /// so Settings > People can safely name the right local profile later.
+    @discardableResult
+    public static func markSpeakerReviewDeferred(
+        transcriptURL: URL,
+        entries: [SpeakerNamingEntry],
+        redirectedSpeakerIdsByKey: [String: UUID]
+    ) -> Bool {
+        guard !entries.isEmpty else { return true }
+
+        return fileUpdateQueue.sync {
+            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+                AppLogger.pipeline.error("Failed to read transcript for deferred speaker review", ["path": transcriptURL.path])
+                return false
+            }
+
+            for entry in entries {
+                let key = entry.channel.speakerKey(diarizerSpeakerId: entry.diarizerSpeakerId)
+                let speakerId = redirectedSpeakerIdsByKey[key] ?? entry.id
+                writeFrontmatterSpeakerMetadata(
+                    in: &content,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
+                    channel: entry.channel,
+                    persistentSpeakerId: speakerId,
+                    name: "Speaker \(entry.diarizerSpeakerId)",
+                    source: "db_pending"
+                )
+            }
+
+            do {
+                try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            } catch {
+                AppLogger.pipeline.error("Failed to write deferred speaker review metadata", ["error": error.localizedDescription])
+                return false
+            }
+
+            AppLogger.pipeline.info("Deferred speaker review metadata saved", [
+                "path": transcriptURL.lastPathComponent,
+                "speakers": "\(entries.count)"
+            ])
+            return true
+        }
+    }
 
     /// Simplified overload for transcripts that started with generic speaker labels and have no
     /// TranscriptionResult available. Updates frontmatter db_id/name and replaces generic speaker
@@ -497,6 +623,7 @@ extension TranscriptSaver {
         let yamlSafeName = escapeYAML(newName)
         content = content.replacingOccurrences(of: "name: \"\(yamlSafeOldName)\"", with: "name: \"\(yamlSafeName)\"")
         content = content.replacingOccurrences(of: "[System/\(oldName)]", with: "[System/\(newName)]")
+        content = content.replacingOccurrences(of: "[Mic/\(oldName)]", with: "[Mic/\(newName)]")
         content = content.replacingOccurrences(of: "[[\(oldName)]]", with: "[[\(newName)]]")
         content = content.replacingOccurrences(of: "**\(oldName):**", with: "**\(newName):**")
 
@@ -564,13 +691,31 @@ extension TranscriptSaver {
         in content: inout String,
         update: SpeakerNameUpdate
     ) {
+        writeFrontmatterSpeakerMetadata(
+            in: &content,
+            diarizerSpeakerId: update.diarizerSpeakerId,
+            channel: update.channel,
+            persistentSpeakerId: update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId,
+            name: update.newName,
+            source: NameSource.userManual
+        )
+    }
+
+    private static func writeFrontmatterSpeakerMetadata(
+        in content: inout String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        persistentSpeakerId: UUID,
+        name: String,
+        source: String
+    ) {
         guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
 
         var lines = String(content[frontmatterRange])
             .components(separatedBy: "\n")
 
-        let targetIdLine = #"id: "\#(update.diarizerSpeakerId)""#
-        let resolvedPersistentId = (update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId).uuidString
+        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
+        let resolvedPersistentId = persistentSpeakerId.uuidString
         var lineIndex = 0
 
         while lineIndex < lines.count {
@@ -608,14 +753,14 @@ extension TranscriptSaver {
             }
 
             let block = lines[lineIndex..<nextEntryIndex]
-            guard speakerBlockMatchesChannel(block, channel: update.channel) else {
+            guard speakerBlockMatchesChannel(block, channel: channel) else {
                 lineIndex = nextEntryIndex
                 continue
             }
 
             let dbIdLine = #"    db_id: "\#(resolvedPersistentId)""#
-            let nameLine = #"    name: "\#(escapeYAML(update.newName))""#
-            let sourceLine = "    source: \(NameSource.userManual)"
+            let nameLine = #"    name: "\#(escapeYAML(name))""#
+            let sourceLine = "    source: \(source)"
             var nextInsertIndex = lineIndex + 1
 
             if let dbIdIndex {

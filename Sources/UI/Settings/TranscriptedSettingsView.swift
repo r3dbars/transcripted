@@ -1243,7 +1243,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "People",
-                summary: "Review saved speakers, samples, and possible duplicates."
+                summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
