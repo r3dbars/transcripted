@@ -11,18 +11,7 @@ extension Audio {
     // MARK: - Mic Audio Level
 
     func calculateLevel(buffer: AVAudioPCMBuffer) {
-        guard let data = buffer.floatChannelData else { return }
-
-        let channelData = data.pointee
-        let frameLength = Int(buffer.frameLength)
-        guard frameLength > 0 else { return }
-
-        var sum: Float = 0
-        vDSP_dotpr(channelData, 1, channelData, 1, &sum, vDSP_Length(frameLength))
-
-        let rms = sqrt(sum / Float(frameLength))
-        let power = 20 * log10(max(rms, 0.00001))
-        let level = max(0.0, min(1.0, (power + 60) / 60))
+        let level = normalizedRMSLevel(buffer: buffer)
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -59,6 +48,38 @@ extension Audio {
             peak = max(peak, channelPeak)
         }
         return peak.isFinite ? peak : 0
+    }
+
+    func normalizedRMSLevel(buffer: AVAudioPCMBuffer) -> Float {
+        let frameCount = vDSP_Length(buffer.frameLength)
+        guard frameCount > 0,
+              let channelData = buffer.floatChannelData else {
+            return 0
+        }
+
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 0 else { return 0 }
+
+        var sum: Float = 0
+        if buffer.format.isInterleaved {
+            let totalLength = frameCount * vDSP_Length(channelCount)
+            vDSP_dotpr(channelData[0], 1, channelData[0], 1, &sum, totalLength)
+        } else {
+            for channel in 0..<channelCount {
+                var channelSum: Float = 0
+                vDSP_dotpr(channelData[channel], 1, channelData[channel], 1, &channelSum, frameCount)
+                sum += channelSum
+            }
+        }
+
+        guard sum.isFinite, sum > 0 else { return 0 }
+        let sampleCount = Float(Int(frameCount) * channelCount)
+        guard sampleCount > 0 else { return 0 }
+
+        let rms = sqrt(sum / sampleCount)
+        let power = 20 * log10(max(rms, 0.00001))
+        let level = max(0.0, min(1.0, (power + 60) / 60))
+        return level.isFinite ? level : 0
     }
 
     // MARK: - Silence Detection
@@ -108,18 +129,7 @@ extension Audio {
         }
         guard shouldProcess else { return }
 
-        guard let data = buffer.floatChannelData else { return }
-
-        let channelData = data.pointee
-        let frameLength = Int(buffer.frameLength)
-        guard frameLength > 0 else { return }
-
-        var sum: Float = 0
-        vDSP_dotpr(channelData, 1, channelData, 1, &sum, vDSP_Length(frameLength))
-
-        let rms = sqrt(sum / Float(frameLength))
-        let power = 20 * log10(max(rms, 0.00001))
-        let level = max(0.0, min(1.0, (power + 60) / 60))
+        let level = normalizedRMSLevel(buffer: buffer)
 
         // Track system audio silence for warning indicator
         updateSystemAudioSilenceTracking(peakLevel: level)

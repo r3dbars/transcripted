@@ -1433,6 +1433,7 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(
                     extra: [
                         "error": message,
+                        "failure_kind": analyticsFailureKind(from: message),
                         "queue_depth": "\(queuedTranscriptionJobs.count)",
                         "trigger": transcriptionTrigger.rawValue
                     ]
