@@ -117,6 +117,7 @@ This lets the server answer both meeting-specific queries (`who_is`, `read_meeti
 cd Tools/TranscriptedMCP
 swift build -c release
 swift test
+./.build/release/transcripted-mcp --help
 ./.build/release/transcripted-mcp --self-test
 ```
 

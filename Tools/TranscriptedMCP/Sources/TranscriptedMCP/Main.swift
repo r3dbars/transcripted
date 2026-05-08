@@ -4,6 +4,11 @@ import MCP
 @main
 struct TranscriptedMCP {
     static func main() async throws {
+        if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
+            print(Self.helpText)
+            return
+        }
+
         if CommandLine.arguments.contains("--version") {
             print("transcripted-mcp 1.0.0")
             return
@@ -68,6 +73,23 @@ struct TranscriptedMCP {
         watchers.forEach { $0.stop() }
         log("MCP server stopped")
     }
+
+    private static let helpText = """
+    OVERVIEW: Read-only MCP server for Transcripted meetings and dictations.
+
+    USAGE: transcripted-mcp [--self-test] [--version] [--help]
+
+    OPTIONS:
+      --self-test   Verify directory resolution and SQLite indexing, then exit.
+      --version     Show the version.
+      -h, --help    Show help information.
+
+    ENVIRONMENT:
+      TRANSCRIPTED_DATA_DIR         Shared root with meetings/ and dictations/.
+      TRANSCRIPTED_MEETINGS_DIR     Meeting directory override.
+      TRANSCRIPTED_DICTATIONS_DIR   Dictation directory override.
+      TRANSCRIPTED_INDEX_DIR        SQLite index directory override.
+    """
 
     private static func runSelfTest() throws {
         let directories = TranscriptedDataDirectories.resolve()
