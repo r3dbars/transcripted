@@ -154,6 +154,11 @@ extension TranscriptionTaskManager {
                         "diarizerSpeakerId": update.diarizerSpeakerId
                     ])
                 }
+                Self.restoreCollapsedMatchedSpeakers(
+                    collapsedUpdates,
+                    clipsBySpeakerId: clipsBySpeakerId,
+                    speakerDB: speakerDB
+                )
                 Self.applyDiscardedSpeakerActions(
                     discardedUpdates,
                     clipsBySpeakerId: clipsBySpeakerId,
@@ -412,6 +417,24 @@ extension TranscriptionTaskManager {
                 update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId
             )
         })
+    }
+
+    nonisolated private static func restoreCollapsedMatchedSpeakers(
+        _ updates: [SpeakerNameUpdate],
+        clipsBySpeakerId: [String: SpeakerNamingEntry],
+        speakerDB: any SpeakerStore
+    ) {
+        for update in updates {
+            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            guard let snapshot = clipsBySpeakerId[key]?.matchedProfileSnapshot else { continue }
+
+            speakerDB.restoreProfile(snapshot)
+            speakerDB.incrementDisputeCount(id: snapshot.id)
+            AppLogger.speakers.info("Collapsed mic speaker — restored matched profile", [
+                "profileId": snapshot.id.uuidString,
+                "diarizerSpeakerId": update.diarizerSpeakerId
+            ])
+        }
     }
 
     nonisolated private static func applyDiscardedSpeakerActions(
