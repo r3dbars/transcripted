@@ -220,6 +220,65 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(markdown.contains("[System/Alex]"))
     }
 
+    func testMarkSpeakerReviewDeferredKeepsMicLabelsAndLocalBreakdownGeneric() throws {
+        let originalProfileId = UUID()
+        let deferredProfileId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("deferred-mic.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(originalProfileId.uuidString)"
+            name: "Speaker 1"
+            confidence: medium
+            source: db_pending
+        ---
+
+        ### Microphone (People in the Room)
+        - **Utterances:** 1
+        - **Words:** ~2
+        - **Speaking Time:** 00:01
+        - **Speakers Detected:** 1
+
+        #### Local Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [Mic/Speaker 1] hello there
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.markSpeakerReviewDeferred(
+            transcriptURL: transcriptURL,
+            entries: [
+                SpeakerNamingEntry(
+                    id: originalProfileId,
+                    diarizerSpeakerId: "1",
+                    channel: .mic,
+                    clipURL: temporaryDirectory.appendingPathComponent("clip-mic.wav"),
+                    sampleText: "hello there",
+                    currentName: "Alex",
+                    matchSimilarity: 0.9,
+                    needsNaming: false,
+                    needsConfirmation: true
+                )
+            ],
+            redirectedSpeakerIdsByKey: ["mic_1": deferredProfileId]
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains(#"db_id: "\#(originalProfileId.uuidString)""#))
+        XCTAssertTrue(markdown.contains(#"db_id: "\#(deferredProfileId.uuidString)""#))
+        XCTAssertTrue(markdown.contains(#"name: "Speaker 1""#))
+        XCTAssertTrue(markdown.contains("source: db_pending"))
+        XCTAssertTrue(markdown.contains("- **Speaker 1:** 1 utterances, ~2 words, 00:01"))
+        XCTAssertTrue(markdown.contains("[Mic/Speaker 1]"))
+        XCTAssertFalse(markdown.contains("[Mic/Alex]"))
+    }
+
     private struct MarkdownSpeaker {
         let id: String
         let persistentSpeakerId: UUID
