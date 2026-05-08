@@ -6,7 +6,7 @@ func testDictationNoSpeechPresentationPolicy() {
 
         assertEqual(
             message,
-            "No speech caught. Hold the key while you talk.",
+            "Transcripted didn't catch your voice. Hold the dictation key while you talk.",
             "physical key no-speech copy should explain the press-and-talk behavior"
         )
     }
