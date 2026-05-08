@@ -65,6 +65,30 @@ func testReliabilityPacketRecorder() {
         assertNil(ReliabilityPacketRecorder.packet(from: event), "boring app launch should not create a packet")
     }
 
+    runSuite("ReliabilityPacketRecorder preserves coarse runtime shutdown duration") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-05-03T01:15:11.605Z",
+            level: "warning",
+            engine: "app",
+            event: "unclean_shutdown_detected",
+            message: "Previous app session did not shut down cleanly",
+            context: [
+                "session_active": "false",
+                "session_duration_bucket": "3_7h",
+                "session_kind": "none",
+                "session_stage": "idle",
+                "started_at": "2026-05-03T00:00:00Z",
+            ],
+            appVersion: "1.1.32",
+            osVersion: "Version 26.4.1"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertEqual(packet?.context["session_duration_bucket"], "3_7h", "runtime duration should stay coarse")
+        assertNil(packet?.context["started_at"], "raw runtime timestamps should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder maps short meetings as expected skips") {
         let event = ObservabilityEvent(
             timestamp: "2026-05-03T01:15:11.605Z",

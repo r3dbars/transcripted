@@ -26,6 +26,7 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(context["heartbeat_age_bucket"], "1_4m", "context should bucket heartbeat age")
         assertEqual(context["last_event"], "dictation_recording", "context should keep last runtime event")
         assertEqual(context["session_active"], "true", "context should keep whether a session was active")
+        assertEqual(context["session_duration_bucket"], "1_4m", "context should bucket previous session duration")
         assertEqual(context["session_kind"], "dictation", "context should keep coarse session kind")
         assertEqual(context["session_stage"], "recording", "context should keep coarse session stage")
     }
@@ -56,6 +57,7 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(context["last_event"], "meeting_transcribing", "context should keep last runtime event")
         assertEqual(context["previous_clean_shutdown"], "false", "context should keep current marker clean flag")
         assertEqual(context["session_active"], "true", "context should keep whether a session is active")
+        assertEqual(context["session_duration_bucket"], "lt_1m", "context should bucket current session duration")
         assertEqual(context["session_kind"], "meeting", "context should keep coarse session kind")
         assertEqual(context["session_stage"], "transcribing", "context should keep coarse session stage")
     }
@@ -90,15 +92,37 @@ func testRuntimeDiagnosticsStore() {
                 "os_major",
                 "previous_clean_shutdown",
                 "session_active",
+                "session_duration_bucket",
                 "session_kind",
                 "session_stage",
             ],
             "current Sentry context should stay limited to coarse runtime keys"
         )
         assertEqual(context["previous_clean_shutdown"], "true", "clean shutdown state should survive as a coarse boolean")
+        assertEqual(context["session_duration_bucket"], "lt_1m", "session duration should stay coarse")
         assertNil(context["launch_id"], "launch IDs should not leak into crash context")
         assertNil(context["started_at"], "raw start timestamps should not leak into crash context")
         assertNil(context["updated_at"], "raw heartbeat timestamps should not leak into crash context")
+    }
+
+    runSuite("RuntimeDiagnosticsStore buckets session duration without raw timestamps") {
+        let now = Date(timeIntervalSince1970: 100_000)
+
+        assertEqual(
+            RuntimeDiagnosticsStore.sessionDurationBucket(startedAt: now.addingTimeInterval(-30), now: now),
+            "lt_1m",
+            "sub-minute sessions should stay coarse"
+        )
+        assertEqual(
+            RuntimeDiagnosticsStore.sessionDurationBucket(startedAt: now.addingTimeInterval(-600), now: now),
+            "5_14m",
+            "middle durations should use stable buckets"
+        )
+        assertEqual(
+            RuntimeDiagnosticsStore.sessionDurationBucket(startedAt: now.addingTimeInterval(-30_000), now: now),
+            "8h_plus",
+            "long-running sessions should be bucketed"
+        )
     }
 
     runSuite("RuntimeDiagnosticsStore round-trips marker files") {

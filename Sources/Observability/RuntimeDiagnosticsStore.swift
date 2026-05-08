@@ -77,6 +77,26 @@ enum RuntimeDiagnosticsStore {
         }
     }
 
+    static func sessionDurationBucket(startedAt: Date, now: Date = Date()) -> String {
+        let duration = max(0, now.timeIntervalSince(startedAt))
+        switch duration {
+        case ..<60:
+            return "lt_1m"
+        case ..<300:
+            return "1_4m"
+        case ..<900:
+            return "5_14m"
+        case ..<3600:
+            return "15_59m"
+        case ..<10_800:
+            return "1_2h"
+        case ..<28_800:
+            return "3_7h"
+        default:
+            return "8h_plus"
+        }
+    }
+
     static func contextForUncleanShutdown(
         previous marker: RuntimeDiagnosticsMarker,
         now: Date = Date()
@@ -88,6 +108,7 @@ enum RuntimeDiagnosticsStore {
             "last_event": marker.lastEvent,
             "os_major": "\(marker.osMajor)",
             "session_active": "\(marker.sessionActive)",
+            "session_duration_bucket": sessionDurationBucket(startedAt: marker.startedAt, now: now),
             "session_kind": marker.sessionKind,
             "session_stage": marker.sessionStage,
         ]
@@ -105,6 +126,7 @@ enum RuntimeDiagnosticsStore {
             "os_major": "\(marker.osMajor)",
             "previous_clean_shutdown": "\(marker.cleanShutdown)",
             "session_active": "\(marker.sessionActive)",
+            "session_duration_bucket": sessionDurationBucket(startedAt: marker.startedAt, now: now),
             "session_kind": marker.sessionKind,
             "session_stage": marker.sessionStage,
         ]

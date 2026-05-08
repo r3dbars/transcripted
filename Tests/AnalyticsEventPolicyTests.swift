@@ -102,6 +102,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(unclean?.allowedProperties.contains("session_stage"), true, "unclean shutdown should preserve last session stage")
         assertEqual(unclean?.allowedProperties.contains("heartbeat_age_bucket"), true, "unclean shutdown should preserve heartbeat age bucket")
+        assertEqual(unclean?.allowedProperties.contains("session_duration_bucket"), true, "unclean shutdown should preserve coarse session duration")
         assertEqual(stall?.allowedProperties.contains("stall_stage"), true, "session stall should preserve stall stage")
         assertEqual(stall?.allowedProperties.contains("duration_bucket"), true, "session stall should preserve duration bucket")
         assertNotNil(copied, "copy diagnostics event should be allowlisted")
@@ -111,12 +112,14 @@ func testAnalyticsEventPolicy() {
             [
                 "duration_bucket": "30_119s",
                 "heartbeat_age_bucket": "1_4m",
+                "session_duration_bucket": "5_14m",
                 "session_kind": "dictation",
                 "session_stage": "recording",
                 "stall_stage": "microphone_start_timeout",
             ],
             allowedKeys: stall?.allowedProperties ?? []
         )
+        assertEqual(sanitized["session_duration_bucket"], "5_14m", "session duration bucket should survive sanitization")
         assertEqual(sanitized["session_stage"], "recording", "session stage should survive sanitization")
         assertEqual(sanitized["stall_stage"], "microphone_start_timeout", "stall stage should survive sanitization")
     }
