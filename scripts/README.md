@@ -12,6 +12,7 @@ stable and the docs can keep pointing at the same commands:
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
+- `run-daily-audio-reliability.sh` — interactive or synthetic daily audio reliability check
 
 ## Entrypoint implementations
 
