@@ -1218,6 +1218,133 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteCollapsedMicSpeakersRestoresMatchedProfile() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let matchedProfile = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.35, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(id: matchedProfile.id, name: "Matt Vlasach")
+        let matchedSnapshot = try XCTUnwrap(harness.speakerDB.getSpeaker(id: matchedProfile.id))
+
+        _ = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.95, count: 256),
+            existingId: matchedProfile.id
+        )
+        XCTAssertGreaterThan(
+            harness.speakerDB.getSpeaker(id: matchedProfile.id)?.callCount ?? 0,
+            matchedSnapshot.callCount
+        )
+
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Matched_Mic_Collapse.md")
+        let clipURL = tempDirectory.appendingPathComponent("speaker-matched-collapse.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-matched-collapse.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-matched-collapse.wav")
+
+        let transcript = """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        date: 2026-04-10
+        time: 15:01:23
+        duration: "1:30"
+        sources: [mic, system_audio]
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(matchedProfile.id.uuidString)"
+            name: "Matt Vlasach"
+            confidence: medium
+            source: db_pending
+        ---
+
+        ## Channel & Speaker Analytics
+
+        ### Microphone (People in the Room)
+        - **Utterances:** 1
+        - **Words:** ~5
+        - **Speaking Time:** 00:03
+        - **Speakers Detected:** 1
+
+        #### Local Speaker Breakdown
+
+        - **Matt Vlasach:** 1 utterances, ~5 words, 00:03
+
+        ---
+
+        ## Full Transcript
+
+        [00:01] [Mic/Matt Vlasach] I am in the room.
+        """
+
+        try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: matchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    channel: .mic,
+                    newName: "You",
+                    previousName: "Matt Vlasach",
+                    action: .collapsedToMe
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: TranscriptionResult(
+                micUtterances: [],
+                systemUtterances: [],
+                duration: 90,
+                processingTime: 3.0
+            ),
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: matchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    channel: .mic,
+                    clipURL: clipURL,
+                    sampleText: "I am in the room.",
+                    currentName: "Matt Vlasach",
+                    matchSimilarity: 0.9,
+                    needsNaming: false,
+                    needsConfirmation: true,
+                    sessionEmbedding: [Float](repeating: 0.95, count: 256),
+                    matchedProfileSnapshot: matchedSnapshot
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let restoredProfile = try XCTUnwrap(harness.speakerDB.getSpeaker(id: matchedProfile.id))
+        XCTAssertEqual(restoredProfile.displayName, "Matt Vlasach")
+        XCTAssertEqual(restoredProfile.callCount, matchedSnapshot.callCount)
+        XCTAssertEqual(restoredProfile.disputeCount, matchedSnapshot.disputeCount + 1)
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains("[00:01] [Mic/You] I am in the room."))
+        XCTAssertFalse(savedTranscript.contains(#"channel: mic"#))
+    }
+
+    @MainActor
     func testHandleNamingCompletePublishesFailureWhenRewriteFails() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
