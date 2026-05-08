@@ -19,6 +19,24 @@ func testSpeakerPeopleReviewPolicy() {
         )
     }
 
+    runSuite("SpeakerPeopleReviewPolicy treats whitespace-only names as unnamed review work") {
+        let profile = makePeopleReviewProfile(name: "   ")
+
+        assertTrue(
+            SpeakerPeopleReviewPolicy.needsReview(profile: profile, duplicateIds: []),
+            "blank trimmed names should stay in Needs Review until the person is actually named"
+        )
+    }
+
+    runSuite("SpeakerPeopleReviewPolicy marks duplicate profiles for review") {
+        let duplicate = makePeopleReviewProfile(name: "Alex")
+
+        assertTrue(
+            SpeakerPeopleReviewPolicy.needsReview(profile: duplicate, duplicateIds: [duplicate.id]),
+            "duplicate profiles should stay visible in Needs Review until the merge is handled"
+        )
+    }
+
     runSuite("SpeakerPeopleReviewPolicy leaves clean named speakers out of review") {
         let profile = makePeopleReviewProfile(name: "Alex")
 
@@ -38,6 +56,18 @@ func testSpeakerPeopleReviewPolicy() {
         )
 
         assertEqual(sorted.first?.id, unnamed.id, "deferred unnamed speakers should appear first")
+    }
+
+    runSuite("SpeakerPeopleReviewPolicy sorts duplicate review work ahead of clean profiles") {
+        let clean = makePeopleReviewProfile(name: "Alex", calls: 20)
+        let duplicate = makePeopleReviewProfile(name: "Jordan", calls: 1)
+
+        let sorted = SpeakerPeopleReviewPolicy.sortedForPeopleSettings(
+            [clean, duplicate],
+            duplicateIds: [duplicate.id]
+        )
+
+        assertEqual(sorted.first?.id, duplicate.id, "duplicate merge work should appear before clean profiles")
     }
 }
 
