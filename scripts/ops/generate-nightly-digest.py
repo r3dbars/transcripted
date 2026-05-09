@@ -1508,6 +1508,17 @@ def render_dau_trend(dau: dict[str, Any]) -> str:
 """
 
 
+def dau_averages(dau: dict[str, Any]) -> dict[str, Any]:
+    history = dau.get("history") or {}
+    averages = history.get("averages") or {}
+    return {
+        "last_7": average_label(averages.get("last_7_complete")),
+        "last_30": average_label(averages.get("last_30_complete")),
+        "weekday": average_label(averages.get("weekday_complete")),
+        "weekend": average_label(averages.get("weekend_complete")),
+    }
+
+
 def render_html(payload: dict[str, Any]) -> str:
     status = payload["overall_status"]
     counts = payload["counts"]
@@ -1541,8 +1552,27 @@ def render_html(payload: dict[str, Any]) -> str:
         if dau_unknown
         else f"Current DAU: {dau['current']}. Gap: {dau['gap']}."
     )
-    dau_card_class = "goal-card problem" if dau_unknown else "goal-card"
     dau_trend_html = render_dau_trend(dau)
+    averages = dau_averages(dau)
+    morning_answer = (
+        "We do not know DAU yet."
+        if dau_unknown
+        else f"{dau['current']} right now. {dau['gap']} to 1,000."
+    )
+    simple_context = (
+        "Fix measurement first, then trust the rest of the report."
+        if dau_unknown
+        else f"7-day avg {averages['last_7']}. 30-day avg {averages['last_30']}. Weekday avg {averages['weekday']}; weekend avg {averages['weekend']}."
+    )
+    night_answer = (
+        f"{counts['active_lanes']} jobs included. {counts['blocked_or_unknown']} blocked. "
+        f"{counts['open_nightly_prs']} PR. {counts['needs_human']} human actions."
+    )
+    trust_answer = (
+        "No blockers in the active lanes."
+        if not blocked_lanes
+        else f"{len(blocked_lanes)} blocked or missing lanes need attention."
+    )
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1617,11 +1647,13 @@ main {{
   margin: 0 auto;
   padding: 28px 18px 44px;
 }}
-.hero {{
+.hero, .command-card {{
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+}}
+.hero {{
   padding: 22px 24px;
 }}
 .eyebrow {{
@@ -1692,6 +1724,21 @@ p {{ margin: 0; }}
 .goal-card.problem {{ border-color: #f2b3ad; background: #fff8f7; }}
 .goal-card.problem strong {{ color: var(--red); }}
 .goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
+.command-card {{ margin-top: 14px; padding: 18px; }}
+.command-grid {{ display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }}
+.command-primary {{
+  background: #101827;
+  color: #fff;
+  border-radius: 8px;
+  padding: 18px;
+}}
+.command-label {{ color: #cbd5e1; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }}
+.command-primary strong {{ display: block; font-size: 24px; line-height: 1.12; }}
+.command-primary p {{ color: #d9e2ef; font-size: 13px; line-height: 1.4; margin-top: 8px; }}
+.command-list {{ display: grid; gap: 8px; }}
+.command-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; }}
+.command-item span {{ color: var(--muted); display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 5px; }}
+.command-item strong {{ display: block; font-size: 15px; line-height: 1.3; }}
 .dau-trend {{ margin-top: 14px; }}
 .dau-trend-head {{
   display: grid;
@@ -1779,6 +1826,7 @@ a:hover {{ text-decoration: underline; }}
   .hero {{ padding: 18px; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .goal-grid {{ grid-template-columns: 1fr; }}
+  .command-grid {{ grid-template-columns: 1fr; }}
   .dau-trend-head {{ grid-template-columns: 1fr; }}
   .dau-avg-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .dau-chart.seven .dau-bar-wrap {{ flex-basis: 44px; }}
@@ -1800,26 +1848,22 @@ a:hover {{ text-decoration: underline; }}
     </div>
   </section>
 
-  <section class="goal-grid" aria-label="DAU progress">
-    <div class="goal-card"><span>Goal</span><strong>{escape(dau['goal'])}</strong></div>
-    <div class="{dau_card_class}"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
-    <div class="goal-card"><span>Gap</span><strong>{escape(dau['gap'])}</strong></div>
-    <div class="goal-card"><span>Best proxy</span><strong>{escape(dau['proxy'])}</strong></div>
+  <section class="command-card">
+    <div class="command-grid">
+      <div class="command-primary">
+        <span class="command-label">Morning answer</span>
+        <strong>{escape(morning_answer)}</strong>
+        <p>{escape(simple_context)}</p>
+      </div>
+      <div class="command-list">
+        <div class="command-item"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
+        <div class="command-item"><span>Last night</span><strong>{escape(night_answer)}</strong></div>
+        <div class="command-item"><span>Trust</span><strong>{escape(trust_answer)}</strong></div>
+      </div>
+    </div>
   </section>
 
   {dau_trend_html}
-
-  <section class="grid" aria-label="Summary">
-    <div class="card"><div class="num">{counts['active_lanes']}</div><div class="label">jobs ran</div></div>
-    <div class="card"><div class="num">{len(green_lanes)}</div><div class="label">quiet</div></div>
-    <div class="card"><div class="num">{counts['needs_human']}</div><div class="label">human actions</div></div>
-    <div class="card"><div class="num">{counts['blocked_or_unknown']}</div><div class="label">missing / blocked</div></div>
-  </section>
-
-  <section class="big-action">
-    <span>Do this first</span>
-    <strong>{escape(ceo['do_now'])}</strong>
-  </section>
 
   <section class="brief-grid">
     <div>
