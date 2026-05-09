@@ -63,6 +63,14 @@ not have to carry the full operational logic:
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
   - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
+- `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state
+  - Usage: `python3 scripts/ops/generate-nightly-digest.py --open`
+  - Self-test: `python3 scripts/ops/generate-nightly-digest.py --self-test`
+  - Writes:
+    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.html`
+    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.html`
+    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.json`
+    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.json`
 - `scripts/ops/build-codex-memory-index.py` — build a safe metadata-only index from local Codex session archives for Transcripted memory briefs
   - Usage: `python3 scripts/ops/build-codex-memory-index.py --verbose`
   - Writes:
