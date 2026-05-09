@@ -4,7 +4,7 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (64 Swift files)
+## Subsystems (65 Swift files)
 
 - `Audio/` (18 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (2 files) — shared app logger and JSONL file logger
@@ -12,7 +12,7 @@
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (10 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, profile merging, retroactive transcript updates
+- `Speaker/` (11 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
 - `Storage/` (5 files) — transcript save, scanner, formatter, shared frontmatter parsing, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
@@ -91,14 +91,17 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
+- `Tests/MicRecordingMergePlanTests.swift`
 - `Tests/TranscriptedCoreTests/RealtimeAGCTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingAudioArchiverTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingHealthInfoOverrideTests.swift`
 - `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
+- `Tests/SpeakerPeopleReviewPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptionTaskManagerMetadataTests.swift`
