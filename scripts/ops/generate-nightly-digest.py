@@ -7,11 +7,14 @@ import argparse
 import ast
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -700,8 +703,17 @@ def github_data(repo: Path, no_github: bool) -> dict[str, Any]:
     }
 
 
-def human_next_steps(lanes: list[LaneResult], open_prs: list[dict[str, Any]], github_error: Optional[str]) -> list[str]:
+def human_next_steps(
+    lanes: list[LaneResult],
+    open_prs: list[dict[str, Any]],
+    github_error: Optional[str],
+    dau_unknown: bool,
+    ops_tokens_incomplete: bool,
+) -> list[str]:
     steps: list[str] = []
+    if dau_unknown:
+        steps.append("Fix DAU visibility: set PostHog read credentials and rerun this report.")
+
     if open_prs:
         if len(open_prs) == 1:
             pr = open_prs[0]
@@ -712,8 +724,8 @@ def human_next_steps(lanes: list[LaneResult], open_prs: list[dict[str, Any]], gi
     if github_error and github_error != "GitHub disabled":
         steps.append("Restore GitHub CLI access so PR review status is not guessed.")
 
-    if any(lane.human_action == "Restore ops read tokens" for lane in lanes):
-        steps.append("Restore Sentry, PostHog, and Cloudflare read tokens for full morning truth.")
+    if ops_tokens_incomplete and not dau_unknown:
+        steps.append("Restore missing ops read tokens for full Sentry, PostHog, and Cloudflare context.")
 
     if any(lane.human_action == "Decide whether to clean local artifacts" for lane in lanes):
         steps.append("Decide whether to clean the repeated local artifact drift.")
@@ -806,9 +818,59 @@ def extract_first_int(text: str, patterns: Iterable[str]) -> Optional[int]:
     return None
 
 
-def build_dau_status(memories: dict[str, str], ops_tokens_incomplete: bool) -> dict[str, str]:
+def query_posthog_dau() -> dict[str, Any]:
+    token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
+    project_id = os.environ.get("POSTHOG_PROJECT_ID")
+    missing = [name for name, value in (("POSTHOG_PERSONAL_API_KEY", token), ("POSTHOG_PROJECT_ID", project_id)) if not value]
+    if missing:
+        verb = "is" if len(missing) == 1 else "are"
+        return {"dau": None, "event_count": None, "error": f"{', '.join(missing)} {verb} not set"}
+
+    host = (os.environ.get("POSTHOG_HOST") or "https://us.i.posthog.com").rstrip("/")
+    url = f"{host}/api/projects/{project_id}/query/"
+    body = json.dumps(
+        {
+            "query": (
+                "select uniq(distinct_id) as dau, count() as events_24h "
+                "from events where timestamp >= now() - interval 1 day"
+            )
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return {"dau": None, "event_count": None, "error": f"PostHog query failed with HTTP {exc.code}"}
+    except (urllib.error.URLError, TimeoutError):
+        return {"dau": None, "event_count": None, "error": "PostHog query failed"}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"dau": None, "event_count": None, "error": "PostHog returned an unreadable response"}
+
+    try:
+        row = (payload.get("data") or payload.get("results") or [])[0]
+        dau = int(row[0])
+        event_count = int(row[1]) if len(row) > 1 and row[1] is not None else None
+    except (IndexError, TypeError, ValueError):
+        return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
+    return {"dau": dau, "event_count": event_count, "error": None}
+
+
+def build_dau_status(
+    memories: dict[str, str],
+    ops_tokens_incomplete: bool,
+    posthog_dau: Optional[dict[str, Any]] = None,
+) -> dict[str, str]:
     all_memory = "\n".join(memories.values())
-    exact_dau = extract_first_int(
+    memory_dau = extract_first_int(
         all_memory,
         (
             r"\b(\d{1,5})\s+daily active users\b",
@@ -838,16 +900,23 @@ def build_dau_status(memories: dict[str, str], ops_tokens_incomplete: bool) -> d
         ),
     )
 
+    posthog_value = posthog_dau.get("dau") if posthog_dau else None
+    exact_dau = posthog_value if isinstance(posthog_value, int) else memory_dau
+    exact_source = "PostHog" if isinstance(posthog_value, int) else ("nightly memory" if memory_dau is not None else "")
+
     if exact_dau is not None:
         current = f"{exact_dau} DAU"
         gap = f"{max(0, DAU_GOAL - exact_dau)} away"
-        confidence = "High" if not ops_tokens_incomplete else "Medium"
+        confidence = "High" if exact_source == "PostHog" else ("Medium" if ops_tokens_incomplete else "High")
     else:
         current = "Unknown today"
         gap = "Cannot calculate exact gap"
         confidence = "Low" if ops_tokens_incomplete else "Medium"
 
     proxy_parts: list[str] = []
+    event_count = posthog_dau.get("event_count") if posthog_dau else None
+    if isinstance(event_count, int):
+        proxy_parts.append(f"{event_count} PostHog events in the last 24 hours")
     if active_devices is not None:
         proxy_parts.append(f"{active_devices} active devices in the last 7 days")
     if downloads is not None:
@@ -856,11 +925,16 @@ def build_dau_status(memories: dict[str, str], ops_tokens_incomplete: bool) -> d
         proxy_parts.append(f"{repo_viewers} unique repo viewers in 14 days")
     proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
 
-    note = (
-        "Exact DAU was not available in this run because live product analytics could not be read."
-        if exact_dau is None and ops_tokens_incomplete
-        else "Use this as the morning growth read, not a perfect analytics dashboard."
-    )
+    if exact_source == "PostHog":
+        note = "Exact DAU came from PostHog for the last 24 hours."
+    elif exact_dau is not None:
+        note = "Exact DAU came from a nightly automation memory entry."
+    elif posthog_dau and posthog_dau.get("error"):
+        note = f"Exact DAU is missing because {posthog_dau['error']}."
+    elif ops_tokens_incomplete:
+        note = "Exact DAU was not available because live product analytics could not be read."
+    else:
+        note = "Use this as the morning growth read, not a perfect analytics dashboard."
 
     return {
         "goal": f"{DAU_GOAL:,} daily active users",
@@ -901,13 +975,16 @@ def build_recommendations(
     lanes: list[LaneResult],
     open_prs: list[dict[str, Any]],
     ops_tokens_incomplete: bool,
+    dau_unknown: bool,
 ) -> list[str]:
     recommendations: list[str] = []
+    if dau_unknown:
+        recommendations.append("Fix DAU visibility first: set PostHog read credentials, then rerun this report.")
     if open_prs:
         pr = open_prs[0]
         recommendations.append(f"Review PR #{pr.get('number')} so this morning report becomes the durable final automation.")
-    if ops_tokens_incomplete:
-        recommendations.append("Restore Sentry, PostHog, and Cloudflare read tokens so tomorrow's DAU and health read is not guessed.")
+    if ops_tokens_incomplete and not dau_unknown:
+        recommendations.append("Restore missing ops read tokens so tomorrow's Sentry, PostHog, and Cloudflare read is complete.")
     if any(lane.id == "transcripted-nightly-north-star-agent" for lane in lanes):
         recommendations.append("Pick the activation metric: first useful agent answer from a local Transcripted artifact.")
     if any(lane.human_action == "Watch issue #500" for lane in lanes):
@@ -926,10 +1003,12 @@ def build_ceo_brief(
     overall: str,
     steps: list[str],
     ops_tokens_incomplete: bool,
+    dau_status: dict[str, str],
 ) -> dict[str, Any]:
     artifact_drift = any(lane.human_action == "Decide whether to clean local artifacts" for lane in lanes)
     issue_500_watch = any(lane.human_action == "Watch issue #500" for lane in lanes)
     blocked_or_unknown = any(lane.status in ("blocked", "unknown") for lane in lanes)
+    dau_unknown = dau_status["current"] == "Unknown today"
     growth_ready = any(
         lane.id
         in {
@@ -942,7 +1021,9 @@ def build_ceo_brief(
         for lane in lanes
     )
 
-    if overall == "blocked":
+    if dau_unknown:
+        call = "Measurement: we do not know current DAU, so the first job is to make that number visible."
+    elif overall == "blocked":
         call = "Trust: a blocker exists, so fix trust before growth or shipping."
     elif ops_tokens_incomplete or issue_500_watch or artifact_drift:
         call = "Trust: the product is mostly healthy, but today's leverage is tightening confidence before adding noise."
@@ -1034,18 +1115,22 @@ def build_ceo_brief(
     if not issue_500_watch:
         watch = "Stale or missing telemetry would be the first thing to watch."
 
+    do_now = steps[0] if steps else "No human action needed this morning."
+    if dau_unknown:
+        do_now = "Fix DAU visibility: set PostHog read credentials and rerun this report."
+
     return {
         "ceo_call": call,
         "scorecard": roles,
-        "do_now": steps[0] if steps else "No human action needed this morning.",
+        "do_now": do_now,
         "needs_judgment": needs_judgment[:6],
         "safe_to_execute": safe_to_execute[:5],
         "watch": watch,
         "ignore": "Green verification lanes, third-party warning noise, and paused historical automations.",
         "why_thousands": "This gets to 1,000 DAU by protecting trust first, then pushing one habit loop: spoken work becomes local Markdown, then an agent gives a useful answer.",
-        "dau_status": build_dau_status(full_memories, ops_tokens_incomplete),
+        "dau_status": dau_status,
         "accomplishments": build_accomplishments(lanes, open_prs),
-        "recommendations": build_recommendations(lanes, open_prs, ops_tokens_incomplete),
+        "recommendations": build_recommendations(lanes, open_prs, ops_tokens_incomplete, dau_unknown),
     }
 
 
@@ -1056,6 +1141,7 @@ def build_payload(
     now: datetime,
     fresh_hours: int,
     no_github: bool,
+    posthog_dau: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     lanes: list[LaneResult] = []
     memories: dict[str, str] = {}
@@ -1068,10 +1154,20 @@ def build_payload(
         lanes.append(classify_lane(automation, content, now, fresh_hours))
 
     gh_payload = github_data(repo, no_github)
-    steps = human_next_steps(lanes, gh_payload["open_prs"], gh_payload["error"])
+    ops_tokens_incomplete = any(lane.human_action == "Restore ops read tokens" for lane in lanes)
+    if posthog_dau is None:
+        posthog_dau = query_posthog_dau()
+    dau_status = build_dau_status(full_memories, ops_tokens_incomplete, posthog_dau)
+    dau_unknown = dau_status["current"] == "Unknown today"
+    steps = human_next_steps(
+        lanes,
+        gh_payload["open_prs"],
+        gh_payload["error"],
+        dau_unknown=dau_unknown,
+        ops_tokens_incomplete=ops_tokens_incomplete,
+    )
     overall = overall_status(lanes, steps, gh_payload["open_prs"], gh_payload["error"])
     data_quality = data_quality_note(lanes, gh_payload["error"])
-    ops_tokens_incomplete = any(lane.human_action == "Restore ops read tokens" for lane in lanes)
     blocked_unknown = sum(1 for lane in lanes if lane.status in ("blocked", "unknown"))
     needs_human = len([step for step in steps if step != "No human action needed this morning."])
 
@@ -1084,6 +1180,7 @@ def build_payload(
         overall=overall,
         steps=steps,
         ops_tokens_incomplete=ops_tokens_incomplete,
+        dau_status=dau_status,
     )
 
     return {
@@ -1349,6 +1446,8 @@ p {{ margin: 0; }}
 }}
 .goal-card strong {{ display: block; font-size: 18px; margin-top: 4px; }}
 .goal-card span {{ color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; }}
+.goal-card.problem {{ border-color: #f2b3ad; background: #fff8f7; }}
+.goal-card.problem strong {{ color: var(--red); }}
 .goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
 .big-action {{
   background: #101827;
@@ -1412,9 +1511,9 @@ a:hover {{ text-decoration: underline; }}
   <section class="hero">
     <div>
       <div class="eyebrow">Transcripted Daily CEO Brief</div>
-      <h1>1,000 DAU morning brief.</h1>
+      <h1>Goal: 1,000 DAU.</h1>
       <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
-      <p class="verdict">Goal: {escape(dau['goal'])}. Current DAU: {escape(dau['current'])}.</p>
+      <p class="verdict">Current DAU: {escape(dau['current'])}. We need to know this.</p>
       <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
       <p class="goal-note">Confidence: {escape(dau['confidence'])}. {escape(dau['note'])}</p>
     </div>
@@ -1422,7 +1521,7 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="goal-grid" aria-label="DAU progress">
     <div class="goal-card"><span>Goal</span><strong>{escape(dau['goal'])}</strong></div>
-    <div class="goal-card"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
+    <div class="goal-card problem"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
     <div class="goal-card"><span>Gap</span><strong>{escape(dau['gap'])}</strong></div>
     <div class="goal-card"><span>Best proxy</span><strong>{escape(dau['proxy'])}</strong></div>
   </section>
@@ -1505,6 +1604,9 @@ def headline_text(payload: dict[str, Any]) -> str:
         return "A nightly lane is blocked. Start with the first action below."
     if status == "unknown":
         return "Too many lanes are missing fresh signal. Treat this as an automation problem first."
+    dau = ceo.get("dau_status", {})
+    if dau.get("current") == "Unknown today":
+        return "We do not know current DAU. Fix that first."
     steps = payload.get("human_next_steps", [])
     first = ceo.get("do_now") or (steps[0] if steps else "Review the action queue.")
     human_actions = payload.get("counts", {}).get("needs_human", 0)
@@ -1585,10 +1687,19 @@ def run_self_test() -> None:
             (folder / "memory.md").write_text(memory + "\n", encoding="utf-8")
 
         active, paused = load_automations(automations_dir)
-        payload = build_payload(active, paused, repo, now, fresh_hours=18, no_github=True)
+        payload = build_payload(
+            active,
+            paused,
+            repo,
+            now,
+            fresh_hours=18,
+            no_github=True,
+            posthog_dau={"dau": None, "event_count": None, "error": "Self-test skipped PostHog"},
+        )
         assert payload["overall_status"] == "needs_review", payload["overall_status"]
         assert payload["counts"]["active_lanes"] == 3, payload["counts"]
         assert payload["counts"]["needs_human"] >= 2, payload["human_next_steps"]
+        assert payload["human_next_steps"][0].startswith("Fix DAU visibility"), payload["human_next_steps"]
         assert len(payload["ceo_brief"]["scorecard"]) >= 13
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
