@@ -1472,33 +1472,24 @@ def render_dau_bars(days: list[dict[str, Any]], *, chart_class: str = "") -> str
 def render_dau_trend(dau: dict[str, Any]) -> str:
     history = dau.get("history") or {}
     last_7 = history.get("last_7") or []
-    last_30 = history.get("last_30") or []
     averages = history.get("averages") or {}
-    if not last_7 or not last_30:
+    if not last_7:
         return ""
 
     return f"""
   <section class="dau-trend section">
     <div class="dau-trend-head">
       <div>
-        <h2>DAU trend</h2>
-        <p>{escape(history.get('note', 'Calendar-day DAU from PostHog.'))}</p>
+        <h2>7-day DAU</h2>
+        <p>Calendar-day DAU from PostHog. Today is partial.</p>
       </div>
       <div class="dau-avg-grid">
         <div><span>7-day avg</span><strong>{average_label(averages.get('last_7_complete'))}</strong></div>
-        <div><span>30-day avg</span><strong>{average_label(averages.get('last_30_complete'))}</strong></div>
         <div><span>Weekday avg</span><strong>{average_label(averages.get('weekday_complete'))}</strong></div>
         <div><span>Weekend avg</span><strong>{average_label(averages.get('weekend_complete'))}</strong></div>
       </div>
     </div>
-    <div class="dau-subchart">
-      <h3>Last 7 days</h3>
-      {render_dau_bars(last_7, chart_class='seven')}
-    </div>
-    <div class="dau-subchart">
-      <h3>Last 30 days</h3>
-      {render_dau_bars(last_30)}
-    </div>
+    {render_dau_bars(last_7, chart_class='seven')}
     <div class="dau-legend">
       <span><i class="dau-dot"></i>Weekday</span>
       <span><i class="dau-dot weekend"></i>Weekend</span>
@@ -1513,7 +1504,6 @@ def dau_averages(dau: dict[str, Any]) -> dict[str, Any]:
     averages = history.get("averages") or {}
     return {
         "last_7": average_label(averages.get("last_7_complete")),
-        "last_30": average_label(averages.get("last_30_complete")),
         "weekday": average_label(averages.get("weekday_complete")),
         "weekend": average_label(averages.get("weekend_complete")),
     }
@@ -1547,22 +1537,18 @@ def render_html(payload: dict[str, Any]) -> str:
     score = next((item for item in ceo["scorecard"] if item["role"] == "CEO"), None)
     score_text = f"{score['score']} / {score['grade']}" if score else "needs review"
     dau_unknown = dau["current"] == "Unknown today"
-    dau_verdict = (
-        "Current DAU: Unknown today. We need to know this."
-        if dau_unknown
-        else f"Current DAU: {dau['current']}. Gap: {dau['gap']}."
-    )
     dau_trend_html = render_dau_trend(dau)
     averages = dau_averages(dau)
-    morning_answer = (
-        "We do not know DAU yet."
-        if dau_unknown
-        else f"{dau['current']} right now. {dau['gap']} to 1,000."
-    )
     simple_context = (
         "Fix measurement first, then trust the rest of the report."
         if dau_unknown
-        else f"7-day avg {averages['last_7']}. 30-day avg {averages['last_30']}. Weekday avg {averages['weekday']}; weekend avg {averages['weekend']}."
+        else f"7-day avg {averages['last_7']}. Weekday avg {averages['weekday']}. Weekend avg {averages['weekend']}."
+    )
+    hero_title = "DAU unknown" if dau_unknown else f"{dau['current']} right now"
+    hero_subtitle = (
+        "Goal: 1,000. Current DAU is missing."
+        if dau_unknown
+        else f"Goal: 1,000. {dau['gap']}. {simple_context}"
     )
     night_answer = (
         f"{counts['active_lanes']} jobs included. {counts['blocked_or_unknown']} blocked. "
@@ -1573,6 +1559,7 @@ def render_html(payload: dict[str, Any]) -> str:
         if not blocked_lanes
         else f"{len(blocked_lanes)} blocked or missing lanes need attention."
     )
+    why_answer = "Are we growing? Did anything break? What do I do next?"
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1616,7 +1603,7 @@ def render_html(payload: dict[str, Any]) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Transcripted Daily CEO Brief</title>
+<title>Transcripted Morning</title>
 <style>
 :root {{
   --bg: #f7f8fa;
@@ -1643,9 +1630,9 @@ body {{
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }}
 main {{
-  max-width: 920px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 28px 18px 44px;
+  padding: 24px 18px 40px;
 }}
 .hero, .command-card {{
   background: var(--panel);
@@ -1654,7 +1641,7 @@ main {{
   box-shadow: var(--shadow);
 }}
 .hero {{
-  padding: 22px 24px;
+  padding: 20px 22px;
 }}
 .eyebrow {{
   color: var(--muted);
@@ -1663,10 +1650,10 @@ main {{
   letter-spacing: .04em;
   text-transform: uppercase;
 }}
-h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 46px); line-height: 1; letter-spacing: 0; }}
-h2 {{ margin: 30px 0 12px; font-size: 16px; }}
+h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 44px); line-height: 1; letter-spacing: 0; }}
+h2 {{ margin: 24px 0 10px; font-size: 16px; }}
 p {{ margin: 0; }}
-.sub {{ color: var(--muted); font-size: 13px; margin-top: 5px; }}
+.sub {{ color: var(--muted); font-size: 14px; line-height: 1.4; margin-top: 8px; max-width: 720px; }}
 .verdict {{ font-size: 20px; font-weight: 850; margin-top: 16px; max-width: 780px; }}
 .call {{
   border-left: 4px solid var(--blue);
@@ -1724,39 +1711,38 @@ p {{ margin: 0; }}
 .goal-card.problem {{ border-color: #f2b3ad; background: #fff8f7; }}
 .goal-card.problem strong {{ color: var(--red); }}
 .goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
-.command-card {{ margin-top: 14px; padding: 18px; }}
+.command-card {{ margin-top: 12px; padding: 14px; }}
 .command-grid {{ display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }}
 .command-primary {{
   background: #101827;
   color: #fff;
   border-radius: 8px;
-  padding: 18px;
+  padding: 16px;
 }}
 .command-label {{ color: #cbd5e1; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }}
-.command-primary strong {{ display: block; font-size: 24px; line-height: 1.12; }}
+.command-primary strong {{ display: block; font-size: 22px; line-height: 1.14; }}
 .command-primary p {{ color: #d9e2ef; font-size: 13px; line-height: 1.4; margin-top: 8px; }}
-.command-list {{ display: grid; gap: 8px; }}
-.command-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; }}
+.command-list {{ display: grid; gap: 7px; }}
+.command-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }}
 .command-item span {{ color: var(--muted); display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 5px; }}
 .command-item strong {{ display: block; font-size: 15px; line-height: 1.3; }}
-.dau-trend {{ margin-top: 14px; }}
+.dau-trend {{ margin-top: 12px; }}
 .dau-trend-head {{
   display: grid;
-  grid-template-columns: 1.1fr 1.4fr;
-  gap: 14px;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 12px;
   align-items: start;
 }}
 .dau-trend h2 {{ margin: 0; }}
-.dau-trend h3 {{ margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; }}
 .dau-trend p {{ color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 5px; }}
-.dau-avg-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }}
+.dau-avg-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }}
 .dau-avg-grid div {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px; }}
 .dau-avg-grid span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }}
 .dau-avg-grid strong {{ display: block; margin-top: 3px; font-size: 20px; }}
-.dau-chart {{ display: flex; align-items: flex-end; gap: 5px; min-height: 195px; padding: 22px 3px 0; overflow-x: auto; }}
+.dau-chart {{ display: flex; align-items: flex-end; gap: 7px; min-height: 132px; padding: 20px 3px 0; overflow-x: auto; }}
 .dau-chart.seven {{ gap: 8px; }}
 .dau-bar-wrap {{ flex: 1 0 22px; min-width: 22px; text-align: center; }}
-.dau-chart.seven .dau-bar-wrap {{ flex-basis: 72px; }}
+.dau-chart.seven .dau-bar-wrap {{ flex-basis: 64px; }}
 .dau-bar {{
   position: relative;
   display: flex;
@@ -1839,26 +1825,23 @@ a:hover {{ text-decoration: underline; }}
 <main>
   <section class="hero">
     <div>
-      <div class="eyebrow">Transcripted Daily CEO Brief</div>
-      <h1>Goal: 1,000 DAU.</h1>
-      <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
-      <p class="verdict">{escape(dau_verdict)}</p>
-      <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
-      <p class="goal-note">Confidence: {escape(dau['confidence'])}. {escape(dau['note'])}</p>
+      <div class="eyebrow">Transcripted Morning</div>
+      <h1>{escape(hero_title)}</h1>
+      <p class="sub">{escape(hero_subtitle)}</p>
     </div>
   </section>
 
   <section class="command-card">
     <div class="command-grid">
       <div class="command-primary">
-        <span class="command-label">Morning answer</span>
-        <strong>{escape(morning_answer)}</strong>
-        <p>{escape(simple_context)}</p>
+        <span class="command-label">Why I’m here</span>
+        <strong>{escape(why_answer)}</strong>
+        <p>{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
       </div>
       <div class="command-list">
-        <div class="command-item"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
-        <div class="command-item"><span>Last night</span><strong>{escape(night_answer)}</strong></div>
-        <div class="command-item"><span>Trust</span><strong>{escape(trust_answer)}</strong></div>
+        <div class="command-item"><span>Do next</span><strong>{escape(ceo['do_now'])}</strong></div>
+        <div class="command-item"><span>Overnight</span><strong>{escape(night_answer)}</strong></div>
+        <div class="command-item"><span>Health</span><strong>{escape(trust_answer)}</strong></div>
       </div>
     </div>
   </section>
