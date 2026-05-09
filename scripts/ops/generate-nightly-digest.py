@@ -1442,63 +1442,6 @@ def average_label(value: Any) -> str:
     return f"{number:.1f}"
 
 
-def render_dau_bars(days: list[dict[str, Any]], *, chart_class: str = "") -> str:
-    max_value = max([int(item.get("active_devices", 0)) for item in days] + [1])
-    items: list[str] = []
-    for item in days:
-        value = int(item.get("active_devices", 0))
-        height = max(6, round(value / max_value * 150))
-        classes = ["dau-bar"]
-        if item.get("weekend"):
-            classes.append("weekend")
-        if item.get("partial"):
-            classes.append("partial")
-        title = f"{item.get('dow', '')} {item.get('label', item.get('day', ''))}: {value} DAU"
-        if item.get("partial"):
-            title += " so far"
-        items.append(
-            "<div class=\"dau-bar-wrap\" "
-            f"title=\"{escape(title)}\">"
-            f"<div class=\"{' '.join(classes)}\" style=\"height:{height}px\"><span>{value}</span></div>"
-            "<div class=\"dau-x\">"
-            f"<b>{escape(item.get('dow', ''))}</b>"
-            f"<small>{escape(item.get('label', item.get('day', '')))}</small>"
-            "</div>"
-            "</div>"
-        )
-    return f"<div class=\"dau-chart {escape(chart_class)}\">{''.join(items)}</div>"
-
-
-def render_dau_trend(dau: dict[str, Any]) -> str:
-    history = dau.get("history") or {}
-    last_7 = history.get("last_7") or []
-    averages = history.get("averages") or {}
-    if not last_7:
-        return ""
-
-    return f"""
-  <section class="dau-trend section">
-    <div class="dau-trend-head">
-      <div>
-        <h2>7-day DAU</h2>
-        <p>Calendar-day DAU from PostHog. Today is partial.</p>
-      </div>
-      <div class="dau-avg-grid">
-        <div><span>7-day avg</span><strong>{average_label(averages.get('last_7_complete'))}</strong></div>
-        <div><span>Weekday avg</span><strong>{average_label(averages.get('weekday_complete'))}</strong></div>
-        <div><span>Weekend avg</span><strong>{average_label(averages.get('weekend_complete'))}</strong></div>
-      </div>
-    </div>
-    {render_dau_bars(last_7, chart_class='seven')}
-    <div class="dau-legend">
-      <span><i class="dau-dot"></i>Weekday</span>
-      <span><i class="dau-dot weekend"></i>Weekend</span>
-      <span><i class="dau-dot partial"></i>Today so far</span>
-    </div>
-  </section>
-"""
-
-
 def dau_averages(dau: dict[str, Any]) -> dict[str, Any]:
     history = dau.get("history") or {}
     averages = history.get("averages") or {}
@@ -1517,49 +1460,57 @@ def render_html(payload: dict[str, Any]) -> str:
     ceo = payload["ceo_brief"]
     dau = ceo["dau_status"]
 
-    review_lanes = [lane for lane in lanes if lane["status"] == "needs_review"]
     green_lanes = [lane for lane in lanes if lane["status"] == "green"]
     blocked_lanes = [lane for lane in lanes if lane["status"] in ("blocked", "unknown")]
 
     step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"][:4])
-    judgment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["needs_judgment"][:4])
     safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"][:4])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
-    accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"])
-    recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["recommendations"])
+    accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"][:4])
+    recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["recommendations"][:3])
+    if not accomplishment_items:
+        accomplishment_items = "<li>No overnight accomplishments were captured.</li>"
+    if not recommendation_items:
+        recommendation_items = "<li>No human action needed right now.</li>"
 
-    good_names = ", ".join(lane["name"] for lane in green_lanes[:6])
-    if len(green_lanes) > 6:
-        good_names += f", and {len(green_lanes) - 6} more"
-    if not good_names:
-        good_names = "No lane was fully quiet."
-
-    score = next((item for item in ceo["scorecard"] if item["role"] == "CEO"), None)
-    score_text = f"{score['score']} / {score['grade']}" if score else "needs review"
     dau_unknown = dau["current"] == "Unknown today"
-    dau_trend_html = render_dau_trend(dau)
     averages = dau_averages(dau)
-    simple_context = (
-        "Fix measurement first, then trust the rest of the report."
-        if dau_unknown
-        else f"7-day avg {averages['last_7']}. Weekday avg {averages['weekday']}. Weekend avg {averages['weekend']}."
-    )
-    hero_title = "DAU unknown" if dau_unknown else f"{dau['current']} right now"
+    blocker_word = "blocker" if counts["blocked_or_unknown"] == 1 else "blockers"
+    pr_word = "PR" if counts["open_nightly_prs"] == 1 else "PRs"
+    action_word = "thing" if counts["needs_human"] == 1 else "things"
+    action_verb = "needs" if counts["needs_human"] == 1 else "need"
+    hero_title = f"{counts['active_lanes']} jobs ran. {counts['blocked_or_unknown']} {blocker_word}."
     hero_subtitle = (
-        "Goal: 1,000. Current DAU is missing."
+        f"DAU unknown. Goal: {dau['goal']}. Fix measurement first."
         if dau_unknown
-        else f"Goal: 1,000. {dau['gap']}. {simple_context}"
+        else f"{dau['current']} now. {dau['gap']} to 1,000. {counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} {action_word} {action_verb} you."
     )
-    night_answer = (
-        f"{counts['active_lanes']} jobs included. {counts['blocked_or_unknown']} blocked. "
-        f"{counts['open_nightly_prs']} PR. {counts['needs_human']} human actions."
+    if blocked_lanes:
+        bottom_line = ceo["do_now"]
+    else:
+        night_bits = ["Nothing is blocked."]
+        if counts["open_nightly_prs"]:
+            night_bits.append(f"{counts['open_nightly_prs']} {pr_word} waiting.")
+        if counts["needs_human"]:
+            night_bits.append(f"{counts['needs_human']} {action_word} {action_verb} you.")
+        if len(night_bits) == 1:
+            night_bits.append("No human action needed.")
+        bottom_line = " ".join(night_bits)
+    dau_context = (
+        "Fix measurement first."
+        if dau_unknown
+        else f"{averages['last_7']} avg. Weekdays {averages['weekday']}; weekends {averages['weekend']}."
     )
-    trust_answer = (
-        "No blockers in the active lanes."
-        if not blocked_lanes
-        else f"{len(blocked_lanes)} blocked or missing lanes need attention."
-    )
-    why_answer = "Are we growing? Did anything break? What do I do next?"
+    if blocked_lanes:
+        health_text = "Blocked"
+        health_context = ", ".join(lane["name"] for lane in blocked_lanes[:2])
+    elif counts["needs_human"]:
+        health_text = "Review needed"
+        health_context = f"{counts['needs_human']} items. 0 blockers."
+    else:
+        health_text = "Quiet"
+        health_context = f"{counts['active_lanes']} jobs ran cleanly."
+    details_summary = f"More detail <span>{len(lanes)} lanes, {len(open_prs)} {pr_word}</span>"
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1597,7 +1548,6 @@ def render_html(payload: dict[str, Any]) -> str:
         )
     lane_details = "\n".join(lane_sections)
 
-    headline = headline_text(payload)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1634,13 +1584,11 @@ main {{
   margin: 0 auto;
   padding: 24px 18px 40px;
 }}
-.hero, .command-card {{
+.hero {{
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
-}}
-.hero {{
   padding: 20px 22px;
 }}
 .eyebrow {{
@@ -1654,15 +1602,6 @@ h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 44px); line-height: 1; letter
 h2 {{ margin: 24px 0 10px; font-size: 16px; }}
 p {{ margin: 0; }}
 .sub {{ color: var(--muted); font-size: 14px; line-height: 1.4; margin-top: 8px; max-width: 720px; }}
-.verdict {{ font-size: 20px; font-weight: 850; margin-top: 16px; max-width: 780px; }}
-.call {{
-  border-left: 4px solid var(--blue);
-  padding: 12px 0 12px 14px;
-  margin-top: 18px;
-  color: #1f2937;
-  font-size: 15px;
-  line-height: 1.45;
-}}
 .pill {{
   display: inline-flex;
   align-items: center;
@@ -1677,98 +1616,60 @@ p {{ margin: 0; }}
 .review, .watch {{ color: var(--amber); background: var(--amber-bg); }}
 .bad {{ color: var(--red); background: var(--red-bg); }}
 .unknown {{ color: var(--gray); background: var(--gray-bg); }}
-.grid {{
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}}
-.card, .section, .mini-card, details {{
+.section, .mini-card, details {{
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(17, 24, 39, .035);
 }}
-.card {{ padding: 14px; }}
-.num {{ font-size: 27px; font-weight: 850; line-height: 1; }}
-.label {{ color: var(--muted); font-size: 12px; margin-top: 5px; }}
 .section {{ padding: 16px 18px; }}
-.goal-grid {{
+.summary-strip {{
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1.5fr 1fr;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 12px;
 }}
-.goal-card {{
+.summary-strip div {{
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
+  padding: 13px 14px;
   box-shadow: 0 8px 24px rgba(17, 24, 39, .035);
 }}
-.goal-card strong {{ display: block; font-size: 18px; margin-top: 4px; }}
-.goal-card span {{ color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; }}
-.goal-card.problem {{ border-color: #f2b3ad; background: #fff8f7; }}
-.goal-card.problem strong {{ color: var(--red); }}
-.goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
-.command-card {{ margin-top: 12px; padding: 14px; }}
-.command-grid {{ display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }}
-.command-primary {{
-  background: #101827;
-  color: #fff;
-  border-radius: 8px;
-  padding: 16px;
+.summary-strip span {{
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  margin-bottom: 5px;
 }}
-.command-label {{ color: #cbd5e1; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }}
-.command-primary strong {{ display: block; font-size: 22px; line-height: 1.14; }}
-.command-primary p {{ color: #d9e2ef; font-size: 13px; line-height: 1.4; margin-top: 8px; }}
-.command-list {{ display: grid; gap: 7px; }}
-.command-item {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }}
-.command-item span {{ color: var(--muted); display: block; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 5px; }}
-.command-item strong {{ display: block; font-size: 15px; line-height: 1.3; }}
-.dau-trend {{ margin-top: 12px; }}
-.dau-trend-head {{
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 12px;
-  align-items: start;
+.summary-strip strong {{ display: block; font-size: 17px; line-height: 1.25; }}
+.summary-strip small {{ color: var(--muted); display: block; font-size: 12px; line-height: 1.35; margin-top: 4px; }}
+.focus-section, .actions-section {{ margin-top: 12px; }}
+.focus-section {{ border-color: #b9c9dd; }}
+.actions-section {{ border-left: 4px solid var(--blue); }}
+.focus-section h2, .actions-section h2 {{ margin: 0 0 10px; font-size: 16px; }}
+.focus-section .plain-list {{ gap: 0; }}
+.focus-section .plain-list li {{
+  background: transparent;
+  border: 0;
+  border-top: 1px solid #edf0f4;
+  border-radius: 0;
+  padding: 10px 0;
 }}
-.dau-trend h2 {{ margin: 0; }}
-.dau-trend p {{ color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 5px; }}
-.dau-avg-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }}
-.dau-avg-grid div {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px; }}
-.dau-avg-grid span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }}
-.dau-avg-grid strong {{ display: block; margin-top: 3px; font-size: 20px; }}
-.dau-chart {{ display: flex; align-items: flex-end; gap: 7px; min-height: 132px; padding: 20px 3px 0; overflow-x: auto; }}
-.dau-chart.seven {{ gap: 8px; }}
-.dau-bar-wrap {{ flex: 1 0 22px; min-width: 22px; text-align: center; }}
-.dau-chart.seven .dau-bar-wrap {{ flex-basis: 64px; }}
-.dau-bar {{
-  position: relative;
-  display: flex;
-  justify-content: center;
-  min-height: 6px;
-  border-radius: 6px 6px 2px 2px;
-  background: linear-gradient(180deg, #73a4ff, var(--blue));
+.focus-section .plain-list li:first-child {{ border-top: 0; padding-top: 0; }}
+.focus-section .plain-list li:last-child {{ padding-bottom: 0; }}
+.actions-section ol {{ padding-left: 22px; line-height: 1.4; }}
+.more-detail {{ margin-top: 14px; }}
+.more-detail > summary {{ background: var(--panel); }}
+.detail-grid {{ padding: 0 14px 14px; }}
+.more-detail > h2 {{ margin: 14px 14px 10px; }}
+.more-detail > .mini-grid, .more-detail > details {{
+  margin-left: 14px;
+  margin-right: 14px;
 }}
-.dau-bar.weekend {{ background: linear-gradient(180deg, #f3c463, #976315); }}
-.dau-bar.partial {{ background: linear-gradient(180deg, #ffaaa3, var(--red)); }}
-.dau-bar span {{ position: absolute; top: -20px; color: var(--ink); font-size: 12px; font-weight: 850; }}
-.dau-x {{ color: var(--muted); font-size: 10px; line-height: 1.15; margin-top: 7px; }}
-.dau-x b, .dau-x small {{ display: block; }}
-.dau-legend {{ display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 12px; }}
-.dau-dot {{ display: inline-block; width: 9px; height: 9px; border-radius: 99px; background: var(--blue); margin-right: 5px; }}
-.dau-dot.weekend {{ background: #976315; }}
-.dau-dot.partial {{ background: var(--red); }}
-.big-action {{
-  background: #101827;
-  color: #fff;
-  border-radius: 8px;
-  padding: 18px;
-  margin-top: 16px;
-}}
-.big-action span {{ color: #cbd5e1; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }}
-.big-action strong {{ display: block; font-size: 22px; line-height: 1.18; }}
+.more-detail > details:last-child {{ margin-bottom: 14px; }}
 .brief-grid {{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1810,12 +1711,7 @@ a:hover {{ text-decoration: underline; }}
 @media (max-width: 760px) {{
   main {{ padding: 20px 14px 28px; }}
   .hero {{ padding: 18px; }}
-  .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-  .goal-grid {{ grid-template-columns: 1fr; }}
-  .command-grid {{ grid-template-columns: 1fr; }}
-  .dau-trend-head {{ grid-template-columns: 1fr; }}
-  .dau-avg-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-  .dau-chart.seven .dau-bar-wrap {{ flex-basis: 44px; }}
+  .summary-strip {{ grid-template-columns: 1fr; }}
   .mini-grid {{ grid-template-columns: 1fr; }}
   .brief-grid {{ grid-template-columns: 1fr; }}
 }}
@@ -1831,72 +1727,52 @@ a:hover {{ text-decoration: underline; }}
     </div>
   </section>
 
-  <section class="command-card">
-    <div class="command-grid">
-      <div class="command-primary">
-        <span class="command-label">Why I’m here</span>
-        <strong>{escape(why_answer)}</strong>
-        <p>{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
+  <section class="summary-strip">
+    <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
+    <div><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
+    <div><span>Health</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
+  </section>
+
+  <section class="section focus-section">
+    <h2>What happened last night</h2>
+    <ul class="plain-list">
+      <li><strong>{escape(bottom_line)}</strong></li>
+      {accomplishment_items}
+    </ul>
+  </section>
+
+  <section class="section actions-section">
+    <h2>Recommended actions</h2>
+    <ol>{recommendation_items}</ol>
+  </section>
+
+  <details class="more-detail">
+    <summary>{details_summary}</summary>
+    <section class="brief-grid detail-grid">
+      <div>
+        <h2>Watch</h2>
+        <section class="section"><p>{escape(ceo['watch'])}</p></section>
       </div>
-      <div class="command-list">
-        <div class="command-item"><span>Do next</span><strong>{escape(ceo['do_now'])}</strong></div>
-        <div class="command-item"><span>Overnight</span><strong>{escape(night_answer)}</strong></div>
-        <div class="command-item"><span>Health</span><strong>{escape(trust_answer)}</strong></div>
+      <div>
+        <h2>Decide</h2>
+        <section class="section"><ol>{step_items}</ol></section>
       </div>
-    </div>
-  </section>
-
-  {dau_trend_html}
-
-  <section class="brief-grid">
-    <div>
-      <h2>What happened last night</h2>
-      <section class="section">
-        <ul class="plain-list">
-          <li><strong>All active nightly jobs produced fresh output.</strong><br>{counts['active_lanes']} ran, and {len(blocked_lanes)} were missing or blocked.</li>
-          {accomplishment_items}
-        </ul>
-      </section>
-    </div>
-    <div>
-      <h2>Recommended next actions</h2>
-      <section class="section"><ol>{recommendation_items}</ol></section>
-    </div>
-  </section>
-
-  <section class="brief-grid">
-    <div>
-      <h2>Watch</h2>
-      <section class="section"><p>{escape(ceo['watch'])}</p></section>
-    </div>
-    <div>
-      <h2>Safe for agents</h2>
-      <section class="section"><ul>{safe_items}</ul></section>
-    </div>
-  </section>
-
-  <h2>Why this matters</h2>
-  <section class="section"><p>{escape(ceo['why_thousands'])}</p></section>
-
-  <section class="brief-grid">
-    <div>
-      <h2>What you need to decide</h2>
-      <section class="section"><ol>{step_items}</ol></section>
-    </div>
-    <div>
-      <h2>Founder judgment</h2>
-      <section class="section"><ul>{judgment_items}</ul></section>
-    </div>
-  </section>
-
-  <h2>Noise to ignore</h2>
-  <section class="section"><ul>{ignore_items_html}</ul></section>
-
-  <h2>PRs from the night</h2>
-  <section class="mini-grid">{pr_cards}</section>
-
-  <h2>Every automation, folded away</h2>
-  {lane_details}
+    </section>
+    <section class="brief-grid detail-grid">
+      <div>
+        <h2>Safe to hand off</h2>
+        <section class="section"><ul>{safe_items}</ul></section>
+      </div>
+      <div>
+        <h2>Ignore</h2>
+        <section class="section"><ul>{ignore_items_html}</ul></section>
+      </div>
+    </section>
+    <h2>PRs</h2>
+    <section class="mini-grid">{pr_cards}</section>
+    <h2>Automation details</h2>
+    {lane_details}
+  </details>
 
   <p class="footer">Data quality: {escape(payload['data_quality'])}</p>
 </main>
