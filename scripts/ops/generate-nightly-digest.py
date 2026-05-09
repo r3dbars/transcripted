@@ -1034,6 +1034,16 @@ def lane_group(lane_id: str) -> str:
     return LANE_GROUPS.get(lane_id, "Other")
 
 
+def score_tone(score: int) -> str:
+    if score >= 90:
+        return "excellent"
+    if score >= 82:
+        return "strong"
+    if score >= 75:
+        return "mixed"
+    return "weak"
+
+
 def escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
@@ -1052,25 +1062,27 @@ def render_html(payload: dict[str, Any]) -> str:
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
 
     if open_prs:
-        pr_rows = "\n".join(
-            "<tr>"
-            f"<td><a href=\"{escape(pr.get('url', ''))}\">#{escape(pr.get('number', ''))}</a></td>"
-            f"<td>{escape(pr.get('title', ''))}</td>"
-            f"<td>{'draft' if pr.get('isDraft') else 'ready'}</td>"
-            f"<td>{escape(pr.get('headRefName', ''))}</td>"
-            "</tr>"
+        pr_cards = "\n".join(
+            "<article class=\"mini-card\">"
+            f"<div><a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a></div>"
+            f"<strong>{escape(pr.get('title', ''))}</strong>"
+            f"<span>{'draft' if pr.get('isDraft') else 'ready'} · {escape(pr.get('headRefName', ''))}</span>"
+            "</article>"
             for pr in open_prs
         )
     else:
-        pr_rows = "<tr><td colspan=\"4\">No open nightly PRs right now.</td></tr>"
+        pr_cards = "<article class=\"mini-card quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></article>"
 
-    lane_rows = "\n".join(
-        "<tr>"
-        f"<td><strong>{escape(lane['name'])}</strong><span>{escape(lane_group(lane['id']))} · {escape(lane['schedule'])}</span></td>"
-        f"<td><b class=\"pill {css_class(lane['status'])}\">{escape(status_label(lane['status']))}</b></td>"
-        f"<td>{escape(lane['signal'])}</td>"
-        f"<td>{escape(lane['human_action'])}</td>"
-        "</tr>"
+    lane_cards = "\n".join(
+        "<article class=\"lane-card\" "
+        f"data-status=\"{escape(lane['status'])}\" data-group=\"{escape(lane_group(lane['id']).lower())}\">"
+        "<div class=\"lane-head\">"
+        f"<div><strong>{escape(lane['name'])}</strong><span>{escape(lane_group(lane['id']))} · {escape(lane['schedule'])}</span></div>"
+        f"<b class=\"pill {css_class(lane['status'])}\">{escape(status_label(lane['status']))}</b>"
+        "</div>"
+        f"<p>{escape(lane['signal'])}</p>"
+        f"<footer>Human action: <strong>{escape(lane['human_action'])}</strong></footer>"
+        "</article>"
         for lane in lanes
     )
 
@@ -1081,15 +1093,28 @@ def render_html(payload: dict[str, Any]) -> str:
     if not merged_items:
         merged_items = "<li>No recent merged PR data available.</li>"
 
-    score_rows = "\n".join(
-        "<tr>"
-        f"<td><strong>{escape(item['role'])}</strong></td>"
-        f"<td>{escape(item['score'])}</td>"
-        f"<td><b class=\"pill {css_class('green' if int(item['score']) >= 90 else 'watch')}\">{escape(item['grade'])}</b></td>"
-        f"<td>{escape(item['reason'])}</td>"
-        "</tr>"
+    score_cards = "\n".join(
+        "<article class=\"score-card\">"
+        "<div class=\"score-top\">"
+        f"<strong>{escape(item['role'])}</strong>"
+        f"<b class=\"grade {score_tone(int(item['score']))}\">{escape(item['grade'])}</b>"
+        "</div>"
+        f"<div class=\"score-number\">{escape(item['score'])}</div>"
+        "<div class=\"bar\" aria-hidden=\"true\">"
+        f"<i class=\"{score_tone(int(item['score']))}\" style=\"width: {max(0, min(100, int(item['score'])))}%\"></i>"
+        "</div>"
+        f"<p>{escape(item['reason'])}</p>"
+        "</article>"
         for item in ceo["scorecard"]
     )
+
+    trust_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Trust")
+    activation_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Activation")
+    growth_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Growth")
+    execution_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Execution")
+    review_count = sum(1 for lane in lanes if lane["status"] == "needs_review")
+    watch_count = sum(1 for lane in lanes if lane["status"] == "watch")
+    green_count = sum(1 for lane in lanes if lane["status"] == "green")
 
     headline = headline_text(payload)
     return f"""<!doctype html>
@@ -1100,12 +1125,14 @@ def render_html(payload: dict[str, Any]) -> str:
 <title>Transcripted Daily CEO Brief</title>
 <style>
 :root {{
-  --bg: #f6f7f9;
+  --bg: #f4f6f8;
   --panel: #ffffff;
   --ink: #111827;
-  --muted: #5b6472;
-  --line: #dde3ea;
-  --blue: #1d4ed8;
+  --muted: #5d6675;
+  --soft: #eef2f6;
+  --line: #d9e0e8;
+  --blue: #1957d2;
+  --violet: #6d28d9;
   --green-bg: #dff4e7;
   --green: #136f3a;
   --amber-bg: #fff2c2;
@@ -1114,6 +1141,7 @@ def render_html(payload: dict[str, Any]) -> str:
   --red: #9b1c1c;
   --gray-bg: #e9edf2;
   --gray: #4b5563;
+  --shadow: 0 18px 45px rgba(17, 24, 39, .08);
 }}
 * {{ box-sizing: border-box; }}
 body {{
@@ -1122,24 +1150,63 @@ body {{
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }}
+body::before {{
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(135deg, rgba(25, 87, 210, .10), rgba(19, 111, 58, .06) 42%, rgba(128, 84, 0, .08)),
+    radial-gradient(circle at 76% 8%, rgba(109, 40, 217, .10), transparent 32rem);
+}}
 main {{
-  max-width: 1060px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 28px 20px 36px;
+  padding: 30px 20px 46px;
 }}
-.top {{
+.hero {{
+  background: rgba(255,255,255,.86);
+  border: 1px solid rgba(217,224,232,.95);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 22px;
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 16px;
-  align-items: start;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 18px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr);
+  gap: 18px;
 }}
-h1 {{ margin: 0; font-size: 30px; letter-spacing: 0; }}
-h2 {{ margin: 26px 0 10px; font-size: 15px; }}
+.eyebrow {{
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}}
+h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 54px); line-height: .98; letter-spacing: 0; }}
+h2 {{ margin: 30px 0 12px; font-size: 16px; }}
 p {{ margin: 0; }}
 .sub {{ color: var(--muted); font-size: 13px; margin-top: 5px; }}
-.verdict {{ font-size: 18px; font-weight: 800; margin-top: 14px; max-width: 760px; }}
+.verdict {{ font-size: 20px; font-weight: 850; margin-top: 18px; max-width: 820px; }}
+.call {{
+  border-left: 4px solid var(--blue);
+  padding: 12px 0 12px 14px;
+  margin-top: 18px;
+  color: #1f2937;
+  font-size: 15px;
+}}
+.do-now {{
+  background: #101827;
+  color: #fff;
+  border-radius: 8px;
+  padding: 18px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+}}
+.do-now .pill {{ color: #bee3ff; background: rgba(255,255,255,.12); width: fit-content; }}
+.do-now strong {{ display: block; font-size: 22px; line-height: 1.12; letter-spacing: 0; }}
+.do-now span {{ color: #cbd5e1; font-size: 13px; }}
 .pill {{
   display: inline-flex;
   align-items: center;
@@ -1158,72 +1225,106 @@ p {{ margin: 0; }}
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
-  margin-top: 18px;
+  margin-top: 14px;
 }}
 .card, .section {{
-  background: var(--panel);
+  background: rgba(255,255,255,.92);
   border: 1px solid var(--line);
   border-radius: 8px;
 }}
 .card {{ padding: 14px; }}
 .num {{ font-size: 27px; font-weight: 850; line-height: 1; }}
 .label {{ color: var(--muted); font-size: 12px; margin-top: 5px; }}
-.section {{ padding: 15px 18px; }}
-.callout {{
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px 18px;
-  margin-top: 18px;
-}}
+.section {{ padding: 16px 18px; box-shadow: 0 8px 24px rgba(17, 24, 39, .04); }}
 .brief-grid {{
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }}
 .brief-grid .section {{ min-height: 100%; }}
-ol, ul {{ margin: 0; padding-left: 20px; }}
-li {{ margin: 7px 0; }}
-table {{
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: var(--panel);
+.score-grid {{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}}
+.score-card, .lane-card, .mini-card {{
+  background: rgba(255,255,255,.94);
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, .04);
 }}
-th, td {{
-  padding: 11px 12px;
-  border-bottom: 1px solid #edf0f4;
-  text-align: left;
-  vertical-align: top;
-  font-size: 13px;
+.score-top, .lane-head {{
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
 }}
-tr:last-child td {{ border-bottom: 0; }}
-th {{ background: #f9fafb; color: var(--muted); font-weight: 750; }}
-td span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }}
+.grade {{
+  border-radius: 7px;
+  padding: 4px 7px;
+  font-size: 12px;
+}}
+.excellent {{ color: var(--green); background: var(--green-bg); }}
+.strong {{ color: var(--blue); background: #dbeafe; }}
+.mixed {{ color: var(--amber); background: var(--amber-bg); }}
+.weak {{ color: var(--red); background: var(--red-bg); }}
+.score-number {{ font-size: 28px; font-weight: 850; margin-top: 10px; }}
+.bar {{ height: 7px; background: var(--soft); border-radius: 999px; overflow: hidden; margin: 8px 0 10px; }}
+.bar i {{ display: block; height: 100%; border-radius: inherit; }}
+.bar .excellent {{ background: var(--green); }}
+.bar .strong {{ background: var(--blue); }}
+.bar .mixed {{ background: #d97706; }}
+.bar .weak {{ background: var(--red); }}
+.score-card p, .lane-card p {{ color: var(--muted); font-size: 13px; line-height: 1.42; }}
+.lane-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+.lane-card.is-hidden {{ display: none; }}
+.lane-card span, .mini-card span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }}
+.lane-card footer {{ color: #374151; font-size: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf0f4; }}
+.filters {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }}
+.filters button {{
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.78);
+  color: #1f2937;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}}
+.filters button.active {{ border-color: var(--blue); color: var(--blue); background: #e8f0ff; }}
+.mini-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+.mini-card.quiet {{ color: var(--muted); }}
+ol, ul {{ margin: 0; padding-left: 20px; }}
+li {{ margin: 7px 0; }}
 a {{ color: var(--blue); text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 .footer {{ color: var(--muted); font-size: 12px; margin-top: 18px; }}
 @media (max-width: 760px) {{
   main {{ padding: 20px 14px 28px; }}
-  .top {{ grid-template-columns: 1fr; }}
+  .hero {{ grid-template-columns: 1fr; padding: 18px; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .score-grid, .lane-grid, .mini-grid {{ grid-template-columns: 1fr; }}
   .brief-grid {{ grid-template-columns: 1fr; }}
-  table {{ display: block; overflow-x: auto; }}
 }}
 </style>
 </head>
 <body>
 <main>
-  <section class="top">
+  <section class="hero">
     <div>
-      <h1>Transcripted Daily CEO Brief</h1>
+      <div class="eyebrow">Transcripted Daily CEO Brief</div>
+      <h1>Signal from the nightly noise.</h1>
       <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
       <p class="verdict">{escape(headline)}</p>
+      <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
     </div>
-    <b class="pill {css_class(status)}">{escape(status_label(status))}</b>
+    <aside class="do-now">
+      <b class="pill {css_class(status)}">{escape(status_label(status))}</b>
+      <strong>{escape(ceo['do_now'])}</strong>
+      <span>This is the one thing to look at before reading the lane details.</span>
+    </aside>
   </section>
 
   <section class="grid" aria-label="Summary">
@@ -1233,17 +1334,8 @@ a:hover {{ text-decoration: underline; }}
     <div class="card"><div class="num">{counts['blocked_or_unknown']}</div><div class="label">blocked / unknown</div></div>
   </section>
 
-  <h2>CEO Call</h2>
-  <section class="callout"><p><strong>{escape(ceo['ceo_call'])}</strong></p></section>
-
   <h2>Scorecard</h2>
-  <table>
-    <tr><th>Role</th><th>Score</th><th>Grade</th><th>Why</th></tr>
-    {score_rows}
-  </table>
-
-  <h2>Do Now</h2>
-  <section class="section"><p><strong>{escape(ceo['do_now'])}</strong></p></section>
+  <section class="score-grid">{score_cards}</section>
 
   <section class="brief-grid">
     <div>
@@ -1274,25 +1366,43 @@ a:hover {{ text-decoration: underline; }}
   <section class="section"><ol>{step_items}</ol></section>
 
   <h2>PRs Waiting</h2>
-  <table>
-    <tr><th>PR</th><th>Title</th><th>State</th><th>Branch</th></tr>
-    {pr_rows}
-  </table>
+  <section class="mini-grid">{pr_cards}</section>
 
-  <h2>Lane Results</h2>
-  <table>
-    <tr><th>Lane</th><th>Status</th><th>Signal</th><th>Human action</th></tr>
-    {lane_rows}
-  </table>
+  <h2>Lane Explorer</h2>
+  <div class="filters" aria-label="Lane filters">
+    <button class="active" data-filter="all">All {counts['active_lanes']}</button>
+    <button data-filter="needs_review">Needs Review {review_count}</button>
+    <button data-filter="watch">Watch {watch_count}</button>
+    <button data-filter="green">Green {green_count}</button>
+    <button data-filter="trust">Trust {trust_count}</button>
+    <button data-filter="activation">Activation {activation_count}</button>
+    <button data-filter="growth">Growth {growth_count}</button>
+    <button data-filter="execution">Execution {execution_count}</button>
+  </div>
+  <section class="lane-grid" id="lane-grid">{lane_cards}</section>
 
   <h2>Recently Merged</h2>
   <section class="section"><ul>{merged_items}</ul></section>
 
-  <h2>Ignore</h2>
+  <h2>Noise Filter</h2>
   <section class="section"><ul>{ignore_items_html}</ul></section>
 
   <p class="footer">Data quality: {escape(payload['data_quality'])}</p>
 </main>
+<script>
+const buttons = Array.from(document.querySelectorAll('[data-filter]'));
+const cards = Array.from(document.querySelectorAll('.lane-card'));
+buttons.forEach((button) => {{
+  button.addEventListener('click', () => {{
+    const filter = button.dataset.filter;
+    buttons.forEach((item) => item.classList.toggle('active', item === button));
+    cards.forEach((card) => {{
+      const visible = filter === 'all' || card.dataset.status === filter || card.dataset.group === filter;
+      card.classList.toggle('is-hidden', !visible);
+    }});
+  }});
+}});
+</script>
 </body>
 </html>
 """
