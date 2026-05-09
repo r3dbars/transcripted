@@ -101,22 +101,21 @@ enum RuntimeDiagnosticsStore {
         previous marker: RuntimeDiagnosticsMarker,
         now: Date = Date()
     ) -> [String: String] {
-        [
-            "app_version": marker.appVersion,
-            "build_version": marker.buildVersion,
-            "heartbeat_age_bucket": heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now),
-            "last_event": marker.lastEvent,
-            "os_major": "\(marker.osMajor)",
-            "session_active": "\(marker.sessionActive)",
-            "session_duration_bucket": sessionDurationBucket(startedAt: marker.startedAt, now: now),
-            "session_kind": marker.sessionKind,
-            "session_stage": marker.sessionStage,
-        ]
+        runtimeContext(for: marker, now: now)
     }
 
     static func contextForCurrentSession(
         marker: RuntimeDiagnosticsMarker,
         now: Date = Date()
+    ) -> [String: String] {
+        var context = runtimeContext(for: marker, now: now)
+        context["previous_clean_shutdown"] = "\(marker.cleanShutdown)"
+        return context
+    }
+
+    private static func runtimeContext(
+        for marker: RuntimeDiagnosticsMarker,
+        now: Date
     ) -> [String: String] {
         [
             "app_version": marker.appVersion,
@@ -124,7 +123,6 @@ enum RuntimeDiagnosticsStore {
             "heartbeat_age_bucket": heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now),
             "last_event": marker.lastEvent,
             "os_major": "\(marker.osMajor)",
-            "previous_clean_shutdown": "\(marker.cleanShutdown)",
             "session_active": "\(marker.sessionActive)",
             "session_duration_bucket": sessionDurationBucket(startedAt: marker.startedAt, now: now),
             "session_kind": marker.sessionKind,
