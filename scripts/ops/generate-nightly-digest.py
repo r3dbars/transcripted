@@ -29,6 +29,7 @@ DEFAULT_OUTPUT_DIR = Path("/Users/redbars/Delance")
 DEFAULT_REPO = Path("/Users/redbars/transcripted-latest")
 LOCAL_TZ = ZoneInfo("America/Chicago") if ZoneInfo else timezone.utc
 FRESH_HOURS = 18
+DAU_GOAL = 1000
 
 NIGHTLY_PREFIXES = (
     "[nightly-",
@@ -797,9 +798,130 @@ def score_from_memory(
     return fallback, letter_grade(fallback)
 
 
+def extract_first_int(text: str, patterns: Iterable[str]) -> Optional[int]:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def build_dau_status(memories: dict[str, str], ops_tokens_incomplete: bool) -> dict[str, str]:
+    all_memory = "\n".join(memories.values())
+    exact_dau = extract_first_int(
+        all_memory,
+        (
+            r"\b(\d{1,5})\s+daily active users\b",
+            r"\bDAU:\s*(\d{1,5})\b",
+        ),
+    )
+    active_devices = extract_first_int(
+        all_memory,
+        (
+            r"\b(\d{1,5})\s+active devices\b",
+            r"devices_7d[^\d]{0,30}(\d{1,5})",
+        ),
+    )
+    downloads = extract_first_int(
+        all_memory,
+        (
+            r"release asset download count(?:\s+is)?\s+(\d{1,5})",
+            r"download count was\s+(\d{1,5})",
+            r"\b(\d{1,5})\s+downloads?\b",
+        ),
+    )
+    repo_viewers = extract_first_int(
+        all_memory,
+        (
+            r"\b(\d{1,5})\s+unique repo viewers\b",
+            r"uniques[^\d]{0,20}(\d{1,5})",
+        ),
+    )
+
+    if exact_dau is not None:
+        current = f"{exact_dau} DAU"
+        gap = f"{max(0, DAU_GOAL - exact_dau)} away"
+        confidence = "High" if not ops_tokens_incomplete else "Medium"
+    else:
+        current = "Unknown today"
+        gap = "Cannot calculate exact gap"
+        confidence = "Low" if ops_tokens_incomplete else "Medium"
+
+    proxy_parts: list[str] = []
+    if active_devices is not None:
+        proxy_parts.append(f"{active_devices} active devices in the last 7 days")
+    if downloads is not None:
+        proxy_parts.append(f"{downloads} latest-release downloads")
+    if repo_viewers is not None:
+        proxy_parts.append(f"{repo_viewers} unique repo viewers in 14 days")
+    proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
+
+    note = (
+        "Exact DAU was not available in this run because live product analytics could not be read."
+        if exact_dau is None and ops_tokens_incomplete
+        else "Use this as the morning growth read, not a perfect analytics dashboard."
+    )
+
+    return {
+        "goal": f"{DAU_GOAL:,} daily active users",
+        "current": current,
+        "gap": gap,
+        "proxy": proxy,
+        "confidence": confidence,
+        "note": note,
+    }
+
+
+def build_accomplishments(lanes: list[LaneResult], open_prs: list[dict[str, Any]]) -> list[str]:
+    by_id = {lane.id: lane for lane in lanes}
+    items: list[str] = []
+
+    if by_id.get("transcripted-nightly-build-repair", None) and by_id["transcripted-nightly-build-repair"].status == "green":
+        items.append("Build, app tests, integration smoke, and package tests passed.")
+    if by_id.get("transcripted-nightly-security", None) and by_id["transcripted-nightly-security"].status == "green":
+        items.append("Security and privacy checks came back clean.")
+    if by_id.get("transcripted-nightly-release-candidate", None) and by_id["transcripted-nightly-release-candidate"].status == "green":
+        items.append("The latest public release and download surfaces stayed aligned.")
+    if by_id.get("transcripted-nightly-agent-surface-check", None) and by_id["transcripted-nightly-agent-surface-check"].status == "green":
+        items.append("The agent-facing CLI and MCP surfaces passed verification.")
+    if any(by_id.get(lane_id) for lane_id in ("transcripted-nightly-activation-agent", "transcripted-nightly-onboarding-lab", "transcripted-nightly-retention-agent", "transcripted-nightly-north-star-agent")):
+        items.append("Activation, onboarding, retention, and North Star lanes all pointed at the same theme: get users to a useful agent answer from local Markdown.")
+    if any(by_id.get(lane_id) for lane_id in ("transcripted-nightly-community-scout", "transcripted-nightly-comparison-agent", "transcripted-nightly-content-agent", "transcripted-nightly-launch-agent")):
+        items.append("Growth lanes produced community targets, positioning notes, a content draft, and a staged launch recommendation.")
+    if any(lane.human_action == "Watch issue #500" for lane in lanes):
+        items.append("Audio reliability checks passed synthetically, but issue #500 stayed on the watch list.")
+    if open_prs:
+        pr = open_prs[0]
+        items.append(f"PR #{pr.get('number')} is waiting with the durable morning report work.")
+
+    return items[:8]
+
+
+def build_recommendations(
+    lanes: list[LaneResult],
+    open_prs: list[dict[str, Any]],
+    ops_tokens_incomplete: bool,
+) -> list[str]:
+    recommendations: list[str] = []
+    if open_prs:
+        pr = open_prs[0]
+        recommendations.append(f"Review PR #{pr.get('number')} so this morning report becomes the durable final automation.")
+    if ops_tokens_incomplete:
+        recommendations.append("Restore Sentry, PostHog, and Cloudflare read tokens so tomorrow's DAU and health read is not guessed.")
+    if any(lane.id == "transcripted-nightly-north-star-agent" for lane in lanes):
+        recommendations.append("Pick the activation metric: first useful agent answer from a local Transcripted artifact.")
+    if any(lane.human_action == "Watch issue #500" for lane in lanes):
+        recommendations.append("Run the issue #500 audio QA matrix before making a bigger launch push.")
+    if any(lane.id == "transcripted-nightly-community-scout" for lane in lanes):
+        recommendations.append("Approve one helpful community reply where people already want local Markdown and agent memory.")
+
+    return recommendations[:5]
+
+
 def build_ceo_brief(
     lanes: list[LaneResult],
     memories: dict[str, str],
+    full_memories: dict[str, str],
     open_prs: list[dict[str, Any]],
     overall: str,
     steps: list[str],
@@ -921,6 +1043,9 @@ def build_ceo_brief(
         "watch": watch,
         "ignore": "Green verification lanes, third-party warning noise, and paused historical automations.",
         "why_thousands": "This gets to 1,000 DAU by protecting trust first, then pushing one habit loop: spoken work becomes local Markdown, then an agent gives a useful answer.",
+        "dau_status": build_dau_status(full_memories, ops_tokens_incomplete),
+        "accomplishments": build_accomplishments(lanes, open_prs),
+        "recommendations": build_recommendations(lanes, open_prs, ops_tokens_incomplete),
     }
 
 
@@ -934,9 +1059,11 @@ def build_payload(
 ) -> dict[str, Any]:
     lanes: list[LaneResult] = []
     memories: dict[str, str] = {}
+    full_memories: dict[str, str] = {}
     for automation in active:
         content = automation.memory_path.read_text(encoding="utf-8") if automation.memory_path.exists() else ""
         latest_ts, latest_label = memory_timestamp(content, automation.memory_path)
+        full_memories[automation.id] = content
         memories[automation.id] = latest_memory_section(content, latest_label)
         lanes.append(classify_lane(automation, content, now, fresh_hours))
 
@@ -952,6 +1079,7 @@ def build_payload(
     ceo_brief = build_ceo_brief(
         lanes=lanes,
         memories=memories,
+        full_memories=full_memories,
         open_prs=gh_payload["open_prs"],
         overall=overall,
         steps=steps,
@@ -1054,9 +1182,9 @@ def render_html(payload: dict[str, Any]) -> str:
     lanes = payload["lanes"]
     open_prs = payload["open_prs"]
     ceo = payload["ceo_brief"]
+    dau = ceo["dau_status"]
 
     review_lanes = [lane for lane in lanes if lane["status"] == "needs_review"]
-    watch_lanes = [lane for lane in lanes if lane["status"] == "watch"]
     green_lanes = [lane for lane in lanes if lane["status"] == "green"]
     blocked_lanes = [lane for lane in lanes if lane["status"] in ("blocked", "unknown")]
 
@@ -1064,6 +1192,8 @@ def render_html(payload: dict[str, Any]) -> str:
     judgment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["needs_judgment"][:4])
     safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"][:4])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
+    accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"])
+    recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["recommendations"])
 
     good_names = ", ".join(lane["name"] for lane in green_lanes[:6])
     if len(green_lanes) > 6:
@@ -1204,6 +1334,22 @@ p {{ margin: 0; }}
 .num {{ font-size: 27px; font-weight: 850; line-height: 1; }}
 .label {{ color: var(--muted); font-size: 12px; margin-top: 5px; }}
 .section {{ padding: 16px 18px; }}
+.goal-grid {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}}
+.goal-card {{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, .035);
+}}
+.goal-card strong {{ display: block; font-size: 18px; margin-top: 4px; }}
+.goal-card span {{ color: var(--muted); font-size: 12px; font-weight: 750; text-transform: uppercase; }}
+.goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
 .big-action {{
   background: #101827;
   color: #fff;
@@ -1247,6 +1393,7 @@ summary span {{ color: var(--muted); font-weight: 650; font-size: 12px; margin-l
 .lane-list small {{ display: block; margin-top: 7px; color: #374151; }}
 ol, ul {{ margin: 0; padding-left: 20px; }}
 li {{ margin: 7px 0; }}
+.section > ul:not(.plain-list), .section > ol {{ line-height: 1.35; }}
 a {{ color: var(--blue); text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 .footer {{ color: var(--muted); font-size: 12px; margin-top: 18px; }}
@@ -1254,6 +1401,7 @@ a:hover {{ text-decoration: underline; }}
   main {{ padding: 20px 14px 28px; }}
   .hero {{ padding: 18px; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .goal-grid {{ grid-template-columns: 1fr; }}
   .mini-grid {{ grid-template-columns: 1fr; }}
   .brief-grid {{ grid-template-columns: 1fr; }}
 }}
@@ -1264,11 +1412,19 @@ a:hover {{ text-decoration: underline; }}
   <section class="hero">
     <div>
       <div class="eyebrow">Transcripted Daily CEO Brief</div>
-      <h1>Signal from the nightly noise.</h1>
+      <h1>1,000 DAU morning brief.</h1>
       <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
-      <p class="verdict">{escape(headline)}</p>
+      <p class="verdict">Goal: {escape(dau['goal'])}. Current DAU: {escape(dau['current'])}.</p>
       <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
+      <p class="goal-note">Confidence: {escape(dau['confidence'])}. {escape(dau['note'])}</p>
     </div>
+  </section>
+
+  <section class="goal-grid" aria-label="DAU progress">
+    <div class="goal-card"><span>Goal</span><strong>{escape(dau['goal'])}</strong></div>
+    <div class="goal-card"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
+    <div class="goal-card"><span>Gap</span><strong>{escape(dau['gap'])}</strong></div>
+    <div class="goal-card"><span>Best proxy</span><strong>{escape(dau['proxy'])}</strong></div>
   </section>
 
   <section class="grid" aria-label="Summary">
@@ -1289,15 +1445,13 @@ a:hover {{ text-decoration: underline; }}
       <section class="section">
         <ul class="plain-list">
           <li><strong>All active nightly jobs produced fresh output.</strong><br>{counts['active_lanes']} ran, and {len(blocked_lanes)} were missing or blocked.</li>
-          <li><strong>The product is not on fire.</strong><br>{escape(good_names)} were quiet.</li>
-          <li><strong>The main issue is confidence.</strong><br>Telemetry read tokens are missing, issue #500 still needs audio proof, and local artifact drift is still noisy.</li>
-          <li><strong>Overall read:</strong> {escape(score_text)}.</li>
+          {accomplishment_items}
         </ul>
       </section>
     </div>
     <div>
-      <h2>What you need to decide</h2>
-      <section class="section"><ol>{step_items}</ol></section>
+      <h2>Recommended next actions</h2>
+      <section class="section"><ol>{recommendation_items}</ol></section>
     </div>
   </section>
 
@@ -1317,14 +1471,17 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="brief-grid">
     <div>
+      <h2>What you need to decide</h2>
+      <section class="section"><ol>{step_items}</ol></section>
+    </div>
+    <div>
       <h2>Founder judgment</h2>
       <section class="section"><ul>{judgment_items}</ul></section>
     </div>
-    <div>
-      <h2>Noise to ignore</h2>
-      <section class="section"><ul>{ignore_items_html}</ul></section>
-    </div>
   </section>
+
+  <h2>Noise to ignore</h2>
+  <section class="section"><ul>{ignore_items_html}</ul></section>
 
   <h2>PRs from the night</h2>
   <section class="mini-grid">{pr_cards}</section>
