@@ -16,7 +16,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, Tuple
 
@@ -895,33 +895,13 @@ def sql_quote(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def query_posthog_dau() -> dict[str, Any]:
-    load_local_posthog_env()
-    token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
-    project_id = os.environ.get("POSTHOG_PROJECT_ID")
-    missing = [name for name, value in (("POSTHOG_PERSONAL_API_KEY", token), ("POSTHOG_PROJECT_ID", project_id)) if not value]
-    if missing:
-        verb = "is" if len(missing) == 1 else "are"
-        return {"dau": None, "event_count": None, "error": f"{', '.join(missing)} {verb} not set"}
-
-    host = normalize_posthog_host(
-        os.environ.get("POSTHOG_APP_HOST") or os.environ.get("POSTHOG_HOST") or "https://us.posthog.com"
-    )
+def posthog_query(host: str, project_id: str, token: str, query: str) -> dict[str, Any]:
     url = f"{host}/api/projects/{project_id}/query/"
-    event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
     body = json.dumps(
         {
             "query": {
                 "kind": "HogQLQuery",
-                "query": (
-                    "SELECT "
-                    "uniqIf(distinct_id, event = 'app_launched') AS dau, "
-                    "countIf(event = 'app_launched') AS launches_24h, "
-                    "count() AS workflow_events_24h "
-                    "FROM events "
-                    "WHERE timestamp >= now() - INTERVAL 1 DAY "
-                    f"AND event IN ({event_list})"
-                ),
+                "query": query,
             },
             "refresh": "blocking",
         }
@@ -935,9 +915,96 @@ def query_posthog_dau() -> dict[str, Any]:
             "Content-Type": "application/json",
         },
     )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def build_dau_history(daily_rows: list[list[Any]], today_utc: date) -> dict[str, Any]:
+    by_day: dict[date, int] = {}
+    for row in daily_rows:
+        if not isinstance(row, list) or len(row) < 2:
+            continue
+        try:
+            day = date.fromisoformat(str(row[0]))
+            by_day[day] = int(row[1])
+        except (TypeError, ValueError):
+            continue
+
+    start_day = today_utc - timedelta(days=29)
+    days: list[dict[str, Any]] = []
+    for offset in range(30):
+        day = start_day + timedelta(days=offset)
+        days.append(
+            {
+                "day": day.isoformat(),
+                "label": day.strftime("%b %-d"),
+                "dow": day.strftime("%a"),
+                "active_devices": by_day.get(day, 0),
+                "partial": day == today_utc,
+                "weekend": day.weekday() >= 5,
+            }
+        )
+
+    complete_30 = [item for item in days if not item["partial"]]
+    last_7 = days[-7:]
+    complete_7 = [item for item in last_7 if not item["partial"]]
+    weekdays = [item for item in complete_30 if not item["weekend"]]
+    weekends = [item for item in complete_30 if item["weekend"]]
+
+    def average(items: list[dict[str, Any]]) -> float:
+        if not items:
+            return 0.0
+        return round(sum(int(item["active_devices"]) for item in items) / len(items), 1)
+
+    return {
+        "last_7": last_7,
+        "last_30": days,
+        "averages": {
+            "last_7_complete": average(complete_7),
+            "last_30_complete": average(complete_30),
+            "weekday_complete": average(weekdays),
+            "weekend_complete": average(weekends),
+        },
+        "note": "Bars use PostHog UTC calendar days. Today is partial.",
+    }
+
+
+def query_posthog_dau() -> dict[str, Any]:
+    load_local_posthog_env()
+    token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
+    project_id = os.environ.get("POSTHOG_PROJECT_ID")
+    missing = [name for name, value in (("POSTHOG_PERSONAL_API_KEY", token), ("POSTHOG_PROJECT_ID", project_id)) if not value]
+    if missing:
+        verb = "is" if len(missing) == 1 else "are"
+        return {"dau": None, "event_count": None, "error": f"{', '.join(missing)} {verb} not set"}
+
+    host = normalize_posthog_host(
+        os.environ.get("POSTHOG_APP_HOST") or os.environ.get("POSTHOG_HOST") or "https://us.posthog.com"
+    )
+    event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+
+    current_query = (
+        "SELECT "
+        "uniqIf(distinct_id, event = 'app_launched') AS dau, "
+        "countIf(event = 'app_launched') AS launches_24h, "
+        "count() AS workflow_events_24h "
+        "FROM events "
+        "WHERE timestamp >= now() - INTERVAL 1 DAY "
+        f"AND event IN ({event_list})"
+    )
+    daily_query = (
+        "SELECT "
+        "toDate(timestamp) AS day, "
+        "uniqIf(distinct_id, event = 'app_launched') AS active_devices "
+        "FROM events "
+        "WHERE timestamp >= now() - INTERVAL 30 DAY "
+        f"AND event IN ({event_list}) "
+        "GROUP BY day "
+        "ORDER BY day ASC"
+    )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = posthog_query(host, project_id, token, current_query)
+        daily_payload = posthog_query(host, project_id, token, daily_query)
     except urllib.error.HTTPError as exc:
         return {"dau": None, "event_count": None, "error": f"PostHog query failed with HTTP {exc.code}"}
     except (urllib.error.URLError, TimeoutError):
@@ -951,14 +1018,15 @@ def query_posthog_dau() -> dict[str, Any]:
         event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
     except (IndexError, TypeError, ValueError):
         return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
-    return {"dau": dau, "event_count": event_count, "error": None}
+    history = build_dau_history(daily_payload.get("results") or daily_payload.get("data") or [], datetime.now(timezone.utc).date())
+    return {"dau": dau, "event_count": event_count, "history": history, "error": None}
 
 
 def build_dau_status(
     memories: dict[str, str],
     ops_tokens_incomplete: bool,
     posthog_dau: Optional[dict[str, Any]] = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     all_memory = "\n".join(memories.values())
     memory_dau = extract_first_int(
         all_memory,
@@ -1033,6 +1101,7 @@ def build_dau_status(
         "proxy": proxy,
         "confidence": confidence,
         "note": note,
+        "history": posthog_dau.get("history") if posthog_dau else None,
     }
 
 
@@ -1363,6 +1432,82 @@ def escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def average_label(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "Unknown"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.1f}"
+
+
+def render_dau_bars(days: list[dict[str, Any]], *, chart_class: str = "") -> str:
+    max_value = max([int(item.get("active_devices", 0)) for item in days] + [1])
+    items: list[str] = []
+    for item in days:
+        value = int(item.get("active_devices", 0))
+        height = max(6, round(value / max_value * 150))
+        classes = ["dau-bar"]
+        if item.get("weekend"):
+            classes.append("weekend")
+        if item.get("partial"):
+            classes.append("partial")
+        title = f"{item.get('dow', '')} {item.get('label', item.get('day', ''))}: {value} DAU"
+        if item.get("partial"):
+            title += " so far"
+        items.append(
+            "<div class=\"dau-bar-wrap\" "
+            f"title=\"{escape(title)}\">"
+            f"<div class=\"{' '.join(classes)}\" style=\"height:{height}px\"><span>{value}</span></div>"
+            "<div class=\"dau-x\">"
+            f"<b>{escape(item.get('dow', ''))}</b>"
+            f"<small>{escape(item.get('label', item.get('day', '')))}</small>"
+            "</div>"
+            "</div>"
+        )
+    return f"<div class=\"dau-chart {escape(chart_class)}\">{''.join(items)}</div>"
+
+
+def render_dau_trend(dau: dict[str, Any]) -> str:
+    history = dau.get("history") or {}
+    last_7 = history.get("last_7") or []
+    last_30 = history.get("last_30") or []
+    averages = history.get("averages") or {}
+    if not last_7 or not last_30:
+        return ""
+
+    return f"""
+  <section class="dau-trend section">
+    <div class="dau-trend-head">
+      <div>
+        <h2>DAU trend</h2>
+        <p>{escape(history.get('note', 'Calendar-day DAU from PostHog.'))}</p>
+      </div>
+      <div class="dau-avg-grid">
+        <div><span>7-day avg</span><strong>{average_label(averages.get('last_7_complete'))}</strong></div>
+        <div><span>30-day avg</span><strong>{average_label(averages.get('last_30_complete'))}</strong></div>
+        <div><span>Weekday avg</span><strong>{average_label(averages.get('weekday_complete'))}</strong></div>
+        <div><span>Weekend avg</span><strong>{average_label(averages.get('weekend_complete'))}</strong></div>
+      </div>
+    </div>
+    <div class="dau-subchart">
+      <h3>Last 7 days</h3>
+      {render_dau_bars(last_7, chart_class='seven')}
+    </div>
+    <div class="dau-subchart">
+      <h3>Last 30 days</h3>
+      {render_dau_bars(last_30)}
+    </div>
+    <div class="dau-legend">
+      <span><i class="dau-dot"></i>Weekday</span>
+      <span><i class="dau-dot weekend"></i>Weekend</span>
+      <span><i class="dau-dot partial"></i>Today so far</span>
+    </div>
+  </section>
+"""
+
+
 def render_html(payload: dict[str, Any]) -> str:
     status = payload["overall_status"]
     counts = payload["counts"]
@@ -1397,6 +1542,7 @@ def render_html(payload: dict[str, Any]) -> str:
         else f"Current DAU: {dau['current']}. Gap: {dau['gap']}."
     )
     dau_card_class = "goal-card problem" if dau_unknown else "goal-card"
+    dau_trend_html = render_dau_trend(dau)
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1546,6 +1692,41 @@ p {{ margin: 0; }}
 .goal-card.problem {{ border-color: #f2b3ad; background: #fff8f7; }}
 .goal-card.problem strong {{ color: var(--red); }}
 .goal-note {{ color: var(--muted); font-size: 13px; line-height: 1.45; margin-top: 10px; }}
+.dau-trend {{ margin-top: 14px; }}
+.dau-trend-head {{
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr;
+  gap: 14px;
+  align-items: start;
+}}
+.dau-trend h2 {{ margin: 0; }}
+.dau-trend h3 {{ margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; }}
+.dau-trend p {{ color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 5px; }}
+.dau-avg-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }}
+.dau-avg-grid div {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px; }}
+.dau-avg-grid span {{ display: block; color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }}
+.dau-avg-grid strong {{ display: block; margin-top: 3px; font-size: 20px; }}
+.dau-chart {{ display: flex; align-items: flex-end; gap: 5px; min-height: 195px; padding: 22px 3px 0; overflow-x: auto; }}
+.dau-chart.seven {{ gap: 8px; }}
+.dau-bar-wrap {{ flex: 1 0 22px; min-width: 22px; text-align: center; }}
+.dau-chart.seven .dau-bar-wrap {{ flex-basis: 72px; }}
+.dau-bar {{
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 6px;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, #73a4ff, var(--blue));
+}}
+.dau-bar.weekend {{ background: linear-gradient(180deg, #f3c463, #976315); }}
+.dau-bar.partial {{ background: linear-gradient(180deg, #ffaaa3, var(--red)); }}
+.dau-bar span {{ position: absolute; top: -20px; color: var(--ink); font-size: 12px; font-weight: 850; }}
+.dau-x {{ color: var(--muted); font-size: 10px; line-height: 1.15; margin-top: 7px; }}
+.dau-x b, .dau-x small {{ display: block; }}
+.dau-legend {{ display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 12px; }}
+.dau-dot {{ display: inline-block; width: 9px; height: 9px; border-radius: 99px; background: var(--blue); margin-right: 5px; }}
+.dau-dot.weekend {{ background: #976315; }}
+.dau-dot.partial {{ background: var(--red); }}
 .big-action {{
   background: #101827;
   color: #fff;
@@ -1598,6 +1779,9 @@ a:hover {{ text-decoration: underline; }}
   .hero {{ padding: 18px; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
   .goal-grid {{ grid-template-columns: 1fr; }}
+  .dau-trend-head {{ grid-template-columns: 1fr; }}
+  .dau-avg-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .dau-chart.seven .dau-bar-wrap {{ flex-basis: 44px; }}
   .mini-grid {{ grid-template-columns: 1fr; }}
   .brief-grid {{ grid-template-columns: 1fr; }}
 }}
@@ -1622,6 +1806,8 @@ a:hover {{ text-decoration: underline; }}
     <div class="goal-card"><span>Gap</span><strong>{escape(dau['gap'])}</strong></div>
     <div class="goal-card"><span>Best proxy</span><strong>{escape(dau['proxy'])}</strong></div>
   </section>
+
+  {dau_trend_html}
 
   <section class="grid" aria-label="Summary">
     <div class="card"><div class="num">{counts['active_lanes']}</div><div class="label">jobs ran</div></div>
