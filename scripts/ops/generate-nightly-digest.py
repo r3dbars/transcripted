@@ -41,12 +41,25 @@ LANE_ORDER = [
     "transcripted-nightly-security",
     "transcripted-nightly-artifact-qa",
     "transcripted-nightly-health",
-    "transcripted-nightly-code-review",
     "transcripted-nightly-audio-reliability",
-    "transcripted-nightly-agent-surface-check",
     "transcripted-nightly-telemetry-gap-finder",
+    "performance-audit",
     "transcripted-nightly-release-candidate",
+    "transcripted-nightly-activation-agent",
+    "transcripted-nightly-onboarding-lab",
+    "transcripted-nightly-retention-agent",
+    "transcripted-nightly-user-interview-agent",
+    "transcripted-nightly-agent-surface-check",
+    "transcripted-nightly-community-scout",
+    "transcripted-nightly-comparison-agent",
+    "transcripted-nightly-content-agent",
+    "transcripted-nightly-support-agent",
+    "transcripted-nightly-launch-agent",
+    "transcripted-nightly-code-review",
+    "transcripted-nightly-codex-operator",
+    "transcripted-nightly-reviewer",
     "transcripted-nightly-simplify",
+    "transcripted-nightly-north-star-agent",
 ]
 
 LANE_LABELS = {
@@ -54,13 +67,139 @@ LANE_LABELS = {
     "transcripted-nightly-security": "Security and Privacy",
     "transcripted-nightly-artifact-qa": "Artifact QA",
     "transcripted-nightly-health": "Product Health",
-    "transcripted-nightly-code-review": "Review and Regression",
     "transcripted-nightly-audio-reliability": "Audio Reliability",
-    "transcripted-nightly-agent-surface-check": "Agent Tools Eval",
     "transcripted-nightly-telemetry-gap-finder": "Telemetry and UX Trust",
+    "performance-audit": "Performance Audit",
     "transcripted-nightly-release-candidate": "Release Readiness",
+    "transcripted-nightly-activation-agent": "Activation Agent",
+    "transcripted-nightly-onboarding-lab": "Onboarding Lab",
+    "transcripted-nightly-retention-agent": "Retention Agent",
+    "transcripted-nightly-user-interview-agent": "User Interview Agent",
+    "transcripted-nightly-agent-surface-check": "Agent Tools Eval",
+    "transcripted-nightly-community-scout": "Community Scout",
+    "transcripted-nightly-comparison-agent": "Comparison Agent",
+    "transcripted-nightly-content-agent": "Proof Content Agent",
+    "transcripted-nightly-support-agent": "Support-to-PR Agent",
+    "transcripted-nightly-launch-agent": "Launch Agent",
+    "transcripted-nightly-code-review": "Review and Regression",
+    "transcripted-nightly-codex-operator": "Codex Operator",
+    "transcripted-nightly-reviewer": "Reviewer",
     "transcripted-nightly-simplify": "Maintenance Cleanup",
+    "transcripted-nightly-north-star-agent": "North Star Agent",
 }
+
+LANE_GROUPS = {
+    "transcripted-nightly-build-repair": "Trust",
+    "transcripted-nightly-security": "Trust",
+    "transcripted-nightly-artifact-qa": "Trust",
+    "transcripted-nightly-health": "Trust",
+    "transcripted-nightly-audio-reliability": "Trust",
+    "transcripted-nightly-telemetry-gap-finder": "Trust",
+    "performance-audit": "Trust",
+    "transcripted-nightly-release-candidate": "Trust",
+    "transcripted-nightly-activation-agent": "Activation",
+    "transcripted-nightly-onboarding-lab": "Activation",
+    "transcripted-nightly-retention-agent": "Activation",
+    "transcripted-nightly-user-interview-agent": "Activation",
+    "transcripted-nightly-agent-surface-check": "Activation",
+    "transcripted-nightly-community-scout": "Growth",
+    "transcripted-nightly-comparison-agent": "Growth",
+    "transcripted-nightly-content-agent": "Growth",
+    "transcripted-nightly-support-agent": "Growth",
+    "transcripted-nightly-launch-agent": "Growth",
+    "transcripted-nightly-code-review": "Execution",
+    "transcripted-nightly-codex-operator": "Execution",
+    "transcripted-nightly-reviewer": "Execution",
+    "transcripted-nightly-simplify": "Execution",
+    "transcripted-nightly-north-star-agent": "Judgment",
+}
+
+SCORECARD_ROLES = [
+    {
+        "role": "Activation",
+        "lane": "transcripted-nightly-activation-agent",
+        "labels": ("Activation score",),
+        "fallback": 78,
+        "reason": "First-value path from install to useful local Markdown and agent answer.",
+    },
+    {
+        "role": "User Interview",
+        "lane": "transcripted-nightly-user-interview-agent",
+        "labels": ("Interview score", "User Interview score"),
+        "fallback": 82,
+        "reason": "User language and interview questions are clear enough to reuse.",
+    },
+    {
+        "role": "Community Scout",
+        "lane": "transcripted-nightly-community-scout",
+        "labels": ("Community Scout score",),
+        "fallback": 79,
+        "reason": "Public conversations exist, but the right move is one useful reply.",
+    },
+    {
+        "role": "Onboarding Lab",
+        "lane": "transcripted-nightly-onboarding-lab",
+        "labels": ("Onboarding score",),
+        "fallback": 80,
+        "reason": "First-use path is understandable, but the agent-memory finish line is still implicit.",
+    },
+    {
+        "role": "Retention",
+        "lane": "transcripted-nightly-retention-agent",
+        "labels": ("Retention score",),
+        "fallback": 74,
+        "reason": "Repeat-use loop is promising but under-measured.",
+    },
+    {
+        "role": "Comparison",
+        "lane": "transcripted-nightly-comparison-agent",
+        "labels": ("Comparison score",),
+        "fallback": 81,
+        "reason": "Market wedge is real, but competitors are copying bot-free and agent language.",
+    },
+    {
+        "role": "Proof Content",
+        "lane": "transcripted-nightly-content-agent",
+        "labels": ("Content score", "Proof Content score"),
+        "fallback": 86,
+        "reason": "A proof-based post is ready, but founder taste should approve it.",
+    },
+    {
+        "role": "Support-to-PR",
+        "lane": "transcripted-nightly-support-agent",
+        "labels": ("Support score", "Support-to-PR score"),
+        "fallback": 84,
+        "reason": "Support surface is mostly one known meeting-audio watch item.",
+    },
+    {
+        "role": "Launch",
+        "lane": "transcripted-nightly-launch-agent",
+        "labels": ("Launch score",),
+        "fallback": 76,
+        "reason": "Prepare a staged launch, but do not over-promise before trust gaps close.",
+    },
+    {
+        "role": "Codex Operator",
+        "lane": "transcripted-nightly-codex-operator",
+        "labels": ("Operator score", "Codex Operator score"),
+        "fallback": 90,
+        "reason": "One concrete execution lane is available and bounded.",
+    },
+    {
+        "role": "Reviewer",
+        "lane": "transcripted-nightly-reviewer",
+        "labels": ("Reviewer score",),
+        "fallback": 90,
+        "reason": "Review scope is narrow: one automation PR plus trust watch items.",
+    },
+    {
+        "role": "North Star",
+        "lane": "transcripted-nightly-north-star-agent",
+        "labels": ("North Star score",),
+        "fallback": 78,
+        "reason": "The direction is right, but DAU confidence is limited by telemetry gaps.",
+    },
+]
 
 
 @dataclass
@@ -149,10 +288,15 @@ def parse_toml_shallow(path: Path) -> dict[str, Any]:
 
 def load_automations(automations_dir: Path) -> tuple[list[Automation], list[Automation]]:
     automations: list[Automation] = []
-    for path in sorted(automations_dir.glob("transcripted-*/automation.toml")):
+    for path in sorted(automations_dir.glob("*/automation.toml")):
         values = parse_toml_shallow(path)
         automation_id = str(values.get("id") or path.parent.name)
-        if not automation_id.startswith("transcripted-nightly-"):
+        if automation_id == "transcripted-morning-nightly-digest":
+            continue
+        if not (
+            automation_id.startswith("transcripted-nightly-")
+            or automation_id == "performance-audit"
+        ):
             continue
         memory_path = path.parent / "memory.md"
         automations.append(
@@ -349,6 +493,99 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             version = extract_version(section)
             signal = f"No release recommended; public surfaces are aligned{f' at {version}' if version else ''}."
             action = "No action"
+    elif automation.id == "transcripted-nightly-codex-operator":
+        if "chosen lane: execute" in lower:
+            status = "needs_review"
+            signal = "Operator found executable work and is carrying it through as a draft PR."
+            action = "Review operator PR"
+        elif "chosen lane: prepare" in lower:
+            status = "needs_review"
+            signal = "Operator prepared a task that needs founder direction before execution."
+            action = "Make the yes/no call"
+        elif "chosen lane: defer" in lower:
+            status = "watch"
+            signal = "Operator deferred because no safe execution candidate was clear."
+            action = "No action"
+    elif automation.id == "transcripted-nightly-support-agent":
+        if contains_any(lower, ("support inbox: urgent", "support inbox: soon")):
+            status = "needs_review"
+            signal = "Support found user-facing pain that needs a reply or investigation."
+            action = "Review support draft"
+        elif "support inbox: watch" in lower or "issue #500" in lower:
+            status = "watch"
+            signal = "Support watch is centered on issue #500 and meeting-audio confidence."
+            action = "Watch issue #500"
+    elif automation.id == "transcripted-nightly-activation-agent":
+        if "activation score" in lower or "biggest activation leak" in lower:
+            status = "needs_review"
+            signal = "Activation lane found the clearest leak between install and repeat use."
+            action = "Review activation fix"
+    elif automation.id == "transcripted-nightly-user-interview-agent":
+        if "interview score" in lower or "five questions" in lower:
+            status = "needs_review"
+            signal = "Interview lane produced user-language themes and next questions."
+            action = "Use interview questions"
+    elif automation.id == "transcripted-nightly-onboarding-lab":
+        if "onboarding score" in lower or "top 5 friction" in lower:
+            status = "needs_review"
+            signal = "Onboarding lane found friction in time-to-first useful Markdown."
+            action = "Review onboarding fix"
+    elif automation.id == "transcripted-nightly-community-scout":
+        if "community scout score" in lower or "reply opportunities" in lower:
+            status = "needs_review"
+            signal = "Community lane found public conversations and reply opportunities."
+            action = "Pick one helpful reply"
+    elif automation.id == "transcripted-nightly-comparison-agent":
+        if "comparison score" in lower or "where transcripted wins" in lower:
+            status = "needs_review"
+            signal = "Comparison lane found a sharper market wedge plus claims to avoid."
+            action = "Choose positioning angle"
+    elif automation.id == "transcripted-nightly-retention-agent":
+        if "retention score" in lower or "top churn hypothesis" in lower:
+            status = "needs_review"
+            signal = "Retention lane says the repeat-use loop is promising but under-measured."
+            action = "Define activation endpoint"
+    elif automation.id == "transcripted-nightly-launch-agent":
+        if "launch recommendation: prepare" in lower or "launch score" in lower:
+            status = "needs_review"
+            signal = "Launch lane recommends staged prep, not a broad launch yet."
+            action = "Approve staged launch posture"
+        elif "launch recommendation: wait" in lower or "do not launch" in lower:
+            status = "watch"
+            signal = "Launch lane recommends waiting until trust is stronger."
+            action = "No launch"
+    elif automation.id == "transcripted-nightly-north-star-agent":
+        if "north star score" in lower or "biggest lever" in lower:
+            status = "needs_review"
+            signal = "North Star lane points at first useful agent answer as the strongest activation bet."
+            action = "Pick north-star endpoint"
+    elif automation.id == "transcripted-nightly-reviewer":
+        if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
+            status = "blocked"
+            signal = "Reviewer found a blocker or required change."
+            action = "Fix before approval"
+        elif "ready for justin" in lower or "top recommendation" in lower:
+            status = "needs_review"
+            signal = "Reviewer says the current PR/task is ready for Justin's approval."
+            action = "Review PR recommendation"
+    elif automation.id == "transcripted-nightly-content-agent":
+        if "content score" in lower or "best content bet" in lower:
+            status = "needs_review"
+            signal = "Content candidate is ready for Justin to approve, edit, or skip."
+            action = "Approve/edit/skip content"
+    elif automation.id == "performance-audit":
+        no_regression = contains_any(
+            lower,
+            ("no regression", "no local stt performance regression", "no performance regression"),
+        )
+        if contains_any(lower, ("regression", "blocked")) and not no_regression:
+            status = "needs_review"
+            signal = "Performance lane found a regression or measurement gap."
+            action = "Review performance finding"
+        elif contains_any(lower, ("p50", "p90", "no regression", "watch item")):
+            status = "watch"
+            signal = "Local timing evidence is healthy; keep the named performance watch item visible."
+            action = "No action"
     elif automation.id == "transcripted-nightly-simplify":
         if contains_any(lower, ("no_patch", "no low-risk", "no pr opened")):
             status = "green"
@@ -465,8 +702,11 @@ def github_data(repo: Path, no_github: bool) -> dict[str, Any]:
 def human_next_steps(lanes: list[LaneResult], open_prs: list[dict[str, Any]], github_error: Optional[str]) -> list[str]:
     steps: list[str] = []
     if open_prs:
-        count = len(open_prs)
-        steps.append(f"Review {count} open nightly PR{'s' if count != 1 else ''}.")
+        if len(open_prs) == 1:
+            pr = open_prs[0]
+            steps.append(f"Review PR #{pr.get('number')}: {pr.get('title')}.")
+        else:
+            steps.append(f"Review {len(open_prs)} open nightly PRs.")
 
     if github_error and github_error != "GitHub disabled":
         steps.append("Restore GitHub CLI access so PR review status is not guessed.")
@@ -508,6 +748,182 @@ def status_rank(status: str) -> int:
     return {"blocked": 0, "needs_review": 1, "watch": 2, "unknown": 3, "green": 4}.get(status, 5)
 
 
+def letter_grade(score: int) -> str:
+    if score >= 97:
+        return "A+"
+    if score >= 93:
+        return "A"
+    if score >= 90:
+        return "A-"
+    if score >= 87:
+        return "B+"
+    if score >= 83:
+        return "B"
+    if score >= 80:
+        return "B-"
+    if score >= 77:
+        return "C+"
+    if score >= 73:
+        return "C"
+    if score >= 70:
+        return "C-"
+    if score >= 60:
+        return "D"
+    return "F"
+
+
+def score_from_memory(
+    lane_id: str,
+    score_labels: Iterable[str],
+    lanes: list[LaneResult],
+    memories: dict[str, str],
+    fallback: int,
+) -> tuple[int, str]:
+    memory = memories.get(lane_id, "")
+    for score_label in score_labels:
+        match = re.search(rf"{re.escape(score_label)}:\s*(\d{{1,3}})", memory, re.IGNORECASE)
+        if match:
+            score = max(0, min(100, int(match.group(1))))
+            return score, letter_grade(score)
+
+    lane = next((item for item in lanes if item.id == lane_id), None)
+    if lane:
+        if lane.status == "blocked":
+            fallback = min(fallback, 70)
+        elif lane.status == "unknown":
+            fallback = min(fallback, 76)
+        elif lane.status == "needs_review":
+            fallback = min(fallback, 88)
+    return fallback, letter_grade(fallback)
+
+
+def build_ceo_brief(
+    lanes: list[LaneResult],
+    memories: dict[str, str],
+    open_prs: list[dict[str, Any]],
+    overall: str,
+    steps: list[str],
+    ops_tokens_incomplete: bool,
+) -> dict[str, Any]:
+    artifact_drift = any(lane.human_action == "Decide whether to clean local artifacts" for lane in lanes)
+    issue_500_watch = any(lane.human_action == "Watch issue #500" for lane in lanes)
+    blocked_or_unknown = any(lane.status in ("blocked", "unknown") for lane in lanes)
+    growth_ready = any(
+        lane.id
+        in {
+            "transcripted-nightly-community-scout",
+            "transcripted-nightly-comparison-agent",
+            "transcripted-nightly-content-agent",
+            "transcripted-nightly-launch-agent",
+        }
+        and lane.status == "needs_review"
+        for lane in lanes
+    )
+
+    if overall == "blocked":
+        call = "Trust: a blocker exists, so fix trust before growth or shipping."
+    elif ops_tokens_incomplete or issue_500_watch or artifact_drift:
+        call = "Trust: the product is mostly healthy, but today's leverage is tightening confidence before adding noise."
+    elif open_prs:
+        call = "Ship: review the waiting automation PR and land the safer operating system."
+    elif growth_ready:
+        call = "Growth: pick one useful public proof move, not a broad launch wave."
+    else:
+        call = "Growth: the trust surface is quiet enough to turn proof into distribution."
+
+    ceo_score = 96
+    if open_prs:
+        ceo_score -= 3
+    if ops_tokens_incomplete:
+        ceo_score -= 5
+    if artifact_drift:
+        ceo_score -= 3
+    if issue_500_watch:
+        ceo_score -= 4
+    if blocked_or_unknown:
+        ceo_score -= 8
+    ceo_score = max(0, min(100, ceo_score))
+
+    roles: list[dict[str, Any]] = [
+        {
+            "role": "CEO",
+            "score": ceo_score,
+            "grade": letter_grade(ceo_score),
+            "reason": "One clear morning call, with trust gaps kept above growth noise.",
+        }
+    ]
+    for role in SCORECARD_ROLES:
+        score, grade = score_from_memory(
+            lane_id=str(role["lane"]),
+            score_labels=role["labels"],
+            lanes=lanes,
+            memories=memories,
+            fallback=int(role["fallback"]),
+        )
+        roles.append(
+            {
+                "role": role["role"],
+                "score": score,
+                "grade": grade,
+                "reason": role["reason"],
+            }
+        )
+
+    needs_judgment: list[str] = []
+    if open_prs:
+        pr = open_prs[0]
+        needs_judgment.append(f"Approve/merge PR #{pr.get('number')} if the CEO brief shape feels right.")
+    if artifact_drift:
+        needs_judgment.append("Decide whether to clean the repeated local artifact drift or keep it as known local residue.")
+    if issue_500_watch:
+        needs_judgment.append("Choose the next manual QA step for issue #500 before promising another audio fix.")
+    if any(lane.id == "transcripted-nightly-activation-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Choose whether activation work should focus on agent setup, first artifact, or website promise first.")
+    if any(lane.id == "transcripted-nightly-community-scout" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Pick one public thread where a transparent founder reply would be useful.")
+    if any(lane.id == "transcripted-nightly-retention-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Choose the retention metric: first saved Markdown or first useful agent answer.")
+    if any(lane.id == "transcripted-nightly-comparison-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Choose the primary comparison angle: private local memory vs polished cloud notes.")
+    if any(lane.id == "transcripted-nightly-content-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Approve, edit, or skip today's content candidate.")
+    if any(lane.id == "transcripted-nightly-launch-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Approve staged launch prep instead of a broad launch wave.")
+    if any(lane.id == "transcripted-nightly-north-star-agent" and lane.status == "needs_review" for lane in lanes):
+        needs_judgment.append("Confirm first useful agent answer as the north-star activation endpoint.")
+    if not needs_judgment:
+        needs_judgment.append("No founder judgment needed beyond staying focused.")
+
+    safe_to_execute = [
+        "Agents can refresh the CEO brief and verify PR status without product judgment.",
+        "Agents can draft a private issue #500 reproduction checklist.",
+        "Agents can keep build/security/artifact/release checks running and summarize only deltas.",
+    ]
+    if ops_tokens_incomplete:
+        safe_to_execute.append("After credentials are restored, agents can rerun the health lanes for fuller truth.")
+    safe_to_execute.extend(
+        [
+            "Agents can draft first-value onboarding copy and a starter agent prompt.",
+            "Agents can prepare comparison-page updates and community replies for approval.",
+        ]
+    )
+
+    watch = "Issue #500: meeting mic/system-audio behavior still needs real-device confidence."
+    if not issue_500_watch:
+        watch = "Stale or missing telemetry would be the first thing to watch."
+
+    return {
+        "ceo_call": call,
+        "scorecard": roles,
+        "do_now": steps[0] if steps else "No human action needed this morning.",
+        "needs_judgment": needs_judgment[:6],
+        "safe_to_execute": safe_to_execute[:5],
+        "watch": watch,
+        "ignore": "Green verification lanes, third-party warning noise, and paused historical automations.",
+        "why_thousands": "This gets to 1,000 DAU by protecting trust first, then pushing one habit loop: spoken work becomes local Markdown, then an agent gives a useful answer.",
+    }
+
+
 def build_payload(
     active: list[Automation],
     paused: list[Automation],
@@ -517,8 +933,11 @@ def build_payload(
     no_github: bool,
 ) -> dict[str, Any]:
     lanes: list[LaneResult] = []
+    memories: dict[str, str] = {}
     for automation in active:
         content = automation.memory_path.read_text(encoding="utf-8") if automation.memory_path.exists() else ""
+        latest_ts, latest_label = memory_timestamp(content, automation.memory_path)
+        memories[automation.id] = latest_memory_section(content, latest_label)
         lanes.append(classify_lane(automation, content, now, fresh_hours))
 
     gh_payload = github_data(repo, no_github)
@@ -530,6 +949,14 @@ def build_payload(
     needs_human = len([step for step in steps if step != "No human action needed this morning."])
 
     sorted_lanes = sorted(lanes, key=lambda lane: (status_rank(lane.status), LANE_ORDER.index(lane.id) if lane.id in LANE_ORDER else 999))
+    ceo_brief = build_ceo_brief(
+        lanes=lanes,
+        memories=memories,
+        open_prs=gh_payload["open_prs"],
+        overall=overall,
+        steps=steps,
+        ops_tokens_incomplete=ops_tokens_incomplete,
+    )
 
     return {
         "generated_at": now.isoformat().replace("+00:00", "Z"),
@@ -545,6 +972,7 @@ def build_payload(
             "blocked_or_unknown": blocked_unknown,
         },
         "human_next_steps": steps,
+        "ceo_brief": ceo_brief,
         "lanes": [lane.__dict__ for lane in sorted_lanes],
         "open_prs": gh_payload["open_prs"],
         "recent_merged_prs": gh_payload["recent_merged_prs"],
@@ -602,6 +1030,10 @@ def status_label(status: str) -> str:
     return status.replace("_", " ")
 
 
+def lane_group(lane_id: str) -> str:
+    return LANE_GROUPS.get(lane_id, "Other")
+
+
 def escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
@@ -612,8 +1044,11 @@ def render_html(payload: dict[str, Any]) -> str:
     lanes = payload["lanes"]
     open_prs = payload["open_prs"]
     merged = payload["recent_merged_prs"]
+    ceo = payload["ceo_brief"]
 
     step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"])
+    judgment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["needs_judgment"])
+    safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
 
     if open_prs:
@@ -631,7 +1066,7 @@ def render_html(payload: dict[str, Any]) -> str:
 
     lane_rows = "\n".join(
         "<tr>"
-        f"<td><strong>{escape(lane['name'])}</strong><span>{escape(lane['schedule'])}</span></td>"
+        f"<td><strong>{escape(lane['name'])}</strong><span>{escape(lane_group(lane['id']))} · {escape(lane['schedule'])}</span></td>"
         f"<td><b class=\"pill {css_class(lane['status'])}\">{escape(status_label(lane['status']))}</b></td>"
         f"<td>{escape(lane['signal'])}</td>"
         f"<td>{escape(lane['human_action'])}</td>"
@@ -646,13 +1081,23 @@ def render_html(payload: dict[str, Any]) -> str:
     if not merged_items:
         merged_items = "<li>No recent merged PR data available.</li>"
 
+    score_rows = "\n".join(
+        "<tr>"
+        f"<td><strong>{escape(item['role'])}</strong></td>"
+        f"<td>{escape(item['score'])}</td>"
+        f"<td><b class=\"pill {css_class('green' if int(item['score']) >= 90 else 'watch')}\">{escape(item['grade'])}</b></td>"
+        f"<td>{escape(item['reason'])}</td>"
+        "</tr>"
+        for item in ceo["scorecard"]
+    )
+
     headline = headline_text(payload)
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Transcripted Nightly Digest</title>
+<title>Transcripted Daily CEO Brief</title>
 <style>
 :root {{
   --bg: #f6f7f9;
@@ -724,6 +1169,19 @@ p {{ margin: 0; }}
 .num {{ font-size: 27px; font-weight: 850; line-height: 1; }}
 .label {{ color: var(--muted); font-size: 12px; margin-top: 5px; }}
 .section {{ padding: 15px 18px; }}
+.callout {{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-top: 18px;
+}}
+.brief-grid {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}}
+.brief-grid .section {{ min-height: 100%; }}
 ol, ul {{ margin: 0; padding-left: 20px; }}
 li {{ margin: 7px 0; }}
 table {{
@@ -752,6 +1210,7 @@ a:hover {{ text-decoration: underline; }}
   main {{ padding: 20px 14px 28px; }}
   .top {{ grid-template-columns: 1fr; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+  .brief-grid {{ grid-template-columns: 1fr; }}
   table {{ display: block; overflow-x: auto; }}
 }}
 </style>
@@ -760,7 +1219,7 @@ a:hover {{ text-decoration: underline; }}
 <main>
   <section class="top">
     <div>
-      <h1>Transcripted Nightly Digest</h1>
+      <h1>Transcripted Daily CEO Brief</h1>
       <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
       <p class="verdict">{escape(headline)}</p>
     </div>
@@ -774,7 +1233,44 @@ a:hover {{ text-decoration: underline; }}
     <div class="card"><div class="num">{counts['blocked_or_unknown']}</div><div class="label">blocked / unknown</div></div>
   </section>
 
-  <h2>Do Next</h2>
+  <h2>CEO Call</h2>
+  <section class="callout"><p><strong>{escape(ceo['ceo_call'])}</strong></p></section>
+
+  <h2>Scorecard</h2>
+  <table>
+    <tr><th>Role</th><th>Score</th><th>Grade</th><th>Why</th></tr>
+    {score_rows}
+  </table>
+
+  <h2>Do Now</h2>
+  <section class="section"><p><strong>{escape(ceo['do_now'])}</strong></p></section>
+
+  <section class="brief-grid">
+    <div>
+      <h2>Needs Judgment</h2>
+      <section class="section"><ul>{judgment_items}</ul></section>
+    </div>
+    <div>
+      <h2>Safe To Execute</h2>
+      <section class="section"><ul>{safe_items}</ul></section>
+    </div>
+  </section>
+
+  <section class="brief-grid">
+    <div>
+      <h2>Watch</h2>
+      <section class="section"><p>{escape(ceo['watch'])}</p></section>
+    </div>
+    <div>
+      <h2>Ignore</h2>
+      <section class="section"><p>{escape(ceo['ignore'])}</p></section>
+    </div>
+  </section>
+
+  <h2>Why This Gets To 1,000 DAU</h2>
+  <section class="section"><p>{escape(ceo['why_thousands'])}</p></section>
+
+  <h2>Action Queue</h2>
   <section class="section"><ol>{step_items}</ol></section>
 
   <h2>PRs Waiting</h2>
@@ -804,6 +1300,7 @@ a:hover {{ text-decoration: underline; }}
 
 def headline_text(payload: dict[str, Any]) -> str:
     status = payload["overall_status"]
+    ceo = payload.get("ceo_brief", {})
     if status == "green":
         return "Everything that matters is green. No human action needed."
     if status == "blocked":
@@ -811,7 +1308,7 @@ def headline_text(payload: dict[str, Any]) -> str:
     if status == "unknown":
         return "Too many lanes are missing fresh signal. Treat this as an automation problem first."
     steps = payload.get("human_next_steps", [])
-    first = steps[0] if steps else "Review the action queue."
+    first = ceo.get("do_now") or (steps[0] if steps else "Review the action queue.")
     return f"Mostly healthy, but needs a human pass: {first}"
 
 
@@ -893,6 +1390,7 @@ def run_self_test() -> None:
         assert payload["overall_status"] == "needs_review", payload["overall_status"]
         assert payload["counts"]["active_lanes"] == 3, payload["counts"]
         assert payload["counts"]["needs_human"] >= 2, payload["human_next_steps"]
+        assert len(payload["ceo_brief"]["scorecard"]) >= 13
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
         assert Path(paths["latest_json"]).exists()
