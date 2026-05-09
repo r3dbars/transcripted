@@ -1053,13 +1053,26 @@ def render_html(payload: dict[str, Any]) -> str:
     counts = payload["counts"]
     lanes = payload["lanes"]
     open_prs = payload["open_prs"]
-    merged = payload["recent_merged_prs"]
     ceo = payload["ceo_brief"]
 
-    step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"])
-    judgment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["needs_judgment"])
-    safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"])
+    review_lanes = [lane for lane in lanes if lane["status"] == "needs_review"]
+    watch_lanes = [lane for lane in lanes if lane["status"] == "watch"]
+    green_lanes = [lane for lane in lanes if lane["status"] == "green"]
+    blocked_lanes = [lane for lane in lanes if lane["status"] in ("blocked", "unknown")]
+
+    step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"][:4])
+    judgment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["needs_judgment"][:4])
+    safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"][:4])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
+
+    good_names = ", ".join(lane["name"] for lane in green_lanes[:6])
+    if len(green_lanes) > 6:
+        good_names += f", and {len(green_lanes) - 6} more"
+    if not good_names:
+        good_names = "No lane was fully quiet."
+
+    score = next((item for item in ceo["scorecard"] if item["role"] == "CEO"), None)
+    score_text = f"{score['score']} / {score['grade']}" if score else "needs review"
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1073,48 +1086,29 @@ def render_html(payload: dict[str, Any]) -> str:
     else:
         pr_cards = "<article class=\"mini-card quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></article>"
 
-    lane_cards = "\n".join(
-        "<article class=\"lane-card\" "
-        f"data-status=\"{escape(lane['status'])}\" data-group=\"{escape(lane_group(lane['id']).lower())}\">"
-        "<div class=\"lane-head\">"
-        f"<div><strong>{escape(lane['name'])}</strong><span>{escape(lane_group(lane['id']))} · {escape(lane['schedule'])}</span></div>"
-        f"<b class=\"pill {css_class(lane['status'])}\">{escape(status_label(lane['status']))}</b>"
-        "</div>"
-        f"<p>{escape(lane['signal'])}</p>"
-        f"<footer>Human action: <strong>{escape(lane['human_action'])}</strong></footer>"
-        "</article>"
-        for lane in lanes
-    )
-
-    merged_items = "\n".join(
-        f"<li><a href=\"{escape(pr.get('url', ''))}\">#{escape(pr.get('number', ''))}</a> {escape(pr.get('title', ''))}</li>"
-        for pr in merged[:6]
-    )
-    if not merged_items:
-        merged_items = "<li>No recent merged PR data available.</li>"
-
-    score_cards = "\n".join(
-        "<article class=\"score-card\">"
-        "<div class=\"score-top\">"
-        f"<strong>{escape(item['role'])}</strong>"
-        f"<b class=\"grade {score_tone(int(item['score']))}\">{escape(item['grade'])}</b>"
-        "</div>"
-        f"<div class=\"score-number\">{escape(item['score'])}</div>"
-        "<div class=\"bar\" aria-hidden=\"true\">"
-        f"<i class=\"{score_tone(int(item['score']))}\" style=\"width: {max(0, min(100, int(item['score'])))}%\"></i>"
-        "</div>"
-        f"<p>{escape(item['reason'])}</p>"
-        "</article>"
-        for item in ceo["scorecard"]
-    )
-
-    trust_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Trust")
-    activation_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Activation")
-    growth_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Growth")
-    execution_count = sum(1 for lane in lanes if lane_group(lane["id"]) == "Execution")
-    review_count = sum(1 for lane in lanes if lane["status"] == "needs_review")
-    watch_count = sum(1 for lane in lanes if lane["status"] == "watch")
-    green_count = sum(1 for lane in lanes if lane["status"] == "green")
+    lane_sections: list[str] = []
+    for group in ("Trust", "Activation", "Growth", "Execution", "Judgment", "Other"):
+        group_lanes = [lane for lane in lanes if lane_group(lane["id"]) == group]
+        if not group_lanes:
+            continue
+        lane_items = "\n".join(
+            "<li>"
+            "<div class=\"lane-line\">"
+            f"<strong>{escape(lane['name'])}</strong>"
+            f"<b class=\"pill {css_class(lane['status'])}\">{escape(status_label(lane['status']))}</b>"
+            "</div>"
+            f"<p>{escape(lane['signal'])}</p>"
+            f"<small>Human: {escape(lane['human_action'])}</small>"
+            "</li>"
+            for lane in group_lanes
+        )
+        lane_sections.append(
+            "<details>"
+            f"<summary>{escape(group)} <span>{len(group_lanes)} lanes</span></summary>"
+            f"<ul class=\"lane-list\">{lane_items}</ul>"
+            "</details>"
+        )
+    lane_details = "\n".join(lane_sections)
 
     headline = headline_text(payload)
     return f"""<!doctype html>
@@ -1125,14 +1119,12 @@ def render_html(payload: dict[str, Any]) -> str:
 <title>Transcripted Daily CEO Brief</title>
 <style>
 :root {{
-  --bg: #f4f6f8;
+  --bg: #f7f8fa;
   --panel: #ffffff;
   --ink: #111827;
-  --muted: #5d6675;
-  --soft: #eef2f6;
+  --muted: #5e6673;
   --line: #d9e0e8;
   --blue: #1957d2;
-  --violet: #6d28d9;
   --green-bg: #dff4e7;
   --green: #136f3a;
   --amber-bg: #fff2c2;
@@ -1141,7 +1133,7 @@ def render_html(payload: dict[str, Any]) -> str:
   --red: #9b1c1c;
   --gray-bg: #e9edf2;
   --gray: #4b5563;
-  --shadow: 0 18px 45px rgba(17, 24, 39, .08);
+  --shadow: 0 14px 34px rgba(17, 24, 39, .06);
 }}
 * {{ box-sizing: border-box; }}
 body {{
@@ -1150,29 +1142,17 @@ body {{
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }}
-body::before {{
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(135deg, rgba(25, 87, 210, .10), rgba(19, 111, 58, .06) 42%, rgba(128, 84, 0, .08)),
-    radial-gradient(circle at 76% 8%, rgba(109, 40, 217, .10), transparent 32rem);
-}}
 main {{
-  max-width: 1180px;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 30px 20px 46px;
+  padding: 28px 18px 44px;
 }}
 .hero {{
-  background: rgba(255,255,255,.86);
-  border: 1px solid rgba(217,224,232,.95);
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
-  padding: 22px;
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(310px, .65fr);
-  gap: 18px;
+  padding: 22px 24px;
 }}
 .eyebrow {{
   color: var(--muted);
@@ -1181,32 +1161,19 @@ main {{
   letter-spacing: .04em;
   text-transform: uppercase;
 }}
-h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 54px); line-height: .98; letter-spacing: 0; }}
+h1 {{ margin: 6px 0 0; font-size: clamp(30px, 5vw, 46px); line-height: 1; letter-spacing: 0; }}
 h2 {{ margin: 30px 0 12px; font-size: 16px; }}
 p {{ margin: 0; }}
 .sub {{ color: var(--muted); font-size: 13px; margin-top: 5px; }}
-.verdict {{ font-size: 20px; font-weight: 850; margin-top: 18px; max-width: 820px; }}
+.verdict {{ font-size: 20px; font-weight: 850; margin-top: 16px; max-width: 780px; }}
 .call {{
   border-left: 4px solid var(--blue);
   padding: 12px 0 12px 14px;
   margin-top: 18px;
   color: #1f2937;
   font-size: 15px;
+  line-height: 1.45;
 }}
-.do-now {{
-  background: #101827;
-  color: #fff;
-  border-radius: 8px;
-  padding: 18px;
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 18px;
-}}
-.do-now .pill {{ color: #bee3ff; background: rgba(255,255,255,.12); width: fit-content; }}
-.do-now strong {{ display: block; font-size: 22px; line-height: 1.12; letter-spacing: 0; }}
-.do-now span {{ color: #cbd5e1; font-size: 13px; }}
 .pill {{
   display: inline-flex;
   align-items: center;
@@ -1227,75 +1194,57 @@ p {{ margin: 0; }}
   gap: 10px;
   margin-top: 14px;
 }}
-.card, .section {{
-  background: rgba(255,255,255,.92);
+.card, .section, .mini-card, details {{
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, .035);
 }}
 .card {{ padding: 14px; }}
 .num {{ font-size: 27px; font-weight: 850; line-height: 1; }}
 .label {{ color: var(--muted); font-size: 12px; margin-top: 5px; }}
-.section {{ padding: 16px 18px; box-shadow: 0 8px 24px rgba(17, 24, 39, .04); }}
+.section {{ padding: 16px 18px; }}
+.big-action {{
+  background: #101827;
+  color: #fff;
+  border-radius: 8px;
+  padding: 18px;
+  margin-top: 16px;
+}}
+.big-action span {{ color: #cbd5e1; display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }}
+.big-action strong {{ display: block; font-size: 22px; line-height: 1.18; }}
 .brief-grid {{
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }}
 .brief-grid .section {{ min-height: 100%; }}
-.score-grid {{
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}}
-.score-card, .lane-card, .mini-card {{
-  background: rgba(255,255,255,.94);
+.mini-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+.mini-card {{ padding: 14px; }}
+.mini-card span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }}
+.mini-card.quiet {{ color: var(--muted); }}
+.plain-list {{ display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }}
+.plain-list li {{
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
-  box-shadow: 0 8px 24px rgba(17, 24, 39, .04);
+  padding: 13px 14px;
 }}
-.score-top, .lane-head {{
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: flex-start;
-}}
-.grade {{
-  border-radius: 7px;
-  padding: 4px 7px;
-  font-size: 12px;
-}}
-.excellent {{ color: var(--green); background: var(--green-bg); }}
-.strong {{ color: var(--blue); background: #dbeafe; }}
-.mixed {{ color: var(--amber); background: var(--amber-bg); }}
-.weak {{ color: var(--red); background: var(--red-bg); }}
-.score-number {{ font-size: 28px; font-weight: 850; margin-top: 10px; }}
-.bar {{ height: 7px; background: var(--soft); border-radius: 999px; overflow: hidden; margin: 8px 0 10px; }}
-.bar i {{ display: block; height: 100%; border-radius: inherit; }}
-.bar .excellent {{ background: var(--green); }}
-.bar .strong {{ background: var(--blue); }}
-.bar .mixed {{ background: #d97706; }}
-.bar .weak {{ background: var(--red); }}
-.score-card p, .lane-card p {{ color: var(--muted); font-size: 13px; line-height: 1.42; }}
-.lane-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
-.lane-card.is-hidden {{ display: none; }}
-.lane-card span, .mini-card span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }}
-.lane-card footer {{ color: #374151; font-size: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf0f4; }}
-.filters {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }}
-.filters button {{
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,.78);
-  color: #1f2937;
-  border-radius: 7px;
-  padding: 8px 10px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 750;
+details {{ padding: 0; margin-bottom: 10px; overflow: hidden; }}
+summary {{
   cursor: pointer;
+  padding: 14px 16px;
+  font-weight: 850;
+  list-style: none;
 }}
-.filters button.active {{ border-color: var(--blue); color: var(--blue); background: #e8f0ff; }}
-.mini-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
-.mini-card.quiet {{ color: var(--muted); }}
+summary::-webkit-details-marker {{ display: none; }}
+summary span {{ color: var(--muted); font-weight: 650; font-size: 12px; margin-left: 6px; }}
+.lane-list {{ list-style: none; padding: 0; margin: 0; border-top: 1px solid #edf0f4; }}
+.lane-list li {{ padding: 13px 16px; border-bottom: 1px solid #edf0f4; margin: 0; }}
+.lane-list li:last-child {{ border-bottom: 0; }}
+.lane-line {{ display: flex; justify-content: space-between; align-items: center; gap: 10px; }}
+.lane-list p {{ color: var(--muted); font-size: 13px; line-height: 1.42; margin-top: 6px; }}
+.lane-list small {{ display: block; margin-top: 7px; color: #374151; }}
 ol, ul {{ margin: 0; padding-left: 20px; }}
 li {{ margin: 7px 0; }}
 a {{ color: var(--blue); text-decoration: none; }}
@@ -1303,9 +1252,9 @@ a:hover {{ text-decoration: underline; }}
 .footer {{ color: var(--muted); font-size: 12px; margin-top: 18px; }}
 @media (max-width: 760px) {{
   main {{ padding: 20px 14px 28px; }}
-  .hero {{ grid-template-columns: 1fr; padding: 18px; }}
+  .hero {{ padding: 18px; }}
   .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-  .score-grid, .lane-grid, .mini-grid {{ grid-template-columns: 1fr; }}
+  .mini-grid {{ grid-template-columns: 1fr; }}
   .brief-grid {{ grid-template-columns: 1fr; }}
 }}
 </style>
@@ -1320,31 +1269,35 @@ a:hover {{ text-decoration: underline; }}
       <p class="verdict">{escape(headline)}</p>
       <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
     </div>
-    <aside class="do-now">
-      <b class="pill {css_class(status)}">{escape(status_label(status))}</b>
-      <strong>{escape(ceo['do_now'])}</strong>
-      <span>This is the one thing to look at before reading the lane details.</span>
-    </aside>
   </section>
 
   <section class="grid" aria-label="Summary">
-    <div class="card"><div class="num">{counts['active_lanes']}</div><div class="label">active lanes</div></div>
-    <div class="card"><div class="num">{counts['open_nightly_prs']}</div><div class="label">nightly PRs</div></div>
+    <div class="card"><div class="num">{counts['active_lanes']}</div><div class="label">jobs ran</div></div>
+    <div class="card"><div class="num">{len(green_lanes)}</div><div class="label">quiet</div></div>
     <div class="card"><div class="num">{counts['needs_human']}</div><div class="label">human actions</div></div>
-    <div class="card"><div class="num">{counts['blocked_or_unknown']}</div><div class="label">blocked / unknown</div></div>
+    <div class="card"><div class="num">{counts['blocked_or_unknown']}</div><div class="label">missing / blocked</div></div>
   </section>
 
-  <h2>Scorecard</h2>
-  <section class="score-grid">{score_cards}</section>
+  <section class="big-action">
+    <span>Do this first</span>
+    <strong>{escape(ceo['do_now'])}</strong>
+  </section>
 
   <section class="brief-grid">
     <div>
-      <h2>Needs Judgment</h2>
-      <section class="section"><ul>{judgment_items}</ul></section>
+      <h2>What happened last night</h2>
+      <section class="section">
+        <ul class="plain-list">
+          <li><strong>All active nightly jobs produced fresh output.</strong><br>{counts['active_lanes']} ran, and {len(blocked_lanes)} were missing or blocked.</li>
+          <li><strong>The product is not on fire.</strong><br>{escape(good_names)} were quiet.</li>
+          <li><strong>The main issue is confidence.</strong><br>Telemetry read tokens are missing, issue #500 still needs audio proof, and local artifact drift is still noisy.</li>
+          <li><strong>Overall read:</strong> {escape(score_text)}.</li>
+        </ul>
+      </section>
     </div>
     <div>
-      <h2>Safe To Execute</h2>
-      <section class="section"><ul>{safe_items}</ul></section>
+      <h2>What you need to decide</h2>
+      <section class="section"><ol>{step_items}</ol></section>
     </div>
   </section>
 
@@ -1354,55 +1307,33 @@ a:hover {{ text-decoration: underline; }}
       <section class="section"><p>{escape(ceo['watch'])}</p></section>
     </div>
     <div>
-      <h2>Ignore</h2>
-      <section class="section"><p>{escape(ceo['ignore'])}</p></section>
+      <h2>Safe for agents</h2>
+      <section class="section"><ul>{safe_items}</ul></section>
     </div>
   </section>
 
-  <h2>Why This Gets To 1,000 DAU</h2>
+  <h2>Why this matters</h2>
   <section class="section"><p>{escape(ceo['why_thousands'])}</p></section>
 
-  <h2>Action Queue</h2>
-  <section class="section"><ol>{step_items}</ol></section>
+  <section class="brief-grid">
+    <div>
+      <h2>Founder judgment</h2>
+      <section class="section"><ul>{judgment_items}</ul></section>
+    </div>
+    <div>
+      <h2>Noise to ignore</h2>
+      <section class="section"><ul>{ignore_items_html}</ul></section>
+    </div>
+  </section>
 
-  <h2>PRs Waiting</h2>
+  <h2>PRs from the night</h2>
   <section class="mini-grid">{pr_cards}</section>
 
-  <h2>Lane Explorer</h2>
-  <div class="filters" aria-label="Lane filters">
-    <button class="active" data-filter="all">All {counts['active_lanes']}</button>
-    <button data-filter="needs_review">Needs Review {review_count}</button>
-    <button data-filter="watch">Watch {watch_count}</button>
-    <button data-filter="green">Green {green_count}</button>
-    <button data-filter="trust">Trust {trust_count}</button>
-    <button data-filter="activation">Activation {activation_count}</button>
-    <button data-filter="growth">Growth {growth_count}</button>
-    <button data-filter="execution">Execution {execution_count}</button>
-  </div>
-  <section class="lane-grid" id="lane-grid">{lane_cards}</section>
-
-  <h2>Recently Merged</h2>
-  <section class="section"><ul>{merged_items}</ul></section>
-
-  <h2>Noise Filter</h2>
-  <section class="section"><ul>{ignore_items_html}</ul></section>
+  <h2>Every automation, folded away</h2>
+  {lane_details}
 
   <p class="footer">Data quality: {escape(payload['data_quality'])}</p>
 </main>
-<script>
-const buttons = Array.from(document.querySelectorAll('[data-filter]'));
-const cards = Array.from(document.querySelectorAll('.lane-card'));
-buttons.forEach((button) => {{
-  button.addEventListener('click', () => {{
-    const filter = button.dataset.filter;
-    buttons.forEach((item) => item.classList.toggle('active', item === button));
-    cards.forEach((card) => {{
-      const visible = filter === 'all' || card.dataset.status === filter || card.dataset.group === filter;
-      card.classList.toggle('is-hidden', !visible);
-    }});
-  }});
-}});
-</script>
 </body>
 </html>
 """
@@ -1419,7 +1350,8 @@ def headline_text(payload: dict[str, Any]) -> str:
         return "Too many lanes are missing fresh signal. Treat this as an automation problem first."
     steps = payload.get("human_next_steps", [])
     first = ceo.get("do_now") or (steps[0] if steps else "Review the action queue.")
-    return f"Mostly healthy, but needs a human pass: {first}"
+    human_actions = payload.get("counts", {}).get("needs_human", 0)
+    return f"Everything ran. {human_actions} things need you. Start with: {first}"
 
 
 def write_reports(payload: dict[str, Any], output_dir: Path) -> dict[str, str]:
