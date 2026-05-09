@@ -1513,16 +1513,39 @@ def render_html(payload: dict[str, Any]) -> str:
     details_summary = f"More detail <span>{len(lanes)} lanes, {len(open_prs)} {pr_word}</span>"
 
     if open_prs:
-        pr_cards = "\n".join(
-            "<article class=\"mini-card\">"
-            f"<div><a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a></div>"
+        pr_rows = "\n".join(
+            "<div class=\"pr-row\">"
+            "<div>"
+            f"<a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a>"
             f"<strong>{escape(pr.get('title', ''))}</strong>"
+            "</div>"
             f"<span>{'draft' if pr.get('isDraft') else 'ready'} · {escape(pr.get('headRefName', ''))}</span>"
-            "</article>"
+            "</div>"
             for pr in open_prs
         )
     else:
-        pr_cards = "<article class=\"mini-card quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></article>"
+        pr_rows = "<div class=\"pr-row quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></div>"
+
+    role_sections: list[str] = [
+        (
+            "<div class=\"role-row\">"
+            "<h3>Morning</h3>"
+            "<div class=\"role-chips\"><span>Transcripted Daily CEO Brief</span></div>"
+            "</div>"
+        )
+    ]
+    for group in ("Trust", "Activation", "Growth", "Execution", "Judgment"):
+        group_lanes = [lane for lane in lanes if lane_group(lane["id"]) == group]
+        if not group_lanes:
+            continue
+        role_chips = "".join(f"<span>{escape(lane['name'])}</span>" for lane in group_lanes)
+        role_sections.append(
+            "<div class=\"role-row\">"
+            f"<h3>{escape(group)}</h3>"
+            f"<div class=\"role-chips\">{role_chips}</div>"
+            "</div>"
+        )
+    roles_included = "\n".join(role_sections)
 
     lane_sections: list[str] = []
     for group in ("Trust", "Activation", "Growth", "Execution", "Judgment", "Other"):
@@ -1541,7 +1564,7 @@ def render_html(payload: dict[str, Any]) -> str:
             for lane in group_lanes
         )
         lane_sections.append(
-            "<details>"
+            "<details class=\"lane-group\">"
             f"<summary>{escape(group)} <span>{len(group_lanes)} lanes</span></summary>"
             f"<ul class=\"lane-list\">{lane_items}</ul>"
             "</details>"
@@ -1616,7 +1639,7 @@ p {{ margin: 0; }}
 .review, .watch {{ color: var(--amber); background: var(--amber-bg); }}
 .bad {{ color: var(--red); background: var(--red-bg); }}
 .unknown {{ color: var(--gray); background: var(--gray-bg); }}
-.section, .mini-card, details {{
+.section, .more-detail {{
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1662,24 +1685,104 @@ p {{ margin: 0; }}
 .focus-section .plain-list li:last-child {{ padding-bottom: 0; }}
 .actions-section ol {{ padding-left: 22px; line-height: 1.4; }}
 .more-detail {{ margin-top: 14px; }}
-.more-detail > summary {{ background: var(--panel); }}
-.detail-grid {{ padding: 0 14px 14px; }}
-.more-detail > h2 {{ margin: 14px 14px 10px; }}
-.more-detail > .mini-grid, .more-detail > details {{
-  margin-left: 14px;
-  margin-right: 14px;
+.more-detail > summary {{
+  align-items: baseline;
+  background: var(--panel);
+  border-radius: 8px;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
 }}
-.more-detail > details:last-child {{ margin-bottom: 14px; }}
-.brief-grid {{
+.detail-body {{
+  border-top: 1px solid #edf0f4;
+  padding: 0 18px 18px;
+}}
+.detail-section {{
+  border-top: 1px solid #edf0f4;
+  padding: 18px 0;
+}}
+.detail-section:first-child {{ border-top: 0; }}
+.detail-section header {{
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}}
+.detail-section h2 {{ margin: 0; font-size: 15px; }}
+.detail-section header p {{ color: var(--muted); font-size: 12px; line-height: 1.35; max-width: 360px; text-align: right; }}
+.detail-columns {{
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 14px;
 }}
-.brief-grid .section {{ min-height: 100%; }}
-.mini-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
-.mini-card {{ padding: 14px; }}
-.mini-card span {{ display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }}
-.mini-card.quiet {{ color: var(--muted); }}
+.detail-block {{
+  background: #fbfcfe;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  padding: 13px 14px;
+}}
+.detail-block h3 {{
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}}
+.detail-block p, .detail-block li {{ font-size: 14px; line-height: 1.4; }}
+.compact-list {{ margin: 0; padding-left: 18px; }}
+.compact-list li {{ margin: 6px 0; }}
+.pr-list {{
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  overflow: hidden;
+}}
+.pr-row {{
+  align-items: center;
+  background: #fbfcfe;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}}
+.pr-row + .pr-row {{ border-top: 1px solid #edf0f4; }}
+.pr-row strong {{ display: block; margin-top: 3px; }}
+.pr-row span {{ color: var(--muted); font-size: 12px; white-space: nowrap; }}
+.pr-row.quiet {{ color: var(--muted); }}
+.role-matrix {{
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  overflow: hidden;
+}}
+.role-row {{
+  background: #fbfcfe;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 110px 1fr;
+  padding: 12px 14px;
+}}
+.role-row + .role-row {{ border-top: 1px solid #edf0f4; }}
+.role-row h3 {{
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+  margin: 5px 0 0;
+  text-transform: uppercase;
+}}
+.role-chips {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}}
+.role-chips span {{
+  background: #fff;
+  border: 1px solid #dfe5ee;
+  border-radius: 999px;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 6px 9px;
+}}
 .plain-list {{ display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }}
 .plain-list li {{
   background: var(--panel);
@@ -1687,15 +1790,22 @@ p {{ margin: 0; }}
   border-radius: 8px;
   padding: 13px 14px;
 }}
-details {{ padding: 0; margin-bottom: 10px; overflow: hidden; }}
-summary {{
+.more-detail, .lane-group {{ padding: 0; overflow: hidden; }}
+.lane-group {{
+  background: #fbfcfe;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  margin-top: 8px;
+}}
+.more-detail summary, .lane-group summary {{
   cursor: pointer;
   padding: 14px 16px;
   font-weight: 850;
   list-style: none;
 }}
-summary::-webkit-details-marker {{ display: none; }}
-summary span {{ color: var(--muted); font-weight: 650; font-size: 12px; margin-left: 6px; }}
+.more-detail summary::-webkit-details-marker, .lane-group summary::-webkit-details-marker {{ display: none; }}
+.more-detail summary span, .lane-group summary span {{ color: var(--muted); font-weight: 650; font-size: 12px; margin-left: 6px; }}
+.lane-group summary {{ align-items: center; display: flex; justify-content: space-between; }}
 .lane-list {{ list-style: none; padding: 0; margin: 0; border-top: 1px solid #edf0f4; }}
 .lane-list li {{ padding: 13px 16px; border-bottom: 1px solid #edf0f4; margin: 0; }}
 .lane-list li:last-child {{ border-bottom: 0; }}
@@ -1712,8 +1822,12 @@ a:hover {{ text-decoration: underline; }}
   main {{ padding: 20px 14px 28px; }}
   .hero {{ padding: 18px; }}
   .summary-strip {{ grid-template-columns: 1fr; }}
-  .mini-grid {{ grid-template-columns: 1fr; }}
-  .brief-grid {{ grid-template-columns: 1fr; }}
+  .detail-columns {{ grid-template-columns: 1fr; }}
+  .detail-section header {{ display: block; }}
+  .detail-section header p {{ margin-top: 4px; max-width: none; text-align: left; }}
+  .pr-row {{ align-items: flex-start; display: block; }}
+  .pr-row span {{ display: block; margin-top: 6px; white-space: normal; }}
+  .role-row {{ grid-template-columns: 1fr; }}
 }}
 </style>
 </head>
@@ -1748,30 +1862,61 @@ a:hover {{ text-decoration: underline; }}
 
   <details class="more-detail">
     <summary>{details_summary}</summary>
-    <section class="brief-grid detail-grid">
-      <div>
-        <h2>Watch</h2>
-        <section class="section"><p>{escape(ceo['watch'])}</p></section>
-      </div>
-      <div>
-        <h2>Decide</h2>
-        <section class="section"><ol>{step_items}</ol></section>
-      </div>
-    </section>
-    <section class="brief-grid detail-grid">
-      <div>
-        <h2>Safe to hand off</h2>
-        <section class="section"><ul>{safe_items}</ul></section>
-      </div>
-      <div>
-        <h2>Ignore</h2>
-        <section class="section"><ul>{ignore_items_html}</ul></section>
-      </div>
-    </section>
-    <h2>PRs</h2>
-    <section class="mini-grid">{pr_cards}</section>
-    <h2>Automation details</h2>
-    {lane_details}
+    <div class="detail-body">
+      <section class="detail-section">
+        <header>
+          <h2>Needs attention</h2>
+          <p>Only the follow-up context. The main answer stays above.</p>
+        </header>
+        <div class="detail-columns">
+          <div class="detail-block">
+            <h3>Watch</h3>
+            <p>{escape(ceo['watch'])}</p>
+          </div>
+          <div class="detail-block">
+            <h3>Decide</h3>
+            <ol class="compact-list">{step_items}</ol>
+          </div>
+        </div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>Agent handoff</h2>
+          <p>What agents can keep doing, plus what to ignore.</p>
+        </header>
+        <div class="detail-columns">
+          <div class="detail-block">
+            <h3>Safe to hand off</h3>
+            <ul class="compact-list">{safe_items}</ul>
+          </div>
+          <div class="detail-block">
+            <h3>Ignore</h3>
+            <ul class="compact-list">{ignore_items_html}</ul>
+          </div>
+        </div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>PRs</h2>
+          <p>Anything opened or still waiting from the night.</p>
+        </header>
+        <div class="pr-list">{pr_rows}</div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>Roles included</h2>
+          <p>The morning brief plus every active nightly role feeding it.</p>
+        </header>
+        <div class="role-matrix">{roles_included}</div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>Automation lanes</h2>
+          <p>Grouped by purpose. Open only when you need the evidence.</p>
+        </header>
+        {lane_details}
+      </section>
+    </div>
   </details>
 
   <p class="footer">Data quality: {escape(payload['data_quality'])}</p>
