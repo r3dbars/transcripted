@@ -33,6 +33,24 @@ DEFAULT_REPO = Path("/Users/redbars/transcripted-latest")
 LOCAL_TZ = ZoneInfo("America/Chicago") if ZoneInfo else timezone.utc
 FRESH_HOURS = 18
 DAU_GOAL = 1000
+POSTHOG_ENV_KEYS = (
+    "POSTHOG_PERSONAL_API_KEY",
+    "POSTHOG_PROJECT_ID",
+    "POSTHOG_PROJECT_API_TOKEN",
+    "POSTHOG_HOST",
+    "POSTHOG_APP_HOST",
+)
+POSTHOG_ACTIVE_EVENTS = (
+    "app_launched",
+    "onboarding_completed",
+    "dictation_started",
+    "dictation_completed",
+    "dictation_cancelled",
+    "meeting_recording_started",
+    "meeting_recording_stopped",
+    "meeting_transcript_saved",
+    "meeting_transcript_failed",
+)
 
 NIGHTLY_PREFIXES = (
     "[nightly-",
@@ -818,7 +836,67 @@ def extract_first_int(text: str, patterns: Iterable[str]) -> Optional[int]:
     return None
 
 
+def dotenv_value(raw: str) -> Optional[tuple[str, str]]:
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        return None
+    key, value = line.split("=", 1)
+    key = key.strip()
+    if key.startswith("export "):
+        key = key.removeprefix("export ").strip()
+    if key not in POSTHOG_ENV_KEYS:
+        return None
+    return key, value.strip().strip('"').strip("'")
+
+
+def load_local_posthog_env() -> list[str]:
+    candidates: list[Path] = []
+    explicit = os.environ.get("TRANSCRIPTED_OPS_ENV")
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    candidates.extend(
+        [
+            Path.cwd() / ".env.local",
+            Path.cwd() / ".env",
+            Path.home() / ".transcripted-ops.env",
+            Path.home() / ".hermes" / "profiles" / "ops" / ".env",
+        ]
+    )
+
+    loaded: list[str] = []
+    for path in candidates:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            parsed = dotenv_value(line)
+            if not parsed:
+                continue
+            key, value = parsed
+            if value and not os.environ.get(key):
+                os.environ[key] = value
+                loaded.append(key)
+    return loaded
+
+
+def normalize_posthog_host(raw_host: str) -> str:
+    host = raw_host.strip().rstrip("/")
+    if host == "https://us.i.posthog.com":
+        return "https://us.posthog.com"
+    if host == "https://eu.i.posthog.com":
+        return "https://eu.posthog.com"
+    return host
+
+
+def sql_quote(value: str) -> str:
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def query_posthog_dau() -> dict[str, Any]:
+    load_local_posthog_env()
     token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
     project_id = os.environ.get("POSTHOG_PROJECT_ID")
     missing = [name for name, value in (("POSTHOG_PERSONAL_API_KEY", token), ("POSTHOG_PROJECT_ID", project_id)) if not value]
@@ -826,14 +904,26 @@ def query_posthog_dau() -> dict[str, Any]:
         verb = "is" if len(missing) == 1 else "are"
         return {"dau": None, "event_count": None, "error": f"{', '.join(missing)} {verb} not set"}
 
-    host = (os.environ.get("POSTHOG_HOST") or "https://us.i.posthog.com").rstrip("/")
+    host = normalize_posthog_host(
+        os.environ.get("POSTHOG_APP_HOST") or os.environ.get("POSTHOG_HOST") or "https://us.posthog.com"
+    )
     url = f"{host}/api/projects/{project_id}/query/"
+    event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
     body = json.dumps(
         {
-            "query": (
-                "select uniq(distinct_id) as dau, count() as events_24h "
-                "from events where timestamp >= now() - interval 1 day"
-            )
+            "query": {
+                "kind": "HogQLQuery",
+                "query": (
+                    "SELECT "
+                    "uniqIf(distinct_id, event = 'app_launched') AS dau, "
+                    "countIf(event = 'app_launched') AS launches_24h, "
+                    "count() AS workflow_events_24h "
+                    "FROM events "
+                    "WHERE timestamp >= now() - INTERVAL 1 DAY "
+                    f"AND event IN ({event_list})"
+                ),
+            },
+            "refresh": "blocking",
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -856,9 +946,9 @@ def query_posthog_dau() -> dict[str, Any]:
         return {"dau": None, "event_count": None, "error": "PostHog returned an unreadable response"}
 
     try:
-        row = (payload.get("data") or payload.get("results") or [])[0]
+        row = (payload.get("results") or payload.get("data") or [])[0]
         dau = int(row[0])
-        event_count = int(row[1]) if len(row) > 1 and row[1] is not None else None
+        event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
     except (IndexError, TypeError, ValueError):
         return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
     return {"dau": dau, "event_count": event_count, "error": None}
@@ -1300,6 +1390,13 @@ def render_html(payload: dict[str, Any]) -> str:
 
     score = next((item for item in ceo["scorecard"] if item["role"] == "CEO"), None)
     score_text = f"{score['score']} / {score['grade']}" if score else "needs review"
+    dau_unknown = dau["current"] == "Unknown today"
+    dau_verdict = (
+        "Current DAU: Unknown today. We need to know this."
+        if dau_unknown
+        else f"Current DAU: {dau['current']}. Gap: {dau['gap']}."
+    )
+    dau_card_class = "goal-card problem" if dau_unknown else "goal-card"
 
     if open_prs:
         pr_cards = "\n".join(
@@ -1513,7 +1610,7 @@ a:hover {{ text-decoration: underline; }}
       <div class="eyebrow">Transcripted Daily CEO Brief</div>
       <h1>Goal: 1,000 DAU.</h1>
       <p class="sub">{escape(payload['generated_local'])} · signal quality: {escape(payload['signal_quality'])}</p>
-      <p class="verdict">Current DAU: {escape(dau['current'])}. We need to know this.</p>
+      <p class="verdict">{escape(dau_verdict)}</p>
       <p class="call"><strong>CEO call:</strong> {escape(ceo['ceo_call'])}</p>
       <p class="goal-note">Confidence: {escape(dau['confidence'])}. {escape(dau['note'])}</p>
     </div>
@@ -1521,7 +1618,7 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="goal-grid" aria-label="DAU progress">
     <div class="goal-card"><span>Goal</span><strong>{escape(dau['goal'])}</strong></div>
-    <div class="goal-card problem"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
+    <div class="{dau_card_class}"><span>Current DAU</span><strong>{escape(dau['current'])}</strong></div>
     <div class="goal-card"><span>Gap</span><strong>{escape(dau['gap'])}</strong></div>
     <div class="goal-card"><span>Best proxy</span><strong>{escape(dau['proxy'])}</strong></div>
   </section>
