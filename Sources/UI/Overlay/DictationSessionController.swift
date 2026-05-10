@@ -1104,13 +1104,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .loading: return "loading"
-        case .listening: return "listening"
-        case .drafting: return "drafting"
-        case .success: return "success"
-        }
+        state.diagnosticName
     }
 
     private func cancelActiveTasks(cancelRecording: Bool) {

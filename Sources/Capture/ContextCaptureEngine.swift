@@ -56,13 +56,7 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
 @MainActor
 private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
     guard let state else { return "unknown" }
-    switch state {
-    case .idle: return "idle"
-    case .loading: return "loading"
-    case .listening: return "listening"
-    case .drafting: return "drafting"
-    case .success: return "success"
-    }
+    return state.diagnosticName
 }
 
 private func hotkeyHandler(

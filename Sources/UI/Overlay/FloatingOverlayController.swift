@@ -31,6 +31,16 @@ class FloatingOverlayController {
         case listening    // Recording dictation
         case drafting     // Processing dictation
         case success      // Finished successfully — brief confirmation before dismiss
+
+        var diagnosticName: String {
+            switch self {
+            case .idle: return "idle"
+            case .loading: return "loading"
+            case .listening: return "listening"
+            case .drafting: return "drafting"
+            case .success: return "success"
+            }
+        }
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
