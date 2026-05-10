@@ -1621,7 +1621,7 @@ private struct ThreeActionsRecap: View {
         HStack(spacing: 14) {
             ActionStepCard(
                 number: "1",
-                title: "Dictate",
+                label: "Dictate",
                 command: "Right Option",
                 detail: "Tap once to talk. Tap again to paste.",
                 color: OnboardingTheme.codex,
@@ -1629,7 +1629,7 @@ private struct ThreeActionsRecap: View {
             )
             ActionStepCard(
                 number: "2",
-                title: "Record",
+                label: "Record",
                 command: "Option-M",
                 detail: "Start or stop a meeting recording.",
                 color: OnboardingTheme.recording,
@@ -1637,7 +1637,7 @@ private struct ThreeActionsRecap: View {
             )
             ActionStepCard(
                 number: "3",
-                title: "Ask",
+                label: "Ask",
                 command: "Ask your agent",
                 detail: "Use your saved voice memory as context.",
                 color: OnboardingTheme.claude,
@@ -1655,9 +1655,9 @@ private struct ActionStepCard: View {
     let color: Color
     let icon: String
 
-    init(number: String, title: String, command: String, detail: String, color: Color, icon: String) {
+    init(number: String, label: String, command: String, detail: String, color: Color, icon: String) {
         self.number = number
-        self.label = title
+        self.label = label
         self.command = command
         self.detail = detail
         self.color = color
