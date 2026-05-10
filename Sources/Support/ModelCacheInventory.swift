@@ -31,6 +31,14 @@ struct ModelCacheSnapshot: Equatable {
         ModelCacheInventory.formattedByteCount(staleFluidAudioModelBytes)
     }
 
+    func reclaimableBytes(includeWhisper: Bool) -> Int64 {
+        staleFluidAudioModelBytes + (includeWhisper ? whisperModelsBytes : 0)
+    }
+
+    func formattedReclaimableSize(includeWhisper: Bool) -> String {
+        ModelCacheInventory.formattedByteCount(reclaimableBytes(includeWhisper: includeWhisper))
+    }
+
     var staleModelSummary: String {
         staleFluidAudioModelNames.isEmpty ? "none" : staleFluidAudioModelNames.joined(separator: ", ")
     }
@@ -51,6 +59,15 @@ struct ModelCacheSnapshot: Equatable {
 struct ModelCacheCleanupResult: Equatable {
     let removedBytes: Int64
     let removedNames: [String]
+
+    static let empty = ModelCacheCleanupResult(removedBytes: 0, removedNames: [])
+
+    func merging(_ other: ModelCacheCleanupResult) -> ModelCacheCleanupResult {
+        ModelCacheCleanupResult(
+            removedBytes: removedBytes + other.removedBytes,
+            removedNames: removedNames + other.removedNames
+        )
+    }
 }
 
 enum ModelCacheInventory {
@@ -143,6 +160,26 @@ enum ModelCacheInventory {
             removedBytes: bytes,
             removedNames: ["Whisper cache"]
         )
+    }
+
+    static func removeReclaimableCaches(
+        includeWhisper: Bool,
+        fileManager: FileManager = .default,
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
+        whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let staleResult = try removeKnownStaleFluidAudioModels(
+            fileManager: fileManager,
+            fluidAudioModelsDirectory: fluidAudioModelsDirectory
+        )
+
+        guard includeWhisper else { return staleResult }
+
+        let whisperResult = try removeWhisperModels(
+            fileManager: fileManager,
+            whisperModelsDirectory: whisperModelsDirectory
+        )
+        return staleResult.merging(whisperResult)
     }
 
     static func directorySize(at url: URL, fileManager: FileManager = .default) -> Int64 {

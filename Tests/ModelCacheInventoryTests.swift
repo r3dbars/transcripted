@@ -24,6 +24,8 @@ func testModelCacheInventory() {
         assertEqual(snapshot.whisperModelsBytes, 23, "Whisper total should be broken out separately")
         assertEqual(snapshot.staleFluidAudioModelBytes, 17, "known stale Parakeet v3 non-CoreML cache should be counted")
         assertEqual(snapshot.staleFluidAudioModelNames, ["parakeet-tdt-0.6b-v3"], "known stale model names should be stable and sorted")
+        assertEqual(snapshot.reclaimableBytes(includeWhisper: false), 17, "reclaimable total without Whisper should include stale models only")
+        assertEqual(snapshot.reclaimableBytes(includeWhisper: true), 40, "reclaimable total with Whisper should include stale and optional Whisper models")
     }
 
     runSuite("ModelCacheInventory diagnostics avoid raw paths") {
@@ -86,6 +88,58 @@ func testModelCacheInventory() {
         assertEqual(result?.removedNames, ["Whisper cache"], "cleanup should name the removed cache")
         assertFalse(FileManager.default.fileExists(atPath: whisperModels.path), "Whisper models directory should be removed")
         assertTrue(FileManager.default.fileExists(atPath: unrelatedCacheFile.path), "non-model Whisper cache files should stay")
+    }
+
+    runSuite("ModelCacheInventory combined cleanup removes stale models and optional Whisper") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        let whisperRoot = root.appendingPathComponent("cache/whisperkit", isDirectory: true)
+        let whisperModels = whisperRoot.appendingPathComponent("models", isDirectory: true)
+        let active = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml/Encoder.mlmodelc/data.bin")
+        let stale = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3/Encoder.mlmodelc/data.bin")
+        let whisper = whisperModels.appendingPathComponent("openai_whisper-large-v3-v20240930_626MB/model.bin")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(active, bytes: 11)
+        writeTestFile(stale, bytes: 17)
+        writeTestFile(whisper, bytes: 23)
+
+        let result = try? ModelCacheInventory.removeReclaimableCaches(
+            includeWhisper: true,
+            fluidAudioModelsDirectory: fluid,
+            whisperModelsDirectory: whisperModels
+        )
+
+        assertEqual(result?.removedBytes, 40, "combined cleanup should report stale plus Whisper model bytes")
+        assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v3", "Whisper cache"], "combined cleanup should name every removed cache")
+        assertTrue(FileManager.default.fileExists(atPath: active.path), "combined cleanup should keep active Parakeet")
+        assertFalse(FileManager.default.fileExists(atPath: stale.path), "combined cleanup should remove stale Parakeet")
+        assertFalse(FileManager.default.fileExists(atPath: whisperModels.path), "combined cleanup should remove optional Whisper models")
+    }
+
+    runSuite("ModelCacheInventory combined cleanup can preserve Whisper") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        let whisperModels = root.appendingPathComponent("cache/whisperkit/models", isDirectory: true)
+        let stale = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3/Encoder.mlmodelc/data.bin")
+        let whisper = whisperModels.appendingPathComponent("openai_whisper-large-v3-v20240930_626MB/model.bin")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(stale, bytes: 17)
+        writeTestFile(whisper, bytes: 23)
+
+        let result = try? ModelCacheInventory.removeReclaimableCaches(
+            includeWhisper: false,
+            fluidAudioModelsDirectory: fluid,
+            whisperModelsDirectory: whisperModels
+        )
+
+        assertEqual(result?.removedBytes, 17, "combined cleanup should remove only stale models when Whisper is excluded")
+        assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v3"], "combined cleanup should not name preserved Whisper")
+        assertFalse(FileManager.default.fileExists(atPath: stale.path), "stale Parakeet should be removed")
+        assertTrue(FileManager.default.fileExists(atPath: whisper.path), "Whisper should stay when excluded")
     }
 
     runSuite("ModelCacheInventory cleanup refuses non-Whisper model paths") {

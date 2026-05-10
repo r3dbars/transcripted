@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after eighteen audit/fix loops: **98/100, A**
+Current score after nineteen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -23,13 +23,13 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A | 96 | Default local and beta builds now produce the 105.4 MiB thin app with 1.9 MiB resources; explicit full/offline build remains 566.3 MiB | Ship the next public DMG/appcast/cask from the thin default, or explicitly publish separate full/offline and thin/download variants |
-| Local disk/cache hygiene | A- | 91 | Storage page reports model/cache footprint and offers confirmed cleanup for known stale Parakeet folders plus optional Whisper cache; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model |
+| Local disk/cache hygiene | A | 96 | Storage page now reports reclaimable cache and has one guarded action for known stale Parakeet folders plus optional Whisper cache; this Mac has about 2.1 GB reclaimable | Normal default footprint under 700 MB excluding active bundled model, with reclaimable cache removed or absent |
 | Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | A- | 90 | Settings home now coalesces passive activation/navigation refreshes while preserving forced refreshes for new/deleted captures; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A+ | 98 | Info-level JSONL events now batch up to 8 records or 500 ms; warning/error events still flush immediately; privacy/event budgets remain tested | Keep error diagnostics immediate and measure event-write overhead if high-volume telemetry grows |
 | Build and dev loop speed | B | 86 | Timed default thin `bash build.sh --no-open` takes 68.17s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1586 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
+| Performance regression guardrails | A+ | 99 | 1597 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -511,11 +511,38 @@ Measured proof:
 - `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed.
 - Default thin build after the change: 105.4 MiB expanded, 1.9 MiB resources, no bundled Parakeet model.
 
+### 18. Added one-step reclaimable cache cleanup
+
+Files:
+
+- `Sources/Support/ModelCacheInventory.swift`
+- `Sources/UI/Settings/TranscriptedSettingsView.swift`
+- `Tests/ModelCacheInventoryTests.swift`
+
+Why:
+
+- The Storage page exposed stale Parakeet cleanup and Whisper cleanup separately, but the user still had to infer the total reclaimable footprint and run multiple cleanup paths.
+- On this Mac, known stale FluidAudio folders are about 904 MB and optional Whisper cache is about 1.2 GB.
+
+Change made:
+
+- `ModelCacheSnapshot` now computes reclaimable bytes with or without optional Whisper.
+- `ModelCacheInventory.removeReclaimableCaches(includeWhisper:)` combines the existing safe cleanup paths.
+- Storage settings now shows a Reclaimable Cache row and one guarded "Remove Reclaimable Cache" action.
+- Whisper is preserved automatically while Whisper is the selected transcription model.
+
+Measured proof:
+
+- `bash run-tests.sh`: 1597 tests passed.
+- New tests prove reclaimable byte totals, combined stale-plus-Whisper cleanup, and Whisper-preserving cleanup.
+- `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed.
+- Default thin build after the change: 105.4 MiB expanded, 1.9 MiB resources, no bundled Parakeet model.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1586 tests, 1586 passed, 0 failed**.
+- `bash run-tests.sh`: **1597 tests, 1597 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash build.sh --thin --no-open`: signed thin build passed, launch smoke passed, performance budget passed, no app left running.
@@ -616,7 +643,7 @@ Longest/highest-processing examples:
 | `FluidAudio/Models/parakeet-eou-streaming` | 427 MB |
 | `Transcripted/cache/whisperkit/models` | 1.2 GB |
 
-This is the clearest "not lightweight" area. The app needs a cleanup surface and stale-model pruning.
+This is still one of the clearest "not lightweight" areas. The app now has a single guarded reclaimable-cache cleanup surface, but this audit did not delete local user caches automatically.
 
 ## Hot Path Notes
 
@@ -696,6 +723,11 @@ These are the next improvements I would execute in order.
    - Info-level local JSONL events now batch while warning/error events flush immediately.
    - A+ gate: keep this behavior if event volume grows; add measured event-write overhead only if telemetry becomes hot again.
 
+8. **Local cache cleanup**
+   - Partly done in loop 19.
+   - Settings now shows reclaimable cache and removes known stale Parakeet plus optional Whisper cache in one guarded action.
+   - A+ gate: remove or verify absence of reclaimable cache on the target machine and prove the normal model/cache footprint stays under 700 MB excluding the active model.
+
 ## Current Honest Conclusion
 
 Transcripted is already **fast** where it matters most after warmup. It is not yet **super lightweight**.
@@ -707,4 +739,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, and low-priority local event writes are batched. The next public release, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, and low-priority local event writes are batched. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.

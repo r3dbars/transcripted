@@ -68,6 +68,7 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupStatus: String?
     @State private var showModelCacheCleanupConfirmation = false
     @State private var showWhisperCacheCleanupConfirmation = false
+    @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
@@ -1427,11 +1428,26 @@ struct TranscriptedSettingsView: View {
                 }
 
                 if let snapshot = modelCacheSnapshot {
+                    let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModel.isWhisper
+                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
                     ModelCacheMetricRow(
                         title: "Known model and cache footprint",
                         value: snapshot.formattedTotalKnownSize,
                         detail: "FluidAudio models plus Transcripted's app cache."
                     )
+                    ModelCacheMetricRow(
+                        title: "Reclaimable cache",
+                        value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
+                        detail: includeWhisperInReclaimableCleanup
+                            ? "Known stale models plus optional Whisper files."
+                            : "Known stale models. Whisper is preserved while selected."
+                    )
+                    if reclaimableBytes > 0 {
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache", role: .destructive) {
+                            showReclaimableCacheCleanupConfirmation = true
+                        }
+                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                    }
                     ModelCacheMetricRow(
                         title: "FluidAudio models",
                         value: snapshot.formattedFluidAudioModelsSize,
@@ -1494,6 +1510,17 @@ struct TranscriptedSettingsView: View {
                 if modelCacheSnapshot == nil, !modelCacheLoading {
                     refreshModelCacheSnapshot()
                 }
+            }
+            .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeReclaimableModelCaches()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let includeWhisper = !effectiveTranscriptionModel.isWhisper
+                Text(includeWhisper
+                    ? "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays."
+                    : "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected.")
             }
             .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
                 Button("Remove", role: .destructive) {
@@ -2121,6 +2148,35 @@ struct TranscriptedSettingsView: View {
                 await MainActor.run {
                     modelCacheCleanupInProgress = false
                     modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func removeReclaimableModelCaches() {
+        guard !modelCacheCleanupInProgress else { return }
+        let includeWhisper = !effectiveTranscriptionModel.isWhisper
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeReclaimableCaches(includeWhisper: includeWhisper)
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedNames.isEmpty {
+                        modelCacheCleanupStatus = "No reclaimable model cache needed removal."
+                    } else {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove reclaimable cache: \(error.localizedDescription)"
                 }
             }
         }
