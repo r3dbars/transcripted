@@ -161,6 +161,8 @@ final class MeetingOverlayRootView: NSView {
     private let dismissPromptTooltip = "Dismiss meeting prompt"
     private let remindPromptTooltip = "Remind me soon"
     private let startTooltip = "Start meeting recording"
+    private let showErrorDetailsTooltip = "Show failed meeting details"
+    private let dismissErrorTooltip = "Dismiss meeting error"
     private let minimizeTooltip = "Minimize meeting widget"
     private let expandTooltip = "Expand meeting widget"
     private var tooltipPanel: MeetingOverlayTooltipPanel?
@@ -645,9 +647,29 @@ final class MeetingOverlayRootView: NSView {
 
         detailLabel.frame = NSRect(
             x: pad,
-            y: 16,
+            y: 34,
             width: bounds.width - pad * 2,
             height: 16
+        )
+
+        let secondaryWidth = max(68, closeButton.fittingSize.width + 18)
+        let primaryWidth = max(96, recordButton.fittingSize.width + 18)
+        let buttonHeight: CGFloat = 24
+        let buttonGap: CGFloat = 8
+        let totalButtonWidth = secondaryWidth + primaryWidth + buttonGap
+        let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
+
+        closeButton.frame = NSRect(
+            x: buttonStartX,
+            y: 10,
+            width: secondaryWidth,
+            height: buttonHeight
+        )
+        recordButton.frame = NSRect(
+            x: closeButton.frame.maxX + buttonGap,
+            y: 10,
+            width: primaryWidth,
+            height: buttonHeight
         )
         refreshTooltipTrackingAreas()
     }
@@ -702,10 +724,10 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.isHidden = true
         let showLevels = state == .recording && !self.isRecordingMinimized
         audioWaveform.isHidden = !showLevels
-        recordButton.isHidden = !isPrompting
+        recordButton.isHidden = !(isPrompting || isErrorState)
         remindButton.isHidden = !isPrompting || prompt?.remindTitle == nil
         cancelButton.isHidden = state != .recording
-        closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
+        closeButton.isHidden = isPreparing || (state != .recording && !isPrompting && !isErrorState)
         chevronButton.isHidden = state != .recording
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
@@ -790,6 +812,14 @@ final class MeetingOverlayRootView: NSView {
                     : MeetingOverlayTokens.dotError
             )
             detailLabel.stringValue = copy.detail
+            closeButton.attributedTitle = buttonTitle("Dismiss", size: 11, weight: .semibold)
+            closeButton.toolTip = nil
+            closeButton.setAccessibilityLabel(dismissErrorTooltip)
+            closeButton.setAccessibilityHelp("Dismisses this meeting error.")
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            recordButton.attributedTitle = primaryButtonTitle("Show details")
+            recordButton.setAccessibilityLabel(showErrorDetailsTooltip)
+            recordButton.setAccessibilityHelp("Opens the Meetings page with retry details.")
         }
 
         if state == .recording {
@@ -916,9 +946,23 @@ final class MeetingOverlayRootView: NSView {
         tooltipTrackingAreas.removeAll()
 
         addTooltipTrackingArea(for: cancelButton, text: cancelTooltip)
-        addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
+        let closeTooltip: String
+        if currentState == .recording {
+            closeTooltip = finishTooltip
+        } else if case .error = currentState {
+            closeTooltip = dismissErrorTooltip
+        } else {
+            closeTooltip = dismissPromptTooltip
+        }
+        addTooltipTrackingArea(for: closeButton, text: closeTooltip)
         addTooltipTrackingArea(for: remindButton, text: remindPromptTooltip)
-        addTooltipTrackingArea(for: recordButton, text: startTooltip)
+        let primaryTooltip: String
+        if case .error = currentState {
+            primaryTooltip = showErrorDetailsTooltip
+        } else {
+            primaryTooltip = startTooltip
+        }
+        addTooltipTrackingArea(for: recordButton, text: primaryTooltip)
         addTooltipTrackingArea(
             for: chevronButton,
             text: isRecordingMinimized ? expandTooltip : minimizeTooltip
@@ -1059,7 +1103,7 @@ enum MeetingOverlayTokens {
     static let minimizedRecordingPanelHeight: CGFloat = 36
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
-    static let errorHeight: CGFloat = 72
+    static let errorHeight: CGFloat = 88
     static let cornerRadius: CGFloat = 22
     static let minimizedCornerRadius: CGFloat = 18
     static let dotSize: CGFloat     = 8
@@ -1153,6 +1197,7 @@ final class MeetingOverlayController {
     var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptRemindSoon: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onShowErrorDetails: (() -> Void)?
 
     // MARK: - Setup
 
@@ -1372,8 +1417,8 @@ final class MeetingOverlayController {
             promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            autoHideTask?.cancel()
             showPanel()
-            scheduleAutoHide(after: 5)
         }
         pushToView()
     }
@@ -1508,12 +1553,24 @@ final class MeetingOverlayController {
             }
         case .recording:
             handleCloseTapped()
+        case .error:
+            autoHideTask?.cancel()
+            state = .idle
+            hidePanel()
         default:
             hidePanel()
         }
     }
 
     private func handlePrimaryActionTapped() {
+        if case .error = state {
+            autoHideTask?.cancel()
+            state = .idle
+            hidePanel()
+            onShowErrorDetails?()
+            return
+        }
+
         guard case .prompt = state else { return }
         promptCountdownTask?.cancel()
 

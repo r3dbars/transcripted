@@ -143,6 +143,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            meetingOverlayController.onShowErrorDetails = { [weak self] in
+                self?.showSettingsWindow(page: .meetings, source: "meeting_overlay_error")
+            }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
