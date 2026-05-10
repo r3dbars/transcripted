@@ -1206,6 +1206,15 @@ struct TranscriptedSettingsView: View {
                         )
                     }
                 }
+
+                SettingsQuickLinkRow(
+                    symbolName: "folder",
+                    title: "Open Meetings Folder",
+                    detail: "See every saved meeting transcript in Finder."
+                ) {
+                    trackSettingsAction("open_meetings_folder", page: .meetings)
+                    openMeetingsFolder()
+                }
             }
 
             if !meetingSession.failedMeetings.isEmpty {
@@ -2453,6 +2462,12 @@ struct TranscriptedSettingsView: View {
                 copiedAgentMeetingID = nil
             }
         }
+    }
+
+    private func openMeetingsFolder() {
+        let folder = MeetingStoragePaths.transcriptsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
     }
 
     private static let recentCaptureDateFormatter: DateFormatter = {
