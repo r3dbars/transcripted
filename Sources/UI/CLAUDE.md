@@ -42,6 +42,8 @@ so tiny transient states do not get duplicated inside controllers.
 `OverlayHeaderView` owns the inline dictation stop affordance and centered
 listening layout, while `OverlayRootView` decides when the pill should expand
 into a taller loading or error state.
+Keep primary overlay status labels in Title Case and use the single ellipsis
+character (`…`) for in-progress states instead of three periods.
 
 ### MenuBar/
 

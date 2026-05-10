@@ -68,7 +68,7 @@ final class OverlayDraftingView: NSView {
     private let errorLabel = NSTextField(labelWithString: "")
     private let errorActionButton = OverlaySecondaryButton(frame: .zero)
 
-    // Secondary state: dimmed transcript + "Refining..." spinner
+    // Secondary state: dimmed transcript + "Refining…" spinner
     private let dimmedTranscript = NSTextField(wrappingLabelWithString: "")
     private let refiningSpinner = NSProgressIndicator()
     private let refiningLabel = NSTextField(labelWithString: "")
@@ -144,7 +144,7 @@ final class OverlayDraftingView: NSView {
 
         refiningLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         refiningLabel.textColor = OverlayTokens.textSecondary
-        refiningLabel.stringValue = "Refining..."
+        refiningLabel.stringValue = "Refining…"
         refiningLabel.isBezeled = false
         refiningLabel.isEditable = false
         refiningLabel.drawsBackground = false

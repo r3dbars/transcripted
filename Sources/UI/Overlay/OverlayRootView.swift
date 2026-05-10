@@ -162,7 +162,7 @@ final class OverlayRootView: NSView {
 
         if showError {
             draftingView.isHidden = false
-            let statusText = isTranscribing ? "Transcribing..." : "Processing..."
+            let statusText = isTranscribing ? "Transcribing…" : "Processing…"
             draftingView.update(
                 error: errorMessage.isEmpty ? nil : errorMessage,
                 errorActionTitle: errorActionTitle,
