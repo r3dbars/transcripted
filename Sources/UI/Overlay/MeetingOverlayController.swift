@@ -730,9 +730,13 @@ final class MeetingOverlayRootView: NSView {
         } else {
             isErrorState = false
         }
+        let showsMeetingDuration = state == .recording
+            || state == .transcribing
+            || state == .saved
+            || (isErrorState && duration > 0)
         statusDot.isHidden = isPreparing
         titleLabel.isHidden = isPreparing || (state == .recording && !self.isRecordingMinimized)
-        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting) || self.isRecordingMinimized
+        timerLabel.isHidden = isPreparing || (!showsMeetingDuration && !isPrompting) || self.isRecordingMinimized
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
@@ -837,7 +841,7 @@ final class MeetingOverlayRootView: NSView {
             recordButton.setAccessibilityHelp("Opens the Meetings page with retry details.")
         }
 
-        if state == .recording {
+        if showsMeetingDuration {
             timerLabel.stringValue = formatDuration(duration)
         }
         currentMicLevel = max(0, min(1, micLevel))
