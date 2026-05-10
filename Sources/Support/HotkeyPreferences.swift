@@ -127,6 +127,7 @@ enum HotkeyPreferences {
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
         // One-shot cleanup for retired Draft hotkey preferences.
+        // Keep through the next public release after May 2026, then remove these key removals.
         ud.removeObject(forKey: "hotkey-draft-keyCode")
         ud.removeObject(forKey: "hotkey-draft-modifiers")
         ud.removeObject(forKey: dictationKeyCodeKey)
