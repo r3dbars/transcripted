@@ -61,6 +61,10 @@ enum MenuTokens {
     static let savedBackground = Color(MenuTokens.savedBackgroundNS)
     static let savedBorder = Color(MenuTokens.savedBorderNS)
 
+    // Timings
+    static let copyFeedbackDurationNanoseconds: UInt64 = 1_500_000_000
+    static let compactCopyFeedbackDurationNanoseconds: UInt64 = 1_200_000_000
+
     // Layout
     static let panelWidth: CGFloat = 304
     static let panelHeight: CGFloat = 320

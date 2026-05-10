@@ -348,7 +348,7 @@ struct PermissionsOnboardingView: View {
         copiedAgentItem = item
         copiedResetTask?.cancel()
         copiedResetTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: MenuTokens.copyFeedbackDurationNanoseconds)
             guard !Task.isCancelled else { return }
             copiedAgentItem = nil
         }

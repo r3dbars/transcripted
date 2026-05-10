@@ -106,7 +106,7 @@ final class AgentConnectionViewModel: ObservableObject {
         copiedItem = item
         resetTask?.cancel()
         resetTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: MenuTokens.copyFeedbackDurationNanoseconds)
             guard let self, !Task.isCancelled else { return }
             self.copiedItem = nil
         }

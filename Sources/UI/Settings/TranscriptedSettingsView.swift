@@ -553,7 +553,7 @@ struct TranscriptedSettingsView: View {
     private func flashCopied(rowID: String) {
         homeCopiedRowID = rowID
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            try? await Task.sleep(nanoseconds: MenuTokens.compactCopyFeedbackDurationNanoseconds)
             if homeCopiedRowID == rowID {
                 homeCopiedRowID = nil
             }
@@ -2487,7 +2487,7 @@ struct TranscriptedSettingsView: View {
         copiedAgentMeetingID = item.id
 
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            try? await Task.sleep(nanoseconds: MenuTokens.compactCopyFeedbackDurationNanoseconds)
             if copiedAgentMeetingID == item.id {
                 copiedAgentMeetingID = nil
             }
@@ -3159,7 +3159,7 @@ private struct AgentConnectionSettingsPage: View {
         guard let copiedFlag else { return }
         copiedFlag.wrappedValue = true
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(nanoseconds: MenuTokens.copyFeedbackDurationNanoseconds)
             copiedFlag.wrappedValue = false
         }
     }
