@@ -147,6 +147,12 @@ enum TranscriptedConstants {
     /// Throttled logging minimum interval
     static let logThrottleInterval: TimeInterval = 0.25
 
+    // MARK: - Observability
+
+    /// Keep analytics fire-and-forget networking short so app shutdown and UI
+    /// work never wait on a slow collector.
+    static let analyticsRequestTimeout: TimeInterval = 5
+
     // MARK: - Error Display
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)

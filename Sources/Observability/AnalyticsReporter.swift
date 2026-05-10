@@ -160,7 +160,7 @@ final class AnalyticsReporter {
     private let sessionID = UUID().uuidString
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForRequest = TranscriptedConstants.analyticsRequestTimeout
         return URLSession(configuration: configuration)
     }()
 

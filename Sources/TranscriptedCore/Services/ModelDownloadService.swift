@@ -73,7 +73,8 @@ public enum ModelDownloadService {
 
     /// Default retry configuration
     public static let maxRetries = 3
-    private static let retryDelays: [UInt64] = [2_000_000_000, 5_000_000_000, 10_000_000_000] // 2s, 5s, 10s
+    private static let retryDelaySeconds: [UInt64] = [2, 5, 10]
+    private static let retryDelays = retryDelaySeconds.map { $0 * 1_000_000_000 }
 
     // MARK: - Network Reachability
 
