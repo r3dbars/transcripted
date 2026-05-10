@@ -84,6 +84,8 @@ struct PermissionsOnboardingView: View {
         }
         .frame(width: Self.preferredSize.width, height: Self.preferredSize.height)
         .background(OnboardingTheme.canvas)
+        // This walkthrough uses a fixed light launch palette instead of adapting token-by-token.
+        .preferredColorScheme(.light)
         .onAppear {
             checkAllPermissions()
             startPolling()
