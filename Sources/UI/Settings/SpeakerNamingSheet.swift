@@ -118,7 +118,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 final class SpeakerNamingContentView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "Name the speakers from this meeting")
-    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name speakers now, or review them later in Settings > People.")
+    private let subtitleLabel = NSTextField(labelWithString: "Names you set here are remembered across meetings and used for future labels.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
     private let saveButton = NSButton(title: "Save names", target: nil, action: nil)
@@ -801,8 +801,11 @@ final class SpeakerRowView: NSView {
             parts.append("seen in \(calls)")
         }
         if parts.isEmpty {
-            return entry.needsNaming ? "New speaker" : "Review this match"
+            return entry.needsNaming
+                ? "New speaker - name it once and Transcripted remembers"
+                : "Review this match - confirming helps future labels"
         }
+        parts.append("confirming helps future labels")
         return parts.joined(separator: " • ")
     }
 }
