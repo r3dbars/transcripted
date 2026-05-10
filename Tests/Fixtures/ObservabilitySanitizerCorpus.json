@@ -96,6 +96,29 @@
         "source_app_name=[redacted-sensitive-value]",
         "audio_device=[redacted-sensitive-value]"
       ]
+    },
+    {
+      "id": "json-sensitive-values-with-escaped-quotes",
+      "input": "{\"meeting_title\":\"Customer \\\"ACME\\\" Call\",\"source_app_name\":\"Codex\"}",
+      "must_not_contain": [
+        "Customer",
+        "ACME",
+        "Codex"
+      ],
+      "must_contain": [
+        "\"meeting_title\":\"[redacted-sensitive-value]\"",
+        "\"source_app_name\":\"[redacted-sensitive-value]\""
+      ]
+    },
+    {
+      "id": "plain-engine-device-log",
+      "input": "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
+      "must_not_contain": [
+        "MacBook Pro Microphone"
+      ],
+      "must_contain": [
+        "(parakeet, [redacted-sensitive-value])"
+      ]
     }
   ]
 }

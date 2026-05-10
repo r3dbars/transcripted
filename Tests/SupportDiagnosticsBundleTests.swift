@@ -34,6 +34,7 @@ func testSupportDiagnosticsBundle() {
                 "Opened /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl",
                 "DIAG | capture.dictation_toggle_requested | source_app_bundle_id=com.openai.codex source_app_name=Codex trigger=physical_key",
                 "DIAG | dictation.dictation_started | audio_device=MacBook Pro Microphone route_shape=built_in_input_to_built_in_output",
+                "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
                 "Email person@example.com should not leak",
             ]
         )
