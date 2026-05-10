@@ -172,9 +172,17 @@ extension TranscriptionTaskManager {
             }
 
             if didFinalizeTranscript {
-                Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                Self.applyPlannedNamingMutations(
+                    plannedChanges.mutations,
+                    speakerDB: speakerDB,
+                    transcriptsDirectory: resolvedURL.deletingLastPathComponent()
+                )
                 if let deferredReviewPlan {
-                    Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                    Self.applyPlannedNamingMutations(
+                        deferredReviewPlan.mutations,
+                        speakerDB: speakerDB,
+                        transcriptsDirectory: resolvedURL.deletingLastPathComponent()
+                    )
                 }
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
                     speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
@@ -399,7 +407,8 @@ extension TranscriptionTaskManager {
 
     nonisolated private static func applyPlannedNamingMutations(
         _ mutations: [PlannedSpeakerMutation],
-        speakerDB: any SpeakerStore
+        speakerDB: any SpeakerStore,
+        transcriptsDirectory: URL? = nil
     ) {
         for mutation in mutations {
             switch mutation {
@@ -407,6 +416,13 @@ extension TranscriptionTaskManager {
                 speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
             case .setDisplayName(let id, let name):
                 speakerDB.setDisplayName(id: id, name: name, source: NameSource.userManual)
+                if let transcriptsDirectory {
+                    TranscriptSaver.retroactivelyUpdateSpeaker(
+                        dbId: id,
+                        newName: name,
+                        in: transcriptsDirectory
+                    )
+                }
             case .restoreProfile(let profile):
                 speakerDB.restoreProfile(profile)
             case .addOrUpdateEmbedding(let embedding, let existingId):
