@@ -196,26 +196,35 @@ final class MeetingOverlayRootView: NSView {
         layer?.backgroundColor = MeetingOverlayTokens.panelBg.cgColor
         layer?.borderWidth = 0.5
         layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Meeting overlay")
 
         // Record status dot (red during recording, orange while prep/transcribe, grey idle).
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = MeetingOverlayTokens.dotSize / 2
         statusDot.layer?.shadowOffset = .zero
         statusDot.layer?.backgroundColor = MeetingOverlayTokens.dotIdle.cgColor
+        statusDot.setAccessibilityElement(true)
+        statusDot.setAccessibilityLabel("Meeting status")
+        statusDot.setAccessibilityValue("Idle")
         addSubview(statusDot)
 
         titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         titleLabel.textColor = MeetingOverlayTokens.textPrimary
+        titleLabel.setAccessibilityLabel("Meeting title")
         addSubview(titleLabel)
 
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
+        timerLabel.setAccessibilityLabel("Elapsed meeting time")
+        timerLabel.setAccessibilityValue("00:00")
         addSubview(timerLabel)
 
         detailLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         detailLabel.textColor = MeetingOverlayTokens.textSecondary
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.isHidden = true
+        detailLabel.setAccessibilityLabel("Meeting details")
         addSubview(detailLabel)
 
         micLabel.font = NSFont.systemFont(ofSize: 8, weight: .medium)
@@ -228,6 +237,10 @@ final class MeetingOverlayRootView: NSView {
 
         audioWaveform.primaryTintColor = MeetingOverlayTokens.waveformMicTint
         audioWaveform.secondaryTintColor = MeetingOverlayTokens.waveformSystemTint
+        audioWaveform.setAccessibilityElement(false)
+        audioWaveform.setAccessibilityLabel("Meeting audio levels")
+        audioWaveform.setAccessibilityHelp("Shows current microphone and system audio levels.")
+        audioWaveform.setAccessibilityValue("Mic 0 percent, system audio 0 percent")
         addSubview(audioWaveform)
 
         warmupTitleLabel.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
@@ -246,6 +259,7 @@ final class MeetingOverlayRootView: NSView {
         warmupProgress.maxValue = 1
         warmupProgress.doubleValue = 0
         warmupProgress.isHidden = true
+        warmupProgress.setAccessibilityLabel("Model loading progress")
         addSubview(warmupProgress)
 
         recordButton.attributedTitle = NSAttributedString(
@@ -738,6 +752,7 @@ final class MeetingOverlayRootView: NSView {
             warmupTitleLabel.stringValue = currentWarmupStatus.title
             warmupSubtitleLabel.stringValue = currentWarmupStatus.subtitle
             warmupProgress.doubleValue = currentWarmupStatus.progress
+            refreshWarmupAccessibility()
             needsLayout = true
             return
         }
@@ -831,6 +846,7 @@ final class MeetingOverlayRootView: NSView {
         audioWaveform.secondaryLevel = currentSystemLevel
         let shouldAnimate = state == .recording && !self.isRecordingMinimized
         audioWaveform.isActive = shouldAnimate
+        refreshAccessibilityState(state: state, duration: duration, showLevels: showLevels)
 
         needsLayout = true
     }
@@ -840,6 +856,7 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
+        refreshAudioLevelAccessibility(isVisible: !audioWaveform.isHidden)
     }
 
     private func applyBaseVisualStyle() {
@@ -911,6 +928,76 @@ final class MeetingOverlayRootView: NSView {
         statusDot.layer?.shadowColor = color.cgColor
         statusDot.layer?.shadowOpacity = haloOpacity
         statusDot.layer?.shadowRadius = haloRadius
+    }
+
+    private func refreshWarmupAccessibility() {
+        let progressText = accessibilityPercent(currentWarmupStatus.progress)
+        setAccessibilityValue("\(currentWarmupStatus.title), \(currentWarmupStatus.subtitle), \(progressText)")
+        statusDot.setAccessibilityElement(false)
+        audioWaveform.setAccessibilityElement(false)
+        warmupTitleLabel.setAccessibilityLabel("Meeting warmup status")
+        warmupTitleLabel.setAccessibilityValue(warmupTitleLabel.stringValue)
+        warmupSubtitleLabel.setAccessibilityLabel("Meeting warmup detail")
+        warmupSubtitleLabel.setAccessibilityValue(warmupSubtitleLabel.stringValue)
+        warmupProgress.setAccessibilityValue(progressText)
+    }
+
+    private func refreshAccessibilityState(
+        state: MeetingOverlayController.OverlayState,
+        duration: TimeInterval,
+        showLevels: Bool
+    ) {
+        let stateText = accessibilityStateDescription(for: state)
+        let overlayValue: String
+        if state == .recording {
+            overlayValue = "\(stateText), \(formatDuration(duration))"
+        } else {
+            overlayValue = stateText
+        }
+        setAccessibilityValue(overlayValue)
+        statusDot.setAccessibilityElement(!statusDot.isHidden)
+        statusDot.setAccessibilityLabel("Meeting status")
+        statusDot.setAccessibilityValue(stateText)
+        titleLabel.setAccessibilityValue(titleLabel.stringValue)
+        detailLabel.setAccessibilityValue(detailLabel.stringValue)
+        timerLabel.setAccessibilityValue(timerLabel.stringValue)
+        refreshAudioLevelAccessibility(isVisible: showLevels)
+    }
+
+    private func refreshAudioLevelAccessibility(isVisible: Bool) {
+        audioWaveform.setAccessibilityElement(isVisible)
+        audioWaveform.setAccessibilityValue(
+            "Mic \(accessibilityPercent(currentMicLevel)), system audio \(accessibilityPercent(currentSystemLevel))"
+        )
+    }
+
+    private func accessibilityStateDescription(for state: MeetingOverlayController.OverlayState) -> String {
+        switch state {
+        case .idle:
+            return "Idle"
+        case .preparing:
+            return currentWarmupStatus.title
+        case .prompt:
+            return "Prompt: \(titleLabel.stringValue)"
+        case .recording:
+            return isRecordingMinimized ? "Recording, minimized" : "Recording"
+        case .transcribing:
+            return "Saving transcript"
+        case .saved:
+            return "Saved transcript"
+        case .error:
+            return "Error: \(titleLabel.stringValue)"
+        }
+    }
+
+    private func accessibilityPercent(_ level: Float) -> String {
+        accessibilityPercent(Double(level))
+    }
+
+    private func accessibilityPercent(_ level: Double) -> String {
+        guard level.isFinite else { return "0 percent" }
+        let clamped = max(0, min(1, level))
+        return "\(Int((clamped * 100).rounded())) percent"
     }
 
     private func stopButtonImage() -> NSImage? {
