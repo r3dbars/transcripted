@@ -5,6 +5,8 @@ import TranscriptedCore
 
 @MainActor
 final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDelegate {
+    private static let frameAutosaveName = NSWindow.FrameAutosaveName("TranscriptedSettings")
+
     private let speakerPeopleModel: SpeakerPeopleSettingsViewModel
     private let navigationModel: TranscriptedSettingsNavigationModel
     private let hostingController: NSHostingController<TranscriptedSettingsView>
@@ -37,7 +39,10 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         window.titleVisibility = .hidden
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
-        window.center()
+        if !window.setFrameUsingName(Self.frameAutosaveName) {
+            window.center()
+        }
+        window.setFrameAutosaveName(Self.frameAutosaveName)
 
         super.init(window: window)
         window.delegate = self
