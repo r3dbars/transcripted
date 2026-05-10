@@ -123,9 +123,9 @@ struct PermissionsOnboardingView: View {
             }
         case .permissions:
             CenterStage {
-                Kicker("Two permissions")
-                Headline(primary: "Two yeses and we're set.", size: 42)
-                BodyCopy("macOS will ask. You can change your mind anytime.", maxWidth: 440)
+                Kicker("Two to start")
+                Headline(primary: "Two yeses now. Meetings can come later.", size: 42)
+                BodyCopy("Microphone and Accessibility are required for dictation. System audio and Calendar are optional later.", maxWidth: 460)
                 VStack(spacing: 12) {
                     PermissionGrantRow(
                         title: "Microphone",
