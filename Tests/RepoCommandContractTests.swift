@@ -156,6 +156,12 @@ func testRepoCommandContract() {
             "local build should make model bundling an explicit build choice"
         )
         assertTrue(
+            localBuildScript.contains("SWIFTC_NUM_THREADS")
+                && localBuildScript.contains("-whole-module-optimization")
+                && localBuildScript.contains("-num-threads \"$SWIFTC_NUM_THREADS\""),
+            "local build should use threaded whole-module Swift compilation for a fast signed build loop"
+        )
+        assertTrue(
             localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
             "local launch smoke should not create dirty-shutdown diagnostics markers"
         )
@@ -183,6 +189,12 @@ func testRepoCommandContract() {
         assertTrue(
             betaBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
             "beta release build should default to the lightweight model-download distribution"
+        )
+        assertTrue(
+            betaBuildScript.contains("SWIFTC_NUM_THREADS")
+                && betaBuildScript.contains("-whole-module-optimization")
+                && betaBuildScript.contains("-num-threads \"$SWIFTC_NUM_THREADS\""),
+            "beta release build should use threaded whole-module Swift compilation"
         )
     }
 

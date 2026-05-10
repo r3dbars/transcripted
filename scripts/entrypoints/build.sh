@@ -16,6 +16,7 @@ LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
@@ -296,10 +297,13 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile
 echo "Compiling..."
+echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
+    -whole-module-optimization \
+    -num-threads "$SWIFTC_NUM_THREADS" \
     -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \

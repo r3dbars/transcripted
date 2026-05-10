@@ -26,6 +26,7 @@ USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
 
 if [ -z "$BETA_TOKEN" ]; then
@@ -452,10 +453,13 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
+echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
+    -whole-module-optimization \
+    -num-threads "$SWIFTC_NUM_THREADS" \
     -D BETA_BUILD \
     -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
