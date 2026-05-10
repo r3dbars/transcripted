@@ -282,6 +282,7 @@ class DictationSessionController: ObservableObject {
                     await self.waitForEngineAndStart(sourceApp: sourceApp)
                 }
             }
+            return
         case .showLoadingWhileWaiting:
             // Slow path — engine is settling after a device change. Wait for it.
             overlayController.showLoadingState(
