@@ -82,6 +82,20 @@
       "must_contain": [
         "[redacted-secret]"
       ]
+    },
+    {
+      "id": "diagnostic-key-values",
+      "input": "DIAG source_app_bundle_id=com.openai.codex source_app_name=Codex trigger=physical_key audio_device=MacBook Pro Microphone",
+      "must_not_contain": [
+        "com.openai.codex",
+        "source_app_name=Codex",
+        "MacBook Pro Microphone"
+      ],
+      "must_contain": [
+        "source_app_bundle_id=[redacted-sensitive-value]",
+        "source_app_name=[redacted-sensitive-value]",
+        "audio_device=[redacted-sensitive-value]"
+      ]
     }
   ]
 }
