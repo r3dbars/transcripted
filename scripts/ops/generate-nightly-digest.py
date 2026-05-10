@@ -1172,6 +1172,10 @@ def build_recommendations(
     recommendations: list[str] = []
     if dau_unknown:
         recommendations.append("Fix DAU visibility first: set PostHog read credentials, then rerun this report.")
+    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
+    if blocked_lanes and not dau_unknown:
+        lane = blocked_lanes[0]
+        recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
     if open_prs:
         pr = open_prs[0]
         recommendations.append(f"Review PR #{pr.get('number')} first: {pr.get('title')}.")
@@ -1565,63 +1569,47 @@ def render_html(payload: dict[str, Any]) -> str:
     dau = ceo["dau_status"]
 
     green_lanes = [lane for lane in lanes if lane["status"] == "green"]
-    blocked_lanes = [lane for lane in lanes if lane["status"] in ("blocked", "unknown")]
+    hard_blocked_lanes = [lane for lane in lanes if lane["status"] == "blocked"]
+    unknown_lanes = [lane for lane in lanes if lane["status"] == "unknown"]
 
     step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"][:4])
     safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"][:4])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
     accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"][:4])
-    recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["recommendations"][:3])
+    recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in payload["human_next_steps"][:4])
     if not accomplishment_items:
         accomplishment_items = "<li>No overnight accomplishments were captured.</li>"
     if not recommendation_items:
         recommendation_items = "<li>No human action needed right now.</li>"
 
     dau_unknown = dau["current"] == "Unknown today"
-    averages = dau_averages(dau)
-    blocker_word = "blocker" if counts["blocked_or_unknown"] == 1 else "blockers"
+    hard_blocked_count = len(hard_blocked_lanes)
+    unknown_count = len(unknown_lanes)
     pr_word = "PR" if counts["open_nightly_prs"] == 1 else "PRs"
-    action_word = "thing" if counts["needs_human"] == 1 else "things"
-    action_verb = "needs" if counts["needs_human"] == 1 else "need"
-    hero_title = (
-        "DAU is unknown."
-        if dau_unknown
-        else f"{counts['active_lanes']} jobs ran. {counts['blocked_or_unknown']} {blocker_word}."
-    )
+    action_word = "action" if counts["needs_human"] == 1 else "actions"
+    blocked_label, blocked_detail = blocked_status_text(hard_blocked_count, unknown_count)
+    hero_title = "DAU is unknown" if dau_unknown else "What happened last night"
     hero_subtitle = (
-        f"DAU unknown. Goal: {dau['goal']}. Fix measurement first."
+        f"Goal: {dau['goal']}. Fix measurement first."
         if dau_unknown
-        else f"{dau['current']} now. {dau['gap']} to 1,000. {counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} {action_word} {action_verb} you."
+        else (
+            f"{counts['active_lanes']} jobs ran. {blocked_detail}. "
+            f"{counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} human {action_word}."
+        )
     )
-    if blocked_lanes:
-        bottom_line = ceo["do_now"]
-    else:
-        night_bits = ["Nothing is blocked."]
-        if counts["open_nightly_prs"]:
-            night_bits.append(f"{counts['open_nightly_prs']} {pr_word} waiting.")
-        if counts["needs_human"]:
-            night_bits.append(f"{counts['needs_human']} {action_word} {action_verb} you.")
-        if len(night_bits) == 1:
-            night_bits.append("No human action needed.")
-        bottom_line = " ".join(night_bits)
+    bottom_line = night_summary_text(int(counts["active_lanes"]), hard_blocked_count, unknown_count)
     dau_context = (
-        "Fix measurement first."
+        dau["note"]
         if dau_unknown
-        else f"{averages['last_7']} avg. Weekdays {averages['weekday']}; weekends {averages['weekend']}."
+        else "PostHog last 24 hours"
     )
-    if blocked_lanes:
-        health_text = "Blocked"
-        health_context = ", ".join(lane["name"] for lane in blocked_lanes[:2])
-    elif counts["needs_human"]:
-        health_text = "Review needed"
-        health_context = f"{counts['needs_human']} items. 0 blockers."
-    else:
-        health_text = "Quiet"
-        health_context = f"{counts['active_lanes']} jobs ran cleanly."
+    health_text = blocked_label
+    health_context = blocked_detail
     details_summary = f"More detail <span>{len(lanes)} lanes, {len(open_prs)} {pr_word}</span>"
 
+    recent_merged_prs = payload["recent_merged_prs"][:6]
     if open_prs:
-        pr_rows = "\n".join(
+        open_pr_rows = "\n".join(
             "<div class=\"pr-row\">"
             "<div>"
             f"<a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a>"
@@ -1631,8 +1619,22 @@ def render_html(payload: dict[str, Any]) -> str:
             "</div>"
             for pr in open_prs
         )
+        pr_rows = f"<div class=\"pr-subhead\">Open nightly PRs</div>{open_pr_rows}"
     else:
-        pr_rows = "<div class=\"pr-row quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></div>"
+        pr_rows = "<div class=\"pr-subhead\">Open nightly PRs</div><div class=\"pr-row quiet\"><strong>No open nightly PRs.</strong><span>The PR queue is quiet.</span></div>"
+
+    if recent_merged_prs:
+        merged_rows = "\n".join(
+            "<div class=\"pr-row merged\">"
+            "<div>"
+            f"<a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a>"
+            f"<strong>{escape(pr.get('title', ''))}</strong>"
+            "</div>"
+            f"<span>merged · {escape(pr.get('mergedAt', ''))}</span>"
+            "</div>"
+            for pr in recent_merged_prs
+        )
+        pr_rows += f"<div class=\"pr-subhead\">Recently merged</div>{merged_rows}"
 
     role_sections: list[str] = [
         (
@@ -1642,7 +1644,7 @@ def render_html(payload: dict[str, Any]) -> str:
             "</div>"
         )
     ]
-    for group in ("Trust", "Activation", "Growth", "Execution", "Judgment"):
+    for group in ("Trust", "Activation", "Growth", "Execution", "Judgment", "Other"):
         group_lanes = [lane for lane in lanes if lane_group(lane["id"]) == group]
         if not group_lanes:
             continue
@@ -1756,7 +1758,7 @@ p {{ margin: 0; }}
 .section {{ padding: 16px 18px; }}
 .summary-strip {{
   display: grid;
-  grid-template-columns: 1fr 1.5fr 1fr;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }}
@@ -1764,9 +1766,11 @@ p {{ margin: 0; }}
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  min-width: 0;
   padding: 13px 14px;
   box-shadow: 0 8px 24px rgba(17, 24, 39, .035);
 }}
+.summary-strip .wide {{ grid-column: 1 / -1; }}
 .summary-strip span {{
   color: var(--muted);
   display: block;
@@ -1775,7 +1779,7 @@ p {{ margin: 0; }}
   text-transform: uppercase;
   margin-bottom: 5px;
 }}
-.summary-strip strong {{ display: block; font-size: 17px; line-height: 1.25; }}
+.summary-strip strong {{ display: block; font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }}
 .summary-strip small {{ color: var(--muted); display: block; font-size: 12px; line-height: 1.35; margin-top: 4px; }}
 .focus-section, .actions-section {{ margin-top: 12px; }}
 .focus-section {{ border-color: #b9c9dd; }}
@@ -1844,6 +1848,16 @@ p {{ margin: 0; }}
   border-radius: 8px;
   overflow: hidden;
 }}
+.pr-subhead {{
+  background: #f2f5f9;
+  border-bottom: 1px solid #edf0f4;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .04em;
+  padding: 9px 14px;
+  text-transform: uppercase;
+}}
 .pr-row {{
   align-items: center;
   background: #fbfcfe;
@@ -1856,6 +1870,7 @@ p {{ margin: 0; }}
 .pr-row strong {{ display: block; margin-top: 3px; }}
 .pr-row span {{ color: var(--muted); font-size: 12px; white-space: nowrap; }}
 .pr-row.quiet {{ color: var(--muted); }}
+.pr-row.merged {{ background: #fff; }}
 .role-matrix {{
   border: 1px solid #edf0f4;
   border-radius: 8px;
@@ -1951,8 +1966,11 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="summary-strip">
     <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
-    <div><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
-    <div><span>Health</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
+    <div><span>Gap to 1,000</span><strong>{escape(dau['gap'])}</strong></div>
+    <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
+    <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
+    <div><span>Blocked</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
+    <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
   </section>
 
   <section class="section focus-section">
