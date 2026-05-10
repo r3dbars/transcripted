@@ -39,6 +39,7 @@ struct PermissionsOnboardingView: View {
     @State private var meetingPromptsEnabled = true
     @State private var diagnosticsEnabled = CrashReportingPreferences.isEnabled() && AnalyticsPreferences.isEnabled()
     @State private var demoDictationText = ""
+    @State private var showDemoPasteHelp = false
     @State private var copiedAgentItem: AgentCopyItem?
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var permissionRefreshTask: Task<Void, Never>?
@@ -166,9 +167,12 @@ struct PermissionsOnboardingView: View {
             CenterStage {
                 Kicker("Your turn")
                 Headline(primary: "Try dictation\nright now.", size: 42)
-                BodyCopy("Tap Right Option, say what you want, then tap Right Option again. Transcripted will paste it here.", maxWidth: 540)
-                DemoPasteTarget(text: $demoDictationText)
-                    .focused($demoEditorFocused)
+                BodyCopy("Tap Right Option, say a sentence, then tap it again. Your words paste into the focused field - try here, or any other app.", maxWidth: 560)
+                DemoPasteTarget(
+                    text: $demoDictationText,
+                    isFocused: $demoEditorFocused,
+                    showHelp: showDemoPasteHelp
+                )
                     .padding(.top, 6)
                 HStack(spacing: 12) {
                     DictationPill(label: Self.defaultDictationShortcut)
@@ -179,8 +183,18 @@ struct PermissionsOnboardingView: View {
                 }
                 .padding(.top, 6)
                 .onAppear {
+                    showDemoPasteHelp = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         demoEditorFocused = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        guard currentStep.kind == .shortcut else { return }
+                        showDemoPasteHelp = demoDictationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                }
+                .onChange(of: demoDictationText) { _, newValue in
+                    if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        showDemoPasteHelp = false
                     }
                 }
             }
@@ -990,6 +1004,8 @@ private struct DictationPill: View {
 
 private struct DemoPasteTarget: View {
     @Binding var text: String
+    let isFocused: FocusState<Bool>.Binding
+    let showHelp: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1007,6 +1023,7 @@ private struct DemoPasteTarget: View {
                 .scrollContentBackground(.hidden)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
+                .focused(isFocused)
 
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1016,6 +1033,11 @@ private struct DemoPasteTarget: View {
                     Text("Tap Right Option once, speak, then tap it again.")
                         .font(.system(size: 12))
                         .foregroundStyle(OnboardingTheme.muted)
+                    if showHelp {
+                        Text("Nothing showing up? Click this field, or try dictating into any app.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(OnboardingTheme.codex)
+                    }
                 }
                 .padding(.horizontal, 22)
                 .padding(.vertical, 20)
