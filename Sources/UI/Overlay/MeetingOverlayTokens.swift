@@ -17,7 +17,7 @@ enum MeetingOverlayTokens {
     static let dotIdle       = OverlayTokens.textMuted
     static let dotPrep       = OverlayTokens.textSecondary
     static let dotPrompt     = OverlayTokens.accentGreen
-    static let dotRecording  = NSColor(calibratedRed: 1.00, green: 0.27, blue: 0.23, alpha: 1.0)
+    static let dotRecording  = OverlayTokens.Palette.red
     static let dotSaved      = NSColor.systemGreen
     static let dotError      = NSColor.systemRed
     static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
