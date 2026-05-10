@@ -161,7 +161,7 @@ struct PermissionsOnboardingView: View {
                         requestPermission(.accessibility)
                     }
                 }
-                .frame(width: 480)
+                .frame(width: OnboardingTheme.permissionStackWidth)
                 .padding(.top, 8)
                 Text(hasRequiredPermissions ? "You're ready to keep going." : "Allow both to continue.")
                     .font(.system(size: 12, weight: .medium))
@@ -252,7 +252,7 @@ struct PermissionsOnboardingView: View {
                     detail: "Use read-only calendar access to notice upcoming calls.",
                     isOn: $meetingPromptsEnabled
                 )
-                .frame(maxWidth: 440)
+                .frame(maxWidth: OnboardingTheme.calendarToggleMaxWidth)
                 .padding(.top, 4)
                 Button(calendarGranted
                     ? TranscriptedPermissionKind.calendar.onboardingGrantedTitle
@@ -293,13 +293,13 @@ struct PermissionsOnboardingView: View {
             CenterStage {
                 Kicker("One last thing")
                 Headline(primary: "Help us make it better?", size: 42)
-                BodyCopy("Anonymous diagnostics help us find bugs and fix them fast.", maxWidth: 480)
+                BodyCopy("Anonymous diagnostics help us find bugs and fix them fast.", maxWidth: OnboardingTheme.permissionStackWidth)
                 ToggleCard(
                     title: "Share anonymous diagnostics",
                     detail: "Crash reports, feature counts, app version, and macOS version. Never audio, transcripts, or anything you type or say.",
                     isOn: $diagnosticsEnabled
                 )
-                .frame(width: 480)
+                .frame(width: OnboardingTheme.permissionStackWidth)
                 .padding(.top, 10)
                 .onChange(of: diagnosticsEnabled) { _, newValue in
                     CrashReportingPreferences.setEnabled(newValue)
@@ -476,6 +476,12 @@ private enum OnboardingNavigationDirection {
     }
 }
 
+private struct OnboardingShadow {
+    let opacity: Double
+    let radius: CGFloat
+    let y: CGFloat
+}
+
 private enum OnboardingTheme {
     static let canvas = Color(red: 0.89, green: 0.87, blue: 0.84)
     static let window = Color(red: 0.98, green: 0.98, blue: 0.96)
@@ -489,6 +495,56 @@ private enum OnboardingTheme {
     static let recording = Color(red: 1.0, green: 0.27, blue: 0.23)
     static let claude = Color(red: 0.85, green: 0.47, blue: 0.34)
     static let codex = Color(red: 0.06, green: 0.64, blue: 0.50)
+    static let trafficClose = Color(red: 1.0, green: 0.37, blue: 0.34)
+    static let trafficMinimize = Color(red: 1.0, green: 0.74, blue: 0.18)
+    static let micStream = Color(red: 0.55, green: 0.65, blue: 1.0)
+    static let systemStream = Color(red: 1.0, green: 0.70, blue: 0.55)
+    static let calendarAccent = Color(red: 0.55, green: 0.90, blue: 0.76)
+
+    static let radiusCompact: CGFloat = 8
+    static let radiusButton: CGFloat = 10
+    static let radiusCard: CGFloat = 12
+    static let radiusLarge: CGFloat = 14
+
+    static let padButtonH: CGFloat = 24
+    static let padNavH: CGFloat = 32
+    static let padContentH: CGFloat = 60
+    static let padContentV: CGFloat = 28
+
+    static let centerStageMaxWidth: CGFloat = 800
+    static let ledeMaxWidth: CGFloat = 540
+    static let bodyCopyMaxWidth: CGFloat = 430
+    static let calendarToggleMaxWidth: CGFloat = 440
+    static let permissionStackWidth: CGFloat = 480
+    static let dictationDemoWidth: CGFloat = 360
+    static let dictationDemoHeight: CGFloat = 170
+    static let demoPasteWidth: CGFloat = 560
+    static let demoPasteHeight: CGFloat = 150
+    static let miniVisualWidth: CGFloat = 380
+    static let calendarCardWidth: CGFloat = 340
+    static let memoryFlowWidth: CGFloat = 720
+
+    static let shadowShell = OnboardingShadow(opacity: 0.22, radius: 45, y: 24)
+    static let shadowHeroBaseOpacity = 0.22
+    static let shadowHeroPulseOpacity = 0.04
+    static let shadowHeroPulseRadius: CGFloat = 30
+    static let shadowHeroPulseY: CGFloat = 20
+    static let shadowSoft = OnboardingShadow(opacity: 0.04, radius: 8, y: 4)
+    static let shadowSoftRaised = OnboardingShadow(opacity: 0.04, radius: 10, y: 5)
+    static let shadowCard = OnboardingShadow(opacity: 0.04, radius: 12, y: 6)
+    static let shadowCardWide = OnboardingShadow(opacity: 0.04, radius: 14, y: 6)
+    static let shadowInput = OnboardingShadow(opacity: 0.05, radius: 14, y: 8)
+    static let shadowPanel = OnboardingShadow(opacity: 0.06, radius: 18, y: 10)
+    static let shadowPanelWide = OnboardingShadow(opacity: 0.06, radius: 20, y: 10)
+    static let shadowAccentCard = OnboardingShadow(opacity: 0.12, radius: 18, y: 10)
+    static let shadowMedium = OnboardingShadow(opacity: 0.08, radius: 24, y: 12)
+    static let shadowMediumTight = OnboardingShadow(opacity: 0.08, radius: 22, y: 12)
+}
+
+private extension View {
+    func onboardingShadow(_ shadow: OnboardingShadow, color: Color = .black) -> some View {
+        self.shadow(color: color.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+    }
 }
 
 private struct OnboardingWindowShell<Content: View>: View {
@@ -561,20 +617,20 @@ private struct OnboardingWindowShell<Content: View>: View {
                 )
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.22), radius: 45, y: 24)
+        .onboardingShadow(OnboardingTheme.shadowShell)
     }
 }
 
 private struct TrafficLights: View {
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34))
-            Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18))
+            Circle().fill(OnboardingTheme.trafficClose)
+            Circle().fill(OnboardingTheme.trafficMinimize)
             Circle().fill(OnboardingTheme.success)
         }
         .frame(width: 52, height: 12)
@@ -640,17 +696,17 @@ private struct NavBar: View {
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(OnboardingTheme.window)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, OnboardingTheme.padButtonH)
                 .padding(.vertical, 12)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: OnboardingTheme.radiusButton, style: .continuous)
                         .fill(primaryDisabled ? OnboardingTheme.muted.opacity(0.45) : OnboardingTheme.ink)
                 )
             }
             .buttonStyle(.plain)
             .disabled(primaryDisabled)
         }
-        .padding(.horizontal, 32)
+        .padding(.horizontal, OnboardingTheme.padNavH)
         .frame(height: 78)
     }
 }
@@ -668,10 +724,10 @@ private struct CenterStage<Content: View>: View {
             VStack(spacing: 18) {
                 content
             }
-            .frame(maxWidth: 800)
+            .frame(maxWidth: OnboardingTheme.centerStageMaxWidth)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 60)
+        .padding(.horizontal, OnboardingTheme.padContentH)
     }
 }
 
@@ -696,8 +752,8 @@ private struct SplitStage<Left: View, Right: View>: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 60)
-        .padding(.vertical, 28)
+        .padding(.horizontal, OnboardingTheme.padContentH)
+        .padding(.vertical, OnboardingTheme.padContentV)
     }
 }
 
@@ -741,9 +797,9 @@ private struct Headline: View {
 
 private struct Lede: View {
     let text: String
-    var maxWidth: CGFloat = 540
+    var maxWidth: CGFloat = OnboardingTheme.ledeMaxWidth
 
-    init(_ text: String, maxWidth: CGFloat = 540) {
+    init(_ text: String, maxWidth: CGFloat = OnboardingTheme.ledeMaxWidth) {
         self.text = text
         self.maxWidth = maxWidth
     }
@@ -761,9 +817,9 @@ private struct Lede: View {
 
 private struct BodyCopy: View {
     let text: String
-    var maxWidth: CGFloat = 430
+    var maxWidth: CGFloat = OnboardingTheme.bodyCopyMaxWidth
 
-    init(_ text: String, maxWidth: CGFloat = 430) {
+    init(_ text: String, maxWidth: CGFloat = OnboardingTheme.bodyCopyMaxWidth) {
         self.text = text
         self.maxWidth = maxWidth
     }
@@ -788,7 +844,14 @@ private struct HeroWaveCircle: View {
                 Circle()
                     .fill(OnboardingTheme.ink)
                     .frame(width: 200, height: 200)
-                    .shadow(color: .black.opacity(0.22 + 0.04 * abs(sin(t * 1.4))), radius: 30, y: 20)
+                    .shadow(
+                        color: .black.opacity(
+                            OnboardingTheme.shadowHeroBaseOpacity
+                                + OnboardingTheme.shadowHeroPulseOpacity * abs(sin(t * 1.4))
+                        ),
+                        radius: OnboardingTheme.shadowHeroPulseRadius,
+                        y: OnboardingTheme.shadowHeroPulseY
+                    )
 
                 HStack(alignment: .center, spacing: 2) {
                     ForEach(0..<count, id: \.self) { index in
@@ -830,7 +893,7 @@ private struct PrivacyPill: View {
         .padding(.vertical, 10)
         .background(Capsule().fill(OnboardingTheme.card))
         .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 4)
+        .onboardingShadow(OnboardingTheme.shadowSoft)
     }
 }
 
@@ -874,14 +937,14 @@ private struct PermissionGrantRow: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .fill(granted ? OnboardingTheme.ink : OnboardingTheme.card)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 10, y: 5)
+        .onboardingShadow(OnboardingTheme.shadowSoftRaised)
         .animation(.easeInOut(duration: 0.2), value: granted)
     }
 }
@@ -897,11 +960,11 @@ private struct InkButtonStyle: ButtonStyle {
             .padding(.horizontal, compact ? 14 : 22)
             .padding(.vertical, compact ? 8 : 12)
             .background(
-                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                RoundedRectangle(cornerRadius: compact ? OnboardingTheme.radiusCompact : OnboardingTheme.radiusButton, style: .continuous)
                     .fill(isSubtle ? Color.clear : OnboardingTheme.ink)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
+                RoundedRectangle(cornerRadius: compact ? OnboardingTheme.radiusCompact : OnboardingTheme.radiusButton, style: .continuous)
                     .stroke(isSubtle ? OnboardingTheme.border : Color.clear, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.72 : 1)
@@ -952,7 +1015,7 @@ private struct DictationDemoCard: View {
                 }
                 .padding(18)
             }
-            .frame(width: 360, height: 170)
+            .frame(width: OnboardingTheme.dictationDemoWidth, height: OnboardingTheme.dictationDemoHeight)
 
             DictationPill(label: "Listening")
         }
@@ -988,12 +1051,12 @@ private struct MiniWindow<Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.06), radius: 18, y: 10)
+        .onboardingShadow(OnboardingTheme.shadowPanel)
     }
 }
 
@@ -1024,13 +1087,13 @@ private struct DemoPasteTarget: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous)
                 .fill(OnboardingTheme.card)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous)
                         .stroke(OnboardingTheme.border, lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.05), radius: 14, y: 8)
+                .onboardingShadow(OnboardingTheme.shadowInput)
 
             TextEditor(text: $text)
                 .font(.system(size: 18))
@@ -1059,7 +1122,7 @@ private struct DemoPasteTarget: View {
                 .allowsHitTesting(false)
             }
         }
-        .frame(width: 560, height: 150)
+        .frame(width: OnboardingTheme.demoPasteWidth, height: OnboardingTheme.demoPasteHeight)
         .overlay(alignment: .bottomTrailing) {
             if !text.isEmpty {
                 Button("Clear") {
@@ -1109,15 +1172,15 @@ private struct DualStreamVisual: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            StreamCard(label: "You", subtitle: "Mic", color: Color(red: 0.55, green: 0.65, blue: 1.0), active: true)
-            StreamCard(label: "Everyone else", subtitle: "System audio", color: Color(red: 1.0, green: 0.70, blue: 0.55), active: systemReady)
+            StreamCard(label: "You", subtitle: "Mic", color: OnboardingTheme.micStream, active: true)
+            StreamCard(label: "Everyone else", subtitle: "System audio", color: OnboardingTheme.systemStream, active: systemReady)
             Text("-> local transcript with speaker labels")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .kerning(1.2)
                 .textCase(.uppercase)
                 .foregroundStyle(OnboardingTheme.muted)
         }
-        .frame(width: 380)
+        .frame(width: OnboardingTheme.miniVisualWidth)
     }
 }
 
@@ -1152,12 +1215,12 @@ private struct StreamCard: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 14, y: 6)
+        .onboardingShadow(OnboardingTheme.shadowCardWide)
     }
 }
 
@@ -1190,7 +1253,7 @@ private struct MeetingDemoCard: View {
             }
             .padding(18)
         }
-        .frame(width: 380, height: 250)
+        .frame(width: OnboardingTheme.miniVisualWidth, height: 250)
     }
 }
 
@@ -1217,21 +1280,21 @@ private struct ToggleCard: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+        .onboardingShadow(OnboardingTheme.shadowCard)
     }
 }
 
 private struct CalendarMock: View {
     let connected: Bool
     private let events = [
-        ("10:00", "Design review", "45m", Color(red: 0.55, green: 0.65, blue: 1.0)),
-        ("11:30", "Team sync", "30m", Color(red: 1.0, green: 0.70, blue: 0.55)),
-        ("02:00", "1:1 with Priya", "30m", Color(red: 0.55, green: 0.90, blue: 0.76))
+        ("10:00", "Design review", "45m", OnboardingTheme.micStream),
+        ("11:30", "Team sync", "30m", OnboardingTheme.systemStream),
+        ("02:00", "1:1 with Priya", "30m", OnboardingTheme.calendarAccent)
     ]
 
     var body: some View {
@@ -1265,20 +1328,20 @@ private struct CalendarMock: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(connected ? OnboardingTheme.cardSoft : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCompact, style: .continuous))
                     .opacity(connected ? 1 : 0.45)
                 }
             }
         }
         .padding(20)
-        .frame(width: 340)
+        .frame(width: OnboardingTheme.calendarCardWidth)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.08), radius: 24, y: 12)
+        .onboardingShadow(OnboardingTheme.shadowMedium)
     }
 }
 
@@ -1311,7 +1374,7 @@ private struct MemoryFlowVisual: View {
             }
             .frame(width: 170)
         }
-        .frame(width: 720, height: 210)
+        .frame(width: OnboardingTheme.memoryFlowWidth, height: 210)
     }
 }
 
@@ -1338,12 +1401,12 @@ private struct MemorySourceCard: View {
         .padding(14)
         .frame(width: 158, height: 84, alignment: .leading)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+        .onboardingShadow(OnboardingTheme.shadowCard)
     }
 }
 
@@ -1408,7 +1471,7 @@ private struct MemoryIndexCard: View {
             .padding(.horizontal, 10)
             .frame(height: 34)
             .background(OnboardingTheme.cardSoft)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCompact, style: .continuous))
 
             VStack(alignment: .leading, spacing: 8) {
                 MemoryTagRow(label: "decisions", value: "18")
@@ -1419,12 +1482,12 @@ private struct MemoryIndexCard: View {
         .padding(16)
         .frame(width: 210, height: 174)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusLarge, style: .continuous)
                 .stroke(OnboardingTheme.ink.opacity(0.18), lineWidth: 1.3)
         )
-        .shadow(color: .black.opacity(0.08), radius: 22, y: 12)
+        .onboardingShadow(OnboardingTheme.shadowMediumTight)
     }
 }
 
@@ -1462,9 +1525,9 @@ private struct MemoryQuestionCard: View {
         .padding(.horizontal, 12)
         .frame(height: 42)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusButton, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusButton, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
     }
@@ -1483,14 +1546,14 @@ private struct AgentDemoCard: View {
             .foregroundStyle(OnboardingTheme.muted)
         }
         .padding(18)
-        .frame(width: 380)
+        .frame(width: OnboardingTheme.miniVisualWidth)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.06), radius: 20, y: 10)
+        .onboardingShadow(OnboardingTheme.shadowPanelWide)
     }
 }
 
@@ -1514,7 +1577,7 @@ private struct ChatBubble: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(accent.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusButton, style: .continuous))
     }
 }
 
@@ -1564,7 +1627,7 @@ private struct ConnectAgentStage: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 12)
             }
-            .padding(.horizontal, 60)
+            .padding(.horizontal, OnboardingTheme.padContentH)
             .padding(.vertical, 34)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1612,9 +1675,9 @@ private struct AgentOptionCard: View {
         .padding(22)
         .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
         .background(inverted ? OnboardingTheme.ink : OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
     }
@@ -1718,11 +1781,11 @@ private struct ActionStepCard: View {
         .padding(16)
         .frame(width: 190, height: 150, alignment: .leading)
         .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: OnboardingTheme.radiusCard, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: color.opacity(0.12), radius: 18, y: 10)
+        .onboardingShadow(OnboardingTheme.shadowAccentCard, color: color)
     }
 }
