@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after this audit pass: **86/100, B+**
+Current score after two audit/fix loops: **88/100, B+**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -30,7 +30,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
 | Performance regression guardrails | A- | 93 | 1505 tests pass; repo contract tests now guard model duplication, icon bloat, and dictation fast start | Automated perf-budget parser for bundle size, startup, dictation latency, and cache size |
-| Process hygiene / single-instance behavior | C | 72 | Local state showed multiple Transcripted app copies running from different build paths | One effective Transcripted process per user session, or explicit dev-only isolation |
+| Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
 
@@ -85,13 +85,38 @@ Regression guard:
 
 - `Tests/RepoCommandContractTests.swift` now asserts the release resources ship only `Transcripted.icns`.
 
+### 3. Added a single-instance guard
+
+Files:
+
+- `Sources/Support/SingleInstanceGuard.swift`
+- `Sources/TranscriptedApp.swift`
+- `Tests/SingleInstanceGuardTests.swift`
+
+Why:
+
+- Multiple Transcripted builds were running from different paths during the audit.
+- Each extra copy can hold model memory, write events, own hotkeys, and make performance/reliability symptoms look worse than the actual app.
+
+Change made:
+
+- App startup now acquires an app-support file lock before telemetry, model warmup, overlays, or hotkeys are initialized.
+- A second modern Transcripted instance posts a reopen request to the existing app and exits immediately.
+- The existing app handles that reopen request by showing onboarding or the home settings window.
+- Fast tests now cover lock acquire, duplicate rejection, release, and idempotent acquire behavior.
+
+Measured proof:
+
+- After `bash build.sh`, one rebuilt app process was running from `build/Transcripted.app`.
+- Running `open -n build/Transcripted.app` again left only that one rebuilt app process resident after 4 seconds.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1505 tests, 1505 passed, 0 failed**.
+- `bash run-tests.sh`: **1510 tests, 1510 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed.
-- Incremental post-fix build wall time: **1:32.16**.
+- Incremental post-fix build wall time: **1:10.95**.
 - Rebuilt app size: **550 MB**.
 
 ### Latest Public Release
@@ -222,34 +247,29 @@ These are the next improvements I would execute in order.
    - Confirm no `audio_start_deferred` or `dictation_recording_retry` appears for the fast path.
    - Raise dictation start responsiveness to A+/98 only if the log proves it.
 
-2. **Single-instance/process hygiene**
-   - Add a startup guard or dev-safe duplicate detection.
-   - Prevent multiple app copies with the same bundle id from running in normal use.
-   - A+ gate: one Transcripted app process per user session.
-
-3. **Cache cleanup and stale model pruning**
+2. **Cache cleanup and stale model pruning**
    - Add a diagnostics/cleanup view that reports model/cache size.
    - Offer removal of stale FluidAudio models not needed by the active app.
    - Keep Whisper cleanup explicit because users may have selected Whisper.
    - A+ gate: user can recover multiple GB without Finder spelunking.
 
-4. **Launch readiness policy**
+3. **Launch readiness policy**
    - Decide whether first-use speed or tiny launch footprint wins.
    - Option A: keep eager warmup, but make readiness state explicit and optimize model load time.
    - Option B: lazy-load models on first dictation/meeting and make installer/app launch feel much lighter.
    - A+ gate: either ready under 10s or honestly lazy with clear UX.
 
-5. **Distribution strategy**
+4. **Distribution strategy**
    - The bundled model is the reason the app is 550 MB expanded.
    - To reach A+ on download size, ship a thin app and download the model on first run, or provide separate full/offline and thin installers.
    - A+ gate: default DMG under 150 MB, or a conscious offline-first exception.
 
-6. **Meeting performance harness**
+5. **Meeting performance harness**
    - Build a local corpus runner for a few anonymized/fixture meetings.
    - Track RTF, peak RSS, and segment counts.
    - A+ gate: p95 RTF under 0.050, stable memory, no main-thread stalls.
 
-7. **CI performance budget**
+6. **CI performance budget**
    - Add a script that fails on resource bloat, duplicate model bundles, too many shipped assets, and performance log regressions.
    - A+ gate: bundle and latency regressions fail before release.
 
@@ -261,8 +281,7 @@ The best next work is not micro-optimizing Swift code. It is:
 
 - stop accidental slow startup paths,
 - keep only needed release assets,
-- prevent duplicate running copies,
 - expose and clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first two are done in this pass. The remaining four are what keep the overall score below A+.
+The first three are done in this pass. Cache cleanup, launch readiness, and distribution strategy still keep the overall score below A+.

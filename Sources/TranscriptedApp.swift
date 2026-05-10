@@ -62,6 +62,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         dismissPopover: { [weak self] in self?.closePopover() }
     )
 
+    private let singleInstanceGuard = SingleInstanceGuard()
+    private var singleInstanceReopenObserver: NSObjectProtocol?
+    private var duplicateInstanceShouldTerminateImmediately = false
+
     let appState = TranscriptedAppState()
     let overlayController = FloatingOverlayController()
     let sessionController = DictationSessionController()
@@ -82,6 +86,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var activationPolicySubscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard acquireSingleInstanceLock() else { return }
+
         // Crash reporting
         CrashReporter.setup()
 
@@ -218,16 +224,29 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if duplicateInstanceShouldTerminateImmediately {
+            return
+        }
+
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        if let observer = singleInstanceReopenObserver {
+            DistributedNotificationCenter.default().removeObserver(observer)
+            singleInstanceReopenObserver = nil
         }
         if #available(macOS 14.0, *) {
             meetingPromptDetector.stop()
         }
         appState.shutdown()
+        singleInstanceGuard.release()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if duplicateInstanceShouldTerminateImmediately {
+            return .terminateNow
+        }
+
         guard !terminationCleanupStarted else { return .terminateNow }
         terminationCleanupStarted = true
 
@@ -245,6 +264,46 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         return .terminateLater
+    }
+
+    private func acquireSingleInstanceLock() -> Bool {
+        switch singleInstanceGuard.acquire() {
+        case .acquired:
+            installSingleInstanceReopenHandler()
+            return true
+        case .alreadyRunning:
+            duplicateInstanceShouldTerminateImmediately = true
+            SingleInstanceGuard.requestExistingInstanceToPresent()
+            SingleInstanceGuard.activateExistingInstance()
+            NSApp.terminate(nil)
+            return false
+        }
+    }
+
+    private func installSingleInstanceReopenHandler() {
+        guard singleInstanceReopenObserver == nil else { return }
+
+        singleInstanceReopenObserver = DistributedNotificationCenter.default().addObserver(
+            forName: SingleInstanceGuard.reopenNotificationName,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleSingleInstanceReopenRequest()
+            }
+        }
+    }
+
+    private func handleSingleInstanceReopenRequest() {
+        closePopover()
+
+        if !PermissionsOnboardingPreferences.hasCompleted() {
+            onboardingWindowController.present()
+        } else {
+            showSettingsWindow(page: .home, source: "single_instance_reopen")
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc func togglePopover() {

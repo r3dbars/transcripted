@@ -126,6 +126,7 @@ APP_SOURCES=(
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
+    "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
