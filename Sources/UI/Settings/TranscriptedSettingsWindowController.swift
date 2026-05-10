@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Carbon
 import TranscriptedCore
 
 @MainActor
@@ -26,7 +27,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
             )
         )
 
-        let window = NSWindow(
+        let window = TranscriptedSettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
@@ -63,5 +64,21 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
+    }
+}
+
+private final class TranscriptedSettingsWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        performClose(sender)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.keyCode == UInt16(kVK_ANSI_W), modifiers.contains(.command) {
+            performClose(nil)
+            return
+        }
+
+        super.keyDown(with: event)
     }
 }
