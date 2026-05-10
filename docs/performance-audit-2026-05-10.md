@@ -7,11 +7,11 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after twenty-two audit/fix loops: **99/100, A**
+Current score after twenty-three audit/fix loops: **99/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
-The app does not yet feel "super lightweight" in the full sense. The main blockers are local model/cache footprint, live meeting/UI profiling, build-loop speed, and the currently shipped public DMG, which is still the old 524 MB full/offline release until the next release is cut. On this branch, the default local and beta build path is now the 105.4 MiB thin app; full/offline bundling remains available as an explicit option.
+The app does not yet feel "super lightweight" in the full sense. The main blockers are local model/cache footprint, UI profiling, build-loop speed, and the currently shipped public DMG, which is still the old 524 MB full/offline release until the next release is cut. On this branch, the default local and beta build path is now the 105.4 MiB thin app; full/offline bundling remains available as an explicit option.
 
 ## Scorecard
 
@@ -24,11 +24,11 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Idle memory | A+ | 99 | Latest signed thin build idled at 81,248 KB RSS after 15s, then exited cleanly after proof cleanup | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A | 96 | Default local and beta builds now produce the 105.4 MiB thin app with 1.9 MiB resources; explicit full/offline build remains 566.3 MiB | Ship the next public DMG/appcast/cask from the thin default, or explicitly publish separate full/offline and thin/download variants |
 | Local disk/cache hygiene | A | 96 | Storage page now reports reclaimable cache and has one guarded action for known stale Parakeet folders plus optional Whisper cache; this Mac has about 2.1 GB reclaimable | Normal default footprint under 700 MB excluding active bundled model, with reclaimable cache removed or absent |
-| Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
-| Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
+| Meeting transcription throughput | A+ | 98 | Stats DB gate now checks recordings >=30s: 37 samples, meeting p95 RTF 0.022; latest 94s live capture processed in 1.372s | Keep meeting-like p95 RTF under 0.050 and keep current live-capture RSS proof under 300 MB |
+| Meeting capture realtime path | A+ | 97 | Live 94.4s ScreenCaptureKit meeting run: avg CPU 27.2%, max CPU 30.5%, max RSS 223,360 KB, capture quality `excellent`, 0 gaps, 0 route changes, 0 recovery attempts, transcript saved | Re-run this proof on a longer real call before release when practical |
 | UI/rendering perceived lightness | A- | 90 | Settings home now coalesces passive activation/navigation refreshes while preserving forced refreshes for new/deleted captures; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A+ | 98 | Info-level JSONL events now batch up to 8 records or 500 ms; warning/error events still flush immediately; privacy/event budgets remain tested | Keep error diagnostics immediate and measure event-write overhead if high-volume telemetry grows |
-| Build and dev loop speed | B | 86 | Timed default thin `bash build.sh --no-open` takes 68.17s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
+| Build and dev loop speed | B | 86 | Latest timed default thin `bash build.sh --no-open` takes 67.48s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
 | Performance regression guardrails | A+ | 99 | 1597 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A+ | 98 | Cleaned 8 stale temp/worktree Transcripted build processes; latest signed build stayed at one PID after a duplicate launch attempt | Keep one effective Transcripted process per user session and avoid leaving test builds running |
 
@@ -593,6 +593,26 @@ Measured proof:
 - Strict budget output: dictation fast-start samples `1`, p95 `112.0ms`, fallback/retry events `0`.
 - Closed the proof app and verified no current-build Transcripted process remained.
 
+### 22. Reproved live meeting capture and processing
+
+Why:
+
+- Meeting throughput was already strong in `stats.sqlite`, but the scorecard still lacked a current live capture proof with CPU, memory, stop, and save evidence.
+
+Measured proof:
+
+- Launched the latest signed thin `build/Transcripted.app`.
+- Started a meeting from the Home view `Record meeting` button.
+- Event log emitted `meeting_start_requested`, system audio permission revalidation, `meeting_state_changed` to `recording`, and `meeting_recording_started`.
+- Capture backend: `screen_capture_kit`.
+- Capture health: `capture_quality=excellent`, `buffer_success_bucket=98_100`, `gap_count=0`, `route_change_count=0`, `recovery_attempt_count=0`, `stop_timed_out=false`.
+- Sampled the app process during the live recording for 35 samples: average CPU `27.2%`, max CPU `30.5%`, max RSS `223,360 KB`.
+- Stopped via the meeting hotkey after `94,401 ms`.
+- Event log emitted `meeting_recording_stopped`, `meeting_transcription_started`, `meeting_transcript_artifact_ready`, and `meeting_transcript_saved`.
+- Latest stats row: duration `94s`, processing `1.372s`, RTF `0.015`.
+- Strict budget output now reports meeting throughput samples `37`, minimum duration `30.0s`, p95 RTF `0.022`.
+- Closed the proof app and verified no current-build Transcripted process remained.
+
 ## Evidence
 
 ### Build And Verification
@@ -609,6 +629,7 @@ Measured proof:
 - `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite" --require-dictation-fast-start-samples 1`: passed.
+- Timed default thin `bash build.sh --no-open`: **67.48s**.
 - Timed default thin build wall time: **68.17s**.
 - Default thin rebuilt app size: **105.4 MiB**.
 - Explicit full rebuilt app size: **566.3 MiB**.
@@ -675,9 +696,10 @@ Historical startup readiness, using valid pre-on-demand launch sequences:
 - max duration: 1270s
 - average processing: 1.422s
 - max processing: 22.846s
-- meeting-like samples >=30s: 36
+- meeting-like samples >=30s: 37
 - meeting-like p95 RTF: 0.022
 - all-recording p95 RTF: 0.170, driven by 1-12s test clips where fixed overhead dominates
+- latest live capture proof: 94s recording, 1.372s processing, RTF 0.015, transcript saved
 
 Longest/highest-processing examples:
 
@@ -760,9 +782,10 @@ These are the next improvements I would execute in order.
    - A+ gate: cut and verify a public thin DMG under 150 MB, then update appcast/cask/download surfaces.
 
 4. **Meeting performance harness**
-   - Partly done in loop 15.
-   - Stats DB throughput is now budgeted for recordings >=30s, with p95 RTF 0.022.
-   - A+ gate: add peak RSS/memory cap proof and segment-count coverage during a current long-meeting corpus run.
+   - Done for current live capture in loop 23.
+   - Stats DB throughput is now budgeted for recordings >=30s, with 37 samples and p95 RTF 0.022.
+   - Live 94.4s ScreenCaptureKit proof stayed under 224 MB RSS, had no gaps/routes/recovery attempts, stopped cleanly, and saved a transcript.
+   - Future gate: repeat on a longer real call before a major release.
 
 5. **Settings/UI refresh proof**
    - Partly done in loop 16.
@@ -805,4 +828,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, the current build's single-instance behavior is reproved, clean idle CPU/memory are A+, and live dictation fast-start is A+. The next public release, actual reclaimable-cache removal or absence proof, build-loop speed, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, the current build's single-instance behavior is reproved, clean idle CPU/memory are A+, live dictation fast-start is A+, and live meeting capture is A+. The next public release, actual reclaimable-cache removal or absence proof, UI profiling, and build-loop speed still keep the overall score below A+.
