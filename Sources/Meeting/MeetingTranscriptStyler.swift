@@ -11,10 +11,31 @@ struct StyledMeetingTranscript {
 enum MeetingTranscriptStyler {
     private static let frontmatterPreviewByteLimit = 64 * 1024
 
-    private static let titleFormatter: DateFormatter = {
+    private static let titleTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.current
-        formatter.dateFormat = "MMM d 'at' h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("jmm")
+        return formatter
+    }()
+
+    private static let titleWeekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("EEE")
+        return formatter
+    }()
+
+    private static let titleSameYearDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
+        return formatter
+    }()
+
+    private static let titleDifferentYearDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return formatter
     }()
 
@@ -283,7 +304,28 @@ enum MeetingTranscriptStyler {
 
     private static func titleString(from date: Date) -> String {
         formatterQueue.sync {
-            titleFormatter.string(from: date)
+            let calendar = Calendar.current
+            let time = titleTimeFormatter.string(from: date)
+
+            if calendar.isDateInToday(date) {
+                return "Today at \(time)"
+            }
+
+            if calendar.isDateInYesterday(date) {
+                return "Yesterday at \(time)"
+            }
+
+            let startOfDate = calendar.startOfDay(for: date)
+            let startOfToday = calendar.startOfDay(for: Date())
+            let daysAgo = calendar.dateComponents([.day], from: startOfDate, to: startOfToday).day
+            if let daysAgo, daysAgo > 1, daysAgo < 7 {
+                return "\(titleWeekdayFormatter.string(from: date)) at \(time)"
+            }
+
+            let datePrefix = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+                ? titleSameYearDateFormatter.string(from: date)
+                : titleDifferentYearDateFormatter.string(from: date)
+            return "\(datePrefix) at \(time)"
         }
     }
 

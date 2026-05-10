@@ -12,6 +12,8 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
+        testMeetingTranscriptStylerDateFallbackAddsYearForOlderMeetings()
+        testMeetingTranscriptStylerDateFallbackUsesTodayLabel()
     }
 }
 
@@ -196,6 +198,44 @@ private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {
     assertTrue(updatedMarkdown?.contains("Linked speaker text should stay intact.") == true, "Styler should keep the transcript text attached to the right speaker")
 }
 
+private func testMeetingTranscriptStylerDateFallbackAddsYearForOlderMeetings() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let currentYear = Calendar.current.component(.year, from: Date())
+    let olderYear = currentYear - 1
+    let transcriptURL = directory.appendingPathComponent("Call_\(olderYear)-03-05_15-45-00.md")
+    try? sampleDateFallbackTranscript(date: "\(olderYear)-03-05", time: "15:45:00")
+        .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertTrue(styled.title.contains(String(olderYear)), "Older fallback titles should include the year")
+}
+
+private func testMeetingTranscriptStylerDateFallbackUsesTodayLabel() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let now = Date()
+    let dateFormatter = DateFormatter()
+    dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+    dateFormatter.dateFormat = "yyyy-MM-dd"
+    let timeFormatter = DateFormatter()
+    timeFormatter.locale = Locale(identifier: "en_US_POSIX")
+    timeFormatter.dateFormat = "HH:mm:ss"
+
+    let transcriptURL = directory.appendingPathComponent("Call_today.md")
+    try? sampleDateFallbackTranscript(
+        date: dateFormatter.string(from: now),
+        time: timeFormatter.string(from: now)
+    ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertTrue(styled.title.hasPrefix("Today at "), "Same-day fallback titles should use a Today label")
+}
+
 private func sampleMeetingTranscript() -> String {
     """
     ---
@@ -214,6 +254,33 @@ private func sampleMeetingTranscript() -> String {
 
     **[00:04] [System/Alex]**
     Happy to help. Let's get started.
+    """
+}
+
+private func sampleDateFallbackTranscript(date: String, time: String) -> String {
+    """
+    ---
+    date: "\(date)"
+    time: "\(time)"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "2"
+    system_utterances: "2"
+    ---
+
+    ## Full Transcript
+
+    **[00:00] [Mic/You]**
+    Thanks for making time today.
+
+    **[00:04] [System/Speaker 0]**
+    Happy to help. Let's get started.
+
+    **[00:08] [Mic/You]**
+    Sounds good.
+
+    **[00:12] [System/Speaker 1]**
+    Perfect.
     """
 }
 
