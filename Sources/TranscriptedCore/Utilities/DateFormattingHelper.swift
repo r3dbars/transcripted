@@ -30,24 +30,72 @@ public enum DateFormattingHelper {
         return formatter
     }()
 
+    /// Time-only format for transcript frontmatter: "14:30:45"
+    private static let timeOnlyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    /// ISO date-only format for transcript frontmatter: "2024-01-15"
+    private static let isoDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let formatterQueue = DispatchQueue(label: "TranscriptedCore.DateFormattingHelper.formatters")
+
     // MARK: - Public API
 
     /// Format for audio filenames with millisecond precision
     /// Example: "2024-01-15_14-30-45-123"
     public static func formatFilenamePrecise(_ date: Date) -> String {
-        filenamePreciseFormatter.string(from: date)
+        formatterQueue.sync {
+            filenamePreciseFormatter.string(from: date)
+        }
     }
 
     /// Format for transcript filenames without milliseconds
     /// Example: "2024-01-15_14-30-45"
     public static func formatFilename(_ date: Date) -> String {
-        filenameFormatter.string(from: date)
+        formatterQueue.sync {
+            filenameFormatter.string(from: date)
+        }
     }
 
     /// Format for user-facing display (medium date, short time)
     /// Example: "Jan 15, 2024 at 2:30 PM"
     public static func formatDisplay(_ date: Date) -> String {
-        displayFormatter.string(from: date)
+        formatterQueue.sync {
+            displayFormatter.string(from: date)
+        }
+    }
+
+    /// Format for transcript frontmatter time values
+    /// Example: "14:30:45"
+    public static func formatTimeOnly(_ date: Date) -> String {
+        formatterQueue.sync {
+            timeOnlyFormatter.string(from: date)
+        }
+    }
+
+    /// Parse transcript frontmatter time values
+    /// Example: "14:30:45"
+    public static func parseTimeOnly(_ value: String) -> Date? {
+        formatterQueue.sync {
+            timeOnlyFormatter.date(from: value)
+        }
+    }
+
+    /// Format for transcript frontmatter date values
+    /// Example: "2024-01-15"
+    public static func formatISODate(_ date: Date) -> String {
+        formatterQueue.sync {
+            isoDateFormatter.string(from: date)
+        }
     }
 
     /// Format a TimeInterval as MM:SS

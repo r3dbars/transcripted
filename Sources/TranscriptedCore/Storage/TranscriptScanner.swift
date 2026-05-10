@@ -101,9 +101,7 @@ public enum TranscriptScanner {
             }
 
             if let timeValue = values["time"] {
-                let timeFormatter = DateFormatter()
-                timeFormatter.dateFormat = "HH:mm:ss"
-                if let time = timeFormatter.date(from: timeValue) {
+                if let time = DateFormattingHelper.parseTimeOnly(timeValue) {
                     let calendar = Calendar.current
                     let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: time)
                     date = calendar.date(

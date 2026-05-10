@@ -17,10 +17,7 @@ extension TranscriptSaver {
 
     /// Format transcript as markdown with metadata header
     static func formatMarkdown(text: String, duration: TimeInterval, date: Date) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .short
-        let dateString = dateFormatter.string(from: date)
+        let dateString = DateFormattingHelper.formatDisplay(date)
 
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
@@ -58,22 +55,14 @@ extension TranscriptSaver {
         healthInfo: RecordingHealthInfo? = nil,
         transcriptionEngine: SpeechTranscriptionEngineDescriptor = .parakeetLocal
     ) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .short
-        let dateString = dateFormatter.string(from: date)
+        let dateString = DateFormattingHelper.formatDisplay(date)
 
         let minutes = Int(result.duration) / 60
         let seconds = Int(result.duration) % 60
         let durationString = String(format: "%d:%02d", minutes, seconds)
 
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "HH:mm:ss"
-        let timeString = timeFormatter.string(from: date)
-
-        let isoFormatter = DateFormatter()
-        isoFormatter.dateFormat = "yyyy-MM-dd"
-        let isoDate = isoFormatter.string(from: date)
+        let timeString = DateFormattingHelper.formatTimeOnly(date)
+        let isoDate = DateFormattingHelper.formatISODate(date)
 
         // Aggregate metadata
         let totalWordCount = result.micWordCount + result.systemWordCount
