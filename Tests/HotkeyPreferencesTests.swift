@@ -55,4 +55,24 @@ func testHotkeyPreferences() {
             "reset should restore the default dictation mode"
         )
     }
+
+    runSuite("HotkeyPreferences reset clears retired Draft hotkey keys") {
+        let suiteName = "HotkeyPreferencesTests.legacyDraft.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(2, forKey: "hotkey-draft-keyCode")
+        defaults.set(2048, forKey: "hotkey-draft-modifiers")
+
+        HotkeyPreferences.resetToDefaults(userDefaults: defaults)
+
+        assertNil(
+            defaults.object(forKey: "hotkey-draft-keyCode"),
+            "reset should clear retired Draft key-code preferences"
+        )
+        assertNil(
+            defaults.object(forKey: "hotkey-draft-modifiers"),
+            "reset should clear retired Draft modifier preferences"
+        )
+    }
 }

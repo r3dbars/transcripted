@@ -39,7 +39,6 @@ enum HotkeyPreferences {
 
     // MARK: - Defaults
 
-    static let defaultDraft = HotkeyBinding(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey))
     static let defaultDictation = HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
     static let defaultMeeting = HotkeyBinding(keyCode: UInt32(kVK_ANSI_M), modifiers: UInt32(optionKey))
     static let defaultDictationShortcutMode: DictationShortcutMode = .handsFree
@@ -63,8 +62,6 @@ enum HotkeyPreferences {
 
     // MARK: - UserDefaults Keys
 
-    private static let draftKeyCodeKey    = "hotkey-draft-keyCode"
-    private static let draftModifiersKey  = "hotkey-draft-modifiers"
     private static let dictationKeyCodeKey   = "hotkey-dictation-keyCode"
     private static let dictationModifiersKey = "hotkey-dictation-modifiers"
     private static let meetingKeyCodeKey     = "hotkey-meeting-keyCode"
@@ -72,15 +69,6 @@ enum HotkeyPreferences {
     private static let dictationShortcutModeKey = "hotkey-dictation-shortcut-mode"
 
     // MARK: - Read
-
-    static func draftBinding(userDefaults: UserDefaults = .standard) -> HotkeyBinding {
-        let ud = userDefaults
-        guard ud.object(forKey: draftKeyCodeKey) != nil else { return defaultDraft }
-        return HotkeyBinding(
-            keyCode: UInt32(ud.integer(forKey: draftKeyCodeKey)),
-            modifiers: UInt32(ud.integer(forKey: draftModifiersKey))
-        )
-    }
 
     static func dictationBinding(userDefaults: UserDefaults = .standard) -> HotkeyBinding {
         let ud = userDefaults
@@ -117,13 +105,6 @@ enum HotkeyPreferences {
 
     // MARK: - Write
 
-    static func save(draft binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
-        let ud = userDefaults
-        ud.set(Int(binding.keyCode), forKey: draftKeyCodeKey)
-        ud.set(Int(binding.modifiers), forKey: draftModifiersKey)
-        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
-    }
-
     static func save(dictation binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
         ud.set(Int(binding.keyCode), forKey: dictationKeyCodeKey)
@@ -145,8 +126,9 @@ enum HotkeyPreferences {
 
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
-        ud.removeObject(forKey: draftKeyCodeKey)
-        ud.removeObject(forKey: draftModifiersKey)
+        // One-shot cleanup for retired Draft hotkey preferences.
+        ud.removeObject(forKey: "hotkey-draft-keyCode")
+        ud.removeObject(forKey: "hotkey-draft-modifiers")
         ud.removeObject(forKey: dictationKeyCodeKey)
         ud.removeObject(forKey: dictationModifiersKey)
         ud.removeObject(forKey: meetingKeyCodeKey)
