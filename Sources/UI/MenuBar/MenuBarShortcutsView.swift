@@ -411,7 +411,7 @@ private final class PrimaryActionRowView: NSView {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = MenuTokens.primaryActionCornerRadius
         layer?.borderWidth = 1
 
         symbolWellView.wantsLayer = true
@@ -437,7 +437,7 @@ private final class PrimaryActionRowView: NSView {
         badgeButton.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
         badgeButton.contentTintColor = MenuTokens.textPrimaryNS
         badgeButton.wantsLayer = true
-        badgeButton.layer?.cornerRadius = 8
+        badgeButton.layer?.cornerRadius = MenuTokens.secondaryButtonCornerRadius
         badgeButton.target = self
         badgeButton.action = #selector(editShortcut)
         addSubview(badgeButton)

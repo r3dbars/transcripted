@@ -24,6 +24,7 @@ private enum SpeakerNamingTokens {
     static let sectionHeaderGap: CGFloat = 10
 
     static let rowPadding: CGFloat = 12
+    static let rowCornerRadius: CGFloat = UIRadius.small
     static let rowTitleHeight: CGFloat = 18
     static let rowSubtextHeight: CGFloat = 16
     static let rowSampleHeight: CGFloat = 26
@@ -542,7 +543,7 @@ final class SpeakerRowView: NSView {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = SpeakerNamingTokens.rowCornerRadius
         layer?.borderWidth = 1
         updateSurfaceColors()
 

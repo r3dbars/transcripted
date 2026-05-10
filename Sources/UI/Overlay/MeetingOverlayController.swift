@@ -271,7 +271,7 @@ final class MeetingOverlayRootView: NSView {
         )
         recordButton.isBordered = false
         recordButton.wantsLayer = true
-        recordButton.layer?.cornerRadius = 8
+        recordButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
         recordButton.layer?.backgroundColor = OverlayTokens.accentGreen.cgColor
         recordButton.target = self
         recordButton.action = #selector(handlePrimaryAction)
@@ -283,7 +283,7 @@ final class MeetingOverlayRootView: NSView {
         remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
         remindButton.isBordered = false
         remindButton.wantsLayer = true
-        remindButton.layer?.cornerRadius = 8
+        remindButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
         remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         remindButton.layer?.borderWidth = 0.5
         remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
@@ -322,7 +322,7 @@ final class MeetingOverlayRootView: NSView {
         )
         closeButton.isBordered = false
         closeButton.wantsLayer = true
-        closeButton.layer?.cornerRadius = 8
+        closeButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.imageScaling = .scaleProportionallyDown
@@ -875,7 +875,7 @@ final class MeetingOverlayRootView: NSView {
         closeButton.imagePosition = .noImage
         closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
         closeButton.toolTip = nil
-        closeButton.layer?.cornerRadius = 8
+        closeButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.layer?.borderColor = nil
@@ -884,7 +884,7 @@ final class MeetingOverlayRootView: NSView {
         remindButton.imagePosition = .noImage
         remindButton.contentTintColor = MeetingOverlayTokens.textPrimary
         remindButton.toolTip = nil
-        remindButton.layer?.cornerRadius = 8
+        remindButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
         remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         remindButton.layer?.borderWidth = 0.5
         remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor

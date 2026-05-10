@@ -37,6 +37,7 @@ enum MeetingOverlayTokens {
     static let errorHeight: CGFloat = 88
     static let cornerRadius: CGFloat = 22
     static let minimizedCornerRadius: CGFloat = 18
+    static let buttonCornerRadius: CGFloat = UIRadius.small
     static let dotSize: CGFloat     = 8
     static let padLeft: CGFloat     = 12
     static let padRight: CGFloat    = 8

@@ -26,7 +26,7 @@ final class MenuBarModelStatusView: NSControl {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
         layer?.backgroundColor = NSColor.clear.cgColor
 
         statusDot.wantsLayer = true

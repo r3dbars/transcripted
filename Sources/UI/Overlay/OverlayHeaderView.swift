@@ -34,7 +34,7 @@ private final class OverlayPrimaryButton: NSButton {
         bezelStyle = .regularSquare
         setButtonType(.momentaryPushIn)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = OverlayTokens.controlCornerRadius
         layer?.borderWidth = 1
         focusRingType = .none
         updateTitleAppearance()
