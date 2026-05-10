@@ -740,19 +740,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Gate duplicate start requests while the permission prompt is open or
-        // the async recorder setup is still being scheduled.
-        isStarting = true
-
         // Check microphone permission and request if not determined
         // This allows users who skipped permission during onboarding to grant it at record time
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         if microphoneStatus == .notDetermined {
+            // Gate duplicate start requests while the permission prompt is open.
+            isStarting = true
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 DispatchQueue.main.async {
                     if granted {
                         // Permission granted, proceed with start
-                        self.startAudioCaptureAsync()
+                        self.beginRecordingAfterPermissionCheck()
                     } else {
                         // Permission denied — already on main via the outer dispatch
                         self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
@@ -769,34 +767,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
             }
             return
         }
-        prepareForNewRecordingStart()
-        let startGeneration = recordingSessionGeneration
-
-        AppLogger.audio.info("Starting audio capture")
-
-        onRecordingStart?()
-
-        Task {
-            do {
-                try await startAudioCapture()
-                await MainActor.run {
-                    self.finishSuccessfulStartIfCurrent(startGeneration)
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
-                    self.isRecording = false
-                    self.isStarting = false
-                    self.stop()
-                }
-            }
-        }
+        beginRecordingAfterPermissionCheck()
     }
 
-    /// Helper method to start audio capture asynchronously
-    /// Used when permission is already granted or after permission request completes
-    private func startAudioCaptureAsync() {
-        // Set isStarting to prevent double-start during async setup
+    /// Begins recording once permission and pre-flight checks have already passed.
+    private func beginRecordingAfterPermissionCheck() {
+        guard !isRecording else {
+            AppLogger.audio.warning("Already recording, ignoring duplicate start request")
+            return
+        }
+
+        // Gate duplicate start requests while async recorder setup is scheduled.
         isStarting = true
         prepareForNewRecordingStart()
         let startGeneration = recordingSessionGeneration
