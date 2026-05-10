@@ -14,6 +14,23 @@ struct TranscriptedMCPDirectoriesManifest: Codable, Equatable {
 enum TranscriptedStoragePreferences {
     static let captureLibraryLocationKey = "transcriptSaveLocation"
 
+    enum CaptureLibraryValidationError: LocalizedError, Equatable {
+        case unsafeLocation
+        case notDirectory
+        case notWritable
+
+        var errorDescription: String? {
+            switch self {
+            case .unsafeLocation:
+                return "Choose a normal folder in your home directory, not a system folder."
+            case .notDirectory:
+                return "Choose a folder, not a file."
+            case .notWritable:
+                return "Transcripted could not write to that folder. Choose a folder you can edit."
+            }
+        }
+    }
+
     static func captureLibraryURL(
         userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default
@@ -62,6 +79,36 @@ enum TranscriptedStoragePreferences {
         )
     }
 
+    static func prepareCaptureLibraryURL(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        guard isSafeCaptureLibraryURL(url) else {
+            throw CaptureLibraryValidationError.unsafeLocation
+        }
+
+        let candidate = url.standardizedFileURL
+        var isDirectory = ObjCBool(false)
+        let exists = fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory)
+        if exists {
+            guard isDirectory.boolValue else {
+                throw CaptureLibraryValidationError.notDirectory
+            }
+            guard fileManager.isWritableFile(atPath: candidate.path) else {
+                throw CaptureLibraryValidationError.notWritable
+            }
+        }
+
+        do {
+            try fileManager.createPrivateDirectory(at: candidate)
+            try verifyWritableCaptureLibrary(candidate, fileManager: fileManager)
+        } catch {
+            throw CaptureLibraryValidationError.notWritable
+        }
+
+        return candidate
+    }
+
     static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
         // Security: reject relative paths from tampered preferences so Transcripted
         // never resolves a capture library against the process working directory.
@@ -78,6 +125,16 @@ enum TranscriptedStoragePreferences {
         return !forbiddenPrefixes.contains { prefix in
             candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
         }
+    }
+
+    private static func verifyWritableCaptureLibrary(_ url: URL, fileManager: FileManager) throws {
+        let probeURL = url.appendingPathComponent(
+            ".transcripted-write-test-\(UUID().uuidString)",
+            isDirectory: false
+        )
+        defer { try? fileManager.removeItem(at: probeURL) }
+        try Data().write(to: probeURL, options: [.atomic])
+        fileManager.restrictFileToOwnerOnly(at: probeURL)
     }
 }
 

@@ -164,6 +164,81 @@ func testTranscriptedStoragePaths() {
         }
     }
 
+    runSuite("Transcripted capture library helpers — prepare writable folders before saving") {
+        let customRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-prepared-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: customRoot) }
+
+        do {
+            let preparedURL = try TranscriptedStoragePreferences.prepareCaptureLibraryURL(customRoot)
+            assertEqual(
+                preparedURL,
+                customRoot.standardizedFileURL,
+                "prepared capture-library URL should use the standardized selected folder"
+            )
+            assertTrue(
+                FileManager.default.fileExists(atPath: preparedURL.path),
+                "preparing a capture library should create the selected folder immediately"
+            )
+            assertEqual(
+                permissions(of: preparedURL),
+                NSNumber(value: 0o700),
+                "prepared capture-library folder should be private"
+            )
+        } catch {
+            assertTrue(false, "expected writable capture library to prepare successfully: \(error)")
+        }
+    }
+
+    runSuite("Transcripted capture library helpers — reject file selections before saving") {
+        let fileURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-file-\(UUID().uuidString).txt", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        FileManager.default.createFile(atPath: fileURL.path, contents: Data("not a folder".utf8))
+
+        do {
+            _ = try TranscriptedStoragePreferences.prepareCaptureLibraryURL(fileURL)
+            assertTrue(false, "file selections should not prepare as capture libraries")
+        } catch let error as TranscriptedStoragePreferences.CaptureLibraryValidationError {
+            assertEqual(
+                error,
+                .notDirectory,
+                "file selections should fail with the not-directory validation error"
+            )
+        } catch {
+            assertTrue(false, "unexpected validation error: \(error)")
+        }
+    }
+
+    runSuite("Transcripted capture library helpers — reject non-writable folders before saving") {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-readonly-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o500]
+        )
+
+        do {
+            _ = try TranscriptedStoragePreferences.prepareCaptureLibraryURL(directory)
+            assertTrue(false, "non-writable folders should not prepare as capture libraries")
+        } catch let error as TranscriptedStoragePreferences.CaptureLibraryValidationError {
+            assertEqual(
+                error,
+                .notWritable,
+                "non-writable folders should fail with the writable-folder validation error"
+            )
+        } catch {
+            assertTrue(false, "unexpected validation error: \(error)")
+        }
+    }
+
     runSuite("Transcripted capture library helpers — reject unsafe capture folders") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {

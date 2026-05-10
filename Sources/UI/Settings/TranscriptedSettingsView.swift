@@ -52,6 +52,8 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State private var captureLibraryStatusMessage: String?
+    @State private var captureLibraryStatusIsError = false
     @State private var recentMeetings: [RecentMeetingItem] = []
     @State private var recentDictations: [SavedDictationEntry] = []
     @State private var recentCapturesLoading = false
@@ -1349,6 +1351,8 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction("reset_capture_library", page: .storage)
                         TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
                         refreshStoragePaths()
+                        captureLibraryStatusMessage = "Capture library reset to the default folder."
+                        captureLibraryStatusIsError = false
                         AnalyticsReporter.track(
                             "settings_capture_library_changed",
                             properties: [
@@ -1362,6 +1366,12 @@ struct TranscriptedSettingsView: View {
                 Text("Pick an Obsidian vault or any folder you want agents to read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let captureLibraryStatusMessage {
+                    Text(captureLibraryStatusMessage)
+                        .font(.caption)
+                        .foregroundColor(captureLibraryStatusIsError ? .red : .secondary)
+                }
             }
 
             SettingsSection(
@@ -2203,8 +2213,19 @@ struct TranscriptedSettingsView: View {
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        TranscriptedStoragePreferences.setCaptureLibraryURL(url)
+        let preparedURL: URL
+        do {
+            preparedURL = try TranscriptedStoragePreferences.prepareCaptureLibraryURL(url)
+        } catch {
+            captureLibraryStatusMessage = error.localizedDescription
+            captureLibraryStatusIsError = true
+            return
+        }
+
+        TranscriptedStoragePreferences.setCaptureLibraryURL(preparedURL)
         refreshStoragePaths()
+        captureLibraryStatusMessage = "Capture library updated."
+        captureLibraryStatusIsError = false
         AnalyticsReporter.track(
             "settings_capture_library_changed",
             properties: [
