@@ -5,6 +5,11 @@ import AVFoundation
 // Extensions in: SpeakerNamingCoordinator.swift, TranscriptionPipelineRunner.swift
 // Types in: DisplayStatus.swift (DisplayStatus enum, TranscriptionTask struct)
 
+private enum TranscriptionTaskManagerTiming {
+    static let justCompletedFlashDurationSeconds: TimeInterval = 1.5
+    static let defaultStatusResetDelay: TimeInterval = 3
+}
+
 @available(macOS 14.0, *)
 @MainActor
 public class TranscriptionTaskManager: ObservableObject {
@@ -403,7 +408,7 @@ public class TranscriptionTaskManager: ObservableObject {
         if activeCount == 0 {
             justCompleted = true
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await Task.sleep(for: .seconds(TranscriptionTaskManagerTiming.justCompletedFlashDurationSeconds))
                 self?.justCompleted = false
             }
         }
@@ -483,7 +488,7 @@ public class TranscriptionTaskManager: ObservableObject {
             + (Int(values["system_speakers"] ?? "") ?? 0)
     }
 
-    func scheduleStatusReset(delay: TimeInterval = 3) {
+    func scheduleStatusReset(delay: TimeInterval = TranscriptionTaskManagerTiming.defaultStatusResetDelay) {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }

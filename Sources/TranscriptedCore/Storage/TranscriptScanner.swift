@@ -4,6 +4,7 @@ import Foundation
 /// Used for initial migration when user first updates to version with dashboard
 @available(macOS 14.0, *)
 public enum TranscriptScanner {
+    private static let cooperativeYieldNanoseconds: UInt64 = 10_000_000
 
     /// Scan transcript folder and migrate to database
     /// - Parameters:
@@ -67,7 +68,7 @@ public enum TranscriptScanner {
             progressHandler?(progress, "Scanning: \(fileName)")
 
             // Small delay to prevent UI blocking
-            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            try? await Task.sleep(nanoseconds: Self.cooperativeYieldNanoseconds)
         }
 
         AppLogger.pipeline.info("TranscriptScanner migration complete", ["migrated": "\(migrated)"])

@@ -2,6 +2,10 @@ import Foundation
 
 // MARK: - Retroactive Speaker Updates
 
+private enum RetroactiveSpeakerUpdaterLimits {
+    static let transcriptIdHeaderByteLimit = 2048
+}
+
 extension TranscriptSaver {
 
     /// When a speaker is renamed in Settings, update ALL transcripts that reference them.
@@ -668,7 +672,7 @@ extension TranscriptSaver {
 
     static func extractTranscriptId(from url: URL) -> UUID? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        let header = handle.readData(ofLength: 2048)
+        let header = handle.readData(ofLength: RetroactiveSpeakerUpdaterLimits.transcriptIdHeaderByteLimit)
         try? handle.close()
         guard let text = String(data: header, encoding: .utf8) else { return nil }
         return extractTranscriptId(fromFrontmatter: text)
