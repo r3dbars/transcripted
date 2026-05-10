@@ -63,8 +63,29 @@ func testAgentConnectionGuide() {
             "prompt should include the dictations folder"
         )
         assertTrue(
-            prompt.contains("If helpful, start with this meeting:\nPlanning Sync.md"),
+            prompt.contains("If helpful, start with this meeting:\n- File: Planning Sync.md"),
             "meeting-specific prompt should preserve the selected filename"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.starterPrompt — preserves selected meeting context") {
+        let prompt = AgentConnectionGuide.starterPrompt(
+            filename: "Planning Sync",
+            meetingTitle: "Planning Sync with Alex",
+            meetingDate: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+
+        assertTrue(
+            prompt.contains("- File: Planning Sync.md"),
+            "meeting-specific prompt should include the selected Markdown file"
+        )
+        assertTrue(
+            prompt.contains("- Title: Planning Sync with Alex"),
+            "meeting-specific prompt should include the selected meeting title"
+        )
+        assertTrue(
+            prompt.contains("- Recorded at:"),
+            "meeting-specific prompt should include the selected meeting date"
         )
     }
 

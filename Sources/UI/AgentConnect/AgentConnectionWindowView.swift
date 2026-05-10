@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 
 struct AgentConnectionContext {
+    let meetingTitle: String?
+    let meetingDate: Date?
+    let transcriptURL: URL?
     let meetingsFolderURL: URL
     let dictationsFolderURL: URL
     let starterPrompt: String
@@ -13,12 +16,17 @@ struct AgentConnectionContext {
     init(meetingTitle: String?, meetingDate: Date?, transcriptURL: URL?) {
         let filename = transcriptURL?.deletingPathExtension().lastPathComponent
 
-        _ = meetingTitle
-        _ = meetingDate
+        self.meetingTitle = meetingTitle
+        self.meetingDate = meetingDate
+        self.transcriptURL = transcriptURL
 
         self.meetingsFolderURL = AgentConnectionGuide.meetingsFolder
         self.dictationsFolderURL = AgentConnectionGuide.dictationsFolder
-        self.starterPrompt = AgentConnectionGuide.starterPrompt(filename: filename)
+        self.starterPrompt = AgentConnectionGuide.starterPrompt(
+            filename: filename,
+            meetingTitle: meetingTitle,
+            meetingDate: meetingDate
+        )
         self.folderAccessPrompt = AgentConnectionGuide.folderAccessPrompt
         self.mcpSetupText = AgentConnectionGuide.mcpSetupText
         self.mcpConfigExample = AgentConnectionGuide.mcpConfigExample

@@ -22,6 +22,11 @@ enum AgentConnectionGuide {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+    private static let meetingContextDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     static var localMCPBuildDirectory: URL? {
         let bundleURL = Bundle.main.bundleURL.standardizedFileURL
@@ -121,7 +126,11 @@ enum AgentConnectionGuide {
         agentSkillsFolder.appendingPathComponent(skill.relativeSkillPath, isDirectory: false)
     }
 
-    static func starterPrompt(filename: String?) -> String {
+    static func starterPrompt(
+        filename: String?,
+        meetingTitle: String? = nil,
+        meetingDate: Date? = nil
+    ) -> String {
         var prompt = """
         I use Transcripted on this Mac.
 
@@ -144,7 +153,13 @@ enum AgentConnectionGuide {
         """
 
         if let filename {
-            prompt += "\n\nIf helpful, start with this meeting:\n\(filename).md"
+            prompt += "\n\nIf helpful, start with this meeting:\n- File: \(filename).md"
+            if let meetingTitle, !meetingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                prompt += "\n- Title: \(meetingTitle)"
+            }
+            if let meetingDate {
+                prompt += "\n- Recorded at: \(meetingContextDateFormatter.string(from: meetingDate))"
+            }
         }
 
         return prompt
