@@ -32,6 +32,9 @@ func testSupportDiagnosticsBundle() {
             ],
             recentLogLines: [
                 "Opened /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl",
+                "DIAG | capture.dictation_toggle_requested | source_app_bundle_id=com.openai.codex source_app_name=Codex trigger=physical_key",
+                "DIAG | dictation.dictation_started | audio_device=MacBook Pro Microphone route_shape=built_in_input_to_built_in_output",
+                "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
                 "Email person@example.com should not leak",
             ]
         )
@@ -48,6 +51,9 @@ func testSupportDiagnosticsBundle() {
         assertFalse(text.contains("/Users/redbars"), "diagnostics should redact home paths")
         assertFalse(text.contains("person@example.com"), "diagnostics should redact emails")
         assertFalse(text.contains("Application Support/Transcripted"), "diagnostics should redact app support paths")
+        assertFalse(text.contains("com.openai.codex"), "diagnostics should redact source app bundle IDs from recent logs")
+        assertFalse(text.contains("source_app_name=Codex"), "diagnostics should redact source app names from recent logs")
+        assertFalse(text.contains("MacBook Pro Microphone"), "diagnostics should redact raw device names from recent logs")
     }
 
     runSuite("SupportDiagnosticsBundle Sentry context avoids sanitizer-dropped audio keys") {
