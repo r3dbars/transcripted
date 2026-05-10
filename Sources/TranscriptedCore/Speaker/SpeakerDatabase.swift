@@ -145,6 +145,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         executeSQL(sql)
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         migrateSchema()
+        createIndexes()
     }
 
     /// Add columns that may be missing from older databases.
@@ -157,6 +158,18 @@ public final class SpeakerDatabase: @unchecked Sendable {
         if !existingColumns.contains("dispute_count") {
             executeSQL("ALTER TABLE speakers ADD COLUMN dispute_count INTEGER NOT NULL DEFAULT 0;")
         }
+    }
+
+    private func createIndexes() {
+        executeSQL("""
+        CREATE INDEX IF NOT EXISTS idx_speakers_display_name
+        ON speakers(display_name COLLATE NOCASE)
+        WHERE display_name IS NOT NULL;
+        """)
+        executeSQL("""
+        CREATE INDEX IF NOT EXISTS idx_speakers_last_seen
+        ON speakers(last_seen DESC);
+        """)
     }
 
     /// Query SQLite for existing column names in a table.

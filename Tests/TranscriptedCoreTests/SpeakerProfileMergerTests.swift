@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -20,6 +21,65 @@ final class SpeakerProfileMergerTests: XCTestCase {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
         tempDirectory = nil
+    }
+
+    func testSpeakerDatabaseCreatesLookupIndexes() {
+        let indexes = speakerIndexNames()
+
+        XCTAssertTrue(indexes.contains("idx_speakers_display_name"))
+        XCTAssertTrue(indexes.contains("idx_speakers_last_seen"))
+    }
+
+    func testFindProfilesByNamePreservesVariantMatchesAndSortsByCallCount() {
+        let nate = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        database.setDisplayName(id: nate.id, name: "Nate", source: NameSource.userManual)
+
+        let nathan = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.35, count: 256),
+            existingId: nil
+        )
+        database.setDisplayName(id: nathan.id, name: "Nathan", source: NameSource.userManual)
+        _ = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.36, count: 256),
+            existingId: nathan.id
+        )
+
+        let unmatched = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.45, count: 256),
+            existingId: nil
+        )
+        database.setDisplayName(id: unmatched.id, name: "Sarah", source: NameSource.userManual)
+
+        let matches = database.findProfilesByName("Nathaniel")
+
+        XCTAssertEqual(matches.map(\.id), [nathan.id, nate.id])
+    }
+
+    func testMergeProfilesByNamePreservesCaseInsensitiveExactMergeOnly() {
+        let first = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.20, count: 256),
+            existingId: nil
+        )
+        let second = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.22, count: 256),
+            existingId: nil
+        )
+        let variant = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.24, count: 256),
+            existingId: nil
+        )
+
+        database.setDisplayName(id: first.id, name: "Alex", source: NameSource.userManual)
+        database.setDisplayName(id: second.id, name: " alex ", source: NameSource.userManual)
+        database.setDisplayName(id: variant.id, name: "Alexander", source: NameSource.userManual)
+
+        database.mergeProfilesByName()
+
+        XCTAssertEqual(database.allSpeakers().count, 2)
+        XCTAssertNotNil(database.getSpeaker(id: variant.id))
     }
 
     func testMergeDuplicatesSkipsDisputedProfiles() {
@@ -86,5 +146,21 @@ final class SpeakerProfileMergerTests: XCTestCase {
             database.getSpeaker(id: profileId),
             "deferred unnamed profiles with review samples should survive pruning"
         )
+    }
+
+    private func speakerIndexNames() -> Set<String> {
+        database.queue.sync {
+            var names: Set<String> = []
+            var statement: OpaquePointer?
+            if sqlite3_prepare_v2(database.db, "PRAGMA index_list(speakers);", -1, &statement, nil) == SQLITE_OK {
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    if let namePtr = sqlite3_column_text(statement, 1) {
+                        names.insert(String(cString: namePtr))
+                    }
+                }
+            }
+            sqlite3_finalize(statement)
+            return names
+        }
     }
 }

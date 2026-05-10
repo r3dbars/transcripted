@@ -12,6 +12,12 @@ enum SpeakerDatabaseNamingMutation {
     case resetDisputeCount(UUID)
 }
 
+private struct SpeakerNameLookupRow {
+    let id: UUID
+    let displayName: String
+    let callCount: Int
+}
+
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
@@ -185,13 +191,49 @@ extension SpeakerDatabase {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return [] }
 
-            return allSpeakersImpl()
-                .filter { profile in
-                    guard let displayName = profile.displayName else { return false }
-                    return NameVariants.areVariants(trimmed, displayName)
-                }
+            return namedSpeakerRowsImpl()
+                .filter { NameVariants.areVariants(trimmed, $0.displayName) }
+                .compactMap { getSpeakerImpl(id: $0.id) }
                 .sorted { $0.callCount > $1.callCount }
         }
+    }
+
+    private func namedSpeakerRowsImpl() -> [SpeakerNameLookupRow] {
+        guard isDatabaseOpen else { return [] }
+
+        var rows: [SpeakerNameLookupRow] = []
+        let sql = """
+        SELECT id, display_name, call_count
+        FROM speakers
+        WHERE display_name IS NOT NULL
+        ORDER BY call_count DESC;
+        """
+        var statement: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let idPtr = sqlite3_column_text(statement, 0),
+                      let namePtr = sqlite3_column_text(statement, 1) else { continue }
+                let idString = String(cString: idPtr)
+                guard let id = UUID(uuidString: idString) else {
+                    AppLogger.speakers.warning("Skipping corrupt speaker UUID during name lookup", ["raw_id": idString])
+                    continue
+                }
+
+                rows.append(
+                    SpeakerNameLookupRow(
+                        id: id,
+                        displayName: String(cString: namePtr),
+                        callCount: Int(sqlite3_column_int(statement, 2))
+                    )
+                )
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare speaker name lookup", ["sqlite_error": dbErrorMessage()])
+        }
+
+        sqlite3_finalize(statement)
+        return rows
     }
 
     // MARK: - Explicit Profile Merge
@@ -393,13 +435,13 @@ extension SpeakerDatabase {
     }
 
     private func mergeProfilesByNameImpl() {
-        let speakers = allSpeakersImpl()
+        let speakers = namedSpeakerRowsImpl()
 
         // Group named profiles by lowercased display name
-        var byName: [String: [SpeakerProfile]] = [:]
+        var byName: [String: [SpeakerNameLookupRow]] = [:]
         for speaker in speakers {
-            guard let name = speaker.displayName?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty else { continue }
+            let name = speaker.displayName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
             byName[name, default: []].append(speaker)
         }
 
