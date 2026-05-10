@@ -171,7 +171,7 @@ final class MenuBarShortcutsView: NSView {
             symbolName: "mic.fill",
             title: "Push to Talk",
             subtitle: recordingTarget == .pushToTalk
-                ? "Press key…"
+                ? "Press key, Esc cancels"
                 : dictationState.subtitle,
             key: recordingTarget == .pushToTalk ? "Any key" : pushToTalkKey,
             isEditing: recordingTarget == .pushToTalk,
@@ -182,7 +182,7 @@ final class MenuBarShortcutsView: NSView {
             symbolName: "mic.badge.plus",
             title: "Hands-Free",
             subtitle: recordingTarget == .handsFree
-                ? "Press key…"
+                ? "Press key, Esc cancels"
                 : "Tap to start or stop dictation",
             key: recordingTarget == .handsFree ? "Any key" : handsFreeKey,
             isEditing: recordingTarget == .handsFree,
@@ -193,7 +193,7 @@ final class MenuBarShortcutsView: NSView {
             symbolName: "record.circle.fill",
             title: "Record meeting",
             subtitle: recordingTarget == .meeting
-                ? "Press shortcut…"
+                ? "Press keys, Esc cancels"
                 : meetingState.subtitle,
             key: recordingTarget == .meeting ? "Type keys" : meetingKey,
             isEditing: recordingTarget == .meeting,

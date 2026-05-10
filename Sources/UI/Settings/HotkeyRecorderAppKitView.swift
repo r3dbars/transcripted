@@ -97,19 +97,19 @@ final class HotkeyRecorderAppKitView: NSView {
         let handsFreeBinding = PhysicalDictationTriggerPreferences.handsFreeBinding()
         let meetingBinding = PhysicalDictationTriggerPreferences.meetingBinding()
         pushToTalkRow.update(
-            displayText: displayText(for: .pushToTalk, binding: pushToTalkBinding, recordingText: "Press key..."),
+            displayText: displayText(for: .pushToTalk, binding: pushToTalkBinding, recordingText: "Press key, Esc cancels"),
             isRecording: recordingTarget == .pushToTalk,
             isDefault: pushToTalkBinding == PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
             isInvalid: validationErrorTarget == .pushToTalk
         )
         handsFreeRow.update(
-            displayText: displayText(for: .handsFree, binding: handsFreeBinding, recordingText: "Press key..."),
+            displayText: displayText(for: .handsFree, binding: handsFreeBinding, recordingText: "Press key, Esc cancels"),
             isRecording: recordingTarget == .handsFree,
             isDefault: handsFreeBinding == PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
             isInvalid: validationErrorTarget == .handsFree
         )
         meetingRow.update(
-            displayText: displayText(for: .meeting, binding: meetingBinding, recordingText: "Press shortcut..."),
+            displayText: displayText(for: .meeting, binding: meetingBinding, recordingText: "Press keys, Esc cancels"),
             isRecording: recordingTarget == .meeting,
             isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             isInvalid: validationErrorTarget == .meeting
@@ -297,7 +297,9 @@ private final class ShortcutRecorderRow: NSView {
         super.layout()
         let labelW: CGFloat = 82
         nameLabel.frame = NSRect(x: 0, y: (bounds.height - 16) / 2, width: labelW, height: 16)
-        let btnW: CGFloat = 110
+        let resetSlotW: CGFloat = resetRowButton.isHidden ? 0 : 28
+        let availableButtonW = bounds.width - labelW - 8 - resetSlotW
+        let btnW = min(CGFloat(170), max(CGFloat(110), availableButtonW))
         shortcutButton.frame = NSRect(x: labelW + 8, y: (bounds.height - 24) / 2, width: btnW, height: 24)
         if !resetRowButton.isHidden {
             resetRowButton.frame = NSRect(x: labelW + 8 + btnW + 8, y: (bounds.height - 20) / 2, width: 20, height: 20)
