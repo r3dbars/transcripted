@@ -7,6 +7,7 @@ extension TranscriptionTaskManager {
     private struct PlannedNamingChanges {
         let resolvedUpdates: [SpeakerNameUpdate]
         let mutations: [PlannedSpeakerMutation]
+        let skippedUnsafeUpdateCount: Int
     }
 
     private struct DeferredReviewPlan {
@@ -105,16 +106,48 @@ extension TranscriptionTaskManager {
                 return
             }
 
+            guard !plannedChanges.resolvedUpdates.isEmpty
+                    || !collapsedUpdates.isEmpty
+                    || !discardedUpdates.isEmpty
+                    || updates.isEmpty else {
+                self?.cleanupNamingArtifacts(
+                    clips: clips,
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                )
+
+                Task { @MainActor in
+                    self?.finishNamingFlow(
+                        didFinalizeTranscript: false,
+                        updatesCount: updates.count,
+                        transcriptId: transcriptId,
+                        resolvedURL: resolvedURL
+                    )
+                }
+                return
+            }
+
+            if plannedChanges.skippedUnsafeUpdateCount > 0 {
+                AppLogger.speakers.warning("Skipped unsafe speaker naming updates", [
+                    "skipped": "\(plannedChanges.skippedUnsafeUpdateCount)",
+                    "total": "\(updates.count)"
+                ])
+            }
+
             let deferredReviewPlan = updates.isEmpty
                 ? Self.planDeferredReview(clips)
                 : nil
 
-            var didFinalizeTranscript = regularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
-                transcriptURL: resolvedURL,
-                updates: plannedChanges.resolvedUpdates,
-                transcriptionResult: transcriptionResult,
-                speakerStore: speakerDB
-            )
+            var didFinalizeTranscript = true
+            if !plannedChanges.resolvedUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.updateSpeakerNames(
+                    transcriptURL: resolvedURL,
+                    updates: plannedChanges.resolvedUpdates,
+                    transcriptionResult: transcriptionResult,
+                    speakerStore: speakerDB
+                )
+            }
 
             if didFinalizeTranscript, let deferredReviewPlan {
                 didFinalizeTranscript = TranscriptSaver.markSpeakerReviewDeferred(
@@ -232,6 +265,7 @@ extension TranscriptionTaskManager {
         var resolvedUpdates: [SpeakerNameUpdate] = []
         resolvedUpdates.reserveCapacity(updates.count)
         var mutations: [PlannedSpeakerMutation] = []
+        var skippedUnsafeUpdateCount = 0
 
         for update in updates {
             let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
@@ -240,7 +274,8 @@ extension TranscriptionTaskManager {
                 entry: entry,
                 speakerDB: speakerDB
             ) else {
-                return nil
+                skippedUnsafeUpdateCount += 1
+                continue
             }
 
             AppLogger.speakers.info("Speaker named", [
@@ -264,7 +299,8 @@ extension TranscriptionTaskManager {
 
         return PlannedNamingChanges(
             resolvedUpdates: resolvedUpdates,
-            mutations: mutations
+            mutations: mutations,
+            skippedUnsafeUpdateCount: skippedUnsafeUpdateCount
         )
     }
 

@@ -1655,6 +1655,160 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteSkipsUnsafeCorrectionWithoutDroppingSafeNames() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let unsafeMatchedProfile = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.2, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(
+            id: unsafeMatchedProfile.id,
+            name: "Matt Vlasach",
+            source: NameSource.userManual
+        )
+        guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: unsafeMatchedProfile.id) else {
+            XCTFail("Expected matched profile snapshot")
+            return
+        }
+
+        let safeProfileId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.45, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Mixed Speaker Review.md")
+        let safeClipURL = tempDirectory.appendingPathComponent("speaker-safe.wav")
+        let unsafeClipURL = tempDirectory.appendingPathComponent("speaker-unsafe.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-mixed.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-mixed.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: unsafeMatchedProfile.id,
+                name: "Matt Vlasach",
+                confidence: "medium",
+                source: "db_pending"
+            ),
+            MarkdownSpeaker(
+                id: "2",
+                persistentSpeakerId: safeProfileId,
+                name: "Speaker 2",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Matt Vlasach",
+                text: "Thanks for joining."
+            ),
+            MarkdownUtterance(
+                timestamp: "00:05",
+                source: "System",
+                label: "Speaker 2",
+                text: "Here is the product update.",
+                diarizerSpeakerId: 2
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 3, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 2", utterances: 1, wordCount: 5, duration: "00:03")
+            ],
+            totalWords: 8
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: safeClipURL)
+        try Data().write(to: unsafeClipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: unsafeMatchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: "Matt Vlasach",
+                    action: .corrected
+                ),
+                SpeakerNameUpdate(
+                    persistentSpeakerId: safeProfileId,
+                    diarizerSpeakerId: "2",
+                    newName: "Alex Kim",
+                    previousName: nil,
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: unsafeMatchedProfile.id,
+                    diarizerSpeakerId: "1",
+                    clipURL: unsafeClipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: "Matt Vlasach",
+                    matchSimilarity: 0.85,
+                    needsNaming: false,
+                    needsConfirmation: true,
+                    sessionEmbedding: nil,
+                    matchedProfileSnapshot: matchedSnapshot
+                ),
+                SpeakerNamingEntry(
+                    id: safeProfileId,
+                    diarizerSpeakerId: "2",
+                    clipURL: safeClipURL,
+                    sampleText: "Here is the product update.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.45, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains("Alex Kim"))
+        XCTAssertTrue(savedTranscript.contains("Matt Vlasach"))
+        XCTAssertFalse(savedTranscript.contains("Sarah Graham"))
+
+        let rejectedProfile = harness.speakerDB.getSpeaker(id: unsafeMatchedProfile.id)
+        XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
+        XCTAssertEqual(
+            rejectedProfile?.disputeCount,
+            matchedSnapshot.disputeCount,
+            "skipped unsafe corrections should not mutate the rejected profile"
+        )
+        let safelyNamedProfile = harness.speakerDB.getSpeaker(id: safeProfileId)
+        XCTAssertEqual(safelyNamedProfile?.displayName, "Alex Kim")
+    }
+
+    @MainActor
     func testHandleNamingCompleteSucceedsWithoutJSONSidecar() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
