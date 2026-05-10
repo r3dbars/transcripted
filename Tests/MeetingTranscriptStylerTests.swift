@@ -14,6 +14,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
         testMeetingTranscriptStylerDateFallbackAddsYearForOlderMeetings()
         testMeetingTranscriptStylerDateFallbackUsesTodayLabel()
+        testMeetingTranscriptStylerDisambiguatesQuickNotesTitles()
     }
 }
 
@@ -236,6 +237,24 @@ private func testMeetingTranscriptStylerDateFallbackUsesTodayLabel() {
     assertTrue(styled.title.hasPrefix("Today at "), "Same-day fallback titles should use a Today label")
 }
 
+private func testMeetingTranscriptStylerDisambiguatesQuickNotesTitles() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleQuickNotesTranscript(date: "2026-04-07", time: "09:14:00")
+        .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertTrue(styled.title.hasPrefix("Quick notes "), "Short meeting fallback titles should include a time disambiguator")
+    assertTrue(styled.title != "Quick notes", "Short meeting fallback titles should not collapse to one shared label")
+    assertTrue(
+        styled.url.deletingPathExtension().lastPathComponent.hasPrefix("Quick notes "),
+        "Quick notes filename should keep the disambiguating time after filename sanitization"
+    )
+}
+
 private func sampleMeetingTranscript() -> String {
     """
     ---
@@ -254,6 +273,24 @@ private func sampleMeetingTranscript() -> String {
 
     **[00:04] [System/Alex]**
     Happy to help. Let's get started.
+    """
+}
+
+private func sampleQuickNotesTranscript(date: String, time: String) -> String {
+    """
+    ---
+    date: "\(date)"
+    time: "\(time)"
+    duration: "0:30"
+    total_word_count: "5"
+    mic_utterances: "1"
+    system_utterances: "0"
+    ---
+
+    ## Full Transcript
+
+    **[00:00] [Mic/You]**
+    One quick thing.
     """
 }
 

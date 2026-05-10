@@ -296,10 +296,16 @@ enum MeetingTranscriptStyler {
         }
 
         if document.durationSeconds <= 45 || document.totalUtterances <= 2 {
-            return "Quick notes"
+            return quickNotesTitle(from: document.recordedAt)
         }
 
         return titleString(from: document.recordedAt)
+    }
+
+    private static func quickNotesTitle(from date: Date) -> String {
+        formatterQueue.sync {
+            "Quick notes — \(titleTimeFormatter.string(from: date))"
+        }
     }
 
     private static func titleString(from date: Date) -> String {
