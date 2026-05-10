@@ -13,7 +13,7 @@ enum DiagnosticsTrail {
         let trimmedContext = context.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
         if let logger {
-            let detail = trimmedContext
+            let detail = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay(trimmedContext)
                 .sorted(by: { $0.key < $1.key })
                 .map { "\($0.key)=\($0.value)" }
                 .joined(separator: " ")

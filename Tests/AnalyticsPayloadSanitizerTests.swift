@@ -67,6 +67,26 @@ func testAnalyticsPayloadSanitizer() {
         assertEqual(sanitized["duration_bucket"], "10_29s", "unrelated coarse properties should remain")
     }
 
+    runSuite("AnalyticsPayloadSanitizer scrubs support-facing diagnostic context") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay([
+            "audio_device": "Private AirPods",
+            "duration_bucket": "10_29s",
+            "error": "Failed on /Users/redbars/private.md for person@example.com",
+            "input_device_class": "bluetooth",
+            "title": "Private customer call",
+            "trigger": "hotkey",
+            "url": "https://example.com/private",
+        ])
+
+        assertEqual(sanitized["duration_bucket"], "10_29s", "coarse duration buckets should remain")
+        assertEqual(sanitized["input_device_class"], "bluetooth", "coarse device class should remain")
+        assertEqual(sanitized["trigger"], "hotkey", "stable trigger enums should remain")
+        assertNil(sanitized["audio_device"], "raw device names should not enter support-facing diagnostics")
+        assertNil(sanitized["error"], "free-form errors should not enter support-facing diagnostics")
+        assertNil(sanitized["title"], "meeting titles should not enter support-facing diagnostics")
+        assertNil(sanitized["url"], "raw URLs should not enter support-facing diagnostics")
+    }
+
     runSuite("AnalyticsPayloadSanitizer redacts raw URLs and common secret values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
