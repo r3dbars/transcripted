@@ -86,6 +86,7 @@ enum TranscriptedPermissionAccess {
             if !AXIsProcessTrusted() {
                 let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                 _ = AXIsProcessTrustedWithOptions(options)
+                return
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         case .systemAudioRecording:
