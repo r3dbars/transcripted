@@ -164,6 +164,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
+    "Sources/Observability/EventFileWritePolicy.swift"
     "Sources/Observability/ObservabilityEvent.swift"
     "Sources/Observability/ReliabilityPacketRecorder.swift"
     "Sources/Observability/RuntimeDiagnosticsStore.swift"

@@ -1,6 +1,36 @@
 import Foundation
 
 func testObservabilityLogWriter() {
+    runSuite("EventFileWritePolicy buffers only info events") {
+        assertTrue(
+            EventFileWritePolicy.shouldBuffer(level: "info"),
+            "info events should batch to reduce low-priority JSONL write churn"
+        )
+        assertFalse(
+            EventFileWritePolicy.shouldBuffer(level: "warning"),
+            "warning events should flush immediately"
+        )
+        assertFalse(
+            EventFileWritePolicy.shouldBuffer(level: "error"),
+            "error events should flush immediately"
+        )
+    }
+
+    runSuite("EventFileWritePolicy flushes info batches at a bounded size") {
+        assertFalse(
+            EventFileWritePolicy.shouldFlushBufferedInfoEvents(
+                count: EventFileWritePolicy.maxBufferedInfoEvents - 1
+            ),
+            "info events below the batch limit can wait for the short flush timer"
+        )
+        assertTrue(
+            EventFileWritePolicy.shouldFlushBufferedInfoEvents(
+                count: EventFileWritePolicy.maxBufferedInfoEvents
+            ),
+            "info events at the batch limit should flush immediately"
+        )
+    }
+
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogWriterTests-\(UUID().uuidString)", isDirectory: true)

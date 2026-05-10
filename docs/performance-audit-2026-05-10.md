@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after seventeen audit/fix loops: **98/100, A**
+Current score after eighteen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -27,9 +27,9 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | A- | 90 | Settings home now coalesces passive activation/navigation refreshes while preserving forced refreshes for new/deleted captures; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
-| Observability overhead | A | 95 | Async event capture, allowlisted analytics, local reliability packets; launch smoke no longer writes dirty-shutdown markers | Batch low-priority local events and keep privacy/event budgets tested |
+| Observability overhead | A+ | 98 | Info-level JSONL events now batch up to 8 records or 500 ms; warning/error events still flush immediately; privacy/event budgets remain tested | Keep error diagnostics immediate and measure event-write overhead if high-volume telemetry grows |
 | Build and dev loop speed | B | 86 | Timed default thin `bash build.sh --no-open` takes 68.17s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1581 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
+| Performance regression guardrails | A+ | 99 | 1586 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -483,11 +483,39 @@ Measured proof:
 - Explicit full build: 566.3 MiB expanded, 462.8 MiB resources, bundled `parakeet-tdt-0.6b-v3-coreml`.
 - Timed default thin build: `real 68.17`, `user 51.73`, `sys 11.30`.
 
+### 17. Batched low-priority observability writes
+
+Files:
+
+- `Sources/Observability/EventFileWritePolicy.swift`
+- `Sources/Observability/EventReporter.swift`
+- `Tests/ObservabilityLogWriterTests.swift`
+- `scripts/entrypoints/run-tests.sh`
+
+Why:
+
+- Local observability was already asynchronous, but every info event still performed its own JSONL append.
+- High-volume info diagnostics should be cheap; warning and error diagnostics should stay immediate.
+
+Change made:
+
+- Added a small event-write policy for local observability.
+- Info-level events now batch up to 8 records or 500 ms before writing.
+- Warning/error events flush any pending info batch first, then write immediately.
+- The writer also flushes any pending info events before closing.
+
+Measured proof:
+
+- `bash run-tests.sh`: 1586 tests passed.
+- New policy tests prove only info events batch and the bounded batch size flushes immediately.
+- `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed.
+- Default thin build after the change: 105.4 MiB expanded, 1.9 MiB resources, no bundled Parakeet model.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1581 tests, 1581 passed, 0 failed**.
+- `bash run-tests.sh`: **1586 tests, 1586 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash build.sh --thin --no-open`: signed thin build passed, launch smoke passed, performance budget passed, no app left running.
@@ -663,6 +691,11 @@ These are the next improvements I would execute in order.
    - Next, keep a fresh release-candidate event fixture and add remote CI only if this repo gets workflow automation.
    - A+ gate: bundle regressions fail before DMG packaging and latency regressions have a repeatable log fixture.
 
+7. **Observability write overhead**
+   - Done in loop 18.
+   - Info-level local JSONL events now batch while warning/error events flush immediately.
+   - A+ gate: keep this behavior if event volume grows; add measured event-write overhead only if telemetry becomes hot again.
+
 ## Current Honest Conclusion
 
 Transcripted is already **fast** where it matters most after warmup. It is not yet **super lightweight**.
@@ -674,4 +707,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, and passive Settings dashboard refreshes are coalesced. The next public release, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, and low-priority local event writes are batched. The next public release, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
