@@ -1523,45 +1523,51 @@ private struct ConnectAgentStage: View {
     let onCopy: (AgentCopyItem) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Kicker("Connect an agent")
-            Headline(primary: "Give your agent a memory.", size: 42, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Kicker("Connect an agent")
+                Headline(primary: "Give your agent a memory.", size: 42, alignment: .leading)
 
-            HStack(spacing: 16) {
-                AgentOptionCard(
-                    eyebrow: "Option 1 - Start here",
-                    title: "Claude Desktop",
-                    detail: "Copy the setup steps, then install Transcripted direct tools from Settings > Agent.",
-                    glyph: "◆",
-                    color: OnboardingTheme.claude,
-                    buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps"
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 260), spacing: 16, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 16
                 ) {
-                    onCopy(.claudeDesktopSetup)
-                }
+                    AgentOptionCard(
+                        eyebrow: "Option 1 - Start here",
+                        title: "Claude Desktop",
+                        detail: "Copy the setup steps, then install Transcripted direct tools from Settings > Agent.",
+                        glyph: "◆",
+                        color: OnboardingTheme.claude,
+                        buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps"
+                    ) {
+                        onCopy(.claudeDesktopSetup)
+                    }
 
-                AgentOptionCard(
-                    eyebrow: "Option 2 - Other apps",
-                    title: "Claude Code, Codex, OpenClaw",
-                    detail: "Copy one prompt for local coding agents that can read your Transcripted Markdown folders.",
-                    glyph: "●",
-                    color: OnboardingTheme.codex,
-                    buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt"
-                ) {
-                    onCopy(.localAgentPrompt)
+                    AgentOptionCard(
+                        eyebrow: "Option 2 - Other apps",
+                        title: "Claude Code, Codex, OpenClaw",
+                        detail: "Copy one prompt for local coding agents that can read your Transcripted Markdown folders.",
+                        glyph: "●",
+                        color: OnboardingTheme.codex,
+                        buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt"
+                    ) {
+                        onCopy(.localAgentPrompt)
+                    }
                 }
+                .padding(.top, 28)
+
+                Text("Or skip. Everything still works without an agent.")
+                    .font(.system(size: 12))
+                    .italic()
+                    .foregroundStyle(OnboardingTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 12)
             }
-            .frame(height: 300)
-            .padding(.top, 28)
-
-            Text("Or skip. Everything still works without an agent.")
-                .font(.system(size: 12))
-                .italic()
-                .foregroundStyle(OnboardingTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 12)
+            .padding(.horizontal, 60)
+            .padding(.vertical, 34)
         }
-        .padding(.horizontal, 60)
-        .padding(.vertical, 34)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -1604,7 +1610,7 @@ private struct AgentOptionCard: View {
         }
         .foregroundStyle(inverted ? OnboardingTheme.window : OnboardingTheme.ink)
         .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
         .background(inverted ? OnboardingTheme.ink : OnboardingTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
