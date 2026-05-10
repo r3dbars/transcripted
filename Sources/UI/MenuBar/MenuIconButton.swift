@@ -46,11 +46,12 @@ final class MenuIconButton: NSButton {
         title = ""
         imagePosition = .imageOnly
         imageScaling = .scaleProportionallyDown
-        focusRingType = .none
+        focusRingType = .default
         setButtonType(.momentaryChange)
         layer?.cornerRadius = MenuTokens.secondaryButtonCornerRadius
         layer?.borderWidth = 1
 
+        setAccessibilityRole(.button)
         setAccessibilityLabel(symbolLabel)
         updateSymbolImage()
         updateAppearance()

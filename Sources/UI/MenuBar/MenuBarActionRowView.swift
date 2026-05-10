@@ -29,7 +29,12 @@ final class MenuBarActionRowView: NSControl {
     private var currentHeight: CGFloat = 26
 
     override var isEnabled: Bool {
-        didSet { updateAppearance() }
+        didSet {
+            if !isEnabled, window?.firstResponder === self {
+                window?.makeFirstResponder(nil)
+            }
+            updateAppearance()
+        }
     }
 
     override init(frame: NSRect) {
@@ -41,6 +46,8 @@ final class MenuBarActionRowView: NSControl {
     required init?(coder: NSCoder) { fatalError() }
 
     override var isFlipped: Bool { true }
+
+    override var acceptsFirstResponder: Bool { isEnabled }
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: currentHeight)
@@ -65,6 +72,8 @@ final class MenuBarActionRowView: NSControl {
         trailingLabel.stringValue = trailingText ?? ""
         trailingLabel.isHidden = trailingText?.isEmpty ?? true
         currentHeight = resolvedHeight()
+        setAccessibilityLabel(title)
+        setAccessibilityHelp(detail.isEmpty ? "Press Space or Return to choose this action." : detail)
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
             symbolView.image = image.withSymbolConfiguration(
@@ -80,6 +89,9 @@ final class MenuBarActionRowView: NSControl {
     private func setupViews() {
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.cardCornerRadius
+        focusRingType = .exterior
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
 
         addSubview(symbolWellView)
 
@@ -134,7 +146,13 @@ final class MenuBarActionRowView: NSControl {
         }
 
         layer?.backgroundColor = backgroundColor.cgColor
-        layer?.borderWidth = 0
+        if window?.firstResponder === self {
+            layer?.borderWidth = 2
+            layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
+        } else {
+            layer?.borderWidth = 0
+            layer?.borderColor = nil
+        }
         symbolView.contentTintColor = iconTint
         titleLabel.textColor = titleColor
         detailLabel.textColor = detailColor
@@ -250,6 +268,38 @@ final class MenuBarActionRowView: NSControl {
         let inside = bounds.contains(convert(event.locationInWindow, from: nil))
         defer { isPressing = false }
         guard isEnabled, inside else { return }
+        performPress()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.charactersIgnoringModifiers {
+        case " ", "\r", "\n":
+            performPress()
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        updateAppearance()
+        return accepted
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        performPress()
+        return true
+    }
+
+    private func performPress() {
+        guard isEnabled else { return }
         onPress?()
     }
 }

@@ -67,13 +67,14 @@ final class MenuOutlineButton: NSButton {
         wantsLayer = true
         isBordered = false
         bezelStyle = .inline
-        focusRingType = .none
+        focusRingType = .default
         setButtonType(.momentaryChange)
         imagePosition = .imageLeading
         imageHugsTitle = true
         layer?.cornerRadius = MenuTokens.secondaryButtonCornerRadius
         layer?.borderWidth = 1
 
+        setAccessibilityRole(.button)
         if let symbolLabel {
             setAccessibilityLabel(symbolLabel)
         }
