@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after fourteen audit/fix loops: **98/100, A**
+Current score after fifteen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -24,12 +24,12 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A- | 92 | Full offline build remains 566.2 MiB expanded; new signed thin build is 105.4 MiB expanded with 1.9 MiB resources and runtime model download | Make thin the default public DMG under 150 MB, or explicitly ship full/offline and thin/download variants |
 | Local disk/cache hygiene | A- | 91 | Storage page reports model/cache footprint and offers confirmed cleanup for known stale Parakeet folders plus optional Whisper cache; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model |
-| Meeting transcription throughput | A- | 92 | Stats DB: 91 recordings, avg 99.96s audio, avg processing 1.422s; worst 1270s recording processed in 22.846s | Corpus p95 RTF under 0.050 with memory cap proof |
+| Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A | 95 | Async event capture, allowlisted analytics, local reliability packets; launch smoke no longer writes dirty-shutdown markers | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | B- | 82 | Fresh deps build took 3:26 wall; app build still takes over 60s, but `bash build.sh --no-open` now verifies signing, smoke, and budgets without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1570 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks transcription latency, launch model-readiness, and strict dictation fast-start proof | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
+| Performance regression guardrails | A+ | 99 | 1574 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -395,11 +395,40 @@ Measured proof:
 - Full expanded app: 566.2 MiB.
 - After both no-open builds, no Transcripted process from the temp build remained running.
 
+### 14. Added a meeting throughput stats budget
+
+Files:
+
+- `scripts/ops/performance-budget.rb`
+- `scripts/README.md`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- The audit had strong meeting throughput numbers from `stats.sqlite`, but they were still one-off report evidence.
+- Very short 1-12 second test clips distort all-recording RTF, so the budget needs an explicit meeting-like duration threshold.
+
+Change made:
+
+- Added optional `--stats PATH` support to `scripts/ops/performance-budget.rb`.
+- The stats gate checks `recordings` rows with duration >= 30s by default.
+- The gate fails if meeting p95 RTF exceeds 0.050, and exposes `--min-meeting-duration-s` for explicit threshold changes.
+
+Measured proof:
+
+- `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
+- Meeting throughput samples: 36.
+- Meeting minimum duration: 30.0s.
+- Meeting processing p95 RTF: 0.022.
+- `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
+- `bash run-tests.sh`: 1574 tests passed.
+- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1570 tests, 1570 passed, 0 failed**.
+- `bash run-tests.sh`: **1574 tests, 1574 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash build.sh --thin --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
@@ -408,6 +437,8 @@ Measured proof:
 - `bash -n scripts/entrypoints/build-beta.sh`: passed.
 - `scripts/ops/performance-budget.rb`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
+- `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
+- `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - Incremental post-fix build wall time: **1:08.04**.
 - Full rebuilt app size: **566.2 MiB**.
 - Thin rebuilt app size: **105.4 MiB**.
@@ -473,6 +504,9 @@ Historical startup readiness, using valid pre-on-demand launch sequences:
 - max duration: 1270s
 - average processing: 1.422s
 - max processing: 22.846s
+- meeting-like samples >=30s: 36
+- meeting-like p95 RTF: 0.022
+- all-recording p95 RTF: 0.170, driven by 1-12s test clips where fixed overhead dominates
 
 Longest/highest-processing examples:
 
@@ -554,9 +588,9 @@ These are the next improvements I would execute in order.
    - A+ gate: make the default public DMG thin under 150 MB, or consciously ship separate full/offline and thin/download installers.
 
 4. **Meeting performance harness**
-   - Build a local corpus runner for a few anonymized/fixture meetings.
-   - Track RTF, peak RSS, and segment counts.
-   - A+ gate: p95 RTF under 0.050, stable memory, no main-thread stalls.
+   - Partly done in loop 15.
+   - Stats DB throughput is now budgeted for recordings >=30s, with p95 RTF 0.022.
+   - A+ gate: add peak RSS/memory cap proof and segment-count coverage during a current long-meeting corpus run.
 
 5. **CI/release performance budget**
    - The post-build bundle budget now runs in both the local build and beta distribution paths.

@@ -3,6 +3,7 @@
 
 require "find"
 require "json"
+require "open3"
 require "optparse"
 require "pathname"
 require "time"
@@ -16,18 +17,24 @@ MAX_TRANSCRIPTION_P95_SECONDS = 0.5
 MAX_TRANSCRIPTION_P95_RTF = 0.05
 MAX_MODEL_READY_P90_SECONDS = 30.0
 MAX_DICTATION_FAST_START_P95_MS = 250.0
+MAX_MEETING_P95_RTF = 0.05
+MIN_MEETING_DURATION_SECONDS = 30.0
 MIN_TRANSCRIPTION_SAMPLES = 10
 MIN_STARTUP_SAMPLES = 3
+MIN_MEETING_SAMPLES = 10
 
 options = {
   app_path: REPO_ROOT.join("build/Transcripted.app").to_s,
   events_path: nil,
+  stats_path: nil,
   max_app_bytes: MAX_APP_BYTES,
   max_resources_bytes: MAX_RESOURCES_BYTES,
   max_transcription_p95_seconds: MAX_TRANSCRIPTION_P95_SECONDS,
   max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
   max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS,
   max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
+  max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
+  min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
   require_dictation_fast_start_samples: 0,
   allow_missing_parakeet_model: false
 }
@@ -36,12 +43,15 @@ OptionParser.new do |parser|
   parser.banner = "Usage: scripts/ops/performance-budget.rb [options]"
   parser.on("--app PATH", "Path to Transcripted.app") { |path| options[:app_path] = path }
   parser.on("--events PATH", "Optional events.jsonl path for runtime latency budgets") { |path| options[:events_path] = path }
+  parser.on("--stats PATH", "Optional stats.sqlite path for meeting throughput budgets") { |path| options[:stats_path] = path }
   parser.on("--max-app-mb MB", Integer, "Expanded app size budget") { |mb| options[:max_app_bytes] = mb * 1024 * 1024 }
   parser.on("--max-resources-mb MB", Integer, "Resources directory size budget") { |mb| options[:max_resources_bytes] = mb * 1024 * 1024 }
   parser.on("--max-transcription-p95-s SECONDS", Float, "Dictation transcription p95 budget") { |seconds| options[:max_transcription_p95_seconds] = seconds }
   parser.on("--max-transcription-p95-rtf VALUE", Float, "Dictation transcription p95 RTF budget") { |rtf| options[:max_transcription_p95_rtf] = rtf }
   parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
   parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
+  parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
+  parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
 end.parse!
@@ -109,6 +119,30 @@ def startup_model_ready_durations(events)
   end
 
   durations
+end
+
+def meeting_rtf_samples(stats_path, minimum_duration_seconds:)
+  sql = <<~SQL
+    SELECT duration_seconds, processing_time_ms
+    FROM recordings
+    WHERE duration_seconds >= #{minimum_duration_seconds.to_f} AND processing_time_ms > 0;
+  SQL
+
+  stdout, stderr, status = Open3.capture3("sqlite3", "-separator", "\t", stats_path.to_s, sql)
+  unless status.success?
+    raise "sqlite3 failed for #{stats_path}: #{stderr.strip}"
+  end
+
+  stdout.lines.each_with_object([]) do |line, samples|
+    duration_seconds, processing_ms = line.strip.split("\t", 2).map { |value| Float(value) }
+    next if duration_seconds <= 0
+
+    samples << (processing_ms / 1000.0) / duration_seconds
+  rescue ArgumentError, TypeError
+    next
+  end
+rescue Errno::ENOENT
+  raise "sqlite3 is required for --stats checks"
 end
 
 def fail_budget!(errors)
@@ -239,6 +273,36 @@ if options[:events_path]
   end
 end
 
+stats_summary = nil
+if options[:stats_path]
+  stats_path = Pathname.new(options[:stats_path]).expand_path
+  if !stats_path.file?
+    errors << "Missing stats database: #{stats_path}"
+  else
+    begin
+      meeting_rtfs = meeting_rtf_samples(
+        stats_path,
+        minimum_duration_seconds: options[:min_meeting_duration_seconds]
+      )
+      meeting_p95 = percentile(meeting_rtfs, 0.95)
+
+      if meeting_rtfs.length < MIN_MEETING_SAMPLES
+        errors << "Only #{meeting_rtfs.length} meeting throughput samples, need at least #{MIN_MEETING_SAMPLES}"
+      elsif meeting_p95 > options[:max_meeting_p95_rtf]
+        errors << "Meeting processing p95 RTF is #{format("%.3f", meeting_p95)}, above #{format("%.3f", options[:max_meeting_p95_rtf])}"
+      end
+
+      stats_summary = {
+        meeting_samples: meeting_rtfs.length,
+        meeting_p95_rtf: meeting_p95,
+        minimum_duration_seconds: options[:min_meeting_duration_seconds]
+      }
+    rescue RuntimeError => error
+      errors << error.message
+    end
+  end
+end
+
 fail_budget!(errors)
 
 puts "Performance budget OK"
@@ -257,4 +321,9 @@ if runtime_summary
     puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"
   end
   puts "Dictation fast-start fallback/retry events: #{runtime_summary[:dictation_fast_start_fallback_events]}"
+end
+if stats_summary
+  puts "Meeting throughput samples: #{stats_summary[:meeting_samples]}"
+  puts "Meeting minimum duration: #{format("%.1fs", stats_summary[:minimum_duration_seconds])}"
+  puts "Meeting processing p95 RTF: #{format("%.3f", stats_summary[:meeting_p95_rtf])}"
 end

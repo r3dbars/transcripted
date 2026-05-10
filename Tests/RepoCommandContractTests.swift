@@ -109,8 +109,24 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_MEETING_P95_RTF = 0.05"),
+            "performance budget should cap meeting processing real-time factor when stats are provided"
+        )
+        assertTrue(
+            contents.contains("MIN_MEETING_DURATION_SECONDS = 30.0"),
+            "meeting throughput budgets should ignore tiny fixed-overhead clips by default"
+        )
+        assertTrue(
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
+        )
+        assertTrue(
+            contents.contains("--stats PATH"),
+            "performance budget should support optional meeting throughput stats"
+        )
+        assertTrue(
+            contents.contains("--min-meeting-duration-s"),
+            "performance budget should make the meeting throughput duration threshold explicit"
         )
         assertTrue(
             contents.contains("--allow-missing-parakeet-model"),
