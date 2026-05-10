@@ -256,11 +256,14 @@ private final class ShortcutRecorderRow: NSView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let shortcutButton = NSButton(title: "", target: nil, action: nil)
     private let resetRowButton = NSButton()
+    private let rowLabel: String
+    private var wasRecording = false
 
     private var recordAction: () -> Void
     private var resetAction: () -> Void
 
     init(label: String, recordAction: @escaping () -> Void, resetAction: @escaping () -> Void) {
+        rowLabel = label
         self.recordAction = recordAction
         self.resetAction = resetAction
         super.init(frame: .zero)
@@ -276,6 +279,8 @@ private final class ShortcutRecorderRow: NSView {
         shortcutButton.bezelColor = MenuTokens.buttonBackgroundNS
         shortcutButton.target = self
         shortcutButton.action = #selector(recordTapped)
+        shortcutButton.setAccessibilityLabel("\(label) shortcut")
+        shortcutButton.setAccessibilityHelp("Click to record. Press Escape to cancel.")
         addSubview(shortcutButton)
 
         if let img = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Reset") {
@@ -286,6 +291,8 @@ private final class ShortcutRecorderRow: NSView {
             resetRowButton.target = self
             resetRowButton.action = #selector(resetTapped)
         }
+        resetRowButton.setAccessibilityLabel("Reset \(label) shortcut to default")
+        resetRowButton.setAccessibilityHelp("Restores the default \(label) shortcut.")
         resetRowButton.isHidden = true
         addSubview(resetRowButton)
     }
@@ -308,6 +315,24 @@ private final class ShortcutRecorderRow: NSView {
 
     func update(displayText: String, isRecording: Bool, isDefault: Bool, isInvalid: Bool = false) {
         shortcutButton.title = displayText
+        shortcutButton.setAccessibilityValue(displayText)
+        shortcutButton.setAccessibilityHelp(
+            isRecording
+                ? "Recording. Press your shortcut, or Escape to cancel."
+                : "Click to record. Press Escape to cancel."
+        )
+        if isRecording && !wasRecording {
+            NSAccessibility.post(
+                element: shortcutButton,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: "Recording \(rowLabel) shortcut. Press your shortcut, or Escape to cancel.",
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue
+                ]
+            )
+        }
+        wasRecording = isRecording
+
         if isInvalid {
             shortcutButton.bezelColor = NSColor.systemRed.withAlphaComponent(0.28)
             shortcutButton.contentTintColor = NSColor.systemRed
