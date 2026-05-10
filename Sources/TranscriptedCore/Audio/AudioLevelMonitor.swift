@@ -9,22 +9,20 @@ private enum AudioLevelMonitorTuning {
 }
 
 /// Extension handling audio level metering, silence detection, and rolling buffer management.
-/// Runs on audio callback threads — NOT @MainActor.
+/// Level analysis and silence detection run on callback threads; published UI state is updated on main.
 extension Audio {
 
     // MARK: - Mic Audio Level
 
     func calculateLevel(buffer: AVAudioPCMBuffer) {
         let level = normalizedRMSLevel(buffer: buffer)
+        updateSilenceTracking(currentLevel: level)
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.audioLevel = level
             self.audioLevelHistory.removeFirst()
             self.audioLevelHistory.append(level)
-
-            // Silence detection - track how long we've been below threshold
-            self.updateSilenceTracking(currentLevel: level)
         }
     }
 
@@ -91,30 +89,46 @@ extension Audio {
     /// Updates silence tracking based on current audio level
     func updateSilenceTracking(currentLevel: Float) {
         let now = Date()
-
-        if currentLevel > silenceThreshold {
-            // Audio detected - reset silence tracking
-            lastNonSilentTime = now
-            isSilent = false
-            silenceDuration = 0
-        } else {
-            // Below threshold - we're in silence
-            isSilent = true
-            if let lastActive = lastNonSilentTime {
-                silenceDuration = now.timeIntervalSince(lastActive)
-            } else {
-                // First time detecting silence, start tracking
+        let state = micSilenceLock.withLock { () -> (isSilent: Bool, duration: TimeInterval) in
+            if currentLevel > silenceThreshold {
                 lastNonSilentTime = now
-                silenceDuration = 0
+                return (false, 0)
+            }
+
+            if let lastActive = lastNonSilentTime {
+                return (true, now.timeIntervalSince(lastActive))
+            } else {
+                lastNonSilentTime = now
+                return (true, 0)
             }
         }
+
+        publishMicSilenceState(isSilent: state.isSilent, duration: state.duration)
     }
 
     /// Reset silence tracking (call when recording starts)
     func resetSilenceTracking() {
-        lastNonSilentTime = Date()
-        silenceDuration = 0
-        isSilent = false
+        let now = Date()
+        micSilenceLock.withLock {
+            lastNonSilentTime = now
+        }
+        publishMicSilenceState(isSilent: false, duration: 0)
+    }
+
+    private func publishMicSilenceState(isSilent: Bool, duration: TimeInterval) {
+        let update = { [weak self] in
+            guard let self = self else { return }
+            self.isSilent = isSilent
+            self.silenceDuration = duration
+        }
+
+        if Thread.isMainThread {
+            update()
+        } else {
+            DispatchQueue.main.async {
+                update()
+            }
+        }
     }
 
     // MARK: - System Audio Level

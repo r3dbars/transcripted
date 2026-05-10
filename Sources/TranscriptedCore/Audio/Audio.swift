@@ -120,7 +120,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
     @Published public var isSilent: Bool = false  // True when audio below threshold
     let silenceThreshold: Float = AudioSilenceTuning.micActiveLevelThreshold
+    // Protected by micSilenceLock — written from callback thread, reset on recording start
     var lastNonSilentTime: Date?
+    let micSilenceLock = NSLock()
 
     // Audio file URLs - returned when recording stops
     @Published public var micAudioFileURL: URL?
