@@ -541,21 +541,9 @@ extension TranscriptionTaskManager {
         excluding sourceId: UUID,
         speakerDB: any SpeakerStore
     ) -> SpeakerProfile? {
-        let targetName = normalizeSpeakerName(rawName)
-        guard !targetName.isEmpty else { return nil }
-
-        return speakerDB.allSpeakers()
-            .filter { profile in
-                profile.id != sourceId && normalizeSpeakerName(profile.displayName) == targetName
-            }
-            .sorted { $0.callCount > $1.callCount }
+        speakerDB.findProfilesByName(rawName)
+            .filter { $0.id != sourceId }
             .first
-    }
-
-    nonisolated private static func normalizeSpeakerName(_ name: String?) -> String {
-        (name ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
     }
 
     @MainActor private func finishNamingFlow(
