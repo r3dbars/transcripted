@@ -104,6 +104,18 @@ func testRepoCommandContract() {
             contents.contains("startup_model_ready_durations(events)"),
             "performance budget should parse launch to model-ready events"
         )
+
+        let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")
+        assertTrue(
+            localBuildScript.contains("scripts/ops/performance-budget.rb --app \"$APP_BUNDLE\""),
+            "local build should fail before opening a bundle that violates performance budgets"
+        )
+
+        let betaBuildScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        assertTrue(
+            betaBuildScript.contains("scripts/ops/performance-budget.rb --app \"$APP_BUNDLE\""),
+            "beta release build should fail before DMG packaging when the app violates performance budgets"
+        )
     }
 
     runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {

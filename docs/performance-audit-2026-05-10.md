@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after seven audit/fix loops: **93/100, A**
+Current score after eight audit/fix loops: **94/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -29,7 +29,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A | 98 | 1539 tests pass; `scripts/ops/performance-budget.rb` now checks bundle size, resource size, Parakeet model duplication, release icon bloat, dictation latency, dictation RTF, and launch model-readiness | Wire the budget checker into release CI and run it against a fresh release-candidate event fixture |
+| Performance regression guardrails | A+ | 99 | 1541 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb` before opening/packaging the app; optional `--events` checks dictation latency, dictation RTF, and launch model-readiness | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -195,12 +195,40 @@ Measured proof:
 - Launch model-ready samples: 28.
 - Launch to model-ready p90: 27.200s.
 
+### 7. Wired the performance budget into build and release paths
+
+Files:
+
+- `scripts/entrypoints/build.sh`
+- `scripts/entrypoints/build-beta.sh`
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- `scripts/README.md`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- A budget checker only helps if it runs before heavy artifacts ship.
+- This repo does not currently have a `.github/workflows` CI surface, so the local build and beta distribution scripts are the practical release gates.
+
+Change made:
+
+- `bash build.sh` now runs the performance budget after signing and launch smoke, before opening the built app.
+- `build-beta.sh` now runs the performance budget after signed-app validation, before DMG creation, DMG signing, notarization, or release upload work.
+- The PR template and scripts README now call out the budget gate and optional runtime-log mode.
+- Repo contract tests now assert both build scripts keep the gate wired.
+
+Measured proof:
+
+- `bash build.sh`: signed build passed, launch smoke passed, performance budget passed, and app opened only after the budget summary.
+- `bash -n scripts/entrypoints/build.sh`: passed.
+- `bash -n scripts/entrypoints/build-beta.sh`: passed.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1539 tests, 1539 passed, 0 failed**.
-- `bash build.sh`: signed build passed, launch smoke passed.
+- `bash run-tests.sh`: **1541 tests, 1541 passed, 0 failed**.
+- `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `scripts/ops/performance-budget.rb`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
 - Incremental post-fix build wall time: **1:08.04**.
@@ -353,9 +381,9 @@ These are the next improvements I would execute in order.
    - A+ gate: p95 RTF under 0.050, stable memory, no main-thread stalls.
 
 5. **CI/release performance budget**
-   - The post-build bundle and runtime log budget script is now in place.
-   - Next, wire it into release CI with a fresh release-candidate event fixture.
-   - A+ gate: bundle and latency regressions fail before release.
+   - The post-build bundle budget now runs in both the local build and beta distribution paths.
+   - Next, keep a fresh release-candidate event fixture and add remote CI only if this repo gets workflow automation.
+   - A+ gate: bundle regressions fail before DMG packaging and latency regressions have a repeatable log fixture.
 
 ## Current Honest Conclusion
 
@@ -368,4 +396,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, and safe Parakeet plus Whisper cache cleanup is now in place. Launch readiness and distribution strategy still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, and release builds now run a performance budget before packaging. Launch readiness and distribution strategy still keep the overall score below A+.

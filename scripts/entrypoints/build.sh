@@ -336,6 +336,9 @@ fi
 echo "Running launch smoke check..."
 verify_launch_smoke
 
+echo "Checking performance budget..."
+scripts/ops/performance-budget.rb --app "$APP_BUNDLE"
+
 echo "Build complete!"
 echo "Opening Transcripted..."
 open "$APP_BUNDLE"

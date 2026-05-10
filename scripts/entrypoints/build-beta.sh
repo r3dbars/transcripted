@@ -515,6 +515,9 @@ fi
 
 validate_signed_app
 
+echo "Checking performance budget..."
+scripts/ops/performance-budget.rb --app "$APP_BUNDLE"
+
 # Create DMG
 echo "Creating DMG..."
 rm -f "$BUILD_DIR/$DMG_NAME"
