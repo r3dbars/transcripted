@@ -194,7 +194,7 @@ Download the latest `.dmg`:
 Requirements:
 
 - macOS 26+
-- Apple Silicon Mac recommended
+- Apple Silicon Mac required
 
 ### Homebrew
 
