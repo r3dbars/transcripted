@@ -14,7 +14,7 @@
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (11 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (5 files) — transcript save, scanner, formatter, shared frontmatter parsing, and retained-recording audio archiving
+- `Storage/` (4 files) — transcript save, formatter, shared frontmatter parsing, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know
