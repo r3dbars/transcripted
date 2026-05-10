@@ -54,8 +54,10 @@ POSTHOG_ACTIVE_EVENTS = (
 
 NIGHTLY_PREFIXES = (
     "[nightly-",
+    "[reliability]",
     "nightly-",
     "codex/nightly",
+    "codex/reliability",
 )
 
 LANE_ORDER = [
@@ -584,8 +586,12 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            signal = "Reviewer found a blocker or required change."
-            action = "Fix before approval"
+            if "issue #500" in lower:
+                signal = "Reviewer kept issue #500 as the real user-trust blocker."
+                action = "Run the issue #500 audio matrix"
+            else:
+                signal = "Reviewer found a blocker or required change."
+                action = "Fix before approval"
         elif "ready for justin" in lower or "top recommendation" in lower:
             status = "needs_review"
             signal = "Reviewer says the current PR/task is ready for Justin's approval."
@@ -666,6 +672,24 @@ def is_nightly_pr(pr: dict[str, Any]) -> bool:
     return any(prefix in haystack for prefix in NIGHTLY_PREFIXES) or "codex-automation" in haystack
 
 
+def pr_priority(pr: dict[str, Any]) -> tuple[int, int]:
+    haystack = " ".join(str(pr.get(key, "")) for key in ("title", "headRefName")).lower()
+    number = int(pr.get("number") or 0)
+    if "reliability" in haystack or "dictation ready-start" in haystack:
+        return (0, number)
+    if "nightly-security" in haystack or "nightly-ux" in haystack or "diagnostics" in haystack:
+        return (1, number)
+    if "nightly-regression" in haystack or "nightly-agent" in haystack:
+        return (2, number)
+    if "operator" in haystack:
+        return (3, number)
+    if "nightly-maintenance" in haystack or "nightly-docs" in haystack:
+        return (4, number)
+    if "digest" in haystack:
+        return (5, number)
+    return (6, number)
+
+
 def normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
     normalized = {
         "number": pr.get("number"),
@@ -712,7 +736,10 @@ def github_data(repo: Path, no_github: bool) -> dict[str, Any]:
         ],
         cwd=repo,
     )
-    nightly_open = [normalize_pr(pr) for pr in open_prs if is_nightly_pr(pr)]
+    nightly_open = sorted(
+        (normalize_pr(pr) for pr in open_prs if is_nightly_pr(pr)),
+        key=pr_priority,
+    )
     error = open_error or merged_error
     return {
         "open_prs": nightly_open,
@@ -732,12 +759,18 @@ def human_next_steps(
     if dau_unknown:
         steps.append("Fix DAU visibility: set PostHog read credentials and rerun this report.")
 
+    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
+    if blocked_lanes and not dau_unknown:
+        lane = blocked_lanes[0]
+        steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+
     if open_prs:
         if len(open_prs) == 1:
             pr = open_prs[0]
             steps.append(f"Review PR #{pr.get('number')}: {pr.get('title')}.")
         else:
-            steps.append(f"Review {len(open_prs)} open nightly PRs.")
+            pr = open_prs[0]
+            steps.append(f"Review {len(open_prs)} open nightly PRs, starting with PR #{pr.get('number')}.")
 
     if github_error and github_error != "GitHub disabled":
         steps.append("Restore GitHub CLI access so PR review status is not guessed.")
@@ -1125,7 +1158,7 @@ def build_accomplishments(lanes: list[LaneResult], open_prs: list[dict[str, Any]
         items.append("Audio reliability checks passed synthetically, but issue #500 stayed on the watch list.")
     if open_prs:
         pr = open_prs[0]
-        items.append(f"PR #{pr.get('number')} is waiting with the durable morning report work.")
+        items.append(f"{len(open_prs)} open nightly PRs are waiting; PR #{pr.get('number')} is the first one to review.")
 
     return items[:8]
 
@@ -1141,7 +1174,9 @@ def build_recommendations(
         recommendations.append("Fix DAU visibility first: set PostHog read credentials, then rerun this report.")
     if open_prs:
         pr = open_prs[0]
-        recommendations.append(f"Review PR #{pr.get('number')} so this morning report becomes the durable final automation.")
+        recommendations.append(f"Review PR #{pr.get('number')} first: {pr.get('title')}.")
+        if len(open_prs) > 1:
+            recommendations.append(f"Then triage the other {len(open_prs) - 1} open nightly PRs.")
     if ops_tokens_incomplete and not dau_unknown:
         recommendations.append("Restore missing ops read tokens so tomorrow's Sentry, PostHog, and Cloudflare read is complete.")
     if any(lane.id == "transcripted-nightly-north-star-agent" for lane in lanes):
@@ -1152,6 +1187,61 @@ def build_recommendations(
         recommendations.append("Approve one helpful community reply where people already want local Markdown and agent memory.")
 
     return recommendations[:5]
+
+
+def pluralize(count: int, singular: str, plural: Optional[str] = None) -> str:
+    if count == 1:
+        return singular
+    return plural or f"{singular}s"
+
+
+def blocked_status_text(blocked_count: int, unknown_count: int) -> tuple[str, str]:
+    if blocked_count and unknown_count:
+        return "Yes", f"{blocked_count} {pluralize(blocked_count, 'blocked lane')}; {unknown_count} unknown"
+    if blocked_count:
+        return "Yes", f"{blocked_count} {pluralize(blocked_count, 'blocked lane')}"
+    if unknown_count:
+        return "No confirmed blocker", f"{unknown_count} unknown"
+    return "No", "Nothing blocked"
+
+
+def night_summary_text(active_count: int, blocked_count: int, unknown_count: int) -> str:
+    if blocked_count and unknown_count:
+        return (
+            f"{active_count} jobs ran; {blocked_count} {pluralize(blocked_count, 'lane')} "
+            f"blocked and {unknown_count} {pluralize(unknown_count, 'lane')} missing fresh signal."
+        )
+    if blocked_count:
+        return f"{active_count} jobs ran; {blocked_count} {pluralize(blocked_count, 'lane')} blocked."
+    if unknown_count:
+        return f"{active_count} jobs ran; no confirmed blocker, but {unknown_count} {pluralize(unknown_count, 'lane')} missing fresh signal."
+    return f"{active_count} jobs ran; nothing is blocked."
+
+
+def first_screen_payload(
+    active_count: int,
+    open_pr_count: int,
+    human_action_count: int,
+    blocked_count: int,
+    unknown_count: int,
+    dau_status: dict[str, Any],
+    ceo_brief: dict[str, Any],
+    human_steps: list[str],
+) -> dict[str, Any]:
+    blocked_label, blocked_detail = blocked_status_text(blocked_count, unknown_count)
+    return {
+        "what_happened_last_night": night_summary_text(active_count, blocked_count, unknown_count),
+        "do_first": ceo_brief["do_now"],
+        "current_dau": dau_status["current"],
+        "gap_to_1000_dau": dau_status["gap"],
+        "open_nightly_pr_count": open_pr_count,
+        "human_action_count": human_action_count,
+        "blocked": blocked_count > 0,
+        "blocked_status": blocked_label,
+        "blocked_detail": blocked_detail,
+        "recommended_actions": human_steps[:4],
+        "dau_note": dau_status["note"],
+    }
 
 
 def build_ceo_brief(
@@ -1234,7 +1324,7 @@ def build_ceo_brief(
     needs_judgment: list[str] = []
     if open_prs:
         pr = open_prs[0]
-        needs_judgment.append(f"Approve/merge PR #{pr.get('number')} if the CEO brief shape feels right.")
+        needs_judgment.append(f"Approve/merge PR #{pr.get('number')} first if its smoke check passes.")
     if artifact_drift:
         needs_judgment.append("Decide whether to clean the repeated local artifact drift or keep it as known local residue.")
     if issue_500_watch:
@@ -1327,7 +1417,9 @@ def build_payload(
     )
     overall = overall_status(lanes, steps, gh_payload["open_prs"], gh_payload["error"])
     data_quality = data_quality_note(lanes, gh_payload["error"])
-    blocked_unknown = sum(1 for lane in lanes if lane.status in ("blocked", "unknown"))
+    blocked_count = sum(1 for lane in lanes if lane.status == "blocked")
+    unknown_count = sum(1 for lane in lanes if lane.status == "unknown")
+    blocked_unknown = blocked_count + unknown_count
     needs_human = len([step for step in steps if step != "No human action needed this morning."])
 
     sorted_lanes = sorted(lanes, key=lambda lane: (status_rank(lane.status), LANE_ORDER.index(lane.id) if lane.id in LANE_ORDER else 999))
@@ -1353,9 +1445,21 @@ def build_payload(
             "active_lanes": len(lanes),
             "open_nightly_prs": len(gh_payload["open_prs"]),
             "needs_human": needs_human,
+            "blocked": blocked_count,
+            "unknown": unknown_count,
             "blocked_or_unknown": blocked_unknown,
         },
         "human_next_steps": steps,
+        "first_screen": first_screen_payload(
+            active_count=len(lanes),
+            open_pr_count=len(gh_payload["open_prs"]),
+            human_action_count=needs_human,
+            blocked_count=blocked_count,
+            unknown_count=unknown_count,
+            dau_status=dau_status,
+            ceo_brief=ceo_brief,
+            human_steps=steps,
+        ),
         "ceo_brief": ceo_brief,
         "lanes": [lane.__dict__ for lane in sorted_lanes],
         "open_prs": gh_payload["open_prs"],
@@ -1479,7 +1583,11 @@ def render_html(payload: dict[str, Any]) -> str:
     pr_word = "PR" if counts["open_nightly_prs"] == 1 else "PRs"
     action_word = "thing" if counts["needs_human"] == 1 else "things"
     action_verb = "needs" if counts["needs_human"] == 1 else "need"
-    hero_title = f"{counts['active_lanes']} jobs ran. {counts['blocked_or_unknown']} {blocker_word}."
+    hero_title = (
+        "DAU is unknown."
+        if dau_unknown
+        else f"{counts['active_lanes']} jobs ran. {counts['blocked_or_unknown']} {blocker_word}."
+    )
     hero_subtitle = (
         f"DAU unknown. Goal: {dau['goal']}. Fix measurement first."
         if dau_unknown
@@ -1929,15 +2037,15 @@ a:hover {{ text-decoration: underline; }}
 def headline_text(payload: dict[str, Any]) -> str:
     status = payload["overall_status"]
     ceo = payload.get("ceo_brief", {})
+    dau = ceo.get("dau_status", {})
+    if dau.get("current") == "Unknown today":
+        return "We do not know current DAU. Fix that first."
     if status == "green":
         return "Everything that matters is green. No human action needed."
     if status == "blocked":
         return "A nightly lane is blocked. Start with the first action below."
     if status == "unknown":
         return "Too many lanes are missing fresh signal. Treat this as an automation problem first."
-    dau = ceo.get("dau_status", {})
-    if dau.get("current") == "Unknown today":
-        return "We do not know current DAU. Fix that first."
     steps = payload.get("human_next_steps", [])
     first = ceo.get("do_now") or (steps[0] if steps else "Review the action queue.")
     human_actions = payload.get("counts", {}).get("needs_human", 0)
