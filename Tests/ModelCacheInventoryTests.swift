@@ -44,6 +44,30 @@ func testModelCacheInventory() {
             "model cache diagnostics should not include raw local paths"
         )
     }
+
+    runSuite("ModelCacheInventory cleanup removes only known stale FluidAudio models") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let active = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml/Encoder.mlmodelc/data.bin")
+        let stale = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3/Encoder.mlmodelc/data.bin")
+        let unknown = fluid.appendingPathComponent("some-other-model/model.bin")
+        writeTestFile(active, bytes: 11)
+        writeTestFile(stale, bytes: 17)
+        writeTestFile(unknown, bytes: 19)
+
+        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(
+            fluidAudioModelsDirectory: fluid
+        )
+
+        assertEqual(result?.removedBytes, 17, "cleanup should report the stale directory size")
+        assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v3"], "cleanup should name removed stale directories")
+        assertTrue(FileManager.default.fileExists(atPath: active.path), "active CoreML Parakeet should stay")
+        assertFalse(FileManager.default.fileExists(atPath: stale.path), "known stale Parakeet cache should be removed")
+        assertTrue(FileManager.default.fileExists(atPath: unknown.path), "unknown model directories should not be touched")
+    }
 }
 
 private func writeTestFile(_ url: URL, bytes: Int) {

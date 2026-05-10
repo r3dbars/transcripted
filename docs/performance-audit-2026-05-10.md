@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after three audit/fix loops: **89/100, B+**
+Current score after four audit/fix loops: **90/100, A-**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -23,13 +23,13 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
 | Idle memory | B | 83 | Warm app processes ranged from about 210 MB RSS to about 583 MB RSS depending on model state | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | B | 82 | Release DMG is 524,144,094 bytes; rebuilt app is 550 MB expanded after icon cleanup | DMG under 150 MB, or documented intentional offline-model bundle with optional thin build |
-| Local disk/cache hygiene | C+ | 78 | Storage page and support diagnostics now report model/cache footprint and known stale Parakeet candidates; local footprint is still 3 GB+ | Add confirmed cleanup for stale models and normal default footprint under 700 MB excluding active bundled model |
+| Local disk/cache hygiene | B+ | 86 | Storage page reports model/cache footprint and offers confirmed removal of known stale Parakeet folders; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model, plus explicit Whisper cleanup |
 | Meeting transcription throughput | A- | 92 | Stats DB: 91 recordings, avg 99.96s audio, avg processing 1.422s; worst 1270s recording processed in 22.846s | Corpus p95 RTF under 0.050 with memory cap proof |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A- | 94 | 1520 tests pass; tests now guard model duplication, icon bloat, dictation fast start, single-instance lock, and cache inventory | Automated perf-budget parser for bundle size, startup, dictation latency, and cache size |
+| Performance regression guardrails | A | 95 | 1525 tests pass; tests now guard model duplication, icon bloat, dictation fast start, single-instance lock, cache inventory, and stale-model cleanup | Automated perf-budget parser for bundle size, startup, dictation latency, and cache size |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -110,7 +110,7 @@ Measured proof:
 - After `bash build.sh`, one rebuilt app process was running from `build/Transcripted.app`.
 - Running `open -n build/Transcripted.app` again left only that one rebuilt app process resident after 4 seconds.
 
-### 4. Added model/cache footprint reporting
+### 4. Added model/cache footprint reporting and stale-model cleanup
 
 Files:
 
@@ -131,6 +131,8 @@ Change made:
 
 - Storage settings now scan model/cache sizes on a background task.
 - The Storage page shows total known model/cache footprint, FluidAudio models, Whisper cache, and known stale Parakeet candidates.
+- If stale Parakeet folders are present, the Storage page offers a confirmed cleanup action.
+- Cleanup removes only known old Parakeet folders and leaves active Parakeet CoreML, Whisper, and unknown model folders alone.
 - Copyable support diagnostics now include coarse storage fields without raw local paths.
 - The signed build's launch smoke now sets `TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1` so the smoke subprocess can validate launch while a guarded app is already running.
 
@@ -138,13 +140,13 @@ Measured proof:
 
 - Local model/cache footprint remains large: `FluidAudio/Models` is 1.8 GB and Transcripted app support is 1.3 GB.
 - The app can now surface that footprint instead of hiding it in Finder.
-- Cleanup is not implemented yet; the grade stays C+ until stale-model deletion is explicit, confirmed, and safe.
+- Fast tests prove cleanup removes `parakeet-tdt-0.6b-v3` while preserving active `parakeet-tdt-0.6b-v3-coreml` and unknown model folders.
 
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1520 tests, 1520 passed, 0 failed**.
+- `bash run-tests.sh`: **1525 tests, 1525 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed.
 - Incremental post-fix build wall time: **1:10.50**.
 - Rebuilt app size: **550 MB**.
@@ -278,10 +280,9 @@ These are the next improvements I would execute in order.
    - Raise dictation start responsiveness to A+/98 only if the log proves it.
 
 2. **Cache cleanup and stale model pruning**
-   - Reporting is now in place.
-   - Next, offer confirmed removal of stale FluidAudio models not needed by the active app.
-   - Keep Whisper cleanup explicit because users may have selected Whisper.
-   - A+ gate: user can recover multiple GB without Finder spelunking.
+   - Reporting and known stale Parakeet cleanup are now in place.
+   - Next, add explicit Whisper cleanup because users may have selected Whisper.
+   - A+ gate: users can recover multiple GB without Finder spelunking and without deleting active models by accident.
 
 3. **Launch readiness policy**
    - Decide whether first-use speed or tiny launch footprint wins.
@@ -314,4 +315,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, and cache reporting is now in place. Actual cache cleanup, launch readiness, and distribution strategy still keep the overall score below A+.
+The first three are done, and safe stale-model cleanup is now in place. Launch readiness, distribution strategy, and optional Whisper cleanup still keep the overall score below A+.

@@ -60,6 +60,9 @@ struct TranscriptedSettingsView: View {
     @State private var showSupportFolders = false
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
     @State private var modelCacheLoading = false
+    @State private var modelCacheCleanupInProgress = false
+    @State private var modelCacheCleanupStatus: String?
+    @State private var showModelCacheCleanupConfirmation = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
@@ -1438,10 +1441,22 @@ struct TranscriptedSettingsView: View {
                             value: snapshot.formattedStaleFluidAudioModelSize,
                             detail: snapshot.staleModelSummary
                         )
+
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models", role: .destructive) {
+                            showModelCacheCleanupConfirmation = true
+                        }
+                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
                     } else {
                         Text("No known stale Parakeet model folders found.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if let modelCacheCleanupStatus {
+                        Text(modelCacheCleanupStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else if !modelCacheLoading {
                     Text("Model storage has not been scanned yet.")
@@ -1459,6 +1474,14 @@ struct TranscriptedSettingsView: View {
                 if modelCacheSnapshot == nil, !modelCacheLoading {
                     refreshModelCacheSnapshot()
                 }
+            }
+            .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeStaleModelCaches()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
             }
 
             SettingsSection(
@@ -2043,6 +2066,34 @@ struct TranscriptedSettingsView: View {
             await MainActor.run {
                 modelCacheSnapshot = snapshot
                 modelCacheLoading = false
+            }
+        }
+    }
+
+    private func removeStaleModelCaches() {
+        guard !modelCacheCleanupInProgress else { return }
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeKnownStaleFluidAudioModels()
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedNames.isEmpty {
+                        modelCacheCleanupStatus = "No stale model folders needed removal."
+                    } else {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
+                }
             }
         }
     }

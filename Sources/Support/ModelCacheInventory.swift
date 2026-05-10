@@ -48,6 +48,11 @@ struct ModelCacheSnapshot: Equatable {
     }
 }
 
+struct ModelCacheCleanupResult: Equatable {
+    let removedBytes: Int64
+    let removedNames: [String]
+}
+
 enum ModelCacheInventory {
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
         "parakeet-tdt-0.6b-v2",
@@ -85,6 +90,38 @@ enum ModelCacheInventory {
         formatter.countStyle = .file
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         return formatter.string(fromByteCount: bytes)
+    }
+
+    static func removeKnownStaleFluidAudioModels(
+        fileManager: FileManager = .default,
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let root = fluidAudioModelsDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        var removedBytes: Int64 = 0
+        var removedNames: [String] = []
+
+        for name in knownStaleFluidAudioModelDirectories.sorted() {
+            let candidate = root.appendingPathComponent(name, isDirectory: true)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+
+            guard candidate.path == root.appendingPathComponent(name, isDirectory: true).path,
+                  candidate.path.hasPrefix(root.path + "/"),
+                  fileManager.fileExists(atPath: candidate.path)
+            else {
+                continue
+            }
+
+            let bytes = directorySize(at: candidate, fileManager: fileManager)
+            try fileManager.removeItem(at: candidate)
+            removedBytes += bytes
+            removedNames.append(name)
+        }
+
+        return ModelCacheCleanupResult(
+            removedBytes: removedBytes,
+            removedNames: removedNames
+        )
     }
 
     static func directorySize(at url: URL, fileManager: FileManager = .default) -> Int64 {
