@@ -1212,6 +1212,14 @@ struct TranscriptedSettingsView: View {
                                 trackSettingsAction("open_recent_meeting", page: .meetings)
                                 NSWorkspace.shared.open(item.transcriptURL)
                             },
+                            revealAction: {
+                                trackSettingsAction("reveal_recent_meeting", page: .meetings)
+                                NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+                            },
+                            copyPathAction: {
+                                trackSettingsAction("copy_recent_meeting_path", page: .meetings)
+                                copyPath(item.transcriptURL)
+                            },
                             copyForAgentAction: {
                                 trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
                                 copyMeetingForAgent(item)
@@ -2492,6 +2500,12 @@ struct TranscriptedSettingsView: View {
         NSWorkspace.shared.open(folder)
     }
 
+    private func copyPath(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(url.path, forType: .string)
+    }
+
     private static let recentCaptureDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -2678,6 +2692,8 @@ private struct SettingsRecentMeetingRow: View {
     let detail: String
     let isCopied: Bool
     let openAction: () -> Void
+    let revealAction: () -> Void
+    let copyPathAction: () -> Void
     let copyForAgentAction: () -> Void
     @ObservedObject private var playback = MeetingAudioPlayback.shared
 
@@ -2710,6 +2726,14 @@ private struct SettingsRecentMeetingRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .help("Click to open. Right-click for more.")
+            .contextMenu {
+                Button("Open Transcript", action: openAction)
+                Button("Reveal in Finder", action: revealAction)
+                Button("Copy Path", action: copyPathAction)
+                Divider()
+                Button(isCopied ? "Copied for Agent" : "Copy for Agent", action: copyForAgentAction)
+            }
 
             HStack(spacing: 10) {
                 if let audio = item.audio {
