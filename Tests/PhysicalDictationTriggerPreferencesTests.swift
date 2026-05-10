@@ -51,6 +51,41 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(PhysicalDictationTriggerPreferences.displayString(for: fn), "Fn", "Fn should have a readable display name")
     }
 
+    runSuite("PhysicalDictationTriggerPreferences detects duplicate trigger bindings") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let meetingBinding = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults)
+        let conflict = PhysicalDictationTriggerPreferences.conflictingBinding(
+            for: meetingBinding,
+            target: .handsFree,
+            userDefaults: defaults
+        )
+
+        assertEqual(conflict?.target, .meeting, "hands-free should not be allowed to reuse the meeting shortcut")
+        assertEqual(conflict?.binding, meetingBinding, "conflict should report the binding that is already taken")
+        assertNil(
+            PhysicalDictationTriggerPreferences.conflictingBinding(
+                for: meetingBinding,
+                target: .meeting,
+                userDefaults: defaults
+            ),
+            "a target should not conflict with its own current binding"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.duplicateBindingWarning(userDefaults: defaults),
+            "fresh default shortcuts should not warn"
+        )
+
+        PhysicalDictationTriggerPreferences.saveHandsFree(meetingBinding, userDefaults: defaults)
+
+        assertEqual(
+            PhysicalDictationTriggerPreferences.duplicateBindingWarning(userDefaults: defaults),
+            "⌥M is used by Hands-Free and Meetings. Change one shortcut in Settings.",
+            "existing duplicate preferences should surface a user-readable warning"
+        )
+    }
+
     runSuite("PhysicalDictationTriggerPreferences decodes macOS Fn actions") {
         assertEqual(
             PhysicalDictationTriggerPreferences.functionKeySystemAction(rawValue: nil),

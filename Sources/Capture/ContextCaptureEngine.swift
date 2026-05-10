@@ -560,6 +560,7 @@ class ContextCaptureEngine: ObservableObject {
         let errors = [
             carbonHotkeyError,
             physicalTriggerError,
+            PhysicalDictationTriggerPreferences.duplicateBindingWarning(),
             PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
                 for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
             )

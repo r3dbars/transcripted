@@ -13,6 +13,28 @@ struct PhysicalDictationTriggerBinding: Equatable {
     }
 }
 
+enum PhysicalShortcutTarget: CaseIterable, Equatable {
+    case pushToTalk
+    case handsFree
+    case meeting
+
+    var title: String {
+        switch self {
+        case .pushToTalk:
+            return "Push to Talk"
+        case .handsFree:
+            return "Hands-Free"
+        case .meeting:
+            return "Meetings"
+        }
+    }
+}
+
+struct PhysicalShortcutConflict: Equatable {
+    let target: PhysicalShortcutTarget
+    let binding: PhysicalDictationTriggerBinding
+}
+
 enum PhysicalDictationTriggerModifiers {
     static let command: UInt32 = 1 << 0
     static let shift: UInt32 = 1 << 1
@@ -105,6 +127,53 @@ enum PhysicalDictationTriggerPreferences {
             modifiersKey: meetingModifiersKey,
             userDefaults: userDefaults
         ) ?? migratedMeetingBinding(userDefaults: userDefaults)
+    }
+
+    static func binding(
+        for target: PhysicalShortcutTarget,
+        userDefaults: UserDefaults = .standard
+    ) -> PhysicalDictationTriggerBinding {
+        switch target {
+        case .pushToTalk:
+            return pushToTalkBinding(userDefaults: userDefaults)
+        case .handsFree:
+            return handsFreeBinding(userDefaults: userDefaults)
+        case .meeting:
+            return meetingBinding(userDefaults: userDefaults)
+        }
+    }
+
+    static func conflictingBinding(
+        for binding: PhysicalDictationTriggerBinding,
+        target: PhysicalShortcutTarget,
+        userDefaults: UserDefaults = .standard
+    ) -> PhysicalShortcutConflict? {
+        for otherTarget in PhysicalShortcutTarget.allCases where otherTarget != target {
+            let otherBinding = self.binding(for: otherTarget, userDefaults: userDefaults)
+            if otherBinding == binding {
+                return PhysicalShortcutConflict(target: otherTarget, binding: otherBinding)
+            }
+        }
+
+        return nil
+    }
+
+    static func duplicateBindingWarning(userDefaults: UserDefaults = .standard) -> String? {
+        let bindings = PhysicalShortcutTarget.allCases.map {
+            ($0, binding(for: $0, userDefaults: userDefaults))
+        }
+
+        for index in bindings.indices {
+            for otherIndex in bindings.indices where otherIndex > index {
+                let lhs = bindings[index]
+                let rhs = bindings[otherIndex]
+                if lhs.1 == rhs.1 {
+                    return "\(displayString(for: lhs.1)) is used by \(lhs.0.title) and \(rhs.0.title). Change one shortcut in Settings."
+                }
+            }
+        }
+
+        return nil
     }
 
     static func save(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
