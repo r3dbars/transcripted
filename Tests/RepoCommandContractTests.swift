@@ -70,6 +70,26 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - performance budget checks release bloat") {
+        let contents = readRepoTextFile("scripts/ops/performance-budget.rb")
+        assertTrue(
+            contents.contains("EXPECTED_PARAKEET_MODEL_DIR = \"parakeet-tdt-0.6b-v3-coreml\""),
+            "performance budget should assert the runtime Parakeet model directory"
+        )
+        assertTrue(
+            contents.contains("EXPECTED_RESOURCE_ICONS = [\"Transcripted.icns\"]"),
+            "performance budget should keep old icon experiments out of release resources"
+        )
+        assertTrue(
+            contents.contains("MAX_APP_BYTES = 650 * 1024 * 1024"),
+            "performance budget should cap expanded app size"
+        )
+        assertTrue(
+            contents.contains("MAX_RESOURCES_BYTES = 520 * 1024 * 1024"),
+            "performance budget should cap resource size"
+        )
+    }
+
     runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         guard
@@ -184,7 +204,8 @@ private func isTextPath(_ relativePath: String) -> Bool {
         "toml",
         "txt",
         "yml",
-        "yaml"
+        "yaml",
+        "rb"
     ]
 
     return textExtensions.contains(URL(fileURLWithPath: relativePath).pathExtension)

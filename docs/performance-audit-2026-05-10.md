@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after five audit/fix loops: **91/100, A-**
+Current score after six audit/fix loops: **92/100, A-**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -29,7 +29,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A | 96 | 1531 tests pass; tests now guard model duplication, icon bloat, dictation fast start, single-instance lock, cache inventory, stale-model cleanup, and Whisper-cache cleanup | Automated perf-budget parser for bundle size, startup, dictation latency, and cache size |
+| Performance regression guardrails | A | 97 | 1535 tests pass; `scripts/ops/performance-budget.rb` now checks bundle size, resource size, Parakeet model duplication, and release icon bloat | Wire the budget checker into release CI and add startup/dictation latency budget parsing |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -146,12 +146,34 @@ Measured proof:
 - Fast tests prove cleanup removes `parakeet-tdt-0.6b-v3` while preserving active `parakeet-tdt-0.6b-v3-coreml` and unknown model folders.
 - Fast tests prove Whisper cleanup removes only the Whisper models directory and refuses non-Whisper model paths.
 
+### 5. Added a post-build performance budget checker
+
+File:
+
+- `scripts/ops/performance-budget.rb`
+
+Why:
+
+- The app previously regressed into duplicate model bundling and unused resource bloat.
+- A build can pass while still producing a heavy release artifact.
+
+Change made:
+
+- Added a post-build checker for expanded app size, resources size, Parakeet model directory count/name, and top-level release icon files.
+- Added repo contract coverage so the checker keeps the active Parakeet model, icon, and size budgets explicit.
+
+Measured proof:
+
+- `scripts/ops/performance-budget.rb`: passed.
+- Current signed build: expanded app 566.2 MiB by file-size walk, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1531 tests, 1531 passed, 0 failed**.
+- `bash run-tests.sh`: **1535 tests, 1535 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed.
+- `scripts/ops/performance-budget.rb`: passed.
 - Incremental post-fix build wall time: **1:08.04**.
 - Rebuilt app size: **550 MB**.
 
@@ -299,8 +321,9 @@ These are the next improvements I would execute in order.
    - Track RTF, peak RSS, and segment counts.
    - A+ gate: p95 RTF under 0.050, stable memory, no main-thread stalls.
 
-5. **CI performance budget**
-   - Add a script that fails on resource bloat, duplicate model bundles, too many shipped assets, and performance log regressions.
+5. **CI/release performance budget**
+   - The post-build bundle budget script is now in place.
+   - Next, wire it into release CI and add startup/dictation latency log parsing.
    - A+ gate: bundle and latency regressions fail before release.
 
 ## Current Honest Conclusion
