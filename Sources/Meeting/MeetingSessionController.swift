@@ -1153,8 +1153,12 @@ final class MeetingSessionController: ObservableObject {
 
     private func refreshWarmupStatus() {
         let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
+        let dictationState: MeetingWarmupDictationState = sttRouter.isModelLoaded
+            ? .ready
+            : MeetingWarmupDictationState(sttRouter.modelDownloadState)
+
         warmupStatus = MeetingWarmupStatusPolicy.status(
-            dictationState: MeetingWarmupDictationState(sttRouter.modelDownloadState),
+            dictationState: dictationState,
             meetingState: MeetingWarmupMeetingState(diarization.modelState),
             isMeetingWarmupInFlight: isMeetingWarmupInFlight,
             shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure

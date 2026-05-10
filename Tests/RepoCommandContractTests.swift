@@ -138,6 +138,38 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - launch warmup stays dictation-only") {
+        let contents = readRepoTextFile("Sources/TranscriptedAppState.swift")
+        guard
+            let warmupStart = contents.range(of: "private func startRuntimeReadinessIfNeeded()"),
+            let nextFunction = contents.range(
+                of: "private func startAudioStorageMaintenanceIfNeeded()",
+                range: warmupStart.upperBound..<contents.endIndex
+            )
+        else {
+            assertionFailure("TranscriptedAppState should keep an explicit runtime readiness function")
+            return
+        }
+
+        let warmupBlock = String(contents[warmupStart.lowerBound..<nextFunction.lowerBound])
+        assertTrue(
+            warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
+            "launch readiness should keep warming the selected dictation model"
+        )
+        assertFalse(
+            warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),
+            "launch should not eagerly load heavier meeting diarization models"
+        )
+    }
+
+    runSuite("Repo command contract - warmup status trusts loaded dictation engine") {
+        let contents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        assertTrue(
+            contents.contains("let dictationState: MeetingWarmupDictationState = sttRouter.isModelLoaded"),
+            "warmup status should treat a loaded STT engine as ready even if the progress enum is stale"
+        )
+    }
+
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
         let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
         assertTrue(

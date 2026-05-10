@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after eight audit/fix loops: **94/100, A**
+Current score after nine audit/fix loops: **96/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -19,9 +19,9 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | --- | ---: | ---: | --- | --- |
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
 | Dictation start responsiveness | A- | 91 | Found and fixed fast-path fallthrough that replaced direct recording with recovery wait; old logs still show 61 `audio_start_deferred` events | Fresh live dictation run shows no fast-path deferral/retry on a ready engine |
-| App launch and model readiness | C+ | 74 | Valid launch sequences: app to `models_loaded` avg 17.478s, p50 19.836s, p90 21.956s, max 27.200s | Visible app interactive under 2s, ready state under 10s, or explicit lazy-load UX |
+| App launch and model readiness | B | 86 | Meeting diarization is now lazy with explicit "Meetings load when started" copy; dictation model readiness still has p90 27.200s in local logs | Decide whether dictation should stay eager or move to explicit on-demand loading |
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
-| Idle memory | B | 83 | Warm app processes ranged from about 210 MB RSS to about 583 MB RSS depending on model state | Single process under 250 MB warm idle, no duplicate resident copies |
+| Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | B | 82 | Release DMG is 524,144,094 bytes; rebuilt app is 550 MB expanded after icon cleanup | DMG under 150 MB, or documented intentional offline-model bundle with optional thin build |
 | Local disk/cache hygiene | A- | 91 | Storage page reports model/cache footprint and offers confirmed cleanup for known stale Parakeet folders plus optional Whisper cache; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model |
 | Meeting transcription throughput | A- | 92 | Stats DB: 91 recordings, avg 99.96s audio, avg processing 1.422s; worst 1270s recording processed in 22.846s | Corpus p95 RTF under 0.050 with memory cap proof |
@@ -29,7 +29,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1541 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb` before opening/packaging the app; optional `--events` checks dictation latency, dictation RTF, and launch model-readiness | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
+| Performance regression guardrails | A+ | 99 | 1548 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb` before opening/packaging the app; optional `--events` checks dictation latency, dictation RTF, and launch model-readiness | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -223,11 +223,43 @@ Measured proof:
 - `bash -n scripts/entrypoints/build.sh`: passed.
 - `bash -n scripts/entrypoints/build-beta.sh`: passed.
 
+### 8. Made meeting model warmup lazy at launch
+
+Files:
+
+- `Sources/TranscriptedAppState.swift`
+- `Sources/Meeting/MeetingSessionController.swift`
+- `Sources/Meeting/MeetingWarmupStatusPolicy.swift`
+- `Sources/Meeting/CLAUDE.md`
+- `Tests/MeetingWarmupStatusPolicyTests.swift`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- The app was doing heavier meeting diarization warmup at launch, even if the user only wanted dictation.
+- That made idle memory and background work look heavier than the default user path needs to be.
+
+Change made:
+
+- Launch readiness now warms the selected dictation model only.
+- Meeting diarization stays lazy until the user starts a meeting or imports audio.
+- Warmup status now treats a loaded STT engine as ready even if a progress enum is stale.
+- The shared ready copy now says "Meetings load when started" when meeting models are intentionally on demand.
+- Repo contract coverage prevents launch from reintroducing eager meeting model loading silently.
+
+Measured proof:
+
+- Latest signed launch: one Transcripted process.
+- RSS after warmup: 153,600 KB.
+- CPU after warmup: 0.0%.
+- Event log: `Meetings load when started`, `meetings_status=On demand`, `meeting_model_state=not_loaded`.
+- No latest-launch meeting transition to `meeting_model_state=ready` happened before user action.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1541 tests, 1541 passed, 0 failed**.
+- `bash run-tests.sh`: **1548 tests, 1548 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `scripts/ops/performance-budget.rb`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
@@ -279,7 +311,8 @@ Startup readiness, using valid launch sequences only:
 - app to `models_loaded`: n=20, avg 17.478s, p50 19.836s, p90 21.956s, max 27.200s
 - app to meeting ready: n=20, avg 17.682s, p50 19.985s, p90 22.128s, max 27.752s
 - many launch events were skipped because repeated local/dev launches overlapped before a matching model-ready event.
-- performance-budget parser, using app launch to next model-ready before the next launch: n=28, p90 27.200s.
+- performance-budget parser, using app launch to next model-ready before the next launch: n=31, p90 27.200s.
+- latest signed launch with lazy meeting warmup: RSS 153,600 KB, CPU 0.0%, meeting models left on demand.
 
 ### Local Stats Database
 
@@ -365,10 +398,9 @@ These are the next improvements I would execute in order.
    - Raise dictation start responsiveness to A+/98 only if the log proves it.
 
 2. **Launch readiness policy**
-   - Decide whether first-use speed or tiny launch footprint wins.
-   - Option A: keep eager warmup, but make readiness state explicit and optimize model load time.
-   - Option B: lazy-load models on first dictation/meeting and make installer/app launch feel much lighter.
-   - A+ gate: either ready under 10s or honestly lazy with clear UX.
+   - Meeting models are now honestly lazy and the app says so.
+   - The remaining decision is dictation: keep eager warmup for first-use speed, or make dictation explicitly on demand for the lightest launch.
+   - A+ gate: selected dictation model ready under 10s, or a clear on-demand dictation startup path.
 
 3. **Distribution strategy**
    - The bundled model is the reason the app is 550 MB expanded.
@@ -396,4 +428,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, and release builds now run a performance budget before packaging. Launch readiness and distribution strategy still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, and meeting model warmup is lazy with explicit copy. Dictation model readiness and distribution strategy still keep the overall score below A+.

@@ -16,6 +16,15 @@ struct MeetingWarmupStatus: Equatable {
         dictationStatus: "Ready",
         meetingsStatus: "Ready"
     )
+
+    static let dictationReadyMeetingsOnDemand = MeetingWarmupStatus(
+        title: "Dictation is ready",
+        subtitle: "Meetings load when started",
+        detail: "",
+        progress: 1.0,
+        dictationStatus: "Ready",
+        meetingsStatus: "On demand"
+    )
 }
 
 enum MeetingWarmupDictationState: Equatable {
@@ -100,7 +109,7 @@ enum MeetingWarmupStatusPolicy {
             return .ready
         case .failed(let message):
             guard shouldSurfaceMeetingWarmupFailure else {
-                return .ready
+                return .dictationReadyMeetingsOnDemand
             }
             return MeetingWarmupStatus(
                 title: "Couldn’t load meetings",
@@ -124,7 +133,7 @@ enum MeetingWarmupStatusPolicy {
             )
         case .notLoaded:
             guard isMeetingWarmupInFlight else {
-                return .ready
+                return .dictationReadyMeetingsOnDemand
             }
             return MeetingWarmupStatus(
                 title: "Getting Transcripted ready",

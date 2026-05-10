@@ -170,11 +170,8 @@ class TranscriptedAppState: ObservableObject {
             // hang reports showed launch-time prewarm blocking inside CoreAudio.
             guard !Task.isCancelled else { return }
             await self.sttRouter.initializeSelectedModel()
-            guard !Task.isCancelled else { return }
-
-            if #available(macOS 14.0, *) {
-                await self.meetingSession.prepareModels(showLoadingUI: false)
-            }
+            // Keep heavier meeting diarization lazy. Meeting start/import paths
+            // call prepareModels() with visible loading state when needed.
         }
     }
 
