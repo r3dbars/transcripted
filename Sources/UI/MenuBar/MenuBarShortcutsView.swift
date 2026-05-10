@@ -103,7 +103,7 @@ final class MenuBarShortcutsView: NSView {
             self?.startRecording(.meeting)
         }
 
-        resetHintLabel.font = NSFont.systemFont(ofSize: 10)
+        resetHintLabel.font = MenuTokens.Fonts.caption
         resetHintLabel.textColor = MenuTokens.textMutedNS
         addSubview(resetHintLabel)
 
@@ -424,17 +424,17 @@ private final class PrimaryActionRowView: NSView {
         symbolView.contentTintColor = MenuTokens.textPrimaryNS
         symbolWellView.addSubview(symbolView)
 
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = MenuTokens.Fonts.primaryShortcutTitle
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
-        subtitleLabel.font = NSFont.systemFont(ofSize: 10)
+        subtitleLabel.font = MenuTokens.Fonts.primaryShortcutSubtitle
         subtitleLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(subtitleLabel)
 
         badgeButton.isBordered = false
         badgeButton.bezelStyle = .inline
-        badgeButton.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        badgeButton.font = MenuTokens.Fonts.shortcutBadge
         badgeButton.contentTintColor = MenuTokens.textPrimaryNS
         badgeButton.wantsLayer = true
         badgeButton.layer?.cornerRadius = MenuTokens.secondaryButtonCornerRadius

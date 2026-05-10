@@ -27,7 +27,7 @@ final class MenuBarHeaderView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        titleLabel.font = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
+        titleLabel.font = MenuTokens.Fonts.headerTitle
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
@@ -35,7 +35,7 @@ final class MenuBarHeaderView: NSView {
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
 
-        statusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        statusLabel.font = MenuTokens.Fonts.headerStatus
         statusLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(statusLabel)
 
@@ -45,7 +45,7 @@ final class MenuBarHeaderView: NSView {
         progressBar.maxValue = 1
         addSubview(progressBar)
 
-        detailLabel.font = NSFont.systemFont(ofSize: 10)
+        detailLabel.font = MenuTokens.Fonts.headerDetail
         detailLabel.textColor = MenuTokens.textSecondaryNS
         detailLabel.maximumNumberOfLines = 3
         detailLabel.lineBreakMode = .byWordWrapping
@@ -57,7 +57,7 @@ final class MenuBarHeaderView: NSView {
         }
         addSubview(warningIconView)
 
-        warningLabel.font = NSFont.systemFont(ofSize: 10)
+        warningLabel.font = MenuTokens.Fonts.headerDetail
         warningLabel.textColor = MenuTokens.textSecondaryNS
         warningLabel.maximumNumberOfLines = 3
         warningLabel.lineBreakMode = .byWordWrapping
@@ -154,7 +154,7 @@ final class MenuBarHeaderView: NSView {
     private func measuredTextHeight(for text: String, font: NSFont?, width: CGFloat) -> CGFloat {
         guard !text.isEmpty, width > 0 else { return 0 }
 
-        let resolvedFont = font ?? NSFont.systemFont(ofSize: 10)
+        let resolvedFont = font ?? MenuTokens.Fonts.headerDetail
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byWordWrapping
         let attributed = NSAttributedString(

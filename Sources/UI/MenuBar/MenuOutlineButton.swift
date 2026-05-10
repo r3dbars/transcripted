@@ -104,7 +104,7 @@ final class MenuOutlineButton: NSButton {
         attributedTitle = NSAttributedString(
             string: title,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+                .font: MenuTokens.Fonts.secondaryButtonLabel,
                 .foregroundColor: color
             ]
         )

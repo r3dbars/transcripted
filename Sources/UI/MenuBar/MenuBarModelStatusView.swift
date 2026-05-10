@@ -33,7 +33,7 @@ final class MenuBarModelStatusView: NSControl {
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
 
-        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.font = MenuTokens.Fonts.modelStatus
         label.textColor = MenuTokens.textSecondaryNS
         label.lineBreakMode = .byTruncatingTail
         label.cell?.usesSingleLineMode = true

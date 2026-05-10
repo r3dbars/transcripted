@@ -5,6 +5,23 @@ import AppKit
 import SwiftUI
 
 enum MenuTokens {
+    enum Fonts {
+        static let headerTitle = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
+        static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        static let headerDetail = NSFont.systemFont(ofSize: 10)
+        static let modelStatus = NSFont.systemFont(ofSize: 11, weight: .medium)
+        static let caption = NSFont.systemFont(ofSize: 10)
+        static let primaryShortcutTitle = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        static let primaryShortcutSubtitle = NSFont.systemFont(ofSize: 10)
+        static let shortcutBadge = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        static let primaryRowTitle = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        static let utilityRowTitle = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+        static let rowDetail = NSFont.systemFont(ofSize: 10)
+        static let primaryRowTrailing = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        static let utilityRowTrailing = NSFont.systemFont(ofSize: 10, weight: .medium)
+        static let secondaryButtonLabel = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+    }
+
     // Surface
     static let surfaceBackgroundNS = NSColor.windowBackgroundColor.withAlphaComponent(0.98)
     static let surfaceStrokeNS = NSColor.separatorColor
