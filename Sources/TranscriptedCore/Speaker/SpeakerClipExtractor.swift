@@ -4,6 +4,7 @@
 
 import Foundation
 import AVFoundation
+import SQLite3
 
 /// Result of extracting an audio clip for one speaker
 struct ClipResult {
@@ -15,6 +16,11 @@ struct ClipResult {
     let matchSimilarity: Double?  // cosine similarity from DB match
     let currentName: String?      // display name if known
     let callCount: Int            // how many times this speaker has been seen
+}
+
+private struct ClipProfileSnapshot {
+    let currentName: String?
+    let callCount: Int
 }
 
 @available(macOS 14.0, *)
@@ -50,6 +56,14 @@ public enum SpeakerClipExtractor {
 
         // Group utterances by speaker ID
         let speakerGroups = Dictionary(grouping: utterances, by: { $0.speakerId })
+        let profileSnapshots = profileSnapshots(
+            for: Set(
+                speakerGroups.values.flatMap { group in
+                    group.compactMap(\.persistentSpeakerId)
+                }
+            ),
+            speakerDB: speakerDB
+        )
 
         var results: [ClipResult] = []
 
@@ -62,7 +76,7 @@ public enum SpeakerClipExtractor {
                 continue
             }
 
-            let profile = speakerDB.getSpeaker(id: persistentId)
+            let profile = profileSnapshots[persistentId]
             let similarity = firstWithId.matchSimilarity
 
             // Pick the best segment(s) for the clip
@@ -91,7 +105,7 @@ public enum SpeakerClipExtractor {
                 channel: channel,
                 sampleText: sampleText,
                 matchSimilarity: similarity,
-                currentName: profile?.displayName,
+                currentName: profile?.currentName,
                 callCount: profile?.callCount ?? 1
             ))
         }
@@ -152,6 +166,28 @@ public enum SpeakerClipExtractor {
     }
 
     // MARK: - Private
+
+    private static func profileSnapshots(
+        for ids: Set<UUID>,
+        speakerDB: any SpeakerStore
+    ) -> [UUID: ClipProfileSnapshot] {
+        guard !ids.isEmpty else { return [:] }
+
+        if let database = speakerDB as? SpeakerDatabase {
+            return database.clipProfileSnapshots(ids: ids)
+        }
+
+        return Dictionary(
+            uniqueKeysWithValues: speakerDB.allSpeakers()
+                .filter { ids.contains($0.id) }
+                .map {
+                    (
+                        $0.id,
+                        ClipProfileSnapshot(currentName: $0.displayName, callCount: $0.callCount)
+                    )
+                }
+        )
+    }
 
     /// Select which utterance segments to use for the clip.
     /// Prefers the single longest segment (cap 8s). Falls back to concatenating
@@ -331,6 +367,52 @@ public enum SpeakerClipExtractor {
                 "file": url.lastPathComponent,
                 "error": error.localizedDescription
             ])
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+private extension SpeakerDatabase {
+    func clipProfileSnapshots(ids: Set<UUID>) -> [UUID: ClipProfileSnapshot] {
+        guard !ids.isEmpty else { return [:] }
+
+        return queue.sync {
+            guard isDatabaseOpen else { return [:] }
+
+            let sortedIds = ids.map(\.uuidString).sorted()
+            let placeholders = Array(repeating: "?", count: sortedIds.count).joined(separator: ",")
+            let sql = """
+            SELECT id, display_name, call_count
+            FROM speakers
+            WHERE id IN (\(placeholders));
+            """
+            var statement: OpaquePointer?
+            var snapshots: [UUID: ClipProfileSnapshot] = [:]
+
+            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+                for (index, idString) in sortedIds.enumerated() {
+                    sqlite3_bind_text(statement, Int32(index + 1), (idString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                }
+
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    guard let idPtr = sqlite3_column_text(statement, 0) else { continue }
+                    let idString = String(cString: idPtr)
+                    guard let id = UUID(uuidString: idString) else {
+                        AppLogger.speakers.warning("Skipping corrupt speaker UUID during clip profile lookup", ["raw_id": idString])
+                        continue
+                    }
+
+                    snapshots[id] = ClipProfileSnapshot(
+                        currentName: sqlite3_column_text(statement, 1).map { String(cString: $0) },
+                        callCount: Int(sqlite3_column_int(statement, 2))
+                    )
+                }
+            } else {
+                AppLogger.speakers.error("Failed to prepare clip profile lookup", ["sqlite_error": dbErrorMessage()])
+            }
+
+            sqlite3_finalize(statement)
+            return snapshots
         }
     }
 }
