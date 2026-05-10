@@ -3,6 +3,15 @@ import SQLite3
 
 // MARK: - Profile Management & Merging
 
+enum SpeakerDatabaseNamingMutation {
+    case merge(sourceId: UUID, into: UUID)
+    case setDisplayName(id: UUID, name: String)
+    case restoreProfile(SpeakerProfile)
+    case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
+    case incrementDisputeCount(UUID)
+    case resetDisputeCount(UUID)
+}
+
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
@@ -93,40 +102,78 @@ extension SpeakerDatabase {
         sqlite3_finalize(statement)
     }
 
+    func applyNamingMutations(_ mutations: [SpeakerDatabaseNamingMutation]) {
+        guard !mutations.isEmpty else { return }
+
+        queue.sync {
+            guard isDatabaseOpen else {
+                AppLogger.speakers.error("applyNamingMutations failed - database not open")
+                return
+            }
+
+            transaction {
+                for mutation in mutations {
+                    switch mutation {
+                    case .merge(let sourceId, let targetId):
+                        mergeProfilesImpl(sourceId: sourceId, into: targetId, wrapInTransaction: false)
+                    case .setDisplayName(let id, let name):
+                        setDisplayNameImpl(id: id, name: name, source: NameSource.userManual)
+                    case .restoreProfile(let profile):
+                        restoreProfileImpl(profile)
+                    case .addOrUpdateEmbedding(let embedding, let existingId):
+                        _ = addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId)
+                    case .incrementDisputeCount(let id):
+                        incrementDisputeCountImpl(id: id)
+                    case .resetDisputeCount(let id):
+                        resetDisputeCountImpl(id: id)
+                    }
+                }
+            }
+        }
+    }
+
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
     public func incrementDisputeCount(id: UUID) {
-        queue.sync { [self] in
-            guard isDatabaseOpen else { return }
-            let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
-            var statement: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to increment dispute count", ["sqlite_error": dbErrorMessage()])
-                }
-            } else {
-                AppLogger.speakers.error("Failed to prepare incrementDisputeCount", ["sqlite_error": dbErrorMessage()])
-            }
-            sqlite3_finalize(statement)
+        queue.sync {
+            incrementDisputeCountImpl(id: id)
         }
+    }
+
+    func incrementDisputeCountImpl(id: UUID) {
+        guard isDatabaseOpen else { return }
+        let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to increment dispute count", ["sqlite_error": dbErrorMessage()])
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare incrementDisputeCount", ["sqlite_error": dbErrorMessage()])
+        }
+        sqlite3_finalize(statement)
     }
 
     /// Reset dispute count (after user manual rename or name confirmed)
     public func resetDisputeCount(id: UUID) {
-        queue.sync { [self] in
-            guard isDatabaseOpen else { return }
-            let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
-            var statement: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to reset dispute count", ["sqlite_error": dbErrorMessage()])
-                }
-            } else {
-                AppLogger.speakers.error("Failed to prepare resetDisputeCount", ["sqlite_error": dbErrorMessage()])
-            }
-            sqlite3_finalize(statement)
+        queue.sync {
+            resetDisputeCountImpl(id: id)
         }
+    }
+
+    func resetDisputeCountImpl(id: UUID) {
+        guard isDatabaseOpen else { return }
+        let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to reset dispute count", ["sqlite_error": dbErrorMessage()])
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare resetDisputeCount", ["sqlite_error": dbErrorMessage()])
+        }
+        sqlite3_finalize(statement)
     }
 
     // MARK: - Profile Lookup by Name
@@ -158,7 +205,7 @@ extension SpeakerDatabase {
         }
     }
 
-    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID) {
+    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID, wrapInTransaction: Bool = true) {
         guard let source = getSpeakerImpl(id: sourceId),
               let target = getSpeakerImpl(id: targetId) else {
             AppLogger.speakers.warning("Merge failed — profile not found", [
@@ -198,8 +245,7 @@ extension SpeakerDatabase {
         let newCallCount = target.callCount + source.callCount
         let newConfidence = min(1.0, target.confidence + 0.15)
 
-        // Wrap UPDATE + DELETE in a transaction so a crash between them can't orphan data
-        transaction {
+        let applyMerge = { [self] in
             let sql = """
             UPDATE speakers SET embedding = ?, last_seen = ?, call_count = ?, confidence = ?
             WHERE id = ?;
@@ -232,6 +278,13 @@ extension SpeakerDatabase {
                 AppLogger.speakers.error("Failed to prepare merge delete", ["sqlite_error": dbErrorMessage()])
             }
             sqlite3_finalize(deleteStmt)
+        }
+
+        if wrapInTransaction {
+            // Wrap UPDATE + DELETE in a transaction so a crash between them can't orphan data.
+            transaction(applyMerge)
+        } else {
+            applyMerge()
         }
 
         AppLogger.speakers.info("Merged profiles", [

@@ -238,7 +238,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         }
     }
 
-    private func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?) -> SpeakerProfile {
+    func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?) -> SpeakerProfile {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("CRITICAL: addOrUpdateSpeaker returning in-memory-only profile — database not open, speaker will NOT be persisted", ["existingId": existingId?.uuidString ?? "new"])
             return SpeakerProfile(id: existingId ?? UUID(), displayName: nil, nameSource: nil, embedding: embedding, firstSeen: Date(), lastSeen: Date(), callCount: 1, confidence: 0.5, disputeCount: 0)

@@ -23,15 +23,31 @@ extension TranscriptionTaskManager {
         case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
         case incrementDisputeCount(UUID)
         case resetDisputeCount(UUID)
+
+        var databaseMutation: SpeakerDatabaseNamingMutation {
+            switch self {
+            case .merge(let sourceId, let targetId):
+                return .merge(sourceId: sourceId, into: targetId)
+            case .setDisplayName(let id, let name):
+                return .setDisplayName(id: id, name: name)
+            case .restoreProfile(let profile):
+                return .restoreProfile(profile)
+            case .addOrUpdateEmbedding(let embedding, let existingId):
+                return .addOrUpdateEmbedding(embedding: embedding, existingId: existingId)
+            case .incrementDisputeCount(let id):
+                return .incrementDisputeCount(id)
+            case .resetDisputeCount(let id):
+                return .resetDisputeCount(id)
+            }
+        }
     }
 
     /// Handle completion of the speaker naming flow.
     /// Applies names to the database, updates the transcript, and cleans up.
     ///
-    /// DB operations (mergeProfiles, setDisplayName, mergeDuplicates) run on a
-    /// background task to avoid blocking the main thread with cascading queue.sync
-    /// calls — each DB method synchronously locks a utility queue, and with 7+
-    /// speakers this totals 15-20 blocking calls that freeze the UI.
+    /// DB operations run on a background task. The real SQLite speaker store applies the
+    /// planned writes in one queued transaction so larger speaker-review sheets do not cascade
+    /// into many blocking queue.sync calls.
     public func handleNamingComplete(
         updates: [SpeakerNameUpdate],
         transcriptURL: URL,
@@ -410,6 +426,22 @@ extension TranscriptionTaskManager {
         speakerDB: any SpeakerStore,
         transcriptsDirectory: URL? = nil
     ) {
+        if let speakerDatabase = speakerDB as? SpeakerDatabase {
+            speakerDatabase.applyNamingMutations(mutations.map(\.databaseMutation))
+
+            if let transcriptsDirectory {
+                for mutation in mutations {
+                    guard case .setDisplayName(let id, let name) = mutation else { continue }
+                    TranscriptSaver.retroactivelyUpdateSpeaker(
+                        dbId: id,
+                        newName: name,
+                        in: transcriptsDirectory
+                    )
+                }
+            }
+            return
+        }
+
         for mutation in mutations {
             switch mutation {
             case .merge(let sourceId, let targetId):
