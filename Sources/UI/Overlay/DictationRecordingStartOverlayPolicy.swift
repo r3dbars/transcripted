@@ -13,3 +13,28 @@ struct DictationRecordingStartOverlayPolicy {
         return .showLoadingWhileWaiting
     }
 }
+
+struct DictationRecordingStartLifecyclePolicy {
+    enum StopDecision: Equatable {
+        case cancelPendingStart
+        case stopRecording
+        case ignoreInactive
+    }
+
+    static func stopDecision(
+        isLoadingOverlay: Bool,
+        isListeningOverlay: Bool,
+        hasRecordingStartTask: Bool,
+        sttIsRecording: Bool
+    ) -> StopDecision {
+        if !sttIsRecording, (isLoadingOverlay || hasRecordingStartTask) {
+            return .cancelPendingStart
+        }
+
+        if isListeningOverlay || sttIsRecording {
+            return .stopRecording
+        }
+
+        return .ignoreInactive
+    }
+}
