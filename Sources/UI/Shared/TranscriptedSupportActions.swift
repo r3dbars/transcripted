@@ -71,9 +71,15 @@ enum TranscriptedSupportActions {
         let meetingRecording: Bool
         let meetingDurationBucket: String
         if #available(macOS 14.0, *) {
-            meetingState = meetingStateName(appState.meetingSession.state)
-            meetingRecording = appState.meetingSession.isRecording
-            meetingDurationBucket = AnalyticsReporter.durationBucket(seconds: appState.meetingSession.recordingDuration)
+            if let meetingSession = appState.loadedMeetingSession {
+                meetingState = meetingStateName(meetingSession.state)
+                meetingRecording = meetingSession.isRecording
+                meetingDurationBucket = AnalyticsReporter.durationBucket(seconds: meetingSession.recordingDuration)
+            } else {
+                meetingState = "not_loaded"
+                meetingRecording = false
+                meetingDurationBucket = "lt_10s"
+            }
         } else {
             meetingState = "unavailable"
             meetingRecording = false

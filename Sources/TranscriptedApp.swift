@@ -73,6 +73,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var meetingPromptDetector = MeetingPromptDetector()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var terminationCleanupStarted = false
+    private var meetingSubsystemBootstrapped = false
 
     /// Keeps NSApp in sync with the Dock visibility setting and promotes
     /// the app to `.regular` during active recording for force-quit
@@ -103,52 +104,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         overlayController.setup(sttRouter: appState.sttRouter)
         appState.contextCapture.registerHotkey()
 
-        // Meeting overlay + hotkey + speaker naming — Lane C wiring.
+        // Meeting prompt detection can start early, but the heavier meeting
+        // controller/overlay stack is bootstrapped on first real meeting use.
         if #available(macOS 14.0, *) {
-            let meetingSession = appState.meetingSession
-            meetingOverlayController.setup(meetingSession: meetingSession)
-            meetingOverlayController.onPromptRecord = { [weak self] candidate in
-                guard let self else { return }
-                AnalyticsReporter.track(
-                    "meeting_prompt_record_selected",
-                    properties: self.analyticsProperties(for: candidate)
-                )
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    let started = await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
-                    if started {
-                        self.meetingPromptDetector.markAccepted(candidate: candidate)
-                    }
-                }
-            }
-            meetingOverlayController.onPromptDismiss = { [weak self] candidate in
-                guard let self else { return }
-                let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_dismissed",
-                    properties: self.analyticsProperties(
-                        for: candidate,
-                        backoffKind: backoffDecision.kind
-                    )
-                )
-            }
-            meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
-                guard let self else { return }
-                let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_dismissed",
-                    properties: self.analyticsProperties(
-                        for: candidate,
-                        backoffKind: backoffDecision.kind
-                    )
-                )
-            }
-            meetingOverlayController.onShowErrorDetails = { [weak self] in
-                self?.showSettingsWindow(page: .meetings, source: "meeting_overlay_error")
-            }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
+                self.bootstrapMeetingSubsystemIfNeeded()
                 let presented = self.meetingOverlayController.presentDetectedMeetingPrompt(candidate)
                 if presented {
                     AnalyticsReporter.track(
@@ -160,9 +122,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             meetingPromptDetector.start()
             appState.contextCapture.onMeetingToggle = { [weak self] in
-                self?.meetingOverlayController.toggleFromHotkey()
+                guard let self else { return }
+                self.bootstrapMeetingSubsystemIfNeeded()
+                self.meetingOverlayController.toggleFromHotkey()
             }
-            SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
         }
 
         // Set up menubar status item
@@ -241,8 +204,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
 
             await self.sessionController.finishDictationForTermination()
-            if #available(macOS 14.0, *) {
-                await self.appState.meetingSession.prepareForTermination()
+            if #available(macOS 14.0, *), let meetingSession = self.appState.loadedMeetingSession {
+                await meetingSession.prepareForTermination()
             }
             sender.reply(toApplicationShouldTerminate: true)
         }
@@ -345,6 +308,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         page: TranscriptedSettingsPage = .home,
         source: String = "unknown"
     ) {
+        if #available(macOS 14.0, *) {
+            bootstrapMeetingSubsystemIfNeeded()
+        }
         settingsWindowController.present(page: page, source: source)
     }
 
@@ -383,12 +349,76 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         entrypoint: String = "status_item"
     ) {
         _ = resolvedSourceApp()
+        if #available(macOS 14.0, *) {
+            bootstrapMeetingSubsystemIfNeeded()
+        }
         menuPanelController.refresh()
         trackMenuBarOpened(entrypoint: entrypoint)
         popover.contentViewController = menuPanelController
         popover.contentSize = menuPanelController.preferredContentSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @available(macOS 14.0, *)
+    @discardableResult
+    private func bootstrapMeetingSubsystemIfNeeded() -> MeetingSessionController {
+        let meetingSession = appState.meetingSession
+        guard !meetingSubsystemBootstrapped else { return meetingSession }
+
+        meetingSubsystemBootstrapped = true
+        meetingOverlayController.setup(meetingSession: meetingSession)
+        meetingOverlayController.onPromptRecord = { [weak self] candidate in
+            guard let self else { return }
+            AnalyticsReporter.track(
+                "meeting_prompt_record_selected",
+                properties: self.analyticsProperties(for: candidate)
+            )
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let meetingSession = self.bootstrapMeetingSubsystemIfNeeded()
+                let started = await meetingSession.startRecording(trigger: .detectedPrompt)
+                if started {
+                    self.meetingPromptDetector.markAccepted(candidate: candidate)
+                }
+            }
+        }
+        meetingOverlayController.onPromptDismiss = { [weak self] candidate in
+            guard let self else { return }
+            let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
+            AnalyticsReporter.track(
+                "meeting_prompt_dismissed",
+                properties: self.analyticsProperties(
+                    for: candidate,
+                    backoffKind: backoffDecision.kind
+                )
+            )
+        }
+        meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
+            guard let self else { return }
+            let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
+            AnalyticsReporter.track(
+                "meeting_prompt_dismissed",
+                properties: self.analyticsProperties(
+                    for: candidate,
+                    backoffKind: backoffDecision.kind
+                )
+            )
+        }
+        meetingOverlayController.onShowErrorDetails = { [weak self] in
+            self?.showSettingsWindow(page: .meetings, source: "meeting_overlay_error")
+        }
+        if let activationPolicyController {
+            activationPolicyController.setMeetingRecording(meetingSession.isRecording)
+            meetingSession.$isRecording
+                .receive(on: DispatchQueue.main)
+                .sink { [weak activationPolicyController] isRecording in
+                    activationPolicyController?.setMeetingRecording(isRecording)
+                }
+                .store(in: &activationPolicySubscriptions)
+        }
+        SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
+        return meetingSession
     }
 
     private func trackMenuBarOpened(entrypoint: String) {
@@ -480,16 +510,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             .store(in: &activationPolicySubscriptions)
 
-        // Meeting: the @MainActor MeetingSessionController owns the flag.
-        // Only available on macOS 14+, matching where MeetingSession lives.
-        if #available(macOS 14.0, *) {
-            appState.meetingSession.$isRecording
-                .receive(on: DispatchQueue.main)
-                .sink { [weak controller] isRecording in
-                    controller?.setMeetingRecording(isRecording)
-                }
-                .store(in: &activationPolicySubscriptions)
-        }
+        // Meeting recording is wired when the meeting subsystem is first used,
+        // so launch does not force-create the SQLite/audio meeting stack.
     }
 
     private func startDictationFromSettings() {
@@ -502,8 +524,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func startMeetingFromSettings() {
         let sourceApp = resolvedSourceApp()
         sourceApp?.activate(options: [])
-        Task {
-            await appState.meetingSession.startRecording(trigger: .menu)
+        if #available(macOS 14.0, *) {
+            let meetingSession = bootstrapMeetingSubsystemIfNeeded()
+            Task {
+                await meetingSession.startRecording(trigger: .menu)
+            }
         }
     }
 
@@ -518,8 +543,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        Task {
-            _ = await appState.meetingSession.importAudioFile(from: url)
+        if #available(macOS 14.0, *) {
+            let meetingSession = bootstrapMeetingSubsystemIfNeeded()
+            Task {
+                _ = await meetingSession.importAudioFile(from: url)
+            }
         }
     }
 

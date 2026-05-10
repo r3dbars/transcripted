@@ -17,9 +17,22 @@ class TranscriptedAppState: ObservableObject {
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.
     @available(macOS 14.0, *)
-    lazy var meetingSession: MeetingSessionController = MeetingSessionController(
+    private lazy var storedMeetingSession: MeetingSessionController = MeetingSessionController(
         sttRouter: sttRouter
     )
+    private var hasLoadedMeetingSession = false
+
+    @available(macOS 14.0, *)
+    var meetingSession: MeetingSessionController {
+        hasLoadedMeetingSession = true
+        return storedMeetingSession
+    }
+
+    @available(macOS 14.0, *)
+    var loadedMeetingSession: MeetingSessionController? {
+        guard hasLoadedMeetingSession else { return nil }
+        return storedMeetingSession
+    }
 
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
@@ -172,8 +185,8 @@ class TranscriptedAppState: ObservableObject {
             await self.sttRouter.initializeSelectedModel()
             guard !Task.isCancelled else { return }
 
-            if #available(macOS 14.0, *) {
-                await self.meetingSession.prepareModels(showLoadingUI: false)
+            if #available(macOS 14.0, *), let meetingSession = self.loadedMeetingSession {
+                await meetingSession.prepareModels(showLoadingUI: false)
             }
         }
     }
@@ -216,6 +229,7 @@ class TranscriptedAppState: ObservableObject {
 
     private var meetingStateSummary: String {
         if #available(macOS 14.0, *) {
+            guard let meetingSession = loadedMeetingSession else { return "not_loaded" }
             switch meetingSession.state {
             case .idle: return "idle"
             case .loadingModels: return "loadingModels"
