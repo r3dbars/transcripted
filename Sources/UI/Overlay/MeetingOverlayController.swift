@@ -1293,7 +1293,10 @@ final class MeetingOverlayController {
     }
 
     @discardableResult
-    func presentDetectedMeetingPrompt(_ candidate: MeetingPromptDetector.Candidate, timeout seconds: Int = 10) -> Bool {
+    func presentDetectedMeetingPrompt(
+        _ candidate: MeetingPromptDetector.Candidate,
+        timeout seconds: Int = MeetingTuning.detectedMeetingPromptTimeout
+    ) -> Bool {
         guard let session = meetingSession else { return false }
 
         switch session.state {
@@ -1693,7 +1696,7 @@ final class MeetingOverlayController {
         case .audioInactivity:
             let warning = meetingSession?.audioInactivityWarning
                 ?? MeetingAudioInactivityWarning(
-                    inactiveDuration: 5 * 60,
+                    inactiveDuration: MeetingTuning.audioInactivityThreshold,
                     countdownSeconds: max(1, promptSecondsRemaining)
                 )
             currentPrompt = audioInactivityPromptDisplay(

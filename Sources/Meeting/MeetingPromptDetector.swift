@@ -32,9 +32,9 @@ final class MeetingPromptDetector {
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
     private var runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
 
-    private let defaultSnoozeInterval: TimeInterval = 30 * 60
-    private let pendingCooldown: TimeInterval = 90
-    private let pollIntervalNanoseconds: UInt64 = 20_000_000_000
+    private let defaultSnoozeInterval = MeetingTuning.defaultSnoozeInterval
+    private let pendingCooldown = MeetingTuning.pendingCooldown
+    private let pollIntervalNanoseconds = MeetingTuning.promptPollIntervalNanoseconds
 
     private static let meetingURLDetector = try? NSDataDetector(
         types: NSTextCheckingResult.CheckingType.link.rawValue
@@ -311,8 +311,8 @@ final class MeetingPromptDetector {
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
     ) -> [ScoredCandidate] {
-        let searchStart = now.addingTimeInterval(-5 * 60)
-        let searchEnd = now.addingTimeInterval(15 * 60)
+        let searchStart = now.addingTimeInterval(-MeetingTuning.calendarSearchBack)
+        let searchEnd = now.addingTimeInterval(MeetingTuning.calendarSearchForward)
         let predicate = eventStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: nil)
 
         return eventStore.events(matching: predicate)
@@ -398,7 +398,9 @@ final class MeetingPromptDetector {
 
         if (-60 ... 120).contains(startsIn) {
             score += 2
-        } else if (-5 * 60 ... 5 * 60).contains(startsIn) {
+        } else if (
+            -MeetingTuning.calendarPromptScoreBack ... MeetingTuning.calendarPromptScoreForward
+        ).contains(startsIn) {
             score += 1
         }
 

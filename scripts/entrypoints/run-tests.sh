@@ -133,6 +133,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
+    "Sources/Meeting/MeetingTuning.swift"
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"

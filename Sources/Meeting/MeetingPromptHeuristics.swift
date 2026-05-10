@@ -110,11 +110,11 @@ struct RuntimeMeetingPromptPresentation: Equatable {
 enum MeetingPromptHeuristics {
     static let remindSoonInterval: TimeInterval = 2 * 60
     static let runtimeReminderSnoozeInterval: TimeInterval = remindSoonInterval
-    static let defaultRuntimeDismissFallbackInterval: TimeInterval = 30 * 60
+    static let defaultRuntimeDismissFallbackInterval: TimeInterval = MeetingTuning.defaultSnoozeInterval
     static let teamsDismissMinimumInterval: TimeInterval = 2 * 60 * 60
-    static let runtimeActivityFreshness: TimeInterval = 5 * 60
+    static let runtimeActivityFreshness: TimeInterval = MeetingTuning.runtimeActivityFreshness
     static let calendarReminderLeadTime: TimeInterval = 60
-    static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
+    static let calendarReminderPostStartGrace: TimeInterval = MeetingTuning.calendarReminderPostStartGrace
 
     static func snoozeInterval(
         for source: MeetingPromptSource,
