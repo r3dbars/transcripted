@@ -1181,6 +1181,19 @@ struct TranscriptedSettingsView: View {
                 title: "Recent Meetings",
                 detail: "The last five saved meeting transcripts."
             ) {
+                if let activity = meetingsPageTranscriptionActivity {
+                    SettingsActivityCard(
+                        symbolName: activity.symbolName,
+                        title: activity.title,
+                        status: activity.status,
+                        detail: activity.detail,
+                        tone: activity.tone,
+                        progress: activity.progress,
+                        actionTitle: nil,
+                        action: nil
+                    )
+                }
+
                 if recentCapturesLoading && recentMeetings.isEmpty {
                     Text("Loading recent meetings...")
                         .font(.caption)
@@ -1946,6 +1959,15 @@ struct TranscriptedSettingsView: View {
             lastSavedTitle: meetingSession.lastSavedTitle,
             lastSavedTranscriptURL: meetingSession.lastSavedTranscriptURL
         )
+    }
+
+    private var meetingsPageTranscriptionActivity: HomeTranscriptionActivityPresentation? {
+        switch meetingSession.displayStatus {
+        case .gettingReady, .transcribing, .finishing:
+            return homeTranscriptionActivity
+        case .idle, .transcriptSaved, .failed:
+            return nil
+        }
     }
 
     private func refreshState() {
