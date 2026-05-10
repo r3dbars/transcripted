@@ -47,6 +47,49 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - release resources ship only the active app icon") {
+        let infoPlist = readRepoTextFile("Info.plist")
+        assertTrue(
+            infoPlist.contains("<key>CFBundleIconFile</key>\n\t<string>Transcripted</string>"),
+            "Info.plist should point at the active Transcripted icon"
+        )
+
+        let resourceURL = repoRootURL().appendingPathComponent("Resources", isDirectory: true)
+        let shippedIcons = ((try? FileManager.default.contentsOfDirectory(
+            at: resourceURL,
+            includingPropertiesForKeys: nil
+        )) ?? [])
+            .map(\.lastPathComponent)
+            .filter { $0.hasSuffix(".icns") || $0.hasSuffix(".png") }
+            .sorted()
+
+        assertEqual(
+            shippedIcons,
+            ["Transcripted.icns"],
+            "Resources are copied wholesale into the app bundle, so old icon experiments should not ship"
+        )
+    }
+
+    runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        guard
+            let fastPathStart = contents.range(of: "case .skipLoadingAndStartRecording:"),
+            let slowPathStart = contents.range(
+                of: "case .showLoadingWhileWaiting:",
+                range: fastPathStart.upperBound..<contents.endIndex
+            )
+        else {
+            assertionFailure("Dictation start policy cases should exist")
+            return
+        }
+
+        let fastPathBlock = String(contents[fastPathStart.lowerBound..<slowPathStart.lowerBound])
+        assertTrue(
+            fastPathBlock.contains("\n            return\n"),
+            "fast dictation start should not schedule direct recording and then replace it with the recovery wait task"
+        )
+    }
+
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
         let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
         assertTrue(
