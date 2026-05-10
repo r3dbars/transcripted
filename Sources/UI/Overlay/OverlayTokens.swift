@@ -13,6 +13,10 @@ enum OverlayTokens {
     // Colors (semi-transparent for glassmorphism blur)
     static let panelBg       = NSColor.black.withAlphaComponent(0.82)
     static let panelStroke   = NSColor.white.withAlphaComponent(0.10)
+    static let dividerLine   = NSColor.white.withAlphaComponent(0.06)
+    static let secondaryButtonBackground = NSColor.white.withAlphaComponent(0.12)
+    static let secondaryButtonIdleBackground = NSColor.white.withAlphaComponent(0.07)
+    static let toastBackground = NSColor.black.withAlphaComponent(0.70)
     static let accentGreen   = Palette.green
     static let accentForeground = NSColor.black // Must remain readable on accentGreen.
     static let textPrimary   = NSColor.white

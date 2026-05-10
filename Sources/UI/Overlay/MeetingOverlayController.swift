@@ -323,7 +323,7 @@ final class MeetingOverlayRootView: NSView {
         closeButton.isBordered = false
         closeButton.wantsLayer = true
         closeButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
-        closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        closeButton.layer?.backgroundColor = OverlayTokens.secondaryButtonBackground.cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.imageScaling = .scaleProportionallyDown
         closeButton.setAccessibilityLabel(finishTooltip)
@@ -781,7 +781,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(prompt?.secondaryAccessibilityLabel ?? dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
-            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            closeButton.layer?.backgroundColor = MeetingOverlayTokens.dismissActionBg.cgColor
             if let remindTitle = prompt?.remindTitle {
                 remindButton.attributedTitle = buttonTitle(remindTitle, size: 11, weight: .semibold)
                 remindButton.setAccessibilityLabel(prompt?.remindAccessibilityLabel ?? remindPromptTooltip)
@@ -835,7 +835,7 @@ final class MeetingOverlayRootView: NSView {
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(dismissErrorTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting error.")
-            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            closeButton.layer?.backgroundColor = MeetingOverlayTokens.dismissActionBg.cgColor
             recordButton.attributedTitle = primaryButtonTitle("Show details")
             recordButton.setAccessibilityLabel(showErrorDetailsTooltip)
             recordButton.setAccessibilityHelp("Opens the Meetings page with retry details.")
@@ -876,7 +876,7 @@ final class MeetingOverlayRootView: NSView {
         closeButton.contentTintColor = MeetingOverlayTokens.textPrimary
         closeButton.toolTip = nil
         closeButton.layer?.cornerRadius = MeetingOverlayTokens.buttonCornerRadius
-        closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        closeButton.layer?.backgroundColor = OverlayTokens.secondaryButtonBackground.cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.layer?.borderColor = nil
         remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)

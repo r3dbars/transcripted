@@ -53,10 +53,10 @@ private final class OverlaySecondaryButton: NSButton {
 
     private func updateLayerAppearance() {
         layer?.backgroundColor = (isHighlighted
-            ? NSColor.white.withAlphaComponent(0.12)
-            : NSColor.white.withAlphaComponent(0.07)
+            ? OverlayTokens.secondaryButtonBackground
+            : OverlayTokens.secondaryButtonIdleBackground
         ).cgColor
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        layer?.borderColor = OverlayTokens.secondaryButtonBackground.cgColor
     }
 }
 

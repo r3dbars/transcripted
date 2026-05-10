@@ -23,6 +23,7 @@ enum MeetingOverlayTokens {
     static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
     static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
     static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
+    static let dismissActionBg = NSColor.white.withAlphaComponent(0.10)
     static let finishActionColor = NSColor.white.withAlphaComponent(0.16)
     static let finishActionBorder = NSColor.white.withAlphaComponent(0.24)
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.92)

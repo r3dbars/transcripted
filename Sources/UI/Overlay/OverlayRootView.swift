@@ -53,11 +53,11 @@ final class OverlayRootView: NSView {
     private func setupViews() {
         // Dividers
         topDivider.wantsLayer = true
-        topDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        topDivider.layer?.backgroundColor = OverlayTokens.dividerLine.cgColor
         addSubview(topDivider)
 
         bottomDivider.wantsLayer = true
-        bottomDivider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        bottomDivider.layer?.backgroundColor = OverlayTokens.dividerLine.cgColor
         addSubview(bottomDivider)
 
         addSubview(headerView)
