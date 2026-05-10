@@ -63,6 +63,7 @@ struct TranscriptedSettingsView: View {
     @State private var modelCacheCleanupInProgress = false
     @State private var modelCacheCleanupStatus: String?
     @State private var showModelCacheCleanupConfirmation = false
+    @State private var showWhisperCacheCleanupConfirmation = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
@@ -1434,6 +1435,18 @@ struct TranscriptedSettingsView: View {
                         value: snapshot.formattedWhisperModelsSize,
                         detail: "Optional Whisper models stored by Transcripted."
                     )
+                    if snapshot.whisperModelsBytes > 0 {
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache", role: .destructive) {
+                            showWhisperCacheCleanupConfirmation = true
+                        }
+                        .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
+
+                        if effectiveTranscriptionModel.isWhisper {
+                            Text("Switch back to Parakeet before removing the Whisper cache.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
 
                     if snapshot.staleFluidAudioModelBytes > 0 {
                         ModelCacheMetricRow(
@@ -1482,6 +1495,14 @@ struct TranscriptedSettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
+            }
+            .alert("Remove Whisper cache?", isPresented: $showWhisperCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeWhisperModelCache()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
             }
 
             SettingsSection(
@@ -2093,6 +2114,34 @@ struct TranscriptedSettingsView: View {
                 await MainActor.run {
                     modelCacheCleanupInProgress = false
                     modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func removeWhisperModelCache() {
+        guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeWhisperModels()
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedBytes > 0 {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from the Whisper cache."
+                    } else {
+                        modelCacheCleanupStatus = "No Whisper model files needed removal."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove Whisper cache: \(error.localizedDescription)"
                 }
             }
         }

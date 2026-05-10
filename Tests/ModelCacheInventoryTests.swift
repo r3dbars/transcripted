@@ -68,6 +68,40 @@ func testModelCacheInventory() {
         assertFalse(FileManager.default.fileExists(atPath: stale.path), "known stale Parakeet cache should be removed")
         assertTrue(FileManager.default.fileExists(atPath: unknown.path), "unknown model directories should not be touched")
     }
+
+    runSuite("ModelCacheInventory cleanup removes only the Whisper models directory") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let whisperRoot = root.appendingPathComponent("cache/whisperkit", isDirectory: true)
+        let whisperModels = whisperRoot.appendingPathComponent("models", isDirectory: true)
+        let unrelatedCacheFile = whisperRoot.appendingPathComponent("state.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(whisperModels.appendingPathComponent("openai_whisper-large-v3-v20240930_626MB/model.bin"), bytes: 31)
+        writeTestFile(unrelatedCacheFile, bytes: 11)
+
+        let result = try? ModelCacheInventory.removeWhisperModels(whisperModelsDirectory: whisperModels)
+
+        assertEqual(result?.removedBytes, 31, "cleanup should report the Whisper models directory size")
+        assertEqual(result?.removedNames, ["Whisper cache"], "cleanup should name the removed cache")
+        assertFalse(FileManager.default.fileExists(atPath: whisperModels.path), "Whisper models directory should be removed")
+        assertTrue(FileManager.default.fileExists(atPath: unrelatedCacheFile.path), "non-model Whisper cache files should stay")
+    }
+
+    runSuite("ModelCacheInventory cleanup refuses non-Whisper model paths") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let nonWhisperModels = root.appendingPathComponent("other/models", isDirectory: true)
+        let modelFile = nonWhisperModels.appendingPathComponent("model.bin")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(modelFile, bytes: 31)
+
+        let result = try? ModelCacheInventory.removeWhisperModels(whisperModelsDirectory: nonWhisperModels)
+
+        assertEqual(result?.removedBytes, 0, "cleanup should refuse model folders outside whisperkit")
+        assertTrue(FileManager.default.fileExists(atPath: modelFile.path), "non-Whisper model paths should stay untouched")
+    }
 }
 
 private func writeTestFile(_ url: URL, bytes: Int) {

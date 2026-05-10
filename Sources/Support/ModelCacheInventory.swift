@@ -124,6 +124,27 @@ enum ModelCacheInventory {
         )
     }
 
+    static func removeWhisperModels(
+        fileManager: FileManager = .default,
+        whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let directory = whisperModelsDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        guard
+            directory.lastPathComponent == "models",
+            directory.deletingLastPathComponent().lastPathComponent == "whisperkit",
+            fileManager.fileExists(atPath: directory.path)
+        else {
+            return ModelCacheCleanupResult(removedBytes: 0, removedNames: [])
+        }
+
+        let bytes = directorySize(at: directory, fileManager: fileManager)
+        try fileManager.removeItem(at: directory)
+        return ModelCacheCleanupResult(
+            removedBytes: bytes,
+            removedNames: ["Whisper cache"]
+        )
+    }
+
     static func directorySize(at url: URL, fileManager: FileManager = .default) -> Int64 {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
