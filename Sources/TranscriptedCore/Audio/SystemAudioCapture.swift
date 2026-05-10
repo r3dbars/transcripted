@@ -243,10 +243,9 @@ class SystemAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked
         let capturedGeneration = _generation
         generationLock.unlock()
 
-        // Move delay + cleanup to background queue to avoid blocking main thread
+        // Schedule cleanup without parking a worker thread during the settle delay.
         // The 0.5s delay lets the audio pipeline settle before destroying devices
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            Thread.sleep(forTimeInterval: 0.5)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self = self else { return }
 
             // Check if a new session started while we were waiting
