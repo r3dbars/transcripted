@@ -41,7 +41,7 @@ struct PermissionsOnboardingView: View {
     @State private var demoDictationText = ""
     @State private var copiedAgentItem: AgentCopyItem?
     @State private var copiedResetTask: Task<Void, Never>?
-    @State private var pollTask: Task<Void, Never>?
+    @State private var permissionRefreshTask: Task<Void, Never>?
     @FocusState private var demoEditorFocused: Bool
 
     init(onComplete: @escaping () -> Void) {
@@ -88,10 +88,12 @@ struct PermissionsOnboardingView: View {
         .preferredColorScheme(.light)
         .onAppear {
             checkAllPermissions()
-            startPolling()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            checkAllPermissions()
         }
         .onDisappear {
-            stopPolling()
+            stopPermissionRefresh()
             copiedResetTask?.cancel()
         }
     }
@@ -132,8 +134,7 @@ struct PermissionsOnboardingView: View {
                         granted: micGranted,
                         actionTitle: "Allow"
                     ) {
-                        TranscriptedPermissionAccess.openSettings(for: .microphone)
-                        checkAllPermissions()
+                        requestPermission(.microphone)
                     }
                     PermissionGrantRow(
                         title: "Accessibility",
@@ -142,8 +143,7 @@ struct PermissionsOnboardingView: View {
                         granted: accessibilityGranted,
                         actionTitle: "Allow"
                     ) {
-                        TranscriptedPermissionAccess.openSettings(for: .accessibility)
-                        checkAllPermissions()
+                        requestPermission(.accessibility)
                     }
                 }
                 .frame(width: 480)
@@ -191,8 +191,7 @@ struct PermissionsOnboardingView: View {
                 BodyCopy("Transcripted needs two audio streams to write the whole conversation: your microphone for you, and system audio for everyone else.")
                 BulletList(["macOS calls this Screen Recording", "Used only to hear meeting audio", "Everything stays on your Mac"])
                 Button(screenRecordingGranted ? "System audio enabled" : "Enable system audio") {
-                    TranscriptedPermissionAccess.openSettings(for: .systemAudioRecording)
-                    checkAllPermissions()
+                    requestPermission(.systemAudioRecording)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted))
                 .padding(.top, 12)
@@ -230,8 +229,7 @@ struct PermissionsOnboardingView: View {
                     }
                 }
                 Button(calendarGranted ? "Calendar connected" : "Allow calendar access") {
-                    TranscriptedPermissionAccess.openSettings(for: .calendar)
-                    checkAllPermissions()
+                    requestPermission(.calendar)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
                 .disabled(!meetingPromptsEnabled)
@@ -349,28 +347,33 @@ struct PermissionsOnboardingView: View {
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
     }
 
-    private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            // Foundation Timers run in .default mode and pause during menu
-            // tracking, so onboarding could miss a permission flip while the
-            // user has the System Settings menu open. A Task-driven loop keeps
-            // polling regardless and dies cleanly when onDisappear cancels it.
-            while !Task.isCancelled {
+    private func requestPermission(_ kind: TranscriptedPermissionKind) {
+        TranscriptedPermissionAccess.openSettings(for: kind)
+        checkAllPermissions()
+        startTemporaryPermissionRefresh()
+    }
+
+    private func startTemporaryPermissionRefresh() {
+        permissionRefreshTask?.cancel()
+        permissionRefreshTask = Task { @MainActor in
+            for _ in 0..<16 {
                 checkAllPermissions()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
             }
+            checkAllPermissions()
+            permissionRefreshTask = nil
         }
     }
 
-    private func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+    private func stopPermissionRefresh() {
+        permissionRefreshTask?.cancel()
+        permissionRefreshTask = nil
     }
 
     private func completeOnboarding() {
         guard hasRequiredPermissions else { return }
-        stopPolling()
+        stopPermissionRefresh()
         onComplete()
     }
 
