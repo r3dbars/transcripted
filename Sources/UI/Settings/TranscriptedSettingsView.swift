@@ -1398,17 +1398,7 @@ struct TranscriptedSettingsView: View {
 
                     Button("Reset to Default") {
                         trackSettingsAction("reset_capture_library", page: .storage)
-                        TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
-                        refreshStoragePaths()
-                        captureLibraryStatusMessage = "Capture library reset to the default folder."
-                        captureLibraryStatusIsError = false
-                        AnalyticsReporter.track(
-                            "settings_capture_library_changed",
-                            properties: [
-                                "location_type": "default",
-                                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
-                            ]
-                        )
+                        resetCaptureLibraryToDefault()
                     }
                 }
 
@@ -2295,6 +2285,73 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.storage.analyticsValue,
             ]
         )
+    }
+
+    private func resetCaptureLibraryToDefault() {
+        let oldURL = captureLibraryURL.standardizedFileURL
+
+        if !isUsingDefaultCaptureLibrary {
+            switch confirmDefaultCaptureLibraryReset(oldURL: oldURL) {
+            case .reset:
+                break
+            case .cancel:
+                return
+            case .revealOldFolder:
+                revealCaptureLibrary(oldURL)
+                captureLibraryStatusMessage = "Old capture folder revealed. Capture library unchanged."
+                captureLibraryStatusIsError = false
+                return
+            }
+        }
+
+        TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
+        refreshStoragePaths()
+        captureLibraryStatusMessage = "Capture library reset to the default folder. Existing captures stayed in the old folder."
+        captureLibraryStatusIsError = false
+        AnalyticsReporter.track(
+            "settings_capture_library_changed",
+            properties: [
+                "location_type": "default",
+                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+            ]
+        )
+    }
+
+    private enum CaptureLibraryResetChoice {
+        case reset
+        case cancel
+        case revealOldFolder
+    }
+
+    private func confirmDefaultCaptureLibraryReset(oldURL: URL) -> CaptureLibraryResetChoice {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Reset capture library to the default folder?"
+        alert.informativeText = """
+        Future captures will go to the default location. Existing captures in \(oldURL.path) will stay there.
+
+        Do you want to continue?
+        """
+        alert.addButton(withTitle: "Reset")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reveal Old Folder")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .reset
+        case .alertThirdButtonReturn:
+            return .revealOldFolder
+        default:
+            return .cancel
+        }
+    }
+
+    private func revealCaptureLibrary(_ url: URL) {
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
+        }
     }
 
     private var sortedAutoEnterAllowedBundleIDs: [String] {
