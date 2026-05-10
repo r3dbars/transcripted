@@ -28,7 +28,6 @@ struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
 
     static let preferredSize = NSSize(width: 960, height: 680)
-    private static let defaultDictationShortcut = "Right Option"
 
     @State private var currentStepIndex = 0
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
@@ -77,6 +76,12 @@ struct PermissionsOnboardingView: View {
         }
 
         return "Read-only calendar access lets Transcripted suggest prompts. Events stay on your Mac."
+    }
+
+    private var handsFreeDictationShortcut: String {
+        PhysicalDictationTriggerPreferences.displayString(
+            for: PhysicalDictationTriggerPreferences.handsFreeBinding()
+        )
     }
 
     var body: some View {
@@ -172,7 +177,7 @@ struct PermissionsOnboardingView: View {
             SplitStage {
                 Kicker("Dictation")
                 Headline(primary: "Talk to type.", emphasis: "In any app.", size: 42, alignment: .leading)
-                BodyCopy("Tap Right Option once to start. Tap it again to stop. Your words land where your cursor is.")
+                BodyCopy("Press \(handsFreeDictationShortcut) once to start. Press it again to stop. Your words land where your cursor is.")
                 BulletList(["Mail, docs, Slack, code, anywhere", "On-device. Fast.", "Never leaves your Mac"])
             } right: {
                 DictationDemoCard()
@@ -181,15 +186,16 @@ struct PermissionsOnboardingView: View {
             CenterStage {
                 Kicker("Your turn")
                 Headline(primary: "Try dictation\nright now.", size: 42)
-                BodyCopy("Tap Right Option, say a sentence, then tap it again. Your words paste into the focused field - try here, or any other app.", maxWidth: 560)
+                BodyCopy("Press \(handsFreeDictationShortcut), say a sentence, then press it again. Your words paste into the focused field - try here, or any other app.", maxWidth: 560)
                 DemoPasteTarget(
                     text: $demoDictationText,
                     isFocused: $demoEditorFocused,
-                    showHelp: showDemoPasteHelp
+                    showHelp: showDemoPasteHelp,
+                    shortcutDisplay: handsFreeDictationShortcut
                 )
                     .padding(.top, 6)
                 HStack(spacing: 12) {
-                    DictationPill(label: Self.defaultDictationShortcut)
+                    DictationPill(label: handsFreeDictationShortcut)
                     Text("You can change it anytime in Settings.")
                         .font(.system(size: 12))
                         .italic()
@@ -311,7 +317,7 @@ struct PermissionsOnboardingView: View {
                 Kicker("You're set")
                 Headline(primary: "Dictate. Record. Ask.", size: 52)
                 Lede("Three actions to remember: use your voice anywhere, capture meetings, then ask your agent what happened.", maxWidth: 560)
-                ThreeActionsRecap()
+                ThreeActionsRecap(dictationShortcut: handsFreeDictationShortcut)
                     .padding(.top, 22)
             }
         }
@@ -1084,6 +1090,7 @@ private struct DemoPasteTarget: View {
     @Binding var text: String
     let isFocused: FocusState<Bool>.Binding
     let showHelp: Bool
+    let shortcutDisplay: String
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -1108,7 +1115,7 @@ private struct DemoPasteTarget: View {
                     Text("Your words will paste here.")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(OnboardingTheme.ink.opacity(0.42))
-                    Text("Tap Right Option once, speak, then tap it again.")
+                    Text("Press \(shortcutDisplay) once, speak, then press it again.")
                         .font(.system(size: 12))
                         .foregroundStyle(OnboardingTheme.muted)
                     if showHelp {
@@ -1701,13 +1708,15 @@ private struct AgentGlyph: View {
 }
 
 private struct ThreeActionsRecap: View {
+    let dictationShortcut: String
+
     var body: some View {
         HStack(spacing: 14) {
             ActionStepCard(
                 number: "1",
                 label: "Dictate",
-                command: "Right Option",
-                detail: "Tap once to talk. Tap again to paste.",
+                command: dictationShortcut,
+                detail: "Press once to talk. Press again to paste.",
                 color: OnboardingTheme.codex,
                 icon: "keyboard"
             )
