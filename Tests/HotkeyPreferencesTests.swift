@@ -157,4 +157,28 @@ func testHotkeyPreferences() {
         assertEqual(HotkeyPreferences.keyName(for: UInt32(kVK_ANSI_Slash)), "/")
         assertEqual(HotkeyPreferences.keyName(for: 999), "Key999")
     }
+
+    runSuite("ShortcutRecorderKeyEventPolicy lets bare Tab keep focus traversal") {
+        assertTrue(
+            ShortcutRecorderKeyEventPolicy.shouldStopRecordingAndPassThrough(
+                keyCode: UInt16(kVK_Tab),
+                modifierFlags: []
+            ),
+            "bare Tab should stop recording and continue through AppKit focus traversal"
+        )
+        assertFalse(
+            ShortcutRecorderKeyEventPolicy.shouldStopRecordingAndPassThrough(
+                keyCode: UInt16(kVK_Tab),
+                modifierFlags: [.shift]
+            ),
+            "modified Tab should stay captured while recording shortcuts"
+        )
+        assertFalse(
+            ShortcutRecorderKeyEventPolicy.shouldStopRecordingAndPassThrough(
+                keyCode: UInt16(kVK_ANSI_A),
+                modifierFlags: []
+            ),
+            "non-Tab keys should stay in the recorder"
+        )
+    }
 }

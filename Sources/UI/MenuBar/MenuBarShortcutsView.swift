@@ -216,6 +216,12 @@ final class MenuBarShortcutsView: NSView {
                 return nil
             }
 
+            if ShortcutRecorderKeyEventPolicy.shouldStopRecordingAndPassThrough(event) {
+                self.stopRecording()
+                self.refreshFromPreferences()
+                return event
+            }
+
             self.pendingDictationModifier = nil
             self.pendingDictationModifierKeyCode = nil
             let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(

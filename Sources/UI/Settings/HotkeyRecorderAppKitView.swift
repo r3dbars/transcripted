@@ -139,6 +139,12 @@ final class HotkeyRecorderAppKitView: NSView {
                 return nil
             }
 
+            if ShortcutRecorderKeyEventPolicy.shouldStopRecordingAndPassThrough(event) {
+                self.stopRecording()
+                self.refreshDisplay()
+                return event
+            }
+
             self.pendingDictationModifier = nil
             self.pendingDictationModifierKeyCode = nil
             let candidate = PhysicalDictationTriggerPreferences.bindingForKeyDown(

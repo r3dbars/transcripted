@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (54 Swift files)
+## Files (55 Swift files)
 
 ### Overlay/
 
@@ -97,6 +97,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings meetings page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
+- `Shared/ShortcutRecorderKeyEventPolicy.swift` — shared recorder policy for Esc/Tab-style key handling while editing shortcut bindings
 - `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events, including recent coarse reliability packet summaries
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback, copied diagnostics, and manually queued diagnostic events
 
