@@ -88,6 +88,22 @@ func testRepoCommandContract() {
             contents.contains("MAX_RESOURCES_BYTES = 520 * 1024 * 1024"),
             "performance budget should cap resource size"
         )
+        assertTrue(
+            contents.contains("MAX_TRANSCRIPTION_P95_SECONDS = 0.5"),
+            "performance budget should cap warmed dictation transcription latency"
+        )
+        assertTrue(
+            contents.contains("MAX_TRANSCRIPTION_P95_RTF = 0.05"),
+            "performance budget should cap warmed dictation real-time factor"
+        )
+        assertTrue(
+            contents.contains("MAX_MODEL_READY_P90_SECONDS = 30.0"),
+            "performance budget should cap launch model-ready regressions"
+        )
+        assertTrue(
+            contents.contains("startup_model_ready_durations(events)"),
+            "performance budget should parse launch to model-ready events"
+        )
     }
 
     runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {

@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after six audit/fix loops: **92/100, A-**
+Current score after seven audit/fix loops: **93/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -29,7 +29,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A | 97 | 1535 tests pass; `scripts/ops/performance-budget.rb` now checks bundle size, resource size, Parakeet model duplication, and release icon bloat | Wire the budget checker into release CI and add startup/dictation latency budget parsing |
+| Performance regression guardrails | A | 98 | 1539 tests pass; `scripts/ops/performance-budget.rb` now checks bundle size, resource size, Parakeet model duplication, release icon bloat, dictation latency, dictation RTF, and launch model-readiness | Wire the budget checker into release CI and run it against a fresh release-candidate event fixture |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -167,13 +167,42 @@ Measured proof:
 - `scripts/ops/performance-budget.rb`: passed.
 - Current signed build: expanded app 566.2 MiB by file-size walk, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
 
+### 6. Added runtime latency budgets to the performance checker
+
+File:
+
+- `scripts/ops/performance-budget.rb`
+
+Why:
+
+- Bundle-size checks stop obvious bloat, but they do not prove the app still feels fast.
+- The audit already had local runtime evidence, so the next step was turning those numbers into a repeatable gate.
+
+Change made:
+
+- Added optional `--events` parsing for Transcripted `events.jsonl`.
+- The checker now enforces warmed dictation transcription p95 under 0.500s.
+- The checker now enforces warmed dictation p95 real-time factor under 0.050.
+- The checker now enforces app launch to model-ready p90 under 30.000s.
+- Repo contract tests keep the runtime budgets and event parser entrypoint explicit.
+
+Measured proof:
+
+- `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
+- Dictation samples: 59.
+- Dictation transcription p95: 0.316s.
+- Dictation transcription p95 RTF: 0.029.
+- Launch model-ready samples: 28.
+- Launch to model-ready p90: 27.200s.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1535 tests, 1535 passed, 0 failed**.
+- `bash run-tests.sh`: **1539 tests, 1539 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed.
 - `scripts/ops/performance-budget.rb`: passed.
+- `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
 - Incremental post-fix build wall time: **1:08.04**.
 - Rebuilt app size: **550 MB**.
 
@@ -215,12 +244,14 @@ Local `events.jsonl`:
 - average audio duration: 21.956s
 - average RTF: 0.013
 - p90 RTF: 0.027
+- p95 RTF: 0.029
 
 Startup readiness, using valid launch sequences only:
 
 - app to `models_loaded`: n=20, avg 17.478s, p50 19.836s, p90 21.956s, max 27.200s
 - app to meeting ready: n=20, avg 17.682s, p50 19.985s, p90 22.128s, max 27.752s
 - many launch events were skipped because repeated local/dev launches overlapped before a matching model-ready event.
+- performance-budget parser, using app launch to next model-ready before the next launch: n=28, p90 27.200s.
 
 ### Local Stats Database
 
@@ -322,8 +353,8 @@ These are the next improvements I would execute in order.
    - A+ gate: p95 RTF under 0.050, stable memory, no main-thread stalls.
 
 5. **CI/release performance budget**
-   - The post-build bundle budget script is now in place.
-   - Next, wire it into release CI and add startup/dictation latency log parsing.
+   - The post-build bundle and runtime log budget script is now in place.
+   - Next, wire it into release CI with a fresh release-candidate event fixture.
    - A+ gate: bundle and latency regressions fail before release.
 
 ## Current Honest Conclusion

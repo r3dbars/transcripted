@@ -2,26 +2,41 @@
 # frozen_string_literal: true
 
 require "find"
+require "json"
 require "optparse"
 require "pathname"
+require "time"
 
 REPO_ROOT = Pathname.new(__dir__).join("../..").expand_path
 EXPECTED_PARAKEET_MODEL_DIR = "parakeet-tdt-0.6b-v3-coreml"
 EXPECTED_RESOURCE_ICONS = ["Transcripted.icns"].freeze
 MAX_APP_BYTES = 650 * 1024 * 1024
 MAX_RESOURCES_BYTES = 520 * 1024 * 1024
+MAX_TRANSCRIPTION_P95_SECONDS = 0.5
+MAX_TRANSCRIPTION_P95_RTF = 0.05
+MAX_MODEL_READY_P90_SECONDS = 30.0
+MIN_TRANSCRIPTION_SAMPLES = 10
+MIN_STARTUP_SAMPLES = 3
 
 options = {
   app_path: REPO_ROOT.join("build/Transcripted.app").to_s,
+  events_path: nil,
   max_app_bytes: MAX_APP_BYTES,
-  max_resources_bytes: MAX_RESOURCES_BYTES
+  max_resources_bytes: MAX_RESOURCES_BYTES,
+  max_transcription_p95_seconds: MAX_TRANSCRIPTION_P95_SECONDS,
+  max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
+  max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS
 }
 
 OptionParser.new do |parser|
   parser.banner = "Usage: scripts/ops/performance-budget.rb [options]"
   parser.on("--app PATH", "Path to Transcripted.app") { |path| options[:app_path] = path }
+  parser.on("--events PATH", "Optional events.jsonl path for runtime latency budgets") { |path| options[:events_path] = path }
   parser.on("--max-app-mb MB", Integer, "Expanded app size budget") { |mb| options[:max_app_bytes] = mb * 1024 * 1024 }
   parser.on("--max-resources-mb MB", Integer, "Resources directory size budget") { |mb| options[:max_resources_bytes] = mb * 1024 * 1024 }
+  parser.on("--max-transcription-p95-s SECONDS", Float, "Dictation transcription p95 budget") { |seconds| options[:max_transcription_p95_seconds] = seconds }
+  parser.on("--max-transcription-p95-rtf VALUE", Float, "Dictation transcription p95 RTF budget") { |rtf| options[:max_transcription_p95_rtf] = rtf }
+  parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
 end.parse!
 
 def directory_size(path)
@@ -39,6 +54,54 @@ end
 
 def mib(bytes)
   format("%.1f MiB", bytes.to_f / (1024 * 1024))
+end
+
+def percentile(values, quantile)
+  sorted = values.sort
+  return nil if sorted.empty?
+
+  index = ((sorted.length - 1) * quantile).round
+  sorted[index]
+end
+
+def parse_events(path)
+  events = []
+  File.foreach(path) do |line|
+    event = JSON.parse(line)
+    event["_time"] = Time.parse(event.fetch("timestamp"))
+    events << event
+  rescue JSON::ParserError, KeyError, ArgumentError
+    next
+  end
+  events
+end
+
+def float_or_nil(value)
+  Float(value)
+rescue TypeError, ArgumentError
+  nil
+end
+
+def startup_model_ready_durations(events)
+  durations = []
+
+  events.each_with_index do |event, index|
+    next unless event["event"] == "app_launched"
+
+    launch_time = event["_time"]
+    next unless launch_time
+
+    events[(index + 1)..]&.each do |candidate|
+      break if candidate["event"] == "app_launched"
+
+      if candidate["event"] == "models_loaded" && candidate["_time"]
+        durations << (candidate["_time"] - launch_time)
+        break
+      end
+    end
+  end
+
+  durations
 end
 
 def fail_budget!(errors)
@@ -89,6 +152,50 @@ unless resource_icons == EXPECTED_RESOURCE_ICONS
   errors << "Expected release resource icons #{EXPECTED_RESOURCE_ICONS.inspect}, found #{resource_icons.inspect}"
 end
 
+runtime_summary = nil
+if options[:events_path]
+  events_path = Pathname.new(options[:events_path]).expand_path
+  if !events_path.file?
+    errors << "Missing events file: #{events_path}"
+  else
+    events = parse_events(events_path.to_s)
+    transcription_events = events.select { |event| event["event"] == "transcription_complete" }
+    transcription_elapsed = transcription_events
+      .map { |event| float_or_nil(event.fetch("context", {})["elapsed_s"]) }
+      .compact
+    transcription_rtf = transcription_events
+      .map { |event| float_or_nil(event.fetch("context", {})["rtf"]) }
+      .compact
+    startup_durations = startup_model_ready_durations(events)
+
+    if transcription_elapsed.length < MIN_TRANSCRIPTION_SAMPLES
+      errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
+    elsif percentile(transcription_elapsed, 0.95) > options[:max_transcription_p95_seconds]
+      errors << "Dictation transcription p95 is #{format("%.3fs", percentile(transcription_elapsed, 0.95))}, above #{format("%.3fs", options[:max_transcription_p95_seconds])}"
+    end
+
+    if transcription_rtf.length < MIN_TRANSCRIPTION_SAMPLES
+      errors << "Only #{transcription_rtf.length} transcription RTF samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
+    elsif percentile(transcription_rtf, 0.95) > options[:max_transcription_p95_rtf]
+      errors << "Dictation transcription p95 RTF is #{format("%.3f", percentile(transcription_rtf, 0.95))}, above #{format("%.3f", options[:max_transcription_p95_rtf])}"
+    end
+
+    if startup_durations.length < MIN_STARTUP_SAMPLES
+      errors << "Only #{startup_durations.length} launch to model-ready samples, need at least #{MIN_STARTUP_SAMPLES}"
+    elsif percentile(startup_durations, 0.90) > options[:max_model_ready_p90_seconds]
+      errors << "Launch to model-ready p90 is #{format("%.3fs", percentile(startup_durations, 0.90))}, above #{format("%.3fs", options[:max_model_ready_p90_seconds])}"
+    end
+
+    runtime_summary = {
+      transcription_samples: transcription_elapsed.length,
+      transcription_p95: percentile(transcription_elapsed, 0.95),
+      transcription_rtf_p95: percentile(transcription_rtf, 0.95),
+      startup_samples: startup_durations.length,
+      startup_p90: percentile(startup_durations, 0.90)
+    }
+  end
+end
+
 fail_budget!(errors)
 
 puts "Performance budget OK"
@@ -96,3 +203,10 @@ puts "Expanded app: #{mib(app_size)}"
 puts "Resources: #{mib(resources_size)}"
 puts "Parakeet model: #{model_dirs.first}"
 puts "Resource icons: #{resource_icons.join(", ")}"
+if runtime_summary
+  puts "Dictation transcription samples: #{runtime_summary[:transcription_samples]}"
+  puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])}"
+  puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
+  puts "Launch model-ready samples: #{runtime_summary[:startup_samples]}"
+  puts "Launch to model-ready p90: #{format("%.3fs", runtime_summary[:startup_p90])}"
+end
