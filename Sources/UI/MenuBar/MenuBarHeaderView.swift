@@ -47,7 +47,8 @@ final class MenuBarHeaderView: NSView {
 
         detailLabel.font = NSFont.systemFont(ofSize: 10)
         detailLabel.textColor = MenuTokens.textSecondaryNS
-        detailLabel.maximumNumberOfLines = 2
+        detailLabel.maximumNumberOfLines = 3
+        detailLabel.lineBreakMode = .byWordWrapping
         addSubview(detailLabel)
 
         if let image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning") {
@@ -58,7 +59,8 @@ final class MenuBarHeaderView: NSView {
 
         warningLabel.font = NSFont.systemFont(ofSize: 10)
         warningLabel.textColor = MenuTokens.textSecondaryNS
-        warningLabel.maximumNumberOfLines = 2
+        warningLabel.maximumNumberOfLines = 3
+        warningLabel.lineBreakMode = .byWordWrapping
         addSubview(warningLabel)
     }
 
@@ -88,15 +90,26 @@ final class MenuBarHeaderView: NSView {
         detailLabel.isHidden = isReady
         if !isReady {
             progressBar.frame = NSRect(x: 0, y: 42, width: bounds.width, height: 8)
-            detailLabel.frame = NSRect(x: 0, y: 54, width: bounds.width, height: 24)
+            detailLabel.frame = NSRect(
+                x: 0,
+                y: 54,
+                width: bounds.width,
+                height: measuredTextHeight(for: detailLabel.stringValue, font: detailLabel.font, width: bounds.width)
+            )
         }
 
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         if hasWarning {
-            let warningY: CGFloat = isReady ? 28 : 82
+            let warningWidth = max(0, bounds.width - 18)
+            let warningY: CGFloat = isReady ? 28 : detailLabel.frame.maxY + 6
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
-            warningLabel.frame = NSRect(x: 18, y: warningY - 1, width: bounds.width - 18, height: 26)
+            warningLabel.frame = NSRect(
+                x: 18,
+                y: warningY - 1,
+                width: warningWidth,
+                height: measuredTextHeight(for: warningLabel.stringValue, font: warningLabel.font, width: warningWidth)
+            )
         }
     }
 
@@ -118,9 +131,45 @@ final class MenuBarHeaderView: NSView {
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus == .ready
         let hasWarning = currentHotkeyError?.isEmpty == false
+        let contentWidth = measurementWidth
+        let warningWidth = max(0, contentWidth - 18)
+
         if isReady {
-            return hasWarning ? 56 : 0
+            let warningHeight = measuredTextHeight(for: currentHotkeyError ?? "", font: warningLabel.font, width: warningWidth)
+            return hasWarning ? 28 + warningHeight + 2 : 0
         }
-        return hasWarning ? 110 : 78
+
+        let detailHeight = measuredTextHeight(for: currentWarmupStatus.detail, font: detailLabel.font, width: contentWidth)
+        let contentHeight = 54 + detailHeight
+        guard hasWarning else { return contentHeight }
+
+        let warningHeight = measuredTextHeight(for: currentHotkeyError ?? "", font: warningLabel.font, width: warningWidth)
+        return contentHeight + 6 + warningHeight
+    }
+
+    private var measurementWidth: CGFloat {
+        bounds.width > 0 ? bounds.width : MenuTokens.panelWidth - (MenuTokens.innerPadding * 2)
+    }
+
+    private func measuredTextHeight(for text: String, font: NSFont?, width: CGFloat) -> CGFloat {
+        guard !text.isEmpty, width > 0 else { return 0 }
+
+        let resolvedFont = font ?? NSFont.systemFont(ofSize: 10)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        let attributed = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: resolvedFont,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+        let measured = attributed.boundingRect(
+            with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let lineHeight = ceil(resolvedFont.ascender - resolvedFont.descender + resolvedFont.leading)
+        let maxHeight = lineHeight * 3
+        return min(max(ceil(measured.height), lineHeight), maxHeight)
     }
 }
