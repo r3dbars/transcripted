@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after twenty audit/fix loops: **98/100, A**
+Current score after twenty-one audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -20,8 +20,8 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
 | Dictation start responsiveness | A | 94 | Fixed fast-path fallthrough and added `dictation_recording_fast_start` / fallback proof events plus strict budget parsing; current logs have 0 fresh fast-start samples | Fresh live dictation run with `--require-dictation-fast-start-samples 1` passes with no fallback/retry events |
 | App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
-| Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
-| Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
+| Idle CPU | A+ | 99 | Latest signed thin build idled at 0.0% CPU after 15s with no duplicate Transcripted processes | Stay below 1% CPU idle after warmup |
+| Idle memory | A+ | 99 | Latest signed thin build idled at 81,248 KB RSS after 15s, then exited cleanly after proof cleanup | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A | 96 | Default local and beta builds now produce the 105.4 MiB thin app with 1.9 MiB resources; explicit full/offline build remains 566.3 MiB | Ship the next public DMG/appcast/cask from the thin default, or explicitly publish separate full/offline and thin/download variants |
 | Local disk/cache hygiene | A | 96 | Storage page now reports reclaimable cache and has one guarded action for known stale Parakeet folders plus optional Whisper cache; this Mac has about 2.1 GB reclaimable | Normal default footprint under 700 MB excluding active bundled model, with reclaimable cache removed or absent |
 | Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
@@ -559,6 +559,22 @@ Measured proof:
 - After duplicate latest-build launch: still one PID, `75433`.
 - After proof cleanup: no latest-build Transcripted process remained running.
 
+### 20. Re-measured clean idle footprint
+
+Why:
+
+- Idle CPU and memory proof was previously polluted by stale temp/worktree build processes.
+- After loop 20 cleaned those up, the current signed build needed a fresh idle measurement.
+
+Measured proof:
+
+- Launched the latest signed thin `build/Transcripted.app`.
+- Waited 15 seconds.
+- Observed one current-build process: PID `75506`.
+- `ps`: CPU `0.0%`, RSS `81,248 KB`, elapsed `00:15`.
+- No other `Transcripted.app/Contents/MacOS/Transcripted` processes were present.
+- Closed the proof process and verified no current-build Transcripted process remained.
+
 ## Evidence
 
 ### Build And Verification
@@ -754,6 +770,11 @@ These are the next improvements I would execute in order.
    - Stale temp/worktree Transcripted processes were terminated, and the latest signed build stayed at one PID after a duplicate launch attempt.
    - A+ gate: keep this cleanup discipline during future build/release verification.
 
+10. **Clean idle footprint**
+   - Done in loop 21 for the current signed thin build.
+   - Fresh idle proof shows one process at 0.0% CPU and 81,248 KB RSS after 15 seconds.
+   - A+ gate: keep idle CPU below 1%, memory below 250 MB, and no duplicate resident copies.
+
 ## Current Honest Conclusion
 
 Transcripted is already **fast** where it matters most after warmup. It is not yet **super lightweight**.
@@ -765,4 +786,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, and the current build's single-instance behavior is reproved. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, the current build's single-instance behavior is reproved, and clean idle CPU/memory are A+. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.
