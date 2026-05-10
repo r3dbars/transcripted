@@ -28,7 +28,7 @@ extension SystemAudioCapture {
             if timeSinceLastBuffer > 3.0 {
                 // System audio stopped → output device likely changed
                 AppLogger.audioSystem.warning("Output device disconnected or changed, attempting recovery")
-                // Dispatch to self.queue — recovery uses Thread.sleep for HAL settle time
+                // Dispatch to self.queue; recovery schedules HAL settle time without blocking it.
                 self.queue.async {
                     self.recoverFromOutputChange()
                 }
@@ -172,8 +172,8 @@ extension SystemAudioCapture {
 
     func recoverFromOutputChange() {
         // CRITICAL: Prevent concurrent recovery attempts
-        // Multiple device changes can fire rapidly, and Thread.sleep blocks
-        // Without this guard, concurrent recoveries cause deadlock (spinning beach ball)
+        // Multiple device changes can fire rapidly. Without this guard, concurrent
+        // recoveries can race CoreAudio teardown/rebuild and deadlock.
         guard !isRecovering else {
             AppLogger.audioSystem.warning("Recovery already in progress, skipping duplicate request")
             return
@@ -195,15 +195,16 @@ extension SystemAudioCapture {
 
         isRecovering = true
         recoveryAttempts += 1
-        defer { isRecovering = false }
 
         AppLogger.audioSystem.info("Recovering from system audio output change")
 
         // Store current callback - we'll need it after cleanup
         guard let callback = self.bufferCallback else {
             AppLogger.audioSystem.error("No buffer callback available for recovery")
+            isRecovering = false
             return
         }
+        let wasCapturingAtRecoveryStart = isCapturing
 
         // Step 1: Full cleanup of old tap/aggregate device
         // Order matters: log stats, cleanup devices (preserve listener for future changes)
@@ -215,7 +216,24 @@ extension SystemAudioCapture {
         // The aggregate device is not ready immediately after the CoreAudio API call returns
         // Mozilla cubeb-coreaudio-rs and Apple developer forums recommend 100ms delay
         // Without this, the new tap may fail or produce garbage data
-        Thread.sleep(forTimeInterval: 0.15)  // 150ms (slightly longer for stability)
+        queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.finishRecoveryAfterHALSettle(
+                callback: callback,
+                wasCapturingAtRecoveryStart: wasCapturingAtRecoveryStart
+            )
+        }
+    }
+
+    private func finishRecoveryAfterHALSettle(
+        callback: @escaping (AVAudioPCMBuffer) -> Void,
+        wasCapturingAtRecoveryStart: Bool
+    ) {
+        defer { isRecovering = false }
+
+        if wasCapturingAtRecoveryStart && !isCapturing {
+            AppLogger.audioSystem.info("Skipping system audio recovery rebuild after capture stopped")
+            return
+        }
 
         // Step 3: Recreate tap targeting the new default output device
         do {
