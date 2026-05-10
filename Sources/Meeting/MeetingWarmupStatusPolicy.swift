@@ -29,7 +29,7 @@ struct MeetingWarmupStatus: Equatable {
     static let modelsOnDemand = MeetingWarmupStatus(
         title: "Transcripted is ready",
         subtitle: "Dictation and meetings load when started",
-        detail: "Transcripted keeps local voice models out of memory until you use them.",
+        detail: "The first use may download the local voice model once. The model is saved outside app updates after that.",
         progress: 1.0,
         dictationStatus: "On demand",
         meetingsStatus: "On demand"
@@ -67,9 +67,9 @@ enum MeetingWarmupStatusPolicy {
             return MeetingWarmupStatus(
                 title: "Getting Transcripted ready",
                 subtitle: "Downloading local dictation model",
-                detail: "Transcripted is downloading the on-device voice model used for dictation. This can take a minute or two on first launch.",
+                detail: "One-time local model download. Keep Transcripted open; future app updates should reuse the cached model.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
-                dictationStatus: "Downloading \(Int(progress * 100))%",
+                dictationStatus: progress > 0 ? "Downloading \(Int(progress * 100))%" : "Downloading",
                 meetingsStatus: "Waiting"
             )
         case .loading:
@@ -85,7 +85,7 @@ enum MeetingWarmupStatusPolicy {
             return MeetingWarmupStatus(
                 title: "Couldn’t start dictation",
                 subtitle: "The local dictation model failed to load",
-                detail: message,
+                detail: "\(message) Try dictation again or use Retry Download in Models settings.",
                 progress: 0,
                 dictationStatus: "Failed",
                 meetingsStatus: "Waiting"

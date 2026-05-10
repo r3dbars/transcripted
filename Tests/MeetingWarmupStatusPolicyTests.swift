@@ -60,8 +60,27 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.title, "Transcripted is ready", "lazy default launch should not look like stuck startup work")
         assertEqual(status.subtitle, "Dictation and meetings load when started", "lazy model loading should be explicit")
+        assertTrue(
+            status.detail.contains("outside app updates"),
+            "lazy model copy should explain the one-time cache survives normal app updates"
+        )
         assertEqual(status.dictationStatus, "On demand", "dictation status should show the lazy model policy")
         assertEqual(status.meetingsStatus, "On demand", "meeting status should show the lazy model policy")
+    }
+
+    runSuite("MeetingWarmupStatusPolicy.status — explains one-time dictation download") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .downloading(progress: 0),
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status.dictationStatus, "Downloading", "zero-progress Parakeet downloads should not pretend to have exact percent progress")
+        assertTrue(
+            status.detail.contains("future app updates should reuse the cached model"),
+            "download copy should explain update-safe model caching"
+        )
     }
 
     runSuite("MeetingWarmupStatusPolicy.status — dictation failures still take priority") {

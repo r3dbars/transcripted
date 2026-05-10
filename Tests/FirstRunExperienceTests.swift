@@ -218,6 +218,10 @@ func testFirstRunExperience() {
             "model card should tell the user where the model is being downloaded from"
         )
         assertTrue(
+            card.detail.contains("normal Transcripted updates do not download it again"),
+            "model card should explain that app updates reuse the cached model"
+        )
+        assertTrue(
             card.detail.contains("on this Mac") || card.detail.contains("locally"),
             "model card should reassure the user the model stays local"
         )
@@ -239,7 +243,20 @@ func testFirstRunExperience() {
             card.detail.contains("out of memory"),
             "not-loaded model detail should explain the lightweight launch behavior"
         )
+        assertTrue(
+            card.detail.contains("One-time ~600 MB download"),
+            "not-loaded model detail should warn about the first Parakeet download size"
+        )
         assertNil(card.progress, "on-demand model state should not show fake startup progress")
+    }
+
+    runSuite("FirstRunExperience.modelCard — explains update-safe model cache when ready") {
+        let card = FirstRunExperience.modelCard(for: .ready)
+
+        assertTrue(
+            card.detail.contains("outside app updates"),
+            "ready model card should explain that future app updates do not redownload the model"
+        )
     }
 
     runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {

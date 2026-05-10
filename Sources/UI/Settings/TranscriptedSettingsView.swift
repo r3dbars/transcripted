@@ -1088,7 +1088,10 @@ struct TranscriptedSettingsView: View {
                     title: "Model files",
                     status: modelCard.status,
                     detail: modelCard.detail,
-                    tone: tone(for: modelCard.tone)
+                    tone: tone(for: modelCard.tone),
+                    progress: modelCard.progress,
+                    actionTitle: modelDownloadActionTitle,
+                    action: modelDownloadAction
                 )
             }
 
@@ -1964,7 +1967,28 @@ struct TranscriptedSettingsView: View {
     }
 
     private var activeModelDetail: String {
-        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local."
+        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local. Model files are stored outside app updates."
+    }
+
+    private var modelDownloadActionTitle: String? {
+        switch FirstRunLocalModelState(sttRouter.modelDownloadState) {
+        case .notLoaded:
+            return "Download Now"
+        case .failed:
+            return "Retry Download"
+        case .downloading, .loading, .ready:
+            return nil
+        }
+    }
+
+    private var modelDownloadAction: (() -> Void)? {
+        guard modelDownloadActionTitle != nil else { return nil }
+        return {
+            trackSettingsAction("download_model", page: .models)
+            Task { @MainActor in
+                await sttRouter.initializeSelectedModel()
+            }
+        }
     }
 
     private var missingRequiredPermissions: [TranscriptedPermissionKind] {
