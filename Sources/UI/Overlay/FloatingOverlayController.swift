@@ -106,6 +106,11 @@ class FloatingOverlayController {
 
     // MARK: - Setup
 
+    func setupIfNeeded(sttRouter: STTRouter) {
+        guard panel == nil else { return }
+        setup(sttRouter: sttRouter)
+    }
+
     func setup(sttRouter: STTRouter) {
         guard panel == nil else {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "setup_called_twice",
@@ -125,7 +130,7 @@ class FloatingOverlayController {
         blurView.appearance = NSAppearance(named: .darkAqua)
         blurView.material = .underWindowBackground
         blurView.blendingMode = .behindWindow
-        blurView.state = .active
+        blurView.state = .inactive
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = OverlayTokens.cornerRadius
         blurView.layer?.backgroundColor = OverlayTokens.panelBg.cgColor
@@ -221,6 +226,7 @@ class FloatingOverlayController {
 
     func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
         guard let panel = panel else { return }
+        blurView?.state = .active
 
         // Invalidate any pending async _performHide() from a previous session's animation
         hideGeneration &+= 1
@@ -545,6 +551,7 @@ class FloatingOverlayController {
         panel?.orderOut(nil)
         panel?.alphaValue = 1.0
         panel?.contentView?.layer?.removeAllAnimations()
+        blurView?.state = .inactive
 
         isVisible = false
         errorDismissTask?.cancel()

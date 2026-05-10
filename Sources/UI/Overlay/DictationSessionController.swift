@@ -54,6 +54,7 @@ class DictationSessionController: ObservableObject {
                 message: "appState or overlayController not set")
             return nil
         }
+        overlayController.setupIfNeeded(sttRouter: appState.sttRouter)
         return (appState, overlayController)
     }
 

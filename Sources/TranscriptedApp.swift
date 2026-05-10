@@ -101,8 +101,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         sessionController.overlayController = overlayController
         appState.contextCapture.sessionController = sessionController
 
-        // Set up the floating overlay panel (pure AppKit — no NSHostingView)
-        overlayController.setup(sttRouter: appState.sttRouter)
         appState.contextCapture.registerHotkey()
 
         // Meeting prompt detection starts after onboarding; the heavier
