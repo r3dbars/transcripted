@@ -164,6 +164,17 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
+    runSuite("TranscriptedPermissionKind onboarding titles — keep permission copy centralized") {
+        assertEqual(TranscriptedPermissionKind.microphone.onboardingActionTitle, "Allow microphone")
+        assertEqual(TranscriptedPermissionKind.microphone.onboardingGrantedTitle, "Microphone allowed")
+        assertEqual(TranscriptedPermissionKind.accessibility.onboardingActionTitle, "Allow accessibility")
+        assertEqual(TranscriptedPermissionKind.accessibility.onboardingGrantedTitle, "Accessibility allowed")
+        assertEqual(TranscriptedPermissionKind.systemAudioRecording.onboardingActionTitle, "Allow meeting audio")
+        assertEqual(TranscriptedPermissionKind.systemAudioRecording.onboardingGrantedTitle, "Meeting audio allowed")
+        assertEqual(TranscriptedPermissionKind.calendar.onboardingActionTitle, "Allow meeting prompts")
+        assertEqual(TranscriptedPermissionKind.calendar.onboardingGrantedTitle, "Meeting prompts allowed")
+    }
+
     await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
         let requestBox = PermissionRequestBox()
         let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(

@@ -133,7 +133,8 @@ struct PermissionsOnboardingView: View {
                         reason: "So we can hear you.",
                         icon: "mic.fill",
                         granted: micGranted,
-                        actionTitle: "Allow"
+                        actionTitle: TranscriptedPermissionKind.microphone.onboardingActionTitle,
+                        grantedTitle: TranscriptedPermissionKind.microphone.onboardingGrantedTitle
                     ) {
                         requestPermission(.microphone)
                     }
@@ -142,7 +143,8 @@ struct PermissionsOnboardingView: View {
                         reason: "So your shortcut works everywhere.",
                         icon: "hand.raised.fill",
                         granted: accessibilityGranted,
-                        actionTitle: "Allow"
+                        actionTitle: TranscriptedPermissionKind.accessibility.onboardingActionTitle,
+                        grantedTitle: TranscriptedPermissionKind.accessibility.onboardingGrantedTitle
                     ) {
                         requestPermission(.accessibility)
                     }
@@ -204,7 +206,10 @@ struct PermissionsOnboardingView: View {
                 Headline(primary: "Record meetings.\nGet the transcript.", size: 42, alignment: .leading)
                 BodyCopy("Transcripted needs two audio streams to write the whole conversation: your microphone for you, and system audio for everyone else.")
                 BulletList(["macOS calls this Screen Recording", "Used only to hear meeting audio", "Everything stays on your Mac"])
-                Button(screenRecordingGranted ? "System audio enabled" : "Enable system audio") {
+                Button(screenRecordingGranted
+                    ? TranscriptedPermissionKind.systemAudioRecording.onboardingGrantedTitle
+                    : TranscriptedPermissionKind.systemAudioRecording.onboardingActionTitle
+                ) {
                     requestPermission(.systemAudioRecording)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted))
@@ -242,7 +247,10 @@ struct PermissionsOnboardingView: View {
                         calendarGranted = false
                     }
                 }
-                Button(calendarGranted ? "Calendar connected" : "Allow calendar access") {
+                Button(calendarGranted
+                    ? TranscriptedPermissionKind.calendar.onboardingGrantedTitle
+                    : TranscriptedPermissionKind.calendar.onboardingActionTitle
+                ) {
                     requestPermission(.calendar)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
@@ -826,6 +834,7 @@ private struct PermissionGrantRow: View {
     let icon: String
     let granted: Bool
     let actionTitle: String
+    let grantedTitle: String
     let action: () -> Void
 
     var body: some View {
@@ -850,7 +859,7 @@ private struct PermissionGrantRow: View {
 
             Spacer()
 
-            Button(granted ? "Granted" : actionTitle) {
+            Button(granted ? grantedTitle : actionTitle) {
                 action()
             }
             .buttonStyle(InkButtonStyle(isSubtle: granted, compact: true))

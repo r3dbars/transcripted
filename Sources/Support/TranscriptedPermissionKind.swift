@@ -88,6 +88,32 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         }
     }
 
+    var onboardingActionTitle: String {
+        switch self {
+        case .microphone:
+            return "Allow microphone"
+        case .accessibility:
+            return "Allow accessibility"
+        case .systemAudioRecording:
+            return "Allow meeting audio"
+        case .calendar:
+            return "Allow meeting prompts"
+        }
+    }
+
+    var onboardingGrantedTitle: String {
+        switch self {
+        case .microphone:
+            return "Microphone allowed"
+        case .accessibility:
+            return "Accessibility allowed"
+        case .systemAudioRecording:
+            return "Meeting audio allowed"
+        case .calendar:
+            return "Meeting prompts allowed"
+        }
+    }
+
     static func microphoneActionTitle(for status: AVAuthorizationStatus) -> String {
         switch status {
         case .notDetermined:
