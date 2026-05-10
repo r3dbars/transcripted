@@ -247,11 +247,25 @@ enum HotkeyPreferences {
         let code = Int(binding.keyCode)
         // Reject Escape and Tab outright
         if code == kVK_Escape || code == kVK_Tab { return false }
+        if modifierOnlyKeyCodes.contains(code) { return false }
         // Must have at least one modifier (Cmd, Option, or Control — Shift alone doesn't count)
         let meaningfulModifiers = binding.modifiers & UInt32(cmdKey | optionKey | controlKey)
         if meaningfulModifiers == 0 { return false }
         return true
     }
+
+    private static let modifierOnlyKeyCodes: Set<Int> = [
+        kVK_Command,
+        kVK_RightCommand,
+        kVK_Shift,
+        kVK_RightShift,
+        kVK_Option,
+        kVK_RightOption,
+        kVK_Control,
+        kVK_RightControl,
+        kVK_Function,
+        kVK_CapsLock
+    ]
 
     // MARK: - Modifier Conversion
 
