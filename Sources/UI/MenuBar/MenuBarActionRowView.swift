@@ -23,7 +23,9 @@ final class MenuBarActionRowView: NSControl {
 
     private var isHovering = false { didSet { updateAppearance() } }
     private var isPressing = false { didSet { updateAppearance() } }
+    private var isShowingDisabledFeedback = false { didSet { updateAppearance() } }
     private var trackingAreaRef: NSTrackingArea?
+    private var disabledFeedbackTask: Task<Void, Never>?
     private var rowTone: Tone = .standard
     private var rowSize: Size = .utility
     private var currentHeight: CGFloat = 26
@@ -33,8 +35,13 @@ final class MenuBarActionRowView: NSControl {
             if !isEnabled, window?.firstResponder === self {
                 window?.makeFirstResponder(nil)
             }
+            window?.invalidateCursorRects(for: self)
             updateAppearance()
         }
+    }
+
+    deinit {
+        disabledFeedbackTask?.cancel()
     }
 
     override init(frame: NSRect) {
@@ -73,7 +80,8 @@ final class MenuBarActionRowView: NSControl {
         trailingLabel.isHidden = trailingText?.isEmpty ?? true
         currentHeight = resolvedHeight()
         setAccessibilityLabel(title)
-        setAccessibilityHelp(detail.isEmpty ? "Press Space or Return to choose this action." : detail)
+        let accessibilityHelp = detail.isEmpty ? "Press Space or Return to choose this action." : detail
+        setAccessibilityHelp(isEnabled ? accessibilityHelp : "Unavailable. \(accessibilityHelp)")
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title) {
             symbolView.image = image.withSymbolConfiguration(
@@ -120,9 +128,11 @@ final class MenuBarActionRowView: NSControl {
         let trailingColor: NSColor
 
         if !isEnabled {
-            backgroundColor = MenuTokens.flatRowDisabledNS
-            iconTint = MenuTokens.textMutedNS
-            titleColor = MenuTokens.textMutedNS
+            backgroundColor = isShowingDisabledFeedback
+                ? MenuTokens.statusOrangeNS.withAlphaComponent(0.14)
+                : MenuTokens.flatRowDisabledNS
+            iconTint = isShowingDisabledFeedback ? MenuTokens.statusOrangeNS : MenuTokens.textMutedNS
+            titleColor = isShowingDisabledFeedback ? MenuTokens.statusOrangeNS : MenuTokens.textMutedNS
             detailColor = MenuTokens.textMutedNS
             trailingColor = MenuTokens.textMutedNS
         } else if isPressing {
@@ -249,6 +259,11 @@ final class MenuBarActionRowView: NSControl {
         trackingAreaRef = area
     }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: isEnabled ? .pointingHand : .operationNotAllowed)
+    }
+
     override func mouseEntered(with event: NSEvent) {
         guard isEnabled else { return }
         isHovering = true
@@ -260,7 +275,10 @@ final class MenuBarActionRowView: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            flashDisabledFeedback()
+            return
+        }
         isPressing = true
     }
 
@@ -301,5 +319,15 @@ final class MenuBarActionRowView: NSControl {
     private func performPress() {
         guard isEnabled else { return }
         onPress?()
+    }
+
+    private func flashDisabledFeedback() {
+        disabledFeedbackTask?.cancel()
+        isShowingDisabledFeedback = true
+        disabledFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            self?.isShowingDisabledFeedback = false
+        }
     }
 }
