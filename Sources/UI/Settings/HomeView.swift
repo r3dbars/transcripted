@@ -134,7 +134,7 @@ final class HomeViewModel: ObservableObject {
     private static let daySectionFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = .current
-        f.dateFormat = "EEEE, MMM d"
+        f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
         return f
     }()
 }
@@ -788,7 +788,7 @@ private enum HomeActivityRowFormatting {
     static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = .current
-        f.dateFormat = "h:mm a"
+        f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
 }
