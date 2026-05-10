@@ -57,7 +57,7 @@ final class MenuBarModelStatusView: NSControl {
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 8
+        let pad = MenuTokens.modelStatusPadding
         let dotSize = MenuTokens.statusDotSize
         let chevronSize: CGFloat = 10
         let midY = bounds.midY

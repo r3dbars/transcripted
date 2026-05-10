@@ -14,17 +14,22 @@ import Combine
 import TranscriptedCore
 
 private enum SpeakerNamingTokens {
-    static let sheetPadding: CGFloat = 20
+    static let sheetPadding: CGFloat = UISpacing.xl
     static let titleHeight: CGFloat = 24
     static let subtitleHeight: CGFloat = 16
     static let bottomButtonHeight: CGFloat = 28
     static let rowHeight: CGFloat = 104
-    static let rowSpacing: CGFloat = 12
+    static let rowSpacing: CGFloat = UISpacing.md
     static let sectionHeaderHeight: CGFloat = 24
-    static let sectionHeaderGap: CGFloat = 10
+    static let sectionHeaderGap: CGFloat = UISpacing.compact
 
-    static let rowPadding: CGFloat = 12
+    static let rowPadding: CGFloat = UISpacing.md
     static let rowCornerRadius: CGFloat = UIRadius.small
+    static let titleSubtitleGap: CGFloat = 18
+    static let buttonGap: CGFloat = UISpacing.sm
+    static let scrollGap: CGFloat = UISpacing.md
+    static let sectionHeaderButtonGap: CGFloat = UISpacing.sm
+    static let sectionHeaderButtonPadding: CGFloat = UISpacing.md
     static let rowTitleHeight: CGFloat = 18
     static let rowSubtextHeight: CGFloat = 16
     static let rowSampleHeight: CGFloat = 26
@@ -287,7 +292,7 @@ final class SpeakerNamingContentView: NSView {
         )
         subtitleLabel.frame = NSRect(
             x: pad,
-            y: titleLabel.frame.minY - 18,
+            y: titleLabel.frame.minY - SpeakerNamingTokens.titleSubtitleGap,
             width: contentWidth,
             height: SpeakerNamingTokens.subtitleHeight
         )
@@ -303,15 +308,15 @@ final class SpeakerNamingContentView: NSView {
             height: btnH
         )
         cancelButton.frame = NSRect(
-            x: saveButton.frame.minX - 8 - cancelSize.width,
+            x: saveButton.frame.minX - SpeakerNamingTokens.buttonGap - cancelSize.width,
             y: pad,
             width: cancelSize.width,
             height: btnH
         )
 
         // Scroll view fills the middle.
-        let scrollTop = subtitleLabel.frame.minY - 12
-        let scrollBottom = saveButton.frame.maxY + 12
+        let scrollTop = subtitleLabel.frame.minY - SpeakerNamingTokens.scrollGap
+        let scrollBottom = saveButton.frame.maxY + SpeakerNamingTokens.scrollGap
         let scrollHeight = max(0, scrollTop - scrollBottom)
         scrollView.frame = NSRect(
             x: pad,
@@ -355,11 +360,11 @@ final class SpeakerNamingContentView: NSView {
         if hasMicSection {
             y -= headerHeight
             let btnSize = keepAsYouButton.fittingSize
-            let btnW = max(110, btnSize.width + 12)
+            let btnW = max(110, btnSize.width + SpeakerNamingTokens.sectionHeaderButtonPadding)
             localSectionLabel.frame = NSRect(
                 x: 0,
                 y: y + 2,
-                width: docInnerWidth - btnW - 8,
+                width: docInnerWidth - btnW - SpeakerNamingTokens.sectionHeaderButtonGap,
                 height: headerHeight - 2
             )
             keepAsYouButton.frame = NSRect(

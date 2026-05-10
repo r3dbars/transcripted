@@ -126,18 +126,18 @@ final class MenuBarShortcutsView: NSView {
         pushToTalkRow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: MenuTokens.actionRowHeight)
         handsFreeRow.frame = NSRect(
             x: 0,
-            y: MenuTokens.actionRowHeight + 6,
+            y: MenuTokens.actionRowHeight + MenuTokens.actionRowGap,
             width: bounds.width,
             height: MenuTokens.actionRowHeight
         )
         meetingRow.frame = NSRect(
             x: 0,
-            y: (MenuTokens.actionRowHeight + 6) * 2,
+            y: (MenuTokens.actionRowHeight + MenuTokens.actionRowGap) * 2,
             width: bounds.width,
             height: MenuTokens.actionRowHeight
         )
 
-        let importY = meetingRow.frame.maxY + 8
+        let importY = meetingRow.frame.maxY + MenuTokens.secondaryActionGap
         importButton.frame = NSRect(
             x: 0,
             y: importY,
@@ -146,12 +146,12 @@ final class MenuBarShortcutsView: NSView {
         )
 
         let buttonSize = MenuTokens.secondaryButtonSize
-        let footerY = importButton.frame.maxY + 8
+        let footerY = importButton.frame.maxY + MenuTokens.secondaryActionGap
         resetButton.frame = NSRect(x: bounds.width - buttonSize, y: footerY, width: buttonSize, height: buttonSize)
         resetHintLabel.frame = NSRect(
             x: 0,
             y: footerY + ((buttonSize - 14) / 2),
-            width: max(0, resetButton.frame.minX - 10),
+            width: max(0, resetButton.frame.minX - MenuTokens.footerLabelGap),
             height: 14
         )
     }
@@ -491,7 +491,7 @@ private final class PrimaryActionRowView: NSView {
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 14
+        let pad = MenuTokens.primaryActionPadding
         symbolWellView.frame = NSRect(
             x: pad,
             y: (bounds.height - MenuTokens.symbolWellSize) / 2,
@@ -508,9 +508,9 @@ private final class PrimaryActionRowView: NSView {
             height: MenuTokens.badgeHeight
         )
 
-        let textX = symbolWellView.frame.maxX + 10
-        let textWidth = badgeButton.frame.minX - textX - 10
-        titleLabel.frame = NSRect(x: textX, y: 8, width: textWidth, height: 15)
+        let textX = symbolWellView.frame.maxX + MenuTokens.primaryActionTextGap
+        let textWidth = badgeButton.frame.minX - textX - MenuTokens.primaryActionTextGap
+        titleLabel.frame = NSRect(x: textX, y: MenuTokens.primaryActionVerticalInset, width: textWidth, height: 15)
         subtitleLabel.frame = NSRect(x: textX, y: 24, width: textWidth, height: 13)
     }
 

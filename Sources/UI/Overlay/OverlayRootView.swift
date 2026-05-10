@@ -219,7 +219,7 @@ final class OverlayLoadingView: NSView {
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 14
+        let pad = OverlayTokens.loadingContentPadding
         let contentWidth = max(0, bounds.width - pad * 2)
 
         titleLabel.frame = NSRect(x: pad, y: 12, width: contentWidth, height: 16)
