@@ -122,6 +122,20 @@ func testRepoCommandContract() {
             localBuildScript.contains("--no-open"),
             "local build should support non-interactive verification without leaving the app running"
         )
+        assertTrue(
+            localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
+            "local launch smoke should not create dirty-shutdown diagnostics markers"
+        )
+
+        let runtimeDiagnostics = readRepoTextFile("Sources/Observability/RuntimeDiagnostics.swift")
+        assertTrue(
+            runtimeDiagnostics.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"),
+            "runtime diagnostics should expose a smoke/test disable flag"
+        )
+        assertTrue(
+            runtimeDiagnostics.contains("guard !isDisabled else { return }"),
+            "runtime diagnostics should skip marker writes when disabled"
+        )
 
         let betaBuildScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         assertTrue(
