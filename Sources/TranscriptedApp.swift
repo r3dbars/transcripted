@@ -324,7 +324,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         guard !PermissionsOnboardingPreferences.hasCompleted(), !hasPresentedInitialOnboarding else { return }
         hasPresentedInitialOnboarding = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }
             self.onboardingWindowController.present()
         }
