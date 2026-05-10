@@ -58,6 +58,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
             "no samples recorded",
             "at least 1 second",
             "Invalid audio data",
+            "Audio files unavailable",
             "Recording too short",
             "Invalid audio format",
             "System audio is required",

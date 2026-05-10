@@ -67,4 +67,14 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "Couldn't save the transcript", "save failures should keep the save-specific title")
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
+
+    runSuite("FailedMeetingPresentation missing queued audio is not retryable") {
+        let failed = FailedTranscription(
+            micAudioURL: URL(fileURLWithPath: "/tmp/missing-mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Audio files unavailable"
+        )
+
+        assertFalse(failed.isRetryable, "missing queued scratch audio should not show a retry button")
+    }
 }

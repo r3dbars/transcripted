@@ -29,6 +29,7 @@ import TranscriptedCore
 @MainActor
 final class MeetingSessionController: ObservableObject {
     static var runtimeDiagnosticsRecorder: RuntimeDiagnostics?
+    private static let queuedAudioUnavailableMessage = "Audio files unavailable"
 
     enum StartTrigger: String {
         case hotkey = "hotkey"
@@ -1347,6 +1348,20 @@ final class MeetingSessionController: ObservableObject {
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, let healthInfo):
+            if let missingFiles = MeetingQueuedAudioAvailability.missingFiles(
+                micURL: micURL,
+                systemURL: systemURL
+            ) {
+                handleQueuedRecordingAudioUnavailable(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    missingFiles: missingFiles,
+                    trigger: job.startTrigger
+                )
+                startNextQueuedTranscriptionOrFinalize()
+                return
+            }
+
             taskManager.startTranscription(
                 micURL: micURL,
                 systemURL: systemURL,
@@ -1361,6 +1376,47 @@ final class MeetingSessionController: ObservableObject {
                 meetingTitle: suggestedTitle
             )
         }
+    }
+
+    private func handleQueuedRecordingAudioUnavailable(
+        micURL: URL,
+        systemURL: URL?,
+        missingFiles: MeetingQueuedAudioAvailability.MissingFiles,
+        trigger: StartTrigger
+    ) {
+        TranscriptedCore.AppLogger.pipeline.error("Queued meeting audio files unavailable", [
+            "micMissing": "\(missingFiles.micMissing)",
+            "systemMissing": "\(missingFiles.systemMissing)"
+        ])
+        DiagnosticsTrail.record(
+            level: .error,
+            engine: "meeting",
+            event: "meeting_queued_audio_unavailable",
+            message: "Queued meeting audio files were unavailable before transcription",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "mic_missing": boolString(missingFiles.micMissing),
+                    "system_missing": boolString(missingFiles.systemMissing),
+                    "trigger": trigger.rawValue
+                ]
+            )
+        )
+        failedManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: Self.queuedAudioUnavailableMessage
+        )
+        lastTerminalTranscriptionOutcome = .failed(Self.queuedAudioUnavailableMessage)
+        refreshFailedMeetings()
+    }
+
+    private func startNextQueuedTranscriptionOrFinalize() {
+        if let nextJob = popNextQueuedTranscriptionJob() {
+            startQueuedTranscription(nextJob)
+            return
+        }
+
+        finalizeBackgroundTranscriptionStateIfNeeded()
     }
 
     private func handleBackgroundTranscriptionWorkChanged() {

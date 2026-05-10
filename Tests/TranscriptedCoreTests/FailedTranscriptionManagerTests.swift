@@ -180,6 +180,16 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(failure.isRetryable)
     }
 
+    func testFailedTranscriptionRetryabilityKeepsMissingQueuedAudioPermanent() {
+        let failure = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Audio files unavailable"
+        )
+
+        XCTAssertFalse(failure.isRetryable)
+    }
+
     private func makePaths(root: URL) -> CoreStoragePaths {
         CoreStoragePaths(
             transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
