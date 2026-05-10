@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after nineteen audit/fix loops: **98/100, A**
+Current score after twenty audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -30,7 +30,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Observability overhead | A+ | 98 | Info-level JSONL events now batch up to 8 records or 500 ms; warning/error events still flush immediately; privacy/event budgets remain tested | Keep error diagnostics immediate and measure event-write overhead if high-volume telemetry grows |
 | Build and dev loop speed | B | 86 | Timed default thin `bash build.sh --no-open` takes 68.17s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
 | Performance regression guardrails | A+ | 99 | 1597 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
-| Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
+| Process hygiene / single-instance behavior | A+ | 98 | Cleaned 8 stale temp/worktree Transcripted build processes; latest signed build stayed at one PID after a duplicate launch attempt | Keep one effective Transcripted process per user session and avoid leaving test builds running |
 
 ## Fixes Applied In This Pass
 
@@ -538,6 +538,27 @@ Measured proof:
 - `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed.
 - Default thin build after the change: 105.4 MiB expanded, 1.9 MiB resources, no bundled Parakeet model.
 
+### 19. Cleaned stale build processes and reproved single-instance behavior
+
+Why:
+
+- A live process scan found 8 old Transcripted processes still running from prior temp/worktree builds.
+- Those stale processes distort CPU, memory, hotkey, model, and reliability measurements.
+
+Change made:
+
+- Terminated the stale temp/worktree Transcripted build processes.
+- Launched the latest signed build twice from this audit worktree.
+- Closed the proof app after verification so the audit did not leave a resident build process behind.
+
+Measured proof:
+
+- Before cleanup: 8 old Transcripted build processes were running.
+- After cleanup: no Transcripted build processes were running.
+- After first latest-build launch: one PID, `75433`.
+- After duplicate latest-build launch: still one PID, `75433`.
+- After proof cleanup: no latest-build Transcripted process remained running.
+
 ## Evidence
 
 ### Build And Verification
@@ -728,6 +749,11 @@ These are the next improvements I would execute in order.
    - Settings now shows reclaimable cache and removes known stale Parakeet plus optional Whisper cache in one guarded action.
    - A+ gate: remove or verify absence of reclaimable cache on the target machine and prove the normal model/cache footprint stays under 700 MB excluding the active model.
 
+9. **Process hygiene**
+   - Done in loop 20 for the current signed build.
+   - Stale temp/worktree Transcripted processes were terminated, and the latest signed build stayed at one PID after a duplicate launch attempt.
+   - A+ gate: keep this cleanup discipline during future build/release verification.
+
 ## Current Honest Conclusion
 
 Transcripted is already **fast** where it matters most after warmup. It is not yet **super lightweight**.
@@ -739,4 +765,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, and low-priority local event writes are batched. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, and the current build's single-instance behavior is reproved. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.
