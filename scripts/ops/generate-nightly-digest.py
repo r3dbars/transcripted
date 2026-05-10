@@ -51,6 +51,13 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_saved",
     "meeting_transcript_failed",
 )
+TRUSTED_POSTHOG_HOSTS = {
+    "https://app.posthog.com",
+    "https://eu.posthog.com",
+    "https://posthog.com",
+    "https://us.posthog.com",
+}
+POSTHOG_ALLOW_UNTRUSTED_HOST_ENV = "POSTHOG_ALLOW_UNTRUSTED_HOST"
 
 NIGHTLY_PREFIXES = (
     "[nightly-",
@@ -445,9 +452,9 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             schedule=schedule_label(automation.rrule),
         )
 
-    status = "green"
-    signal = "No action-worthy issue reported."
-    action = "No action"
+    status = "watch"
+    signal = "Fresh result exists, but the digest did not classify a clear pass/fail signal."
+    action = "Review lane summary"
 
     if contains_any(lower, ("blocked", "first failing command", "repo_fix_candidate", "mixed_failures")):
         if "first failing command: none" not in lower and "repo_fix_candidate" not in lower:
@@ -756,13 +763,13 @@ def human_next_steps(
     ops_tokens_incomplete: bool,
 ) -> list[str]:
     steps: list[str] = []
-    if dau_unknown:
-        steps.append("Fix DAU visibility: set PostHog read credentials and rerun this report.")
-
     blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
-    if blocked_lanes and not dau_unknown:
+    if blocked_lanes:
         lane = blocked_lanes[0]
         steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+
+    if dau_unknown:
+        steps.append("Fix DAU visibility: set PostHog read credentials and rerun this report.")
 
     if open_prs:
         if len(open_prs) == 1:
@@ -924,6 +931,19 @@ def normalize_posthog_host(raw_host: str) -> str:
     return host
 
 
+def posthog_host_error(host: str) -> Optional[str]:
+    if not host.startswith("https://"):
+        return "PostHog host must use HTTPS"
+    if os.environ.get(POSTHOG_ALLOW_UNTRUSTED_HOST_ENV) == "1":
+        return None
+    if host not in TRUSTED_POSTHOG_HOSTS:
+        return (
+            f"PostHog host {host} is not in the trusted host list; "
+            f"set {POSTHOG_ALLOW_UNTRUSTED_HOST_ENV}=1 to use a self-hosted endpoint"
+        )
+    return None
+
+
 def sql_quote(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
@@ -1014,11 +1034,14 @@ def query_posthog_dau() -> dict[str, Any]:
     host = normalize_posthog_host(
         os.environ.get("POSTHOG_APP_HOST") or os.environ.get("POSTHOG_HOST") or "https://us.posthog.com"
     )
+    host_error = posthog_host_error(host)
+    if host_error:
+        return {"dau": None, "event_count": None, "error": host_error}
     event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
 
     current_query = (
         "SELECT "
-        "uniqIf(distinct_id, event = 'app_launched') AS dau, "
+        "uniq(distinct_id) AS dau, "
         "countIf(event = 'app_launched') AS launches_24h, "
         "count() AS workflow_events_24h "
         "FROM events "
@@ -1028,7 +1051,7 @@ def query_posthog_dau() -> dict[str, Any]:
     daily_query = (
         "SELECT "
         "toDate(timestamp) AS day, "
-        "uniqIf(distinct_id, event = 'app_launched') AS active_devices "
+        "uniq(distinct_id) AS active_devices "
         "FROM events "
         "WHERE timestamp >= now() - INTERVAL 30 DAY "
         f"AND event IN ({event_list}) "
@@ -1117,7 +1140,7 @@ def build_dau_status(
     proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
 
     if exact_source == "PostHog":
-        note = "Exact DAU came from PostHog for the last 24 hours."
+        note = "Exact DAU came from PostHog active workflow events for the last 24 hours."
     elif exact_dau is not None:
         note = "Exact DAU came from a nightly automation memory entry."
     elif posthog_dau and posthog_dau.get("error"):
@@ -1170,12 +1193,12 @@ def build_recommendations(
     dau_unknown: bool,
 ) -> list[str]:
     recommendations: list[str] = []
-    if dau_unknown:
-        recommendations.append("Fix DAU visibility first: set PostHog read credentials, then rerun this report.")
     blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
-    if blocked_lanes and not dau_unknown:
+    if blocked_lanes:
         lane = blocked_lanes[0]
         recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+    if dau_unknown:
+        recommendations.append("Fix DAU visibility: set PostHog read credentials, then rerun this report.")
     if open_prs:
         pr = open_prs[0]
         recommendations.append(f"Review PR #{pr.get('number')} first: {pr.get('title')}.")
@@ -1274,10 +1297,10 @@ def build_ceo_brief(
         for lane in lanes
     )
 
-    if dau_unknown:
-        call = "Measurement: we do not know current DAU, so the first job is to make that number visible."
-    elif overall == "blocked":
+    if overall == "blocked":
         call = "Trust: a blocker exists, so fix trust before growth or shipping."
+    elif dau_unknown:
+        call = "Measurement: we do not know current DAU, so make that number visible before growth calls."
     elif ops_tokens_incomplete or issue_500_watch or artifact_drift:
         call = "Trust: the product is mostly healthy, but today's leverage is tightening confidence before adding noise."
     elif open_prs:
@@ -1369,8 +1392,6 @@ def build_ceo_brief(
         watch = "Stale or missing telemetry would be the first thing to watch."
 
     do_now = steps[0] if steps else "No human action needed this morning."
-    if dau_unknown:
-        do_now = "Fix DAU visibility: set PostHog read credentials and rerun this report."
 
     return {
         "ceo_call": call,
@@ -1588,15 +1609,21 @@ def render_html(payload: dict[str, Any]) -> str:
     pr_word = "PR" if counts["open_nightly_prs"] == 1 else "PRs"
     action_word = "action" if counts["needs_human"] == 1 else "actions"
     blocked_label, blocked_detail = blocked_status_text(hard_blocked_count, unknown_count)
-    hero_title = "DAU is unknown" if dau_unknown else "What happened last night"
-    hero_subtitle = (
-        f"Goal: {dau['goal']}. Fix measurement first."
-        if dau_unknown
-        else (
+    if hard_blocked_count:
+        hero_title = "A nightly lane is blocked"
+        hero_subtitle = (
             f"{counts['active_lanes']} jobs ran. {blocked_detail}. "
             f"{counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} human {action_word}."
         )
-    )
+    elif dau_unknown:
+        hero_title = "DAU is unknown"
+        hero_subtitle = f"Goal: {dau['goal']}. Fix measurement first."
+    else:
+        hero_title = "What happened last night"
+        hero_subtitle = (
+            f"{counts['active_lanes']} jobs ran. {blocked_detail}. "
+            f"{counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} human {action_word}."
+        )
     bottom_line = night_summary_text(int(counts["active_lanes"]), hard_blocked_count, unknown_count)
     dau_context = (
         dau["note"]
@@ -1635,6 +1662,18 @@ def render_html(payload: dict[str, Any]) -> str:
             for pr in recent_merged_prs
         )
         pr_rows += f"<div class=\"pr-subhead\">Recently merged</div>{merged_rows}"
+
+    averages = dau_averages(dau)
+    scorecard_rows = "\n".join(
+        "<div class=\"score-row\">"
+        "<div>"
+        f"<strong>{escape(row.get('role', ''))}</strong>"
+        f"<p>{escape(row.get('reason', ''))}</p>"
+        "</div>"
+        f"<span>{escape(row.get('grade', ''))} · {escape(row.get('score', ''))}</span>"
+        "</div>"
+        for row in ceo["scorecard"]
+    )
 
     role_sections: list[str] = [
         (
@@ -1906,6 +1945,23 @@ p {{ margin: 0; }}
   line-height: 1.2;
   padding: 6px 9px;
 }}
+.scorecard {{
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  overflow: hidden;
+}}
+.score-row {{
+  align-items: center;
+  background: #fbfcfe;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}}
+.score-row + .score-row {{ border-top: 1px solid #edf0f4; }}
+.score-row strong {{ display: block; }}
+.score-row p {{ color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 3px; }}
+.score-row span {{ color: var(--muted); font-size: 12px; font-weight: 850; white-space: nowrap; }}
 .plain-list {{ display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }}
 .plain-list li {{
   background: var(--panel);
@@ -1951,6 +2007,8 @@ a:hover {{ text-decoration: underline; }}
   .pr-row {{ align-items: flex-start; display: block; }}
   .pr-row span {{ display: block; margin-top: 6px; white-space: normal; }}
   .role-row {{ grid-template-columns: 1fr; }}
+  .score-row {{ align-items: flex-start; display: block; }}
+  .score-row span {{ display: block; margin-top: 6px; white-space: normal; }}
 }}
 </style>
 </head>
@@ -2003,6 +2061,10 @@ a:hover {{ text-decoration: underline; }}
             <h3>Decide</h3>
             <ol class="compact-list">{step_items}</ol>
           </div>
+          <div class="detail-block">
+            <h3>DAU averages</h3>
+            <p>7-day: {escape(averages['last_7'])}. Weekday: {escape(averages['weekday'])}. Weekend: {escape(averages['weekend'])}.</p>
+          </div>
         </div>
       </section>
       <section class="detail-section">
@@ -2034,6 +2096,13 @@ a:hover {{ text-decoration: underline; }}
           <p>The morning brief plus every active nightly role feeding it.</p>
         </header>
         <div class="role-matrix">{roles_included}</div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>Scorecard</h2>
+          <p>Compact role scores from the latest lane memories.</p>
+        </header>
+        <div class="scorecard">{scorecard_rows}</div>
       </section>
       <section class="detail-section">
         <header>
@@ -2122,6 +2191,11 @@ def run_self_test() -> None:
                 "Transcripted Nightly Product Health",
                 "2026-05-09T12:03:00Z Status: needs_review. Sentry and PostHog missing read tokens.",
             ),
+            (
+                "transcripted-nightly-experimental",
+                "Transcripted Nightly Experimental",
+                "2026-05-09T12:04:00Z Do next: inspect this new lane manually.",
+            ),
         ]
         for automation_id, name, memory in fixtures:
             folder = automations_dir / automation_id
@@ -2154,10 +2228,15 @@ def run_self_test() -> None:
             posthog_dau={"dau": None, "event_count": None, "error": "Self-test skipped PostHog"},
         )
         assert payload["overall_status"] == "needs_review", payload["overall_status"]
-        assert payload["counts"]["active_lanes"] == 3, payload["counts"]
+        assert payload["counts"]["active_lanes"] == 4, payload["counts"]
         assert payload["counts"]["needs_human"] >= 2, payload["human_next_steps"]
         assert payload["human_next_steps"][0].startswith("Fix DAU visibility"), payload["human_next_steps"]
+        experimental = next(lane for lane in payload["lanes"] if lane["id"] == "transcripted-nightly-experimental")
+        assert experimental["status"] == "watch", experimental
         assert len(payload["ceo_brief"]["scorecard"]) >= 13
+        assert normalize_posthog_host("https://us.i.posthog.com") == "https://us.posthog.com"
+        assert posthog_host_error("http://posthog.invalid") == "PostHog host must use HTTPS"
+        assert posthog_host_error("https://example.invalid") is not None
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
         assert Path(paths["latest_json"]).exists()
