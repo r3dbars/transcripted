@@ -60,18 +60,18 @@ final class WaveformDrawingLayer: CALayer {
     var currentLevel: Float = 0
     var tintColor: NSColor = .white
     var visualizationStyle: WaveformVisualizationStyle = .scrolling
-    var mirroredBarCount: Int = 26
-    var mirroredBarWidth: CGFloat = 2
-    var mirroredBarSpacing: CGFloat = 1.5
+    var mirroredBarCount = OverlayTokens.waveformMirroredBarCount
+    var mirroredBarWidth = OverlayTokens.waveformBarWidth
+    var mirroredBarSpacing = OverlayTokens.waveformMirroredBarSpacing
 
     // Bar geometry — matches original SwiftUI waveform
-    let barWidth: CGFloat = 2
-    let barSpacing: CGFloat = 1
+    let barWidth = OverlayTokens.waveformBarWidth
+    let barSpacing = OverlayTokens.waveformBarSpacing
     var barStride: CGFloat { barWidth + barSpacing }
-    let minBarHeight: CGFloat = 2
-    let maxBarHeight: CGFloat = 14
-    let barCornerRadius: CGFloat = 1
-    let sampleInterval: TimeInterval = 0.05  // 20Hz
+    let minBarHeight = OverlayTokens.waveformMinBarHeight
+    let maxBarHeight = OverlayTokens.waveformMaxBarHeight
+    let barCornerRadius = OverlayTokens.waveformBarCornerRadius
+    let sampleInterval = OverlayTokens.waveformSampleInterval
 
     override func draw(in ctx: CGContext) {
         let now = CFAbsoluteTimeGetCurrent()
@@ -250,21 +250,21 @@ final class WaveformHostView: NSView {
         }
     }
 
-    var mirroredBarCount: Int = 26 {
+    var mirroredBarCount: Int = OverlayTokens.waveformMirroredBarCount {
         didSet {
             drawingLayer.mirroredBarCount = mirroredBarCount
             drawingLayer.setNeedsDisplay()
         }
     }
 
-    var mirroredBarWidth: CGFloat = 2 {
+    var mirroredBarWidth: CGFloat = OverlayTokens.waveformBarWidth {
         didSet {
             drawingLayer.mirroredBarWidth = mirroredBarWidth
             drawingLayer.setNeedsDisplay()
         }
     }
 
-    var mirroredBarSpacing: CGFloat = 1.5 {
+    var mirroredBarSpacing: CGFloat = OverlayTokens.waveformMirroredBarSpacing {
         didSet {
             drawingLayer.mirroredBarSpacing = mirroredBarSpacing
             drawingLayer.setNeedsDisplay()
@@ -363,13 +363,13 @@ final class DualWaveformDrawingLayer: CALayer {
     var primaryTintColor: NSColor = .white
     var secondaryTintColor: NSColor = .white
 
-    let barWidth: CGFloat = 2
-    let barSpacing: CGFloat = 1
+    let barWidth = OverlayTokens.waveformBarWidth
+    let barSpacing = OverlayTokens.waveformBarSpacing
     var barStride: CGFloat { barWidth + barSpacing }
-    let minBarHeight: CGFloat = 2
-    let maxBarHeight: CGFloat = 14
-    let barCornerRadius: CGFloat = 1
-    let sampleInterval: TimeInterval = 0.05
+    let minBarHeight = OverlayTokens.waveformMinBarHeight
+    let maxBarHeight = OverlayTokens.waveformMaxBarHeight
+    let barCornerRadius = OverlayTokens.waveformBarCornerRadius
+    let sampleInterval = OverlayTokens.waveformSampleInterval
 
     override func draw(in ctx: CGContext) {
         let now = CFAbsoluteTimeGetCurrent()

@@ -41,6 +41,11 @@ enum MeetingOverlayTokens {
     static let padLeft: CGFloat     = 12
     static let padRight: CGFloat    = 8
     static let headerGap: CGFloat   = 8
+    static let standardPad: CGFloat = 12
+    static let standardCloseHeight: CGFloat = 22
+    static let standardChevronSize: CGFloat = 16
+    static let standardLevelBarHeight: CGFloat = 10
+    static let standardLevelBarGap: CGFloat = 2
     static let minimizedPadLeft: CGFloat = 10
     static let minimizedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
@@ -48,6 +53,11 @@ enum MeetingOverlayTokens {
     static let toggleHeight: CGFloat = 22
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
+    static let recordingWaveformHeight: CGFloat = 22
+    static let promptPad: CGFloat = 12
+    static let promptButtonHeight: CGFloat = 24
+    static let promptButtonGap: CGFloat = 8
+    static let warmupPad: CGFloat = 16
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6
     static let tooltipDelayNanoseconds: UInt64 = 80_000_000

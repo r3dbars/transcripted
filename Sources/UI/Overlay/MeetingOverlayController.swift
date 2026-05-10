@@ -370,7 +370,7 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func layoutStandardStatus() {
-        let pad: CGFloat = 12
+        let pad = MeetingOverlayTokens.standardPad
         let dotSize = MeetingOverlayTokens.dotSize
         let headerHeight = MeetingOverlayTokens.panelHeight
 
@@ -408,7 +408,7 @@ final class MeetingOverlayRootView: NSView {
         )
 
         // Explicit Stop action while recording.
-        let closeHeight: CGFloat = 22
+        let closeHeight = MeetingOverlayTokens.standardCloseHeight
         let closeWidth = max(44, closeButton.fittingSize.width + 16)
         closeButton.frame = NSRect(
             x: bounds.width - pad - closeWidth,
@@ -418,7 +418,7 @@ final class MeetingOverlayRootView: NSView {
         )
 
         // Chevron button remains hidden, but keep a frame for layout stability.
-        let chevronSize: CGFloat = 16
+        let chevronSize = MeetingOverlayTokens.standardChevronSize
         chevronButton.frame = NSRect(
             x: closeButton.frame.minX - chevronSize - 6,
             y: headerMidY - chevronSize / 2,
@@ -434,8 +434,8 @@ final class MeetingOverlayRootView: NSView {
         let levelBarRight = closeButton.frame.minX - 10
         let levelBarX = labelX + labelWidth + 8
         let levelBarWidth = max(0, levelBarRight - levelBarX)
-        let levelBarHeight: CGFloat = 10
-        let levelBarGap: CGFloat = 2
+        let levelBarHeight = MeetingOverlayTokens.standardLevelBarHeight
+        let levelBarGap = MeetingOverlayTokens.standardLevelBarGap
         let micY = headerMidY + 1
         let systemY = headerMidY + 1 - levelBarHeight - levelBarGap
 
@@ -510,7 +510,7 @@ final class MeetingOverlayRootView: NSView {
         let barsRight = chevronButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
-        let barsHeight: CGFloat = 22
+        let barsHeight = tokens.recordingWaveformHeight
         let barsY = midY - barsHeight / 2
         audioWaveform.frame = NSRect(
             x: barsLeft,
@@ -576,7 +576,7 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func layoutPrompt() {
-        let pad: CGFloat = 12
+        let pad = MeetingOverlayTokens.promptPad
         let dotSize = MeetingOverlayTokens.dotSize
         let topY = bounds.height - 22
 
@@ -611,8 +611,8 @@ final class MeetingOverlayRootView: NSView {
         let showsRemind = !remindButton.isHidden
         let remindWidth = showsRemind ? max(118, remindButton.fittingSize.width + 18) : 0
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
-        let buttonHeight: CGFloat = 24
-        let buttonGap: CGFloat = 8
+        let buttonHeight = MeetingOverlayTokens.promptButtonHeight
+        let buttonGap = MeetingOverlayTokens.promptButtonGap
         let visibleGapCount: CGFloat = showsRemind ? 2 : 1
         let totalButtonWidth = secondaryWidth + remindWidth + primaryWidth + buttonGap * visibleGapCount
         let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
@@ -643,7 +643,7 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func layoutError() {
-        let pad: CGFloat = 12
+        let pad = MeetingOverlayTokens.promptPad
         let dotSize = MeetingOverlayTokens.dotSize
         let topY = bounds.height - 22
 
@@ -668,8 +668,8 @@ final class MeetingOverlayRootView: NSView {
 
         let secondaryWidth = max(68, closeButton.fittingSize.width + 18)
         let primaryWidth = max(96, recordButton.fittingSize.width + 18)
-        let buttonHeight: CGFloat = 24
-        let buttonGap: CGFloat = 8
+        let buttonHeight = MeetingOverlayTokens.promptButtonHeight
+        let buttonGap = MeetingOverlayTokens.promptButtonGap
         let totalButtonWidth = secondaryWidth + primaryWidth + buttonGap
         let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
 
@@ -689,7 +689,7 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func layoutWarmup() {
-        let pad: CGFloat = 16
+        let pad = MeetingOverlayTokens.warmupPad
         let contentWidth = bounds.width - pad * 2
 
         warmupTitleLabel.frame = NSRect(x: pad, y: bounds.height - 36, width: contentWidth, height: 22)

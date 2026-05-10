@@ -28,4 +28,14 @@ enum OverlayTokens {
     static let headerHeight: CGFloat = 32
     static let toolbarHeight: CGFloat = 28
     static let dividerHeight: CGFloat = 1
+
+    // Waveform
+    static let waveformBarWidth: CGFloat = 2
+    static let waveformBarSpacing: CGFloat = 1
+    static let waveformMirroredBarSpacing: CGFloat = 1.5
+    static let waveformMinBarHeight: CGFloat = 2
+    static let waveformMaxBarHeight: CGFloat = 14
+    static let waveformBarCornerRadius: CGFloat = 1
+    static let waveformSampleInterval: TimeInterval = 0.05
+    static let waveformMirroredBarCount = 26
 }

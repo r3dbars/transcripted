@@ -13,6 +13,23 @@ import AppKit
 import Combine
 import TranscriptedCore
 
+private enum SpeakerNamingTokens {
+    static let sheetPadding: CGFloat = 20
+    static let titleHeight: CGFloat = 24
+    static let subtitleHeight: CGFloat = 16
+    static let bottomButtonHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 104
+    static let rowSpacing: CGFloat = 12
+    static let sectionHeaderHeight: CGFloat = 24
+    static let sectionHeaderGap: CGFloat = 10
+
+    static let rowPadding: CGFloat = 12
+    static let rowTitleHeight: CGFloat = 18
+    static let rowSubtextHeight: CGFloat = 16
+    static let rowSampleHeight: CGFloat = 26
+    static let rowFieldHeight: CGFloat = 22
+}
+
 @available(macOS 14.0, *)
 @MainActor
 final class SpeakerNamingSheet {
@@ -231,24 +248,24 @@ final class SpeakerNamingContentView: NSView {
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 20
+        let pad = SpeakerNamingTokens.sheetPadding
         let contentWidth = bounds.width - pad * 2
 
         titleLabel.frame = NSRect(
             x: pad,
-            y: bounds.height - pad - 24,
+            y: bounds.height - pad - SpeakerNamingTokens.titleHeight,
             width: contentWidth,
-            height: 24
+            height: SpeakerNamingTokens.titleHeight
         )
         subtitleLabel.frame = NSRect(
             x: pad,
             y: titleLabel.frame.minY - 18,
             width: contentWidth,
-            height: 16
+            height: SpeakerNamingTokens.subtitleHeight
         )
 
         // Buttons at bottom-right.
-        let btnH: CGFloat = 28
+        let btnH = SpeakerNamingTokens.bottomButtonHeight
         let saveSize = saveButton.fittingSize
         let cancelSize = cancelButton.fittingSize
         saveButton.frame = NSRect(
@@ -277,10 +294,10 @@ final class SpeakerNamingContentView: NSView {
 
         // Layout rows + section headers inside the document view. Flipped coordinates:
         // rows stack top-down visually, laid out with bottom-up math.
-        let rowHeight: CGFloat = 104
-        let rowSpacing: CGFloat = 12
-        let headerHeight: CGFloat = 24
-        let headerGap: CGFloat = 10
+        let rowHeight = SpeakerNamingTokens.rowHeight
+        let rowSpacing = SpeakerNamingTokens.rowSpacing
+        let headerHeight = SpeakerNamingTokens.sectionHeaderHeight
+        let headerGap = SpeakerNamingTokens.sectionHeaderGap
 
         let micCount = micRows.count
         let systemCount = systemRows.count
@@ -575,36 +592,36 @@ final class SpeakerRowView: NSView {
 
     override func layout() {
         super.layout()
-        let pad: CGFloat = 12
+        let pad = SpeakerNamingTokens.rowPadding
         let w = bounds.width - pad * 2
 
         let playSize = playButton.fittingSize
         labelField.frame = NSRect(
             x: pad,
-            y: bounds.height - pad - 18,
+            y: bounds.height - pad - SpeakerNamingTokens.rowTitleHeight,
             width: max(120, w - playSize.width - 8),
-            height: 18
+            height: SpeakerNamingTokens.rowTitleHeight
         )
         playButton.frame = NSRect(
             x: bounds.width - pad - max(92, playSize.width),
-            y: bounds.height - pad - 22,
+            y: bounds.height - pad - SpeakerNamingTokens.rowFieldHeight,
             width: max(92, playSize.width),
-            height: 22
+            height: SpeakerNamingTokens.rowFieldHeight
         )
         evidenceField.frame = NSRect(
             x: pad,
             y: labelField.frame.minY - 18,
             width: w,
-            height: 16
+            height: SpeakerNamingTokens.rowSubtextHeight
         )
         sampleField.frame = NSRect(
             x: pad,
             y: evidenceField.frame.minY - 30,
             width: w,
-            height: 26
+            height: SpeakerNamingTokens.rowSampleHeight
         )
 
-        let fieldH: CGFloat = 22
+        let fieldH = SpeakerNamingTokens.rowFieldHeight
         let discardSize = discardButton.fittingSize
         let discardW = max(72, discardSize.width + 8)
         discardButton.frame = NSRect(
