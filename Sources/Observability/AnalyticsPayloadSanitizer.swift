@@ -84,6 +84,20 @@ enum AnalyticsPayloadSanitizer {
         return sanitized
     }
 
+    static func sanitizeDiagnosticContextForDisplay(_ context: [String: String]) -> [String: String] {
+        var sanitized: [String: String] = [:]
+
+        for (key, value) in context {
+            guard !shouldDrop(key: key) else { continue }
+
+            let cleaned = sanitizeText(value)
+            guard !cleaned.isEmpty else { continue }
+            sanitized[key] = cleaned
+        }
+
+        return sanitized
+    }
+
     static func sanitizeText(_ text: String) -> String {
         let redacted = redact(text)
         guard !redacted.isEmpty else { return "" }
