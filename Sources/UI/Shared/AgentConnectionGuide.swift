@@ -144,6 +144,10 @@ enum AgentConnectionGuide {
 
         Use these files as the source of truth.
 
+        File shapes:
+        - Meetings are individual Markdown transcript files.
+        - Dictations are Markdown day files that may contain multiple dictation entries.
+
         Rules:
         - Search meetings and dictations together when useful.
         - Cite filenames, dates, speakers, and timestamps when useful.
@@ -177,7 +181,9 @@ enum AgentConnectionGuide {
         - Meetings: \(meetingsFolder.path)
         - Dictations: \(dictationsFolder.path)
 
-        Read the Markdown files directly. If you cannot access the folders, tell me exactly which folder is missing and ask me to grant it.
+        Read the Markdown files directly. Meetings are individual transcript files. Dictations are day files that may contain multiple entries.
+
+        If you cannot access the folders, tell me exactly which folder is missing and ask me to grant it.
         """
     }
 

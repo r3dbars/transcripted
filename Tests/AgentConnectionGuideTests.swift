@@ -31,6 +31,14 @@ func testAgentConnectionGuide() {
             "prompt should ground answers in saved Markdown files"
         )
         assertTrue(
+            prompt.contains("Meetings are individual Markdown transcript files."),
+            "prompt should explain the meeting file shape"
+        )
+        assertTrue(
+            prompt.contains("Dictations are Markdown day files that may contain multiple dictation entries."),
+            "prompt should explain the dictation file shape"
+        )
+        assertTrue(
             !prompt.contains("Install for Claude Desktop"),
             "local agent prompt should not route users through Claude Desktop setup"
         )
@@ -103,6 +111,10 @@ func testAgentConnectionGuide() {
         assertTrue(
             prompt.contains("tell me exactly which folder is missing"),
             "folder prompt should ask for a precise missing folder instead of guessing"
+        )
+        assertTrue(
+            prompt.contains("Dictations are day files that may contain multiple entries."),
+            "folder prompt should describe dictation day files without relying on AGENT.md sidecars"
         )
     }
 
