@@ -8,6 +8,7 @@ enum OverlayTokens {
     static let panelBg       = NSColor.black.withAlphaComponent(0.82)
     static let panelStroke   = NSColor.white.withAlphaComponent(0.10)
     static let accentGreen   = NSColor(red: 0.07, green: 0.94, blue: 0.58, alpha: 1.0) // #13EF95 mint green
+    static let accentForeground = NSColor.black // Must remain readable on accentGreen.
     static let textPrimary   = NSColor.white
     static let textSecondary = NSColor(white: 0.74, alpha: 1.0)
     static let textMuted     = NSColor(white: 0.58, alpha: 1.0)

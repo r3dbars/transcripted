@@ -266,7 +266,7 @@ final class MeetingOverlayRootView: NSView {
             string: "Record",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.black
+                .foregroundColor: OverlayTokens.accentForeground
             ]
         )
         recordButton.isBordered = false
@@ -918,7 +918,7 @@ final class MeetingOverlayRootView: NSView {
             string: title,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.black
+                .foregroundColor: OverlayTokens.accentForeground
             ]
         )
     }
