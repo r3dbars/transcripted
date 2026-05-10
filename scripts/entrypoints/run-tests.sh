@@ -159,6 +159,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/LockedFileAppender.swift"
+    "Sources/Observability/LogFileRotation.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"

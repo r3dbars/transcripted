@@ -42,4 +42,35 @@ func testObservabilityLogWriter() {
         }
         assertEqual(validLines.count, expectedCount, "concurrent appends should not concatenate or split JSONL records")
     }
+
+    runSuite("LogFileRotation keeps newest JSONL records when log grows too large") {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogRotationTests-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("events.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: root) }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let lines = (0..<10).map { "{\"index\":\($0)}" }.joined(separator: "\n") + "\n"
+        try? lines.write(to: logURL, atomically: true, encoding: .utf8)
+
+        do {
+            try LogFileRotation.rotateIfNeeded(
+                fileURL: logURL,
+                threshold: 20,
+                keepLines: 3,
+                fileManager: fm
+            )
+        } catch {
+            assertTrue(false, "rotation should not throw for a writable log file: \(error)")
+            return
+        }
+
+        let rotated = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        let rotatedLines = rotated.split(separator: "\n").map(String.init)
+        assertEqual(
+            rotatedLines,
+            ["{\"index\":7}", "{\"index\":8}", "{\"index\":9}"],
+            "rotation should keep only the newest records"
+        )
+    }
 }

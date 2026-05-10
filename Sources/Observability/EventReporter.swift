@@ -20,6 +20,8 @@ private actor EventFileWriter {
     private let fileURL: URL
     private var handle: FileHandle?
     private var isPrepared = false
+    private let rotationThreshold: UInt64 = TranscriptedConstants.logRotationThreshold
+    private let rotationKeepLines = TranscriptedConstants.logRotationKeepLines
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = []  // Compact — one record per line
@@ -41,6 +43,7 @@ private actor EventFileWriter {
         }
 
         guard prepareIfNeeded() else { return }
+        rotateIfNeeded()
 
         var lineData = data
         lineData.append(0x0A)
@@ -74,6 +77,34 @@ private actor EventFileWriter {
         } catch {
             fputs("⚠️ EVENT | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
             return false
+        }
+    }
+
+    private func rotateIfNeeded() {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+              let size = attributes[.size] as? UInt64,
+              size > rotationThreshold else {
+            return
+        }
+
+        try? handle?.close()
+        handle = nil
+
+        do {
+            try LogFileRotation.rotateIfNeeded(
+                fileURL: fileURL,
+                threshold: rotationThreshold,
+                keepLines: rotationKeepLines
+            )
+        } catch {
+            fputs("⚠️ EVENT | log rotation failed: \(error.localizedDescription)\n", stderr)
+        }
+
+        do {
+            handle = try FileHandle(forWritingTo: fileURL)
+            handle?.seekToEndOfFile()
+        } catch {
+            fputs("⚠️ EVENT | failed to reopen FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
         }
     }
 
