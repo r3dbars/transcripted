@@ -93,6 +93,11 @@ enum AudioRecordingFormatPolicy {
     }
 }
 
+private enum AudioSilenceTuning {
+    static let micActiveLevelThreshold: Float = 0.02
+    static let systemSilenceWarningDuration: TimeInterval = 10
+}
+
 /// Main audio recording class that captures microphone and system audio
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
@@ -114,7 +119,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // Silence detection for "Still Recording?" prompt
     @Published public var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
     @Published public var isSilent: Bool = false  // True when audio below threshold
-    let silenceThreshold: Float = 0.02  // Audio level below this = silence
+    let silenceThreshold: Float = AudioSilenceTuning.micActiveLevelThreshold
     var lastNonSilentTime: Date?
 
     // Audio file URLs - returned when recording stops
@@ -446,7 +451,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             _systemAudioSilenceStart = newValue
         }
     }
-    let systemAudioSilenceThreshold: TimeInterval = 10  // 10s of silence = warning
+    let systemAudioSilenceThreshold: TimeInterval = AudioSilenceTuning.systemSilenceWarningDuration
 
     // Sleep/wake notification observers (stored for cleanup in deinit)
     private var sleepObserver: NSObjectProtocol?

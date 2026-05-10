@@ -4,6 +4,10 @@ import Accelerate
 
 // MARK: - Audio Level Processing & Silence Detection
 
+private enum AudioLevelMonitorTuning {
+    static let systemAudioSilenceFloor: Float = 0.001
+}
+
 /// Extension handling audio level metering, silence detection, and rolling buffer management.
 /// Runs on audio callback threads — NOT @MainActor.
 extension Audio {
@@ -145,9 +149,7 @@ extension Audio {
 
     /// Tracks prolonged silence in system audio for warning display
     func updateSystemAudioSilenceTracking(peakLevel: Float) {
-        let silenceThreshold: Float = 0.001  // Very low threshold for silence
-
-        if peakLevel < silenceThreshold {
+        if peakLevel < AudioLevelMonitorTuning.systemAudioSilenceFloor {
             let now = Date()
             // System audio is silent
             if systemAudioSilenceStart == nil {

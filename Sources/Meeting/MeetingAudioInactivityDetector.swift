@@ -14,7 +14,7 @@ struct MeetingAudioInactivityDetector {
         static let `default` = Configuration(
             inactivityInterval: MeetingTuning.audioInactivityThreshold,
             countdownSeconds: MeetingTuning.audioInactivityCountdown,
-            activeLevelThreshold: 0.02
+            activeLevelThreshold: MeetingTuning.audioInactivityActiveLevelThreshold
         )
     }
 

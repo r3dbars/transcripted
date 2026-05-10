@@ -13,5 +13,6 @@ enum MeetingTuning {
     static let promptPollIntervalNanoseconds = UInt64(promptPollInterval * 1_000_000_000)
     static let audioInactivityThreshold: TimeInterval = 5 * 60
     static let audioInactivityCountdown = 30
+    static let audioInactivityActiveLevelThreshold: Float = 0.02
     static let detectedMeetingPromptTimeout = 10
 }

@@ -5,6 +5,24 @@ import FluidAudio
 
 // MARK: - Local Multichannel Transcription
 
+private enum MicEnergyGatingConfig {
+    static let frameDuration: Double = 0.1
+}
+
+private struct SpeechSegmentDetectionConfig {
+    let frameDuration: Double
+    let hopDuration: Double
+    let minSilenceDuration: Double
+    let minSegmentDuration: Double
+
+    static let `default` = SpeechSegmentDetectionConfig(
+        frameDuration: 0.025,
+        hopDuration: 0.010,
+        minSilenceDuration: 0.4,
+        minSegmentDuration: 0.5
+    )
+}
+
 extension Transcription {
 
     /// Transcribe system audio using local Parakeet STT + offline diarization,
@@ -103,7 +121,7 @@ extension Transcription {
             // Pre-compute mic energy per 100ms frame for embedding quality gating.
             // When the local user is speaking, system audio embeddings are contaminated
             // with their voice echo, producing unreliable remote speaker voiceprints.
-            let micEnergyFrameDuration = 0.1  // 100ms frames
+            let micEnergyFrameDuration = MicEnergyGatingConfig.frameDuration
             let micFrameSize = Int(16000.0 * micEnergyFrameDuration)  // 1600 samples
             let micFrameCount = micSamples.count / micFrameSize
             var micEnergyPerFrame = [Float](repeating: 0, count: micFrameCount)
@@ -906,12 +924,11 @@ extension Transcription {
         guard !samples.isEmpty,
               AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else { return [] }
 
-        let frameSamples = Int(sampleRate * 0.025)  // 25ms frames (400 samples at 16kHz)
-        let hopSamples = Int(sampleRate * 0.010)    // 10ms hop
+        let config = SpeechSegmentDetectionConfig.default
+        let frameSamples = Int(sampleRate * config.frameDuration)
+        let hopSamples = Int(sampleRate * config.hopDuration)
         let analysis = AudioSignalRecovery.analyze(samples: samples, sampleRate: sampleRate)
         let silenceThreshold = AudioSignalRecovery.speechDetectionThreshold(for: analysis)
-        let minSilenceDuration: Double = 0.4        // 400ms gap to split
-        let minSegmentDuration: Double = 0.5        // Don't create segments shorter than this
 
         // Compute RMS energy per frame
         let totalFrames = max(1, (samples.count - frameSamples) / hopSamples + 1)
@@ -940,7 +957,7 @@ extension Transcription {
         var segments: [SpeechSegment] = []
         var speechStart: Int? = nil
         var silenceFrameCount = 0
-        let minSilenceFrames = Int(minSilenceDuration / 0.010)
+        let minSilenceFrames = Int(config.minSilenceDuration / config.hopDuration)
 
         for i in 0..<totalFrames {
             if isVoiced[i] {
@@ -954,7 +971,7 @@ extension Transcription {
                     // End of speech region — segment boundary
                     let segStart = Double(start * hopSamples) / sampleRate
                     let segEnd = Double((i - silenceFrameCount + 1) * hopSamples) / sampleRate
-                    if segEnd - segStart >= minSegmentDuration {
+                    if segEnd - segStart >= config.minSegmentDuration {
                         segments.append(SpeechSegment(start: segStart, end: segEnd))
                     }
                     speechStart = nil
@@ -966,7 +983,7 @@ extension Transcription {
         if let start = speechStart {
             let segStart = Double(start * hopSamples) / sampleRate
             let segEnd = Double(samples.count) / sampleRate
-            if segEnd - segStart >= minSegmentDuration {
+            if segEnd - segStart >= config.minSegmentDuration {
                 segments.append(SpeechSegment(start: segStart, end: segEnd))
             }
         }
