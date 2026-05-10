@@ -328,18 +328,18 @@ final class SpeakerNamingContentView: NSView {
 
         let micCount = micRows.count
         let systemCount = systemRows.count
-        var docHeight: CGFloat = 0
+        var contentHeight: CGFloat = 0
         if hasMicSection {
-            docHeight += headerHeight + headerGap
-            docHeight += CGFloat(micCount) * (rowHeight + rowSpacing)
+            contentHeight += headerHeight + headerGap
+            contentHeight += CGFloat(micCount) * (rowHeight + rowSpacing)
         }
         if hasSystemSection {
             if hasMicSection {
-                docHeight += headerHeight + headerGap
+                contentHeight += headerHeight + headerGap
             }
-            docHeight += CGFloat(systemCount) * (rowHeight + rowSpacing)
+            contentHeight += CGFloat(systemCount) * (rowHeight + rowSpacing)
         }
-        docHeight = max(scrollView.frame.height, docHeight)
+        let docHeight = max(scrollView.frame.height, contentHeight)
 
         documentView.frame = NSRect(
             x: 0, y: 0,
@@ -347,7 +347,7 @@ final class SpeakerNamingContentView: NSView {
             height: docHeight
         )
 
-        var y = docHeight
+        var y = contentHeight < docHeight ? (docHeight + contentHeight) / 2 : docHeight
         let docInnerWidth = documentView.frame.width
 
         // Mic section

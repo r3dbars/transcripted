@@ -302,6 +302,223 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteCorrectedNameMergesAnonymousSourceIntoExistingProfile() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let targetProfile = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.42, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(
+            id: targetProfile.id,
+            name: "Sarah Graham",
+            source: NameSource.userManual
+        )
+        let targetBefore = harness.speakerDB.getSpeaker(id: targetProfile.id)
+        let sourceSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-03-23.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker-corrected-merge.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic-corrected-merge.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-corrected-merge.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: sourceSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
+            ]
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: sourceSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: "Speaker 1",
+                    action: .corrected
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: sourceSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: false,
+                    needsConfirmation: true,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: sourceSpeakerId))
+        let correctedProfile = harness.speakerDB.getSpeaker(id: targetProfile.id)
+        XCTAssertEqual(correctedProfile?.displayName, "Sarah Graham")
+        XCTAssertEqual(correctedProfile?.disputeCount, 0)
+        XCTAssertGreaterThan(correctedProfile?.callCount ?? 0, targetBefore?.callCount ?? 0)
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains(targetProfile.id.uuidString))
+        XCTAssertFalse(savedTranscript.contains(sourceSpeakerId.uuidString))
+    }
+
+    @MainActor
+    func testHandleNamingCompleteCorrectedNameKeepsNamedSourceWhenUsingExistingProfile() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let targetProfile = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.42, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(
+            id: targetProfile.id,
+            name: "Sarah Graham",
+            source: NameSource.userManual
+        )
+        let sourceSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        harness.speakerDB.setDisplayName(
+            id: sourceSpeakerId,
+            name: "Matt Vlasach",
+            source: NameSource.userManual
+        )
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-13-23.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker-corrected-named-source.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic-corrected-named-source.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-corrected-named-source.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: sourceSpeakerId,
+                name: "Matt Vlasach",
+                confidence: "unknown",
+                source: "db_manual"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Matt Vlasach",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03")
+            ]
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: sourceSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: "Matt Vlasach",
+                    action: .corrected
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: sourceSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: "Matt Vlasach",
+                    matchSimilarity: nil,
+                    needsNaming: false,
+                    needsConfirmation: true,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: sourceSpeakerId)?.displayName, "Matt Vlasach")
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: targetProfile.id)?.displayName, "Sarah Graham")
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains(targetProfile.id.uuidString))
+        XCTAssertFalse(savedTranscript.contains(sourceSpeakerId.uuidString))
+    }
+
+    @MainActor
     func testHandleNamingCompleteConfirmedNameUpdatesPriorTranscripts() async throws {
         let harness = try makeHarness()
         let currentTranscriptId = UUID()

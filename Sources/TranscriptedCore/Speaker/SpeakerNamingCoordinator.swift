@@ -387,7 +387,15 @@ extension TranscriptionTaskManager {
                 excluding: update.persistentSpeakerId,
                 speakerDB: speakerDB
             ) {
-                if let embedding = entry?.sessionEmbedding {
+                let sourceProfile = speakerDB.getSpeaker(id: update.persistentSpeakerId)
+                let sourceIsAnonymous = sourceProfile?.displayName?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty != false
+                if entry?.matchedProfileSnapshot == nil,
+                   sourceProfile != nil,
+                   sourceIsAnonymous {
+                    mutations.append(.merge(sourceId: update.persistentSpeakerId, into: targetProfile.id))
+                } else if let embedding = entry?.sessionEmbedding {
                     mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: targetProfile.id))
                 }
                 mutations.append(.setDisplayName(id: targetProfile.id, name: update.newName))
