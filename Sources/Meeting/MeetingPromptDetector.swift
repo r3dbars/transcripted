@@ -53,14 +53,15 @@ final class MeetingPromptDetector {
     func start() {
         guard pollingTask == nil else { return }
         installWorkspaceObservers()
+        let intervalNanoseconds = pollIntervalNanoseconds
 
-        pollingTask = Task { [weak self] in
+        pollingTask = Task.detached(priority: .background) { [weak self] in
             guard let self else { return }
 
             await evaluate()
 
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
                 guard !Task.isCancelled else { return }
                 await evaluate()
             }

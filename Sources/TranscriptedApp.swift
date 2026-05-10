@@ -104,7 +104,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         overlayController.setup(sttRouter: appState.sttRouter)
         appState.contextCapture.registerHotkey()
 
-        // Meeting prompt detection can start early, but the heavier meeting
+        // Meeting prompt detection starts after onboarding; the heavier
         // controller/overlay stack is bootstrapped on first real meeting use.
         if #available(macOS 14.0, *) {
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
@@ -120,7 +120,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
                 return presented
             }
-            meetingPromptDetector.start()
+            startMeetingPromptDetectionIfAllowed()
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 guard let self else { return }
                 self.bootstrapMeetingSubsystemIfNeeded()
@@ -332,6 +332,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        if #available(macOS 14.0, *) {
+            startMeetingPromptDetectionIfAllowed()
+        }
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
@@ -358,6 +361,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         popover.contentSize = menuPanelController.preferredContentSize
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @available(macOS 14.0, *)
+    private func startMeetingPromptDetectionIfAllowed() {
+        guard PermissionsOnboardingPreferences.hasCompleted() else { return }
+        meetingPromptDetector.start()
     }
 
     @available(macOS 14.0, *)
