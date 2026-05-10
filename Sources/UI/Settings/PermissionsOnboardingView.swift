@@ -384,14 +384,18 @@ struct PermissionsOnboardingView: View {
     private func requestPermission(_ kind: TranscriptedPermissionKind) {
         TranscriptedPermissionAccess.openSettings(for: kind)
         checkAllPermissions()
-        startTemporaryPermissionRefresh()
+        startTemporaryPermissionRefresh(untilGranted: kind)
     }
 
-    private func startTemporaryPermissionRefresh() {
+    private func startTemporaryPermissionRefresh(untilGranted kind: TranscriptedPermissionKind) {
         permissionRefreshTask?.cancel()
         permissionRefreshTask = Task { @MainActor in
             for _ in 0..<16 {
                 checkAllPermissions()
+                if TranscriptedPermissionAccess.isGranted(kind) {
+                    permissionRefreshTask = nil
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 guard !Task.isCancelled else { return }
             }
