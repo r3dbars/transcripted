@@ -27,8 +27,29 @@ func testAgentConnectionGuide() {
             "prompt should tell local agents to use direct tools when available"
         )
         assertTrue(
-            prompt.contains("recent_context") && prompt.contains("search_context") && prompt.contains("read_meeting"),
-            "prompt should name the main Transcripted direct tools"
+            AgentConnectionGuide.directToolNames.count == 9,
+            "prompt should track the full Transcripted MCP direct tool set"
+        )
+        for toolName in AgentConnectionGuide.directToolNames {
+            assertTrue(
+                prompt.contains("- \(toolName)"),
+                "prompt should name the \(toolName) direct tool"
+            )
+        }
+        assertEqual(
+            Set(AgentConnectionGuide.directToolNames),
+            Set([
+                "recent_context",
+                "search_context",
+                "list_meetings",
+                "read_meeting",
+                "list_dictations",
+                "read_dictation",
+                "search",
+                "who_is",
+                "recap",
+            ]),
+            "direct tool list should mirror Tools/TranscriptedMCP tool registration"
         )
         assertTrue(
             prompt.contains("If direct tools are not connected, read my saved Transcripted Markdown files directly:"),

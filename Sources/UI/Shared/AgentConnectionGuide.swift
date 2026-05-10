@@ -117,24 +117,31 @@ enum AgentConnectionGuide {
         agentSkillsFolder.appendingPathComponent("manifest.json", isDirectory: false)
     }
 
+    static let directToolNames = [
+        "recent_context",
+        "search_context",
+        "list_meetings",
+        "read_meeting",
+        "list_dictations",
+        "read_dictation",
+        "search",
+        "who_is",
+        "recap",
+    ]
+
     static func skillFileURL(for skill: AgentConnectionStarterSkill) -> URL {
         agentSkillsFolder.appendingPathComponent(skill.relativeSkillPath, isDirectory: false)
     }
 
     static func starterPrompt(filename: String?) -> String {
+        let directToolsList = directToolNames
+            .map { "- \($0)" }
+            .joined(separator: "\n")
         var prompt = """
         I use Transcripted on this Mac.
 
         Use Transcripted direct tools first if they are connected:
-        - recent_context
-        - search_context
-        - list_meetings
-        - read_meeting
-        - list_dictations
-        - read_dictation
-        - search
-        - who_is
-        - recap
+        \(directToolsList)
 
         If direct tools are not connected, read my saved Transcripted Markdown files directly:
 
