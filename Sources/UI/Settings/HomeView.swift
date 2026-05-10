@@ -795,6 +795,7 @@ private enum HomeActivityRowFormatting {
 
 private struct HomeActivityRowShell<Content: View>: View {
     let timeString: String
+    let openHelp: String
     let isCopied: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
@@ -817,10 +818,16 @@ private struct HomeActivityRowShell<Content: View>: View {
 
                     content()
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 4)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(openHelp)
 
             HomeRowActionButtons(
                 isCopied: isCopied,
@@ -838,6 +845,13 @@ private struct HomeActivityRowShell<Content: View>: View {
                 .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
         )
         .onHover { isHovering = $0 }
+        .contextMenu {
+            ForEach(menuItems) { item in
+                Button(role: item.isDestructive ? .destructive : nil, action: item.action) {
+                    Label(item.title, systemImage: item.symbolName)
+                }
+            }
+        }
     }
 }
 
@@ -852,6 +866,7 @@ struct HomeDictationRow: View {
     var body: some View {
         HomeActivityRowShell(
             timeString: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt),
+            openHelp: "Click to open dictation. Right-click for more.",
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
@@ -886,6 +901,7 @@ struct HomeMeetingRow: View {
     var body: some View {
         HomeActivityRowShell(
             timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            openHelp: "Click to preview meeting transcript. Right-click for more.",
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
