@@ -31,4 +31,64 @@ func testSettingsRecentCaptureRefreshPolicy() {
             )
         }
     }
+
+    runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — allows the first passive refresh") {
+        assertTrue(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: false,
+                isInFlight: false,
+                lastStartedAt: nil,
+                now: Date(timeIntervalSinceReferenceDate: 10)
+            ),
+            "home should refresh when there is no previous dashboard load"
+        )
+    }
+
+    runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — coalesces passive refresh churn") {
+        let lastStartedAt = Date(timeIntervalSinceReferenceDate: 10)
+
+        assertFalse(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: false,
+                isInFlight: true,
+                lastStartedAt: lastStartedAt,
+                now: Date(timeIntervalSinceReferenceDate: 12)
+            ),
+            "passive activation/navigation should not stack while dashboard work is in flight"
+        )
+
+        assertFalse(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: false,
+                isInFlight: false,
+                lastStartedAt: lastStartedAt,
+                now: Date(timeIntervalSinceReferenceDate: 11),
+                minimumInterval: 1.5
+            ),
+            "passive refreshes inside the debounce window should be skipped"
+        )
+
+        assertTrue(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: false,
+                isInFlight: false,
+                lastStartedAt: lastStartedAt,
+                now: Date(timeIntervalSinceReferenceDate: 12),
+                minimumInterval: 1.5
+            ),
+            "passive refreshes after the debounce window should run"
+        )
+    }
+
+    runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — forced capture changes bypass coalescing") {
+        assertTrue(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: true,
+                isInFlight: true,
+                lastStartedAt: Date(timeIntervalSinceReferenceDate: 10),
+                now: Date(timeIntervalSinceReferenceDate: 10.2)
+            ),
+            "new/deleted captures should refresh even when passive refreshes would be skipped"
+        )
+    }
 }

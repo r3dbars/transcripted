@@ -56,6 +56,10 @@ struct TranscriptedSettingsView: View {
     @State private var recentDictations: [SavedDictationEntry] = []
     @State private var recentCapturesLoading = false
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
+    @State private var homeDashboardRefreshTask: Task<Void, Never>?
+    @State private var homeDashboardRefreshInFlight = false
+    @State private var homeDashboardRefreshGeneration = 0
+    @State private var lastHomeDashboardRefreshStartedAt: Date?
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
@@ -156,10 +160,10 @@ struct TranscriptedSettingsView: View {
             trackSettingsPageViewed(page, source: "navigation")
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -181,6 +185,9 @@ struct TranscriptedSettingsView: View {
         .onDisappear {
             recentCaptureRefreshTask?.cancel()
             recentCaptureRefreshTask = nil
+            homeDashboardRefreshTask?.cancel()
+            homeDashboardRefreshTask = nil
+            homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
             homeViewModel.cancel()
@@ -575,7 +582,7 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("delete_dictation_confirm", page: .home)
                     do {
                         try DictationTranscriptStore.deleteEntry(entry)
-                        refreshRecentCaptures()
+                        refreshRecentCaptures(force: true)
                     } catch {
                         presentHomeDeleteFailure(
                             title: "Could not delete dictation",
@@ -626,7 +633,7 @@ struct TranscriptedSettingsView: View {
             if let audio = item.audio {
                 try removeItemIfPresent(at: audio.directoryURL)
             }
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         } catch {
             presentHomeDeleteFailure(
                 title: "Could not delete meeting",
@@ -2010,7 +2017,7 @@ struct TranscriptedSettingsView: View {
     private func refreshState() {
         refreshPermissions()
         refreshStoragePaths()
-        refreshRecentCaptures()
+        refreshRecentCaptures(force: true)
         refreshShortcutState()
         refreshMenuBarVisibility()
         refreshDockVisibility()
@@ -2169,17 +2176,14 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func refreshRecentCaptures() {
+    private func refreshRecentCaptures(force: Bool = false) {
         recentCaptureRefreshTask?.cancel()
         recentCaptureRefreshTask = nil
         recentCapturesLoading = false
 
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
-            homeViewModel.refresh()
-            Task { @MainActor in
-                await statsService.refreshStats()
-            }
+            refreshHomeDashboard(force: force)
         case .recentLists:
             recentCapturesLoading = true
             recentCaptureRefreshTask = Task { @MainActor in
@@ -2191,6 +2195,32 @@ struct TranscriptedSettingsView: View {
             }
         case .none:
             break
+        }
+    }
+
+    private func refreshHomeDashboard(force: Bool) {
+        let now = Date()
+        guard SettingsDashboardRefreshPolicy.shouldStartRefresh(
+            force: force,
+            isInFlight: homeDashboardRefreshInFlight,
+            lastStartedAt: lastHomeDashboardRefreshStartedAt,
+            now: now
+        ) else {
+            return
+        }
+
+        homeDashboardRefreshTask?.cancel()
+        homeDashboardRefreshGeneration += 1
+        let generation = homeDashboardRefreshGeneration
+        lastHomeDashboardRefreshStartedAt = now
+        homeDashboardRefreshInFlight = true
+        homeViewModel.refresh()
+
+        homeDashboardRefreshTask = Task { @MainActor in
+            await statsService.refreshStats()
+            guard !Task.isCancelled, generation == homeDashboardRefreshGeneration else { return }
+            homeDashboardRefreshInFlight = false
+            homeDashboardRefreshTask = nil
         }
     }
 

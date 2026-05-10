@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after fifteen audit/fix loops: **98/100, A**
+Current score after sixteen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -22,14 +22,14 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
-| Bundle and download size | A- | 92 | Full offline build remains 566.2 MiB expanded; new signed thin build is 105.4 MiB expanded with 1.9 MiB resources and runtime model download | Make thin the default public DMG under 150 MB, or explicitly ship full/offline and thin/download variants |
+| Bundle and download size | A- | 92 | Full offline build remains 566.3 MiB expanded; new signed thin build is 105.4 MiB expanded with 1.9 MiB resources and runtime model download | Make thin the default public DMG under 150 MB, or explicitly ship full/offline and thin/download variants |
 | Local disk/cache hygiene | A- | 91 | Storage page reports model/cache footprint and offers confirmed cleanup for known stale Parakeet folders plus optional Whisper cache; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model |
 | Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
-| UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
+| UI/rendering perceived lightness | A- | 90 | Settings home now coalesces passive activation/navigation refreshes while preserving forced refreshes for new/deleted captures; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A | 95 | Async event capture, allowlisted analytics, local reliability packets; launch smoke no longer writes dirty-shutdown markers | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | B- | 82 | Fresh deps build took 3:26 wall; app build still takes over 60s, but `bash build.sh --no-open` now verifies signing, smoke, and budgets without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1574 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
+| Performance regression guardrails | A+ | 99 | 1579 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -424,11 +424,37 @@ Measured proof:
 - `bash run-tests.sh`: 1574 tests passed.
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
 
+### 15. Coalesced Settings home dashboard refreshes
+
+Files:
+
+- `Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift`
+- `Sources/UI/Settings/TranscriptedSettingsView.swift`
+- `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
+
+Why:
+
+- Settings home could receive repeated passive refresh triggers from presentation, navigation, and app activation.
+- The recent activity loader already canceled stale work, but dashboard stats refreshes could still stack while the UI was settling.
+
+Change made:
+
+- Added `SettingsDashboardRefreshPolicy` to skip passive dashboard refreshes while one is in flight or inside a short refresh window.
+- Kept forced refreshes for real data changes, including newly saved dictations/meetings and deleted home rows.
+- Added generation tracking so stale async dashboard refreshes cannot clear newer in-flight state.
+
+Measured proof:
+
+- `bash run-tests.sh --filter SettingsRecentCaptureRefreshPolicyTests`: 1579 tests passed; the current fast-test runner compiled and ran the full manifest.
+- New policy tests prove first passive refresh, in-flight coalescing, debounce-window coalescing, stale-window refresh, and forced-change bypass behavior.
+- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
+- Performance budget after the signed build: expanded app 566.3 MiB, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1574 tests, 1574 passed, 0 failed**.
+- `bash run-tests.sh`: **1579 tests, 1579 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash build.sh --thin --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
@@ -440,7 +466,7 @@ Measured proof:
 - `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - Incremental post-fix build wall time: **1:08.04**.
-- Full rebuilt app size: **566.2 MiB**.
+- Full rebuilt app size: **566.3 MiB**.
 - Thin rebuilt app size: **105.4 MiB**.
 
 ### Latest Public Release
@@ -457,7 +483,7 @@ Post-fix rebuilt app:
 
 | Bundle path | Size |
 | --- | ---: |
-| Full `build/Transcripted.app` | 566.2 MiB |
+| Full `build/Transcripted.app` | 566.3 MiB |
 | Thin `build/Transcripted.app` | 105.4 MiB |
 | Full `Contents/Resources` | 462.8 MiB |
 | Thin `Contents/Resources` | 1.9 MiB |
@@ -560,13 +586,15 @@ The stats database shows very strong throughput, but the current event log did n
 
 ### UI
 
-No obvious unbounded render loop was found. The waveform timer is bounded. The risk is mostly maintainability and hidden SwiftUI invalidation cost in large files like:
+No obvious unbounded render loop was found. The waveform timer is bounded. Settings home now coalesces passive dashboard refresh triggers, so app activation/navigation churn cannot stack home recent-capture and stats refresh work while the UI is settling.
+
+The remaining risk is mostly maintainability and hidden SwiftUI invalidation cost in large files like:
 
 - `Sources/UI/Settings/TranscriptedSettingsView.swift`
 - `Sources/UI/Overlay/MeetingOverlayController.swift`
 - `Sources/UI/Overlay/DictationSessionController.swift`
 
-This needs screen-level profiling before claiming A+.
+This still needs screen-level profiling before claiming A+.
 
 ## Next Loop To Reach A+
 
@@ -592,7 +620,12 @@ These are the next improvements I would execute in order.
    - Stats DB throughput is now budgeted for recordings >=30s, with p95 RTF 0.022.
    - A+ gate: add peak RSS/memory cap proof and segment-count coverage during a current long-meeting corpus run.
 
-5. **CI/release performance budget**
+5. **Settings/UI refresh proof**
+   - Partly done in loop 16.
+   - Passive Settings home dashboard refreshes are now coalesced, while forced capture changes still refresh immediately.
+   - A+ gate: screen-level profile of Settings, overlay, and meeting views showing no visible jank or expensive repeated invalidation.
+
+6. **CI/release performance budget**
    - The post-build bundle budget now runs in both the local build and beta distribution paths.
    - Next, keep a fresh release-candidate event fixture and add remote CI only if this repo gets workflow automation.
    - A+ gate: bundle regressions fail before DMG packaging and latency regressions have a repeatable log fixture.
@@ -608,4 +641,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, and a thin build path now exists. The default public distribution decision, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, a thin build path now exists, and passive Settings dashboard refreshes are coalesced. The default public distribution decision, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
