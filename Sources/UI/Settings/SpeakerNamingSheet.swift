@@ -189,12 +189,16 @@ final class SpeakerNamingContentView: NSView {
         saveButton.bezelStyle = .rounded
         saveButton.target = self
         saveButton.action = #selector(handleSave)
+        saveButton.setAccessibilityLabel("Save speaker names")
+        saveButton.setAccessibilityHelp("Saves the names and updates this transcript.")
         addSubview(saveButton)
 
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
         cancelButton.toolTip = "Keep the transcript generic and finish speaker names later in Settings > People"
+        cancelButton.setAccessibilityLabel("Review speaker names later")
+        cancelButton.setAccessibilityHelp("Keeps generic labels for now and lets you finish in Settings > People.")
         addSubview(cancelButton)
 
         // Section headers live inside the document view so they scroll with rows.
@@ -208,6 +212,8 @@ final class SpeakerNamingContentView: NSView {
         keepAsYouButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         keepAsYouButton.target = self
         keepAsYouButton.action = #selector(handleKeepAsYouToggle)
+        keepAsYouButton.setAccessibilityLabel("Keep microphone speakers as You")
+        keepAsYouButton.setAccessibilityHelp("Keeps local microphone speakers labeled as You.")
     }
 
     private func buildRows() {
@@ -244,6 +250,27 @@ final class SpeakerNamingContentView: NSView {
                 systemRows.append(row)
             }
         }
+
+        updateKeyViewLoop()
+    }
+
+    private func updateKeyViewLoop() {
+        let rowKeyViews = (micRows + systemRows).map(\.primaryKeyView)
+
+        guard let firstRowKeyView = rowKeyViews.first else {
+            saveButton.nextKeyView = cancelButton
+            cancelButton.nextKeyView = saveButton
+            return
+        }
+
+        for index in rowKeyViews.indices.dropLast() {
+            rowKeyViews[index].nextKeyView = rowKeyViews[index + 1]
+        }
+
+        rowKeyViews.last?.nextKeyView = saveButton
+        saveButton.nextKeyView = cancelButton
+        cancelButton.nextKeyView = firstRowKeyView
+        keepAsYouButton.nextKeyView = firstRowKeyView
     }
 
     override func layout() {
@@ -451,6 +478,18 @@ final class SpeakerRowView: NSView {
     private var playbackTimer: Timer?
     private var isOpeningNameTray = false
 
+    var primaryKeyView: NSView {
+        nameField
+    }
+
+    private var accessibilitySpeakerLabel: String {
+        if let currentName = entry.currentName, !currentName.isEmpty {
+            return currentName
+        }
+
+        return "Speaker \(entry.diarizerSpeakerId)"
+    }
+
     init(entry: SpeakerNamingEntry, knownPeople: [SpeakerIdentityOption]) {
         self.entry = entry
         let optionLabels = SpeakerNameSelectionPolicy.makeIdentityLabels(
@@ -543,6 +582,8 @@ final class SpeakerRowView: NSView {
         } else {
             nameField.placeholderString = "Type a new name or choose an existing person"
         }
+        nameField.setAccessibilityLabel("Name for \(accessibilitySpeakerLabel)")
+        nameField.setAccessibilityHelp("Type a new name or choose a remembered speaker.")
         nameField.onTextAreaClick = { [weak self] in
             self?.openNameTray()
         }
@@ -551,6 +592,8 @@ final class SpeakerRowView: NSView {
         playButton.bezelStyle = .rounded
         playButton.target = self
         playButton.action = #selector(handlePlaySample)
+        playButton.setAccessibilityHelp("Plays a short sample of this voice.")
+        playButton.toolTip = "Play a short sample of this voice."
         addSubview(playButton)
 
         confirmButton.bezelStyle = .inline
@@ -560,12 +603,16 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName, !current.isEmpty {
             confirmButton.title = "Confirm \(current)"
         }
+        confirmButton.setAccessibilityLabel("Confirm suggested name for \(accessibilitySpeakerLabel)")
+        confirmButton.setAccessibilityHelp("Accepts the suggested speaker name.")
         addSubview(confirmButton)
 
         discardButton.bezelStyle = .inline
         discardButton.target = self
         discardButton.action = #selector(handleDiscardToggle)
         discardButton.toolTip = "Leave this voice out of the speaker database"
+        discardButton.setAccessibilityLabel("Discard \(accessibilitySpeakerLabel)")
+        discardButton.setAccessibilityHelp("Leaves this voice out of the speaker database.")
         addSubview(discardButton)
 
         statusOverlay.font = NSFont.systemFont(ofSize: 11, weight: .medium)
@@ -583,6 +630,8 @@ final class SpeakerRowView: NSView {
                 self?.syncPlayButtonState()
             }
         }
+
+        syncPlayButtonState()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -718,6 +767,14 @@ final class SpeakerRowView: NSView {
     private func syncPlayButtonState() {
         let isPlaying = SpeakerClipPlayback.isPlaying(entry.clipURL)
         playButton.title = isPlaying ? "Stop sample" : "Play sample"
+        playButton.setAccessibilityLabel(
+            isPlaying
+                ? "Stop sample for \(accessibilitySpeakerLabel)"
+                : "Play sample for \(accessibilitySpeakerLabel)"
+        )
+        playButton.toolTip = isPlaying
+            ? "Stop the sample for \(accessibilitySpeakerLabel)."
+            : "Play a short sample of \(accessibilitySpeakerLabel)."
     }
 
     private func updatePlaybackPolling() {
