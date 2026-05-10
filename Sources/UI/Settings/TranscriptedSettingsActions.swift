@@ -6,6 +6,7 @@ struct TranscriptedSettingsActions {
     let startMeeting: () -> Void
     let importAudioFile: () -> Void
     let pasteLastDictation: () -> Void
+    let openOnboarding: () -> Void
     let openConnectAgent: () -> Void
     let checkForUpdates: () -> Void
     let sendFeedback: () -> TranscriptedSupportActions.FeedbackEmailResult

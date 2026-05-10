@@ -924,6 +924,21 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Setup",
+                detail: "Revisit the guided permissions and first-dictation flow."
+            ) {
+                Button("Run Setup Again") {
+                    trackSettingsAction("run_onboarding_again", page: .general)
+                    actions.openOnboarding()
+                }
+
+                Text("Use this if permissions changed, setup felt skipped, or you want to test the first-run flow again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            SettingsSection(
                 title: "Corrections",
                 detail: "Fix the words Transcripted usually gets wrong."
             ) {

@@ -33,6 +33,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         startMeeting: { [weak self] in self?.startMeetingFromSettings() },
         importAudioFile: { [weak self] in self?.importAudioFileFromSettings() },
         pasteLastDictation: { [weak self] in self?.pasteLastDictationFromSettings() },
+        openOnboarding: { [weak self] in self?.showOnboardingFromSettings() },
         openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent, source: "settings_action") },
         checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
         sendFeedback: { [weak self] in
@@ -312,6 +313,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             bootstrapMeetingSubsystemIfNeeded()
         }
         settingsWindowController.present(page: page, source: source)
+    }
+
+    private func showOnboardingFromSettings() {
+        PermissionsOnboardingPreferences.requestRerun()
+        onboardingWindowController.present()
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {

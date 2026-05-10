@@ -15,4 +15,8 @@ enum PermissionsOnboardingPreferences {
         userDefaults.set(true, forKey: completionKey)
         userDefaults.removeObject(forKey: forceKey)
     }
+
+    static func requestRerun(userDefaults: UserDefaults = .standard) {
+        userDefaults.set(true, forKey: forceKey)
+    }
 }
