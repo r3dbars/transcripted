@@ -7,6 +7,9 @@ import Combine
 
 @MainActor
 class FloatingOverlayController {
+    private static let loadingTimerTickNanoseconds: UInt64 = 1_000_000_000
+    private static let loadingTimerWarningThresholdSeconds = 60
+
     struct LoadingPresentation {
         let title: String
         let detail: String
@@ -433,10 +436,27 @@ class FloatingOverlayController {
         if enteringLoading || loadingTimerTask == nil {
             loadingTimerTask?.cancel()
             loadingTimerTask = Task { @MainActor [weak self] in
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    guard let self = self, !Task.isCancelled, self.state == .loading else { break }
-                    self.loadingElapsedSeconds += 1
+                do {
+                    while true {
+                        try await Task.sleep(nanoseconds: Self.loadingTimerTickNanoseconds)
+                        guard let self, !Task.isCancelled, self.state == .loading else { break }
+                        self.loadingElapsedSeconds += 1
+                        if self.loadingElapsedSeconds >= Self.loadingTimerWarningThresholdSeconds {
+                            DiagnosticsTrail.record(
+                                level: .warning,
+                                engine: "overlay",
+                                event: "loading_timer_exceeded",
+                                message: "Dictation loading overlay stayed active past the warning threshold",
+                                context: [
+                                    "elapsedSeconds": "\(self.loadingElapsedSeconds)",
+                                    "state": self.state.diagnosticName
+                                ]
+                            )
+                            break
+                        }
+                    }
+                } catch {
+                    // Task.sleep only throws on cancellation here.
                 }
             }
         }
