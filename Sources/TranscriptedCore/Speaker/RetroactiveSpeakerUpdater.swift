@@ -4,6 +4,7 @@ import Foundation
 
 private enum RetroactiveSpeakerUpdaterLimits {
     static let transcriptIdHeaderByteLimit = 2048
+    static let speakerReferenceHeaderByteLimit = TranscriptFrontmatter.previewByteLimit
 }
 
 extension TranscriptSaver {
@@ -60,11 +61,12 @@ extension TranscriptSaver {
             .filter({ $0.pathExtension == "md" }) else { return }
 
         let dbIdString = dbId.uuidString
+        let speakerNeedle = "db_id: \"\(dbIdString)\""
         var updatedCount = 0
 
         for fileURL in files {
-            guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
-                  content.contains("db_id: \"\(dbIdString)\"") else { continue }
+            guard transcriptHeader(fileURL, contains: speakerNeedle),
+                  var content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
 
             // Find the old speaker name from YAML: the line after db_id contains name: "OldName"
             let lines = content.components(separatedBy: "\n")
@@ -115,11 +117,12 @@ extension TranscriptSaver {
 
         let sourceIdString = sourceDbId.uuidString
         let targetIdString = targetDbId.uuidString
+        let sourceNeedle = "db_id: \"\(sourceIdString)\""
         var updatedCount = 0
 
         for fileURL in files {
-            guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
-                  content.contains("db_id: \"\(sourceIdString)\"") else { continue }
+            guard transcriptHeader(fileURL, contains: sourceNeedle),
+                  var content = try? String(contentsOf: fileURL, encoding: .utf8) else { continue }
 
             let lines = content.components(separatedBy: "\n")
             var oldNames: [String] = []
@@ -676,6 +679,23 @@ extension TranscriptSaver {
         try? handle.close()
         guard let text = String(data: header, encoding: .utf8) else { return nil }
         return extractTranscriptId(fromFrontmatter: text)
+    }
+
+    private static func transcriptHeader(_ url: URL, contains needle: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let header = handle.readData(ofLength: RetroactiveSpeakerUpdaterLimits.speakerReferenceHeaderByteLimit)
+        let text = String(decoding: header, as: UTF8.self)
+        guard text.hasPrefix("---\n") else {
+            return text.contains(needle)
+        }
+
+        let frontmatterStart = text.index(text.startIndex, offsetBy: 4)
+        if let endRange = text.range(of: "\n---\n", range: frontmatterStart..<text.endIndex) {
+            return text[..<endRange.upperBound].contains(needle)
+        }
+
+        return text.contains(needle)
     }
 
     private static func extractTranscriptId(fromFrontmatter text: String) -> UUID? {

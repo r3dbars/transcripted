@@ -110,6 +110,34 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Speaker 1]"))
     }
 
+    func testRetroactivelyUpdateSpeakerIgnoresBodyOnlyDbIdMentions() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("body-only.md")
+        try """
+        ---
+        speakers:
+          - id: "0"
+            name: "Speaker 0"
+            confidence: unknown
+            source: inferred
+        ---
+
+        [00:00] [System/Speaker 0] raw note
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 0"
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Jamie",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(updated.contains("Jamie"))
+        XCTAssertTrue(updated.contains("[System/Speaker 0]"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()
