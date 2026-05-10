@@ -670,43 +670,11 @@ final class SpeakerRowView: NSView {
     /// Build a `SpeakerNameUpdate` reflecting the user's input for this row.
     /// Returns nil if the row has nothing to save (empty name, no confirmation).
     func buildUpdate() -> SpeakerNameUpdate? {
-        let typed = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if isDiscarded {
-            return SpeakerNameUpdate(
-                persistentSpeakerId: entry.id,
-                diarizerSpeakerId: entry.diarizerSpeakerId,
-                channel: entry.channel,
-                newName: entry.currentName ?? "Speaker \(entry.diarizerSpeakerId)",
-                previousName: entry.currentName,
-                action: .discardedFromDatabase
-            )
-        }
-
-        if userConfirmed, let current = entry.currentName, !current.isEmpty {
-            if let suggestedProfileId = entry.suggestedProfileId {
-                return SpeakerNameUpdate(
-                    persistentSpeakerId: entry.id,
-                    diarizerSpeakerId: entry.diarizerSpeakerId,
-                    channel: entry.channel,
-                    newName: current,
-                    action: .merged(targetProfileId: suggestedProfileId)
-                )
-            }
-            return SpeakerNameUpdate(
-                persistentSpeakerId: entry.id,
-                diarizerSpeakerId: entry.diarizerSpeakerId,
-                channel: entry.channel,
-                newName: current,
-                previousName: current,
-                action: .confirmed
-            )
-        }
-
-        guard !typed.isEmpty else { return nil }
-        return SpeakerNamingPolicy.typedNameUpdate(
+        SpeakerNamingPolicy.rowUpdate(
             entry: entry,
-            typedName: typed,
+            typedName: nameField.stringValue,
+            isConfirmed: userConfirmed,
+            isDiscarded: isDiscarded,
             optionsByLabel: knownPeopleByLabel
         )
     }

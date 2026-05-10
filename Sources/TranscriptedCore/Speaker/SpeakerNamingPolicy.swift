@@ -56,9 +56,7 @@ public enum SpeakerNamingPolicy {
         }
 
         let action: SpeakerNameUpdate.NamingAction
-        if entry.suggestedProfileId != nil {
-            action = .named
-        } else if let current = entry.currentName, !current.isEmpty {
+        if let current = entry.currentName, !current.isEmpty {
             action = typed.caseInsensitiveCompare(current) == .orderedSame
                 ? .confirmed
                 : .corrected
@@ -73,6 +71,62 @@ public enum SpeakerNamingPolicy {
             newName: typed,
             previousName: entry.currentName,
             action: action
+        )
+    }
+
+    public static func rowUpdate(
+        entry: SpeakerNamingEntry,
+        typedName: String,
+        isConfirmed: Bool,
+        isDiscarded: Bool,
+        optionsByLabel: [String: SpeakerIdentityOption]
+    ) -> SpeakerNameUpdate? {
+        let typed = typedName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isDiscarded {
+            return SpeakerNameUpdate(
+                persistentSpeakerId: entry.id,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
+                channel: entry.channel,
+                newName: entry.currentName ?? "Speaker \(entry.diarizerSpeakerId)",
+                previousName: entry.currentName,
+                action: .discardedFromDatabase
+            )
+        }
+
+        if isConfirmed, let current = entry.currentName, !current.isEmpty {
+            if !typed.isEmpty, typed != current {
+                return typedNameUpdate(
+                    entry: entry,
+                    typedName: typed,
+                    optionsByLabel: optionsByLabel
+                )
+            }
+
+            if let suggestedProfileId = entry.suggestedProfileId {
+                return SpeakerNameUpdate(
+                    persistentSpeakerId: entry.id,
+                    diarizerSpeakerId: entry.diarizerSpeakerId,
+                    channel: entry.channel,
+                    newName: current,
+                    action: .merged(targetProfileId: suggestedProfileId)
+                )
+            }
+
+            return SpeakerNameUpdate(
+                persistentSpeakerId: entry.id,
+                diarizerSpeakerId: entry.diarizerSpeakerId,
+                channel: entry.channel,
+                newName: current,
+                previousName: current,
+                action: .confirmed
+            )
+        }
+
+        return typedNameUpdate(
+            entry: entry,
+            typedName: typed,
+            optionsByLabel: optionsByLabel
         )
     }
 

@@ -98,4 +98,63 @@ func testSpeakerNamingPolicy() {
             assertTrue(false, "manually typing You should not collapse the whole local speaker set")
         }
     }
+
+    runSuite("SpeakerNamingPolicy.rowUpdate keeps typed correction after confirmation") {
+        let entry = SpeakerNamingEntry(
+            id: UUID(),
+            diarizerSpeakerId: "2",
+            channel: .system,
+            clipURL: URL(fileURLWithPath: "/tmp/speaker-confirmed-row.wav"),
+            sampleText: "Thanks for joining.",
+            currentName: "Matt Vlasach",
+            matchSimilarity: 0.86,
+            needsNaming: false,
+            needsConfirmation: true
+        )
+
+        let update = SpeakerNamingPolicy.rowUpdate(
+            entry: entry,
+            typedName: "Sarah Graham",
+            isConfirmed: true,
+            isDiscarded: false,
+            optionsByLabel: [:]
+        )
+
+        assertEqual(update?.newName, "Sarah Graham", "typed corrections after Confirm should not be replaced by the original suggestion")
+        assertEqual(update?.previousName, "Matt Vlasach", "corrections should preserve the rejected suggestion")
+        if case .corrected? = update?.action {
+            assertTrue(true, "typed correction after Confirm should still be a correction")
+        } else {
+            assertTrue(false, "typed correction after Confirm should not be saved as the original confirmed match")
+        }
+    }
+
+    runSuite("SpeakerNamingPolicy.rowUpdate still confirms unchanged suggestions") {
+        let entry = SpeakerNamingEntry(
+            id: UUID(),
+            diarizerSpeakerId: "3",
+            channel: .system,
+            clipURL: URL(fileURLWithPath: "/tmp/speaker-confirmed-row.wav"),
+            sampleText: "Let's ship it.",
+            currentName: "Alex Kim",
+            matchSimilarity: 0.9,
+            needsNaming: false,
+            needsConfirmation: true
+        )
+
+        let update = SpeakerNamingPolicy.rowUpdate(
+            entry: entry,
+            typedName: "Alex Kim",
+            isConfirmed: true,
+            isDiscarded: false,
+            optionsByLabel: [:]
+        )
+
+        assertEqual(update?.newName, "Alex Kim", "unchanged confirmed rows should keep the suggested name")
+        if case .confirmed? = update?.action {
+            assertTrue(true, "unchanged confirmed rows should stay confirmations")
+        } else {
+            assertTrue(false, "unchanged confirmed rows should not become corrections")
+        }
+    }
 }
