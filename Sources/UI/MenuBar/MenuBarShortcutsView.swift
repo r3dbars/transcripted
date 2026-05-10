@@ -27,9 +27,11 @@ final class MenuBarShortcutsView: NSView {
     )
     private var keyMonitor: Any?
     private var flagsMonitor: Any?
+    private var resetConfirmationTask: Task<Void, Never>?
     private var recordingTarget: RecordingTarget?
     private var pendingDictationModifier: PhysicalDictationTriggerBinding?
     private var pendingDictationModifierKeyCode: UInt32?
+    private var isResetConfirming = false
     private var currentDictationState = MenuBarPrimaryActionState(
         title: "Start Dictation",
         symbolName: "mic.fill",
@@ -67,9 +69,11 @@ final class MenuBarShortcutsView: NSView {
         if let flagsMonitor {
             NSEvent.removeMonitor(flagsMonitor)
         }
+        resetConfirmationTask?.cancel()
     }
 
     override func removeFromSuperview() {
+        cancelResetConfirmation(refresh: false)
         stopRecording()
         super.removeFromSuperview()
     }
@@ -110,6 +114,7 @@ final class MenuBarShortcutsView: NSView {
         resetButton.target = self
         resetButton.action = #selector(resetShortcuts)
         addSubview(resetButton)
+        updateResetButtonAppearance()
 
         addSubview(pushToTalkRow)
         addSubview(handsFreeRow)
@@ -165,7 +170,13 @@ final class MenuBarShortcutsView: NSView {
         importButton.isEnabled = canImportAudioFiles && recordingTarget == nil
         resetButton.isEnabled = recordingTarget == nil
         resetHintLabel.alphaValue = 1.0
-        resetHintLabel.stringValue = "Edit triggers or import audio"
+        if recordingTarget != nil {
+            resetHintLabel.stringValue = "Press the new shortcut, or Esc to cancel."
+        } else if isResetConfirming {
+            resetHintLabel.stringValue = "Click reset again to confirm."
+        } else {
+            resetHintLabel.stringValue = "Edit triggers or import audio"
+        }
 
         pushToTalkRow.update(
             symbolName: "mic.fill",
@@ -204,6 +215,7 @@ final class MenuBarShortcutsView: NSView {
     }
 
     private func startRecording(_ target: RecordingTarget) {
+        cancelResetConfirmation(refresh: false)
         stopRecording()
         recordingTarget = target
         refreshFromPreferences()
@@ -304,9 +316,58 @@ final class MenuBarShortcutsView: NSView {
     }
 
     @objc private func resetShortcuts() {
+        guard recordingTarget == nil else { return }
+
+        guard isResetConfirming else {
+            beginResetConfirmation()
+            return
+        }
+
         HotkeyPreferences.resetToDefaults()
         PhysicalDictationTriggerPreferences.resetToDefaults()
+        cancelResetConfirmation(refresh: false)
         refreshFromPreferences()
+    }
+
+    private func beginResetConfirmation() {
+        isResetConfirming = true
+        updateResetButtonAppearance()
+        refreshFromPreferences()
+
+        resetConfirmationTask?.cancel()
+        resetConfirmationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.cancelResetConfirmation(refresh: true)
+        }
+    }
+
+    private func cancelResetConfirmation(refresh: Bool) {
+        resetConfirmationTask?.cancel()
+        resetConfirmationTask = nil
+        guard isResetConfirming else { return }
+        isResetConfirming = false
+        updateResetButtonAppearance()
+        if refresh {
+            refreshFromPreferences()
+        }
+    }
+
+    private func updateResetButtonAppearance() {
+        if isResetConfirming {
+            resetButton.setSymbol(
+                "checkmark",
+                accessibilityLabel: "Confirm reset shortcuts",
+                tintOverride: MenuTokens.statusOrangeNS
+            )
+            resetButton.toolTip = "Confirm reset shortcuts"
+        } else {
+            resetButton.setSymbol(
+                "arrow.counterclockwise",
+                accessibilityLabel: "Reset shortcuts"
+            )
+            resetButton.toolTip = "Reset shortcuts"
+        }
     }
 
     private func save(_ binding: PhysicalDictationTriggerBinding, for target: RecordingTarget) {
