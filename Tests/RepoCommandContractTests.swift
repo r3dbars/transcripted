@@ -104,6 +104,14 @@ func testRepoCommandContract() {
             contents.contains("startup_model_ready_durations(events)"),
             "performance budget should parse launch to model-ready events"
         )
+        assertTrue(
+            contents.contains("MAX_DICTATION_FAST_START_P95_MS = 250.0"),
+            "performance budget should cap ready-engine dictation start latency when samples are required"
+        )
+        assertTrue(
+            contents.contains("--require-dictation-fast-start-samples"),
+            "performance budget should support strict fresh dictation start proof"
+        )
 
         let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
@@ -139,6 +147,14 @@ func testRepoCommandContract() {
         assertTrue(
             fastPathBlock.contains("\n            return\n"),
             "fast dictation start should not schedule direct recording and then replace it with the recovery wait task"
+        )
+        assertTrue(
+            fastPathBlock.contains("dictation_recording_fast_start"),
+            "fast dictation start should emit a measurable local proof event"
+        )
+        assertTrue(
+            fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
+            "fast dictation start fallback should emit a local proof event"
         )
     }
 

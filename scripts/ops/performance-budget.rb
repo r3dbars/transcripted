@@ -15,6 +15,7 @@ MAX_RESOURCES_BYTES = 520 * 1024 * 1024
 MAX_TRANSCRIPTION_P95_SECONDS = 0.5
 MAX_TRANSCRIPTION_P95_RTF = 0.05
 MAX_MODEL_READY_P90_SECONDS = 30.0
+MAX_DICTATION_FAST_START_P95_MS = 250.0
 MIN_TRANSCRIPTION_SAMPLES = 10
 MIN_STARTUP_SAMPLES = 3
 
@@ -25,7 +26,9 @@ options = {
   max_resources_bytes: MAX_RESOURCES_BYTES,
   max_transcription_p95_seconds: MAX_TRANSCRIPTION_P95_SECONDS,
   max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
-  max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS
+  max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS,
+  max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
+  require_dictation_fast_start_samples: 0
 }
 
 OptionParser.new do |parser|
@@ -37,6 +40,8 @@ OptionParser.new do |parser|
   parser.on("--max-transcription-p95-s SECONDS", Float, "Dictation transcription p95 budget") { |seconds| options[:max_transcription_p95_seconds] = seconds }
   parser.on("--max-transcription-p95-rtf VALUE", Float, "Dictation transcription p95 RTF budget") { |rtf| options[:max_transcription_p95_rtf] = rtf }
   parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
+  parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
+  parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
 end.parse!
 
 def directory_size(path)
@@ -167,6 +172,23 @@ if options[:events_path]
       .map { |event| float_or_nil(event.fetch("context", {})["rtf"]) }
       .compact
     startup_durations = startup_model_ready_durations(events)
+    dictation_fast_starts = events
+      .select { |event| event["event"] == "dictation_recording_fast_start" }
+      .map { |event| [event["_time"], float_or_nil(event.fetch("context", {})["start_ms"])] }
+      .select { |time, value| time && value }
+    dictation_fast_start_ms = dictation_fast_starts.map { |_, value| value }
+    first_fast_start_time = dictation_fast_starts.map(&:first).min
+    fast_start_fallback_events = if first_fast_start_time
+      events.select do |event|
+        [
+          "dictation_fast_start_fell_back_to_wait",
+          "dictation_recording_retry",
+          "audio_start_deferred"
+        ].include?(event["event"]) && event["_time"] && event["_time"] >= first_fast_start_time
+      end
+    else
+      []
+    end
 
     if transcription_elapsed.length < MIN_TRANSCRIPTION_SAMPLES
       errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
@@ -186,12 +208,27 @@ if options[:events_path]
       errors << "Launch to model-ready p90 is #{format("%.3fs", percentile(startup_durations, 0.90))}, above #{format("%.3fs", options[:max_model_ready_p90_seconds])}"
     end
 
+    if options[:require_dictation_fast_start_samples].positive?
+      if dictation_fast_start_ms.length < options[:require_dictation_fast_start_samples]
+        errors << "Only #{dictation_fast_start_ms.length} dictation fast-start samples, need at least #{options[:require_dictation_fast_start_samples]}"
+      elsif percentile(dictation_fast_start_ms, 0.95) > options[:max_dictation_fast_start_p95_ms]
+        errors << "Dictation fast-start p95 is #{format("%.1fms", percentile(dictation_fast_start_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_fast_start_p95_ms])}"
+      end
+
+      unless fast_start_fallback_events.empty?
+        errors << "Found #{fast_start_fallback_events.length} dictation fallback/retry events after the first fast-start sample"
+      end
+    end
+
     runtime_summary = {
       transcription_samples: transcription_elapsed.length,
       transcription_p95: percentile(transcription_elapsed, 0.95),
       transcription_rtf_p95: percentile(transcription_rtf, 0.95),
       startup_samples: startup_durations.length,
-      startup_p90: percentile(startup_durations, 0.90)
+      startup_p90: percentile(startup_durations, 0.90),
+      dictation_fast_start_samples: dictation_fast_start_ms.length,
+      dictation_fast_start_p95: percentile(dictation_fast_start_ms, 0.95),
+      dictation_fast_start_fallback_events: fast_start_fallback_events.length
     }
   end
 end
@@ -209,4 +246,9 @@ if runtime_summary
   puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
   puts "Launch model-ready samples: #{runtime_summary[:startup_samples]}"
   puts "Launch to model-ready p90: #{format("%.3fs", runtime_summary[:startup_p90])}"
+  puts "Dictation fast-start samples: #{runtime_summary[:dictation_fast_start_samples]}"
+  if runtime_summary[:dictation_fast_start_p95]
+    puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"
+  end
+  puts "Dictation fast-start fallback/retry events: #{runtime_summary[:dictation_fast_start_fallback_events]}"
 end
