@@ -34,7 +34,6 @@ class TranscriptedAppState: ObservableObject {
         return storedMeetingSession
     }
 
-    private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
@@ -161,10 +160,6 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
         contextCapture.unregisterHotkey()
-        if let observer = promptsObserver {
-            NotificationCenter.default.removeObserver(observer)
-            promptsObserver = nil
-        }
         if #available(macOS 14.0, *) {
             MeetingSessionController.runtimeDiagnosticsRecorder = nil
         }

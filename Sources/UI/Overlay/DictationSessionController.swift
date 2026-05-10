@@ -22,7 +22,6 @@ class DictationSessionController: ObservableObject {
 
     @Published var isInSession = false
     @Published var isDictating = false
-    @Published var lastCompletedText: String?
 
     private var interruptionSubscription: AnyCancellable?
     private let textPaster = ClipboardRestoringTextPaster()
@@ -123,7 +122,6 @@ class DictationSessionController: ObservableObject {
         sessionAnchorRect = anchorRect
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         currentDictationTrigger = trigger
-        lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
@@ -787,7 +785,6 @@ class DictationSessionController: ObservableObject {
 
             guard !Task.isCancelled else { return }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
-            lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             let autoSendOutcome = await self.performAutoEnterIfNeeded(
                 text: text,
