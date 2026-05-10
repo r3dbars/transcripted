@@ -84,6 +84,22 @@ func testFeedbackIssueBuilder() {
         assertFalse(body.contains("person@example.com"), "emails in user notes should be scrubbed")
         assertFalse(body.contains("https://example.com/log"), "diagnostic URLs should be scrubbed")
     }
+
+    runSuite("FeedbackIssueBuilder builds a clipboard fallback draft from mailto URL") {
+        let url = FeedbackIssueBuilder.emailURL(rawLogLines: [
+            "[12:00:00.000] APP LAUNCHED"
+        ])
+
+        guard let url, let draft = FeedbackIssueBuilder.emailDraftText(from: url) else {
+            assertTrue(false, "feedback mailto URL should produce a clipboard fallback draft")
+            return
+        }
+
+        assertTrue(draft.contains("To: help@transcripted.app"), "fallback draft should include support recipient")
+        assertTrue(draft.contains("Subject: Transcripted Feedback"), "fallback draft should include the email subject")
+        assertTrue(draft.contains("What happened:"), "fallback draft should include the feedback body")
+        assertTrue(draft.contains("APP LAUNCHED"), "fallback draft should preserve sanitized diagnostics")
+    }
 }
 
 private func feedbackBody(from url: URL?) -> String {

@@ -4,16 +4,54 @@ import Foundation
 
 @MainActor
 enum TranscriptedSupportActions {
-    static func sendFeedback(appState: TranscriptedAppState) {
-        guard let url = feedbackEmailURL(appState: appState) else { return }
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
-        NSWorkspace.shared.open(url)
+    enum FeedbackEmailResult: Equatable {
+        case opened
+        case copiedDraftToClipboard
+        case unavailable
+
+        var statusMessage: String? {
+            switch self {
+            case .opened:
+                return "Opened a prefilled email."
+            case .copiedDraftToClipboard:
+                return "Mail did not open, so the email draft was copied."
+            case .unavailable:
+                return nil
+            }
+        }
     }
 
-    static func sendFeedback(logger: AppLogger?) {
-        guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return }
+    @discardableResult
+    static func sendFeedback(appState: TranscriptedAppState) -> FeedbackEmailResult {
+        guard let url = feedbackEmailURL(appState: appState) else { return .unavailable }
+        return openFeedbackEmail(url)
+    }
+
+    @discardableResult
+    static func sendFeedback(logger: AppLogger?) -> FeedbackEmailResult {
+        guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return .unavailable }
+        return openFeedbackEmail(url)
+    }
+
+    @discardableResult
+    static func openFeedbackEmail(_ url: URL) -> FeedbackEmailResult {
+        if NSWorkspace.shared.open(url) {
+            AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
+            return .opened
+        }
+
+        guard let draftText = FeedbackIssueBuilder.emailDraftText(from: url) else {
+            return .unavailable
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(draftText, forType: .string) else {
+            return .unavailable
+        }
+
         AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
-        NSWorkspace.shared.open(url)
+        return .copiedDraftToClipboard
     }
 
     static func copyDiagnostics(appState: TranscriptedAppState) -> Bool {

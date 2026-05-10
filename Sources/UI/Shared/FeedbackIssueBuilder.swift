@@ -50,6 +50,23 @@ enum FeedbackIssueBuilder {
         }
     }
 
+    static func emailDraftText(from url: URL) -> String? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == "mailto" else {
+            return nil
+        }
+
+        let recipient = components.path.isEmpty ? supportEmailAddress : components.path
+        let subject = components.queryItems?.first(where: { $0.name == "subject" })?.value ?? title
+        let body = components.queryItems?.first(where: { $0.name == "body" })?.value ?? ""
+        return """
+        To: \(recipient)
+        Subject: \(subject)
+
+        \(body)
+        """
+    }
+
     private static func emailURL(report: FeedbackReport, sanitizedLogs: String) -> URL? {
         let reportTitle = "Transcripted \(report.sourceKind.capitalized) Feedback"
         let notes = sanitizedNotes(report.userNotes)

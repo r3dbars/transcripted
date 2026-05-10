@@ -36,8 +36,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         openConnectAgent: { [weak self] in self?.showSettingsWindow(page: .connectAgent, source: "settings_action") },
         checkForUpdates: { [weak self] in self?.appState.sparkleUpdater.checkForUpdates() },
         sendFeedback: { [weak self] in
-            guard let self else { return }
-            TranscriptedSupportActions.sendFeedback(appState: self.appState)
+            guard let self else { return .unavailable }
+            return TranscriptedSupportActions.sendFeedback(appState: self.appState)
         },
         copyDiagnostics: { [weak self] in
             guard let self else { return false }

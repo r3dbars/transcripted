@@ -48,6 +48,7 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
     @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+    @State private var feedbackActionStatus: String?
     @State private var sentryTestStatus: String?
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
@@ -541,9 +542,12 @@ struct TranscriptedSettingsView: View {
             return
         }
 
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
-        homeFeedbackTarget = nil
-        NSWorkspace.shared.open(url)
+        let result = TranscriptedSupportActions.openFeedbackEmail(url)
+        if result == .unavailable {
+            NSSound.beep()
+        } else {
+            homeFeedbackTarget = nil
+        }
     }
 
     private func flashCopied(rowID: String) {
@@ -1590,11 +1594,15 @@ struct TranscriptedSettingsView: View {
                 buttonTitle: "Email support",
                 buttonSymbolName: "paperplane.fill",
                 tone: .primary,
-                status: nil,
+                status: feedbackActionStatus,
                 isEnabled: true
             ) {
                 trackSettingsAction("submit_feedback", page: .support)
-                actions.sendFeedback()
+                let result = actions.sendFeedback()
+                feedbackActionStatus = result.statusMessage
+                if result == .unavailable {
+                    NSSound.beep()
+                }
             }
 
             SupportActionCard(

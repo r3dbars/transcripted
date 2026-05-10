@@ -8,7 +8,7 @@ struct TranscriptedSettingsActions {
     let pasteLastDictation: () -> Void
     let openConnectAgent: () -> Void
     let checkForUpdates: () -> Void
-    let sendFeedback: () -> Void
+    let sendFeedback: () -> TranscriptedSupportActions.FeedbackEmailResult
     let copyDiagnostics: () -> Bool
     let sendDiagnosticEvent: () -> String?
 }
