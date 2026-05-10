@@ -8,7 +8,7 @@ These stay at the repo root as thin wrappers so the public command surface stays
 stable and the docs can keep pointing at the same commands:
 
 - `build-deps.sh` — build and cache the shared dependency bundle
-- `build.sh` — local app build; use `bash build.sh --no-open` for non-interactive verification
+- `build.sh` — local app build; use `bash build.sh --no-open` for non-interactive verification, or `bash build.sh --thin --no-open` to verify the model-download app variant
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
@@ -48,6 +48,7 @@ not have to carry the full operational logic:
   - Optional built-app verification: `python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
   - Usage: `scripts/ops/performance-budget.rb`
+  - Thin-build usage: `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
   - Optional runtime log verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`

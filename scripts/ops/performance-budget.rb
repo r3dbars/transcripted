@@ -28,7 +28,8 @@ options = {
   max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
   max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS,
   max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
-  require_dictation_fast_start_samples: 0
+  require_dictation_fast_start_samples: 0,
+  allow_missing_parakeet_model: false
 }
 
 OptionParser.new do |parser|
@@ -42,6 +43,7 @@ OptionParser.new do |parser|
   parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
   parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
+  parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
 end.parse!
 
 def directory_size(path)
@@ -144,7 +146,11 @@ else
   []
 end
 
-unless model_dirs == [EXPECTED_PARAKEET_MODEL_DIR]
+if options[:allow_missing_parakeet_model]
+  unless model_dirs.empty? || model_dirs == [EXPECTED_PARAKEET_MODEL_DIR]
+    errors << "Expected no Parakeet model directory or #{EXPECTED_PARAKEET_MODEL_DIR.inspect}, found #{model_dirs.inspect}"
+  end
+elsif model_dirs != [EXPECTED_PARAKEET_MODEL_DIR]
   errors << "Expected one Parakeet model directory #{EXPECTED_PARAKEET_MODEL_DIR.inspect}, found #{model_dirs.inspect}"
 end
 
@@ -238,7 +244,7 @@ fail_budget!(errors)
 puts "Performance budget OK"
 puts "Expanded app: #{mib(app_size)}"
 puts "Resources: #{mib(resources_size)}"
-puts "Parakeet model: #{model_dirs.first}"
+puts "Parakeet model: #{model_dirs.first || "not bundled (runtime download)"}"
 puts "Resource icons: #{resource_icons.join(", ")}"
 if runtime_summary
   puts "Dictation transcription samples: #{runtime_summary[:transcription_samples]}"

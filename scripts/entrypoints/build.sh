@@ -15,6 +15,7 @@ STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
 OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
+BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
@@ -37,9 +38,15 @@ while [ "$#" -gt 0 ]; do
         --open)
             OPEN_APP_AFTER_BUILD=1
             ;;
+        --thin)
+            BUNDLE_PARAKEET_MODELS=0
+            ;;
+        --full)
+            BUNDLE_PARAKEET_MODELS=1
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: bash build.sh [--no-open]"
+            echo "Usage: bash build.sh [--no-open] [--thin|--full]"
             exit 1
             ;;
     esac
@@ -234,16 +241,20 @@ PARAKEET_BUNDLE_DIR="$APP_BUNDLE/Contents/Resources/parakeet-models"
 PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3-coreml"
 
 bundled_parakeet_models=false
-mkdir -p "$PARAKEET_BUNDLE_DIR"
 model_src="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
-if [ -d "$model_src/Encoder.mlmodelc" ]; then
-    echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
-    rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
-    ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
-    bundled_parakeet_models=true
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    echo "Skipping bundled Parakeet models (--thin); runtime download will occur on first use."
+else
+    mkdir -p "$PARAKEET_BUNDLE_DIR"
+    if [ -d "$model_src/Encoder.mlmodelc" ]; then
+        echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
+        rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+        ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+        bundled_parakeet_models=true
+    fi
 fi
 
-if [ "$bundled_parakeet_models" = false ]; then
+if [ "$BUNDLE_PARAKEET_MODELS" != "0" ] && [ "$bundled_parakeet_models" = false ]; then
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
@@ -355,7 +366,11 @@ echo "Running launch smoke check..."
 verify_launch_smoke
 
 echo "Checking performance budget..."
-scripts/ops/performance-budget.rb --app "$APP_BUNDLE"
+PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    PERFORMANCE_BUDGET_ARGS+=(--allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80)
+fi
+scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"
 if [ "$OPEN_APP_AFTER_BUILD" = "1" ]; then

@@ -112,15 +112,28 @@ func testRepoCommandContract() {
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
         )
+        assertTrue(
+            contents.contains("--allow-missing-parakeet-model"),
+            "performance budget should support intentional thin builds"
+        )
 
         let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
-            localBuildScript.contains("scripts/ops/performance-budget.rb --app \"$APP_BUNDLE\""),
+            localBuildScript.contains("PERFORMANCE_BUDGET_ARGS=(--app \"$APP_BUNDLE\")")
+                && localBuildScript.contains("scripts/ops/performance-budget.rb \"${PERFORMANCE_BUDGET_ARGS[@]}\""),
             "local build should fail before opening a bundle that violates performance budgets"
         )
         assertTrue(
             localBuildScript.contains("--no-open"),
             "local build should support non-interactive verification without leaving the app running"
+        )
+        assertTrue(
+            localBuildScript.contains("--thin"),
+            "local build should support a thin app variant that downloads the model on first use"
+        )
+        assertTrue(
+            localBuildScript.contains("BUNDLE_PARAKEET_MODELS"),
+            "local build should make model bundling an explicit build choice"
         )
         assertTrue(
             localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
@@ -139,8 +152,13 @@ func testRepoCommandContract() {
 
         let betaBuildScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         assertTrue(
-            betaBuildScript.contains("scripts/ops/performance-budget.rb --app \"$APP_BUNDLE\""),
+            betaBuildScript.contains("PERFORMANCE_BUDGET_ARGS=(--app \"$APP_BUNDLE\")")
+                && betaBuildScript.contains("scripts/ops/performance-budget.rb \"${PERFORMANCE_BUDGET_ARGS[@]}\""),
             "beta release build should fail before DMG packaging when the app violates performance budgets"
+        )
+        assertTrue(
+            betaBuildScript.contains("BUNDLE_PARAKEET_MODELS"),
+            "beta release build should support an intentional thin distribution variant"
         )
     }
 
