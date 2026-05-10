@@ -5,11 +5,14 @@ import AppKit
 
 @MainActor
 final class MenuBarSettingsView: NSView {
+    private static let connectAgentTitle = "Connect your agent"
+    private static let connectAgentMinimumTextWidth: CGFloat = 122
+
     private let connectAgentButton = MenuOutlineButton(
-        title: "Connect your agent",
-        symbolName: "sparkles",
-        accessibilityLabel: "Connect your agent",
-        toolTip: "Connect your agent",
+        title: MenuBarSettingsView.connectAgentTitle,
+        symbolName: "puzzlepiece.extension",
+        accessibilityLabel: MenuBarSettingsView.connectAgentTitle,
+        toolTip: MenuBarSettingsView.connectAgentTitle,
         style: .accent
     )
     private let settingsButton = MenuIconButton(
@@ -91,7 +94,18 @@ final class MenuBarSettingsView: NSView {
             height: buttonSize
         )
 
-        let connectWidth = min(max(150, connectAgentButton.fittingSize.width), max(0, settingsButton.frame.minX - 12))
+        let availableWidth = max(0, settingsButton.frame.minX - 12)
+        let usesIconOnlyMode = availableWidth < Self.connectAgentMinimumTextWidth
+        let title = usesIconOnlyMode ? "" : Self.connectAgentTitle
+        if connectAgentButton.title != title {
+            connectAgentButton.title = title
+        }
+
+        let preferredWidth = max(Self.connectAgentMinimumTextWidth, connectAgentButton.fittingSize.width)
+        let connectWidth = usesIconOnlyMode
+            ? min(buttonSize, availableWidth)
+            : min(preferredWidth, availableWidth)
+        connectAgentButton.isHidden = connectWidth < buttonSize
         connectAgentButton.frame = NSRect(x: 0, y: buttonY, width: connectWidth, height: buttonSize)
     }
 

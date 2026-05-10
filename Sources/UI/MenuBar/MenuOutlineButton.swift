@@ -71,6 +71,7 @@ final class MenuOutlineButton: NSButton {
         setButtonType(.momentaryChange)
         imagePosition = .imageLeading
         imageHugsTitle = true
+        cell?.lineBreakMode = .byTruncatingTail
         layer?.cornerRadius = MenuTokens.secondaryButtonCornerRadius
         layer?.borderWidth = 1
 

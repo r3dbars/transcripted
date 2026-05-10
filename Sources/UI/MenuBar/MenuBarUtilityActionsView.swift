@@ -50,7 +50,7 @@ final class MenuBarUtilityActionsView: NSView {
         showUpdateRow: Bool = true
     ) {
         connectAgentRow.update(
-            symbolName: "sparkles",
+            symbolName: "puzzlepiece.extension",
             title: "Connect Agent",
             detail: "",
             tone: .standard,
