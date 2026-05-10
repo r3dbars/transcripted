@@ -67,6 +67,18 @@ struct PermissionsOnboardingView: View {
         (currentStep.kind == .permissions || currentStep.kind == .done) && !hasRequiredPermissions
     }
 
+    private var calendarPermissionNote: String {
+        if calendarGranted && !meetingPromptsEnabled {
+            return "Calendar access stays allowed. Meeting prompts are paused."
+        }
+
+        if !meetingPromptsEnabled {
+            return "Meeting prompts are paused. You can still allow calendar access now."
+        }
+
+        return "Read-only calendar access lets Transcripted suggest prompts. Events stay on your Mac."
+    }
+
     var body: some View {
         OnboardingWindowShell(
             current: currentStepIndex,
@@ -242,11 +254,6 @@ struct PermissionsOnboardingView: View {
                 )
                 .frame(maxWidth: 440)
                 .padding(.top, 4)
-                .onChange(of: meetingPromptsEnabled) { _, newValue in
-                    if !newValue {
-                        calendarGranted = false
-                    }
-                }
                 Button(calendarGranted
                     ? TranscriptedPermissionKind.calendar.onboardingGrantedTitle
                     : TranscriptedPermissionKind.calendar.onboardingActionTitle
@@ -254,9 +261,8 @@ struct PermissionsOnboardingView: View {
                     requestPermission(.calendar)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
-                .disabled(!meetingPromptsEnabled)
                 .padding(.top, 6)
-                Text("Read-only. Events stay on your Mac.")
+                Text(calendarPermissionNote)
                     .font(.system(size: 12))
                     .foregroundStyle(OnboardingTheme.muted)
             } right: {

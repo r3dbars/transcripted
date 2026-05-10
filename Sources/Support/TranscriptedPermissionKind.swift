@@ -97,7 +97,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .systemAudioRecording:
             return "Allow meeting audio"
         case .calendar:
-            return "Allow meeting prompts"
+            return "Allow calendar access"
         }
     }
 
@@ -110,7 +110,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .systemAudioRecording:
             return "Meeting audio allowed"
         case .calendar:
-            return "Meeting prompts allowed"
+            return "Calendar access allowed"
         }
     }
 

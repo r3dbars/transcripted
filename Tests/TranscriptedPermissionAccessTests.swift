@@ -171,8 +171,8 @@ func testTranscriptedPermissionAccess() async {
         assertEqual(TranscriptedPermissionKind.accessibility.onboardingGrantedTitle, "Accessibility allowed")
         assertEqual(TranscriptedPermissionKind.systemAudioRecording.onboardingActionTitle, "Allow meeting audio")
         assertEqual(TranscriptedPermissionKind.systemAudioRecording.onboardingGrantedTitle, "Meeting audio allowed")
-        assertEqual(TranscriptedPermissionKind.calendar.onboardingActionTitle, "Allow meeting prompts")
-        assertEqual(TranscriptedPermissionKind.calendar.onboardingGrantedTitle, "Meeting prompts allowed")
+        assertEqual(TranscriptedPermissionKind.calendar.onboardingActionTitle, "Allow calendar access")
+        assertEqual(TranscriptedPermissionKind.calendar.onboardingGrantedTitle, "Calendar access allowed")
     }
 
     await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
