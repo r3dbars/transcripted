@@ -7,18 +7,18 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after twenty-one audit/fix loops: **98/100, A**
+Current score after twenty-two audit/fix loops: **99/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
-The app does not yet feel "super lightweight" in the full sense. The main blockers are local model footprint, first-use dictation start proof, and the currently shipped public DMG, which is still the old 524 MB full/offline release until the next release is cut. On this branch, the default local and beta build path is now the 105.4 MiB thin app; full/offline bundling remains available as an explicit option.
+The app does not yet feel "super lightweight" in the full sense. The main blockers are local model/cache footprint, live meeting/UI profiling, build-loop speed, and the currently shipped public DMG, which is still the old 524 MB full/offline release until the next release is cut. On this branch, the default local and beta build path is now the 105.4 MiB thin app; full/offline bundling remains available as an explicit option.
 
 ## Scorecard
 
 | Category | Grade | Score | Evidence | A+ Gate |
 | --- | ---: | ---: | --- | --- |
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
-| Dictation start responsiveness | A | 94 | Fixed fast-path fallthrough and added `dictation_recording_fast_start` / fallback proof events plus strict budget parsing; current logs have 0 fresh fast-start samples | Fresh live dictation run with `--require-dictation-fast-start-samples 1` passes with no fallback/retry events |
+| Dictation start responsiveness | A+ | 98 | Live UI-triggered dictation emitted `dictation_recording_fast_start` at 112 ms, then `audio_samples_detected`; strict event budget passed with 1 fast-start sample and 0 fallback/retry events | Keep ready-engine start p95 under 250 ms with no fallback/retry events after the first fast-start sample |
 | App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
 | Idle CPU | A+ | 99 | Latest signed thin build idled at 0.0% CPU after 15s with no duplicate Transcripted processes | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 99 | Latest signed thin build idled at 81,248 KB RSS after 15s, then exited cleanly after proof cleanup | Single process under 250 MB warm idle, no duplicate resident copies |
@@ -575,6 +575,24 @@ Measured proof:
 - No other `Transcripted.app/Contents/MacOS/Transcripted` processes were present.
 - Closed the proof process and verified no current-build Transcripted process remained.
 
+### 21. Reproved live dictation fast-start
+
+Why:
+
+- The code-level fast-path fix and budget parser were not enough to honestly raise dictation start to A+.
+- The remaining gate was a live, UI-triggered dictation run from the current signed thin app.
+
+Measured proof:
+
+- Launched the latest signed thin `build/Transcripted.app`.
+- Clicked the Home view `Start dictation` button.
+- The first start loaded the on-demand model, then the ready engine entered the direct recording path.
+- Event log emitted `dictation_recording_fast_start` with `start_ms=112`, `trigger=menu`, built-in microphone route, and `stt_recording=true`.
+- Event log then emitted `audio_samples_detected` at 48 kHz.
+- `ruby scripts/ops/performance-budget.rb --allow-missing-parakeet-model --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite" --require-dictation-fast-start-samples 1`: passed.
+- Strict budget output: dictation fast-start samples `1`, p95 `112.0ms`, fallback/retry events `0`.
+- Closed the proof app and verified no current-build Transcripted process remained.
+
 ## Evidence
 
 ### Build And Verification
@@ -590,6 +608,7 @@ Measured proof:
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
 - `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
+- `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite" --require-dictation-fast-start-samples 1`: passed.
 - Timed default thin build wall time: **68.17s**.
 - Default thin rebuilt app size: **105.4 MiB**.
 - Explicit full rebuilt app size: **566.3 MiB**.
@@ -635,7 +654,8 @@ Local `events.jsonl`:
 - average RTF: 0.013
 - p90 RTF: 0.027
 - p95 RTF: 0.029
-- dictation fast-start samples: 0
+- dictation fast-start samples: 1
+- dictation fast-start p95: 112.0 ms
 - dictation fast-start fallback/retry events: 0
 
 Historical startup readiness, using valid pre-on-demand launch sequences:
@@ -643,7 +663,7 @@ Historical startup readiness, using valid pre-on-demand launch sequences:
 - app to `models_loaded`: n=20, avg 17.478s, p50 19.836s, p90 21.956s, max 27.200s
 - app to meeting ready: n=20, avg 17.682s, p50 19.985s, p90 22.128s, max 27.752s
 - many launch events were skipped because repeated local/dev launches overlapped before a matching model-ready event.
-- performance-budget parser, using app launch to next model-ready before the next launch: n=31, p90 27.200s. This remains useful as a regression view for older/eager launches, but the default current launch no longer waits for model readiness.
+- performance-budget parser, using app launch to next model-ready before the next launch: n=32, p90 28.094s. This remains useful as a regression view for older/eager launches, but the default current launch no longer waits for model readiness.
 - latest signed launch with lazy dictation and meeting warmup: launch context `stt_model_loaded=false`; status event `Dictation and meetings load when started`; no following `models_loaded` event.
 
 ### Local Stats Database
@@ -726,10 +746,9 @@ This still needs screen-level profiling before claiming A+.
 These are the next improvements I would execute in order.
 
 1. **Fresh dictation start proof**
-   - Run a clean single-instance build.
-   - Trigger a ready-engine dictation.
-   - Run `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --require-dictation-fast-start-samples 1`.
-   - Raise dictation start responsiveness to A+/98 only if the log proves it.
+   - Done in loop 22.
+   - Live UI-triggered dictation produced a 112 ms ready-engine fast-start sample, audio sample-flow proof, and 0 fallback/retry events.
+   - Keep this strict gate in release-candidate checks so the category stays A+.
 
 2. **Launch readiness policy**
    - Done in loop 13.
@@ -786,4 +805,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, the current build's single-instance behavior is reproved, and clean idle CPU/memory are A+. The next public release, first-use dictation proof, actual reclaimable-cache removal or absence proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe one-step Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, the current build's single-instance behavior is reproved, clean idle CPU/memory are A+, and live dictation fast-start is A+. The next public release, actual reclaimable-cache removal or absence proof, build-loop speed, and live meeting/UI profiling still keep the overall score below A+.
