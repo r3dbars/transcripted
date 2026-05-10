@@ -101,6 +101,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
         overlayController.setup(sttRouter: appState.sttRouter)
+        appState.contextCapture.registerHotkey()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
         if #available(macOS 14.0, *) {
@@ -196,7 +197,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Initialize engines
         Task { @MainActor in
             await appState.initialize()
-            appState.contextCapture.registerHotkey()
         }
     }
 
