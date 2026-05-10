@@ -243,6 +243,9 @@ final class OverlayHeaderView: NSView {
     ) {
         // Mode label text + color
         switch state {
+        case .starting:
+            modeLabel.stringValue = "Starting"
+            modeLabel.textColor = OverlayTokens.textSecondary
         case .listening:
             modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
@@ -261,7 +264,7 @@ final class OverlayHeaderView: NSView {
         }
 
         // Spinner visibility
-        let showSpinner = (state == .drafting && !isError) || state == .loading
+        let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
         spinner.isHidden = !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
@@ -279,7 +282,7 @@ final class OverlayHeaderView: NSView {
         case .success:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
-        case .loading:
+        case .starting, .loading:
             shortcutHint.stringValue = "Cancel: \(dictationShortcutHint)"
             shortcutHint.textColor = OverlayTokens.textSecondary
         case .drafting:

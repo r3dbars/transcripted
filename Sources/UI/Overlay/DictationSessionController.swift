@@ -254,6 +254,10 @@ class DictationSessionController: ObservableObject {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
             // still runs asynchronously so a slow device graph never blocks UI.
+            overlayController.state = .starting
+            if !overlayController.isVisible {
+                overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
+            }
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -282,6 +286,7 @@ class DictationSessionController: ObservableObject {
                     await self.waitForEngineAndStart(sourceApp: sourceApp)
                 }
             }
+            return
         case .showLoadingWhileWaiting:
             // Slow path — engine is settling after a device change. Wait for it.
             overlayController.showLoadingState(
@@ -658,13 +663,19 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
-        if overlayController.state == .loading && !appState.sttRouter.isRecording {
+        let stopDecision = DictationRecordingStartLifecyclePolicy.stopDecision(
+            isLoadingOverlay: overlayController.state == .loading,
+            isListeningOverlay: overlayController.state == .listening,
+            hasRecordingStartTask: recordingStartRetryTask != nil,
+            sttIsRecording: appState.sttRouter.isRecording
+        )
+
+        if stopDecision == .cancelPendingStart {
             cancelDictation()
             return
         }
 
-        let canStopRecording = overlayController.state == .listening || appState.sttRouter.isRecording
-        guard canStopRecording else {
+        guard stopDecision == .stopRecording else {
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .warning,
@@ -1109,6 +1120,7 @@ class DictationSessionController: ObservableObject {
     private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
         switch state {
         case .idle: return "idle"
+        case .starting: return "starting"
         case .loading: return "loading"
         case .listening: return "listening"
         case .drafting: return "drafting"
@@ -1122,12 +1134,15 @@ class DictationSessionController: ObservableObject {
         streamingTask?.cancel()
         streamingTask = nil
         textPaster.cancelPendingClipboardRestore()
+        let recordingStartWasInFlight = recordingStartRetryTask != nil
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
 
-        guard cancelRecording, let appState, appState.sttRouter.isRecording else { return }
+        guard cancelRecording,
+              let appState,
+              appState.sttRouter.isRecording || recordingStartWasInFlight else { return }
         appState.sttRouter.cancel()
     }
 

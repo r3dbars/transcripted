@@ -27,6 +27,7 @@ class FloatingOverlayController {
 
     enum OverlayState {
         case idle
+        case starting     // Microphone start requested — cancellable before recording flips on
         case loading      // Voice model still loading — waiting for readiness
         case listening    // Recording dictation
         case drafting     // Processing dictation
@@ -547,7 +548,7 @@ class FloatingOverlayController {
             guard event.keyCode == 53 else { return }
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                guard self.state == .loading || self.state == .listening || self.state == .drafting else { return }
+                guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
                 self.onEscapeDuringSession?()
             }
         }
@@ -590,7 +591,7 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
-        case .idle, .listening, .drafting, .success:
+        case .idle, .starting, .listening, .drafting, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
         }
     }

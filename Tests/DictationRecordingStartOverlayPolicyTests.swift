@@ -39,4 +39,49 @@ func testDictationRecordingStartOverlayPolicy() {
             "an unready input format should still wait instead of pretending the mic is live"
         )
     }
+
+    runSuite("DictationRecordingStartLifecyclePolicy cancels a fast start that is still in flight") {
+        let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
+            isLoadingOverlay: false,
+            isListeningOverlay: false,
+            hasRecordingStartTask: true,
+            sttIsRecording: false
+        )
+
+        assertEqual(
+            decision,
+            .cancelPendingStart,
+            "a quick push-to-talk release before CoreAudio flips recording on should cancel the pending start"
+        )
+    }
+
+    runSuite("DictationRecordingStartLifecyclePolicy stops once recording is active") {
+        let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
+            isLoadingOverlay: false,
+            isListeningOverlay: false,
+            hasRecordingStartTask: true,
+            sttIsRecording: true
+        )
+
+        assertEqual(
+            decision,
+            .stopRecording,
+            "once CoreAudio is recording the same stop request should transcribe instead of cancelling"
+        )
+    }
+
+    runSuite("DictationRecordingStartLifecyclePolicy ignores inactive compact overlay stops") {
+        let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
+            isLoadingOverlay: false,
+            isListeningOverlay: false,
+            hasRecordingStartTask: false,
+            sttIsRecording: false
+        )
+
+        assertEqual(
+            decision,
+            .ignoreInactive,
+            "idle compact overlay stops should stay ignored"
+        )
+    }
 }
