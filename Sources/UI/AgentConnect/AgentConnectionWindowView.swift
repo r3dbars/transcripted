@@ -146,17 +146,17 @@ struct AgentConnectionWindowView: View {
                     .frame(width: 36, height: 36)
 
                 Image(systemName: "sparkles.rectangle.stack")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.headline.weight(.semibold))
                     .foregroundStyle(AgentConnectionTheme.accent)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Pick your agent")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
                 Text("Claude Desktop gets direct tools. Local coding agents get one prompt. Web chats are fallback only.")
-                    .font(.system(size: 12))
+                    .font(.footnote)
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -276,12 +276,12 @@ private struct AgentConnectionSectionCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AgentConnectionTheme.textPrimary)
 
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .font(.footnote)
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -312,7 +312,7 @@ private struct AgentConnectionBodyText: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(.caption)
             .foregroundStyle(AgentConnectionTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -326,7 +326,7 @@ private struct AgentConnectionInfoRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbolName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AgentConnectionTheme.accent)
                 .frame(width: 24, height: 24)
                 .background(
@@ -336,11 +336,11 @@ private struct AgentConnectionInfoRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(AgentConnectionTheme.textPrimary)
 
                 Text(detail)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -361,22 +361,22 @@ private struct AgentConnectionFileRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(name)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.footnote.weight(.semibold))
                         .foregroundStyle(AgentConnectionTheme.textPrimary)
 
                     if !isAvailable {
                         Text("Not written yet")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.caption2.weight(.medium))
                             .foregroundStyle(AgentConnectionTheme.missing)
                     }
                 }
 
                 Text(detail)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(AgentConnectionTheme.textSecondary)
 
                 Text(path)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(AgentConnectionTheme.textMuted)
                     .textSelection(.enabled)
             }
@@ -393,7 +393,7 @@ private struct AgentConnectionFileRow: View {
 private struct AgentConnectionPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.footnote.weight(.medium))
             .foregroundStyle(Color.black)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
@@ -410,7 +410,7 @@ private struct AgentConnectionSecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .medium))
+            .font(.footnote.weight(.medium))
             .foregroundStyle(isHovered ? AgentConnectionTheme.textPrimary : AgentConnectionTheme.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
