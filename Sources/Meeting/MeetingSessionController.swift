@@ -1808,7 +1808,7 @@ final class MeetingSessionController: ObservableObject {
     }
 }
 
-private extension MeetingSessionController.State {
+extension MeetingSessionController.State {
     var diagnosticName: String {
         switch self {
         case .idle: return "idle"

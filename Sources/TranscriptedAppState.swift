@@ -225,14 +225,7 @@ class TranscriptedAppState: ObservableObject {
     private var meetingStateSummary: String {
         if #available(macOS 14.0, *) {
             guard let meetingSession = loadedMeetingSession else { return "not_loaded" }
-            switch meetingSession.state {
-            case .idle: return "idle"
-            case .loadingModels: return "loadingModels"
-            case .ready: return "ready"
-            case .recording: return "recording"
-            case .transcribing: return "transcribing"
-            case .error: return "error"
-            }
+            return meetingSession.state.diagnosticName
         }
         return "unavailable"
     }
