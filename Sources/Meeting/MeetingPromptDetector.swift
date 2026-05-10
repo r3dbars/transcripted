@@ -53,6 +53,11 @@ final class MeetingPromptDetector {
     func start() {
         guard pollingTask == nil else { return }
         installWorkspaceObservers()
+        startPollingTask()
+    }
+
+    private func startPollingTask() {
+        guard pollingTask == nil else { return }
         let intervalNanoseconds = pollIntervalNanoseconds
 
         pollingTask = Task.detached(priority: .background) { [weak self] in
@@ -69,8 +74,7 @@ final class MeetingPromptDetector {
     }
 
     func stop() {
-        pollingTask?.cancel()
-        pollingTask = nil
+        pausePolling()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -205,7 +209,9 @@ final class MeetingPromptDetector {
 
         let names: [NSNotification.Name] = [
             NSWorkspace.didActivateApplicationNotification,
-            NSWorkspace.didLaunchApplicationNotification
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.didWakeNotification
         ]
 
         workspaceObservers = names.map { name in
@@ -216,10 +222,23 @@ final class MeetingPromptDetector {
             ) { [weak self] notification in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    if notification.name == NSWorkspace.willSleepNotification {
+                        self.pausePolling()
+                        return
+                    }
+                    if notification.name == NSWorkspace.didWakeNotification {
+                        self.startPollingTask()
+                        return
+                    }
                     self.handleWorkspaceApplicationNotification(notification)
                 }
             }
         }
+    }
+
+    private func pausePolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
     private func handleWorkspaceApplicationNotification(_ notification: Notification) {
