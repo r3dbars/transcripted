@@ -110,6 +110,10 @@ func testRepoCommandContract() {
             localBuildScript.contains("scripts/ops/performance-budget.rb --app \"$APP_BUNDLE\""),
             "local build should fail before opening a bundle that violates performance budgets"
         )
+        assertTrue(
+            localBuildScript.contains("--no-open"),
+            "local build should support non-interactive verification without leaving the app running"
+        )
 
         let betaBuildScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         assertTrue(

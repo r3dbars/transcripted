@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after nine audit/fix loops: **96/100, A**
+Current score after ten audit/fix loops: **96/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -28,8 +28,8 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A- | 91 | Async event capture, allowlisted analytics, local reliability packets; high launch chatter remains | Batch low-priority local events and keep privacy/event budgets tested |
-| Build and dev loop speed | C+ | 78 | Fresh deps build took 3:26 wall; app build took 2:04 clean and 1:32 incremental after this pass | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1548 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb` before opening/packaging the app; optional `--events` checks dictation latency, dictation RTF, and launch model-readiness | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
+| Build and dev loop speed | B- | 82 | Fresh deps build took 3:26 wall; app build still takes over 60s, but `bash build.sh --no-open` now verifies signing, smoke, and budgets without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
+| Performance regression guardrails | A+ | 99 | 1549 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb` before opening/packaging the app; optional `--events` checks dictation latency, dictation RTF, and launch model-readiness | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -255,12 +255,38 @@ Measured proof:
 - Event log: `Meetings load when started`, `meetings_status=On demand`, `meeting_model_state=not_loaded`.
 - No latest-launch meeting transition to `meeting_model_state=ready` happened before user action.
 
+### 9. Added a no-open build verification mode
+
+Files:
+
+- `scripts/entrypoints/build.sh`
+- `scripts/README.md`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- The normal build path opened Transcripted after every successful build, which made automated verification noisy and left a long-lived app process to clean up.
+- Performance/build checks should be able to prove signing, launch smoke, and budget compliance without changing the user's running app state.
+
+Change made:
+
+- Added `bash build.sh --no-open`.
+- The script still builds, signs, verifies signature, runs launch smoke, and runs the performance budget.
+- When `--no-open` is present, it stops after verification instead of opening the app.
+- Repo contract coverage keeps the non-interactive build mode available.
+
+Measured proof:
+
+- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
+- After the command completed, no Transcripted process from the temp build remained running.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1548 tests, 1548 passed, 0 failed**.
+- `bash run-tests.sh`: **1549 tests, 1549 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
+- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `scripts/ops/performance-budget.rb`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
 - Incremental post-fix build wall time: **1:08.04**.

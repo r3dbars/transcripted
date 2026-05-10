@@ -14,6 +14,7 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
+OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
@@ -27,6 +28,23 @@ SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --no-open)
+            OPEN_APP_AFTER_BUILD=0
+            ;;
+        --open)
+            OPEN_APP_AFTER_BUILD=1
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: bash build.sh [--no-open]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 dependency_input_listing() {
     {
@@ -340,5 +358,9 @@ echo "Checking performance budget..."
 scripts/ops/performance-budget.rb --app "$APP_BUNDLE"
 
 echo "Build complete!"
-echo "Opening Transcripted..."
-open "$APP_BUNDLE"
+if [ "$OPEN_APP_AFTER_BUILD" = "1" ]; then
+    echo "Opening Transcripted..."
+    open "$APP_BUNDLE"
+else
+    echo "Skipping app open (--no-open)."
+fi
