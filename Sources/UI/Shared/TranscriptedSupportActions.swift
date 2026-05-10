@@ -94,6 +94,7 @@ enum TranscriptedSupportActions {
             calendarGranted: TranscriptedPermissionAccess.isGranted(.calendar),
             audioRoute: appState.sttRouter.dictationAudioRouteAnalyticsContext,
             runtime: appState.runtimeDiagnostics.currentAnalyticsContext(),
+            storage: ModelCacheInventory.snapshot().diagnosticsFields,
             meetingState: meetingState,
             meetingRecording: meetingRecording,
             meetingDurationBucket: meetingDurationBucket,

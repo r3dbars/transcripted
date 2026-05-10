@@ -58,6 +58,8 @@ struct TranscriptedSettingsView: View {
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
+    @State private var modelCacheSnapshot: ModelCacheSnapshot?
+    @State private var modelCacheLoading = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
@@ -1405,6 +1407,61 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Local Model Storage",
+                detail: "On-device models and optional transcription caches."
+            ) {
+                if modelCacheLoading, modelCacheSnapshot == nil {
+                    ProgressView("Scanning model storage...")
+                        .controlSize(.small)
+                }
+
+                if let snapshot = modelCacheSnapshot {
+                    ModelCacheMetricRow(
+                        title: "Known model and cache footprint",
+                        value: snapshot.formattedTotalKnownSize,
+                        detail: "FluidAudio models plus Transcripted's app cache."
+                    )
+                    ModelCacheMetricRow(
+                        title: "FluidAudio models",
+                        value: snapshot.formattedFluidAudioModelsSize,
+                        detail: "Parakeet, diarization, and related local model files."
+                    )
+                    ModelCacheMetricRow(
+                        title: "Whisper cache",
+                        value: snapshot.formattedWhisperModelsSize,
+                        detail: "Optional Whisper models stored by Transcripted."
+                    )
+
+                    if snapshot.staleFluidAudioModelBytes > 0 {
+                        ModelCacheMetricRow(
+                            title: "Known stale candidates",
+                            value: snapshot.formattedStaleFluidAudioModelSize,
+                            detail: snapshot.staleModelSummary
+                        )
+                    } else {
+                        Text("No known stale Parakeet model folders found.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if !modelCacheLoading {
+                    Text("Model storage has not been scanned yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
+                    trackSettingsAction("refresh_model_cache_storage", page: .storage)
+                    refreshModelCacheSnapshot()
+                }
+                .disabled(modelCacheLoading)
+            }
+            .onAppear {
+                if modelCacheSnapshot == nil, !modelCacheLoading {
+                    refreshModelCacheSnapshot()
+                }
+            }
+
+            SettingsSection(
                 title: "Support Folders",
                 detail: "Logs, cache, app state, and temporary audio."
             ) {
@@ -1975,6 +2032,19 @@ struct TranscriptedSettingsView: View {
 
     private func refreshStoragePaths() {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    }
+
+    private func refreshModelCacheSnapshot() {
+        guard !modelCacheLoading else { return }
+        modelCacheLoading = true
+
+        Task.detached(priority: .utility) {
+            let snapshot = ModelCacheInventory.snapshot()
+            await MainActor.run {
+                modelCacheSnapshot = snapshot
+                modelCacheLoading = false
+            }
+        }
     }
 
     private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {

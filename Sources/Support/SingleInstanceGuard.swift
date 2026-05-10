@@ -22,6 +22,10 @@ final class SingleInstanceGuard {
     }
 
     func acquire() -> AcquisitionResult {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] == "1" {
+            return .acquired
+        }
+
         if lockFileDescriptor >= 0 {
             return .acquired
         }

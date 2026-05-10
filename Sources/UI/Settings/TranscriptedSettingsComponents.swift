@@ -455,6 +455,33 @@ struct StorageRow: View {
     }
 }
 
+struct ModelCacheMetricRow: View {
+    let title: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Text(value)
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
+}
+
 struct HotkeyRecorderContainer: NSViewRepresentable {
     func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
         HotkeyRecorderAppKitView(frame: .zero)

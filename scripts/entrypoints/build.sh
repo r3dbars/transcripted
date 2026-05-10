@@ -135,7 +135,7 @@ verify_launch_smoke() {
     local smoke_log="$BUILD_DIR/launch-smoke.log"
     rm -f "$smoke_log"
 
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
     local app_pid=$!
 
     sleep 5

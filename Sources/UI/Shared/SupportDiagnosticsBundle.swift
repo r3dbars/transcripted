@@ -14,6 +14,7 @@ struct SupportDiagnosticsSnapshot: Equatable {
     var calendarGranted: Bool
     var audioRoute: [String: String]
     var runtime: [String: String]
+    var storage: [String: String] = [:]
     var meetingState: String
     var meetingRecording: Bool
     var meetingDurationBucket: String
@@ -56,6 +57,9 @@ enum SupportDiagnosticsBundle {
 
         Runtime
         \(render(snapshot.runtime))
+
+        Storage
+        \(render(snapshot.storage))
 
         Audio Route
         \(render(snapshot.audioRoute))
@@ -103,6 +107,10 @@ enum SupportDiagnosticsBundle {
 
         for (key, value) in snapshot.runtime {
             context["runtime_\(key)"] = value
+        }
+
+        for (key, value) in snapshot.storage {
+            context["storage_\(key)"] = value
         }
 
         return context
