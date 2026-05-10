@@ -140,7 +140,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
         pop.delegate = self
-        pop.appearance = NSAppearance(named: .darkAqua)
         popover = pop
 
         // Engine recovery on wake — hotkeys and overlay state

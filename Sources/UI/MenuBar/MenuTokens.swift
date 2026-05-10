@@ -6,37 +6,40 @@ import SwiftUI
 
 enum MenuTokens {
     // Surface
-    static let surfaceBackgroundNS = NSColor(calibratedWhite: 0.11, alpha: 0.98)
-    static let surfaceStrokeNS = NSColor.white.withAlphaComponent(0.08)
-    static let sectionDividerNS = NSColor.white.withAlphaComponent(0.12)
+    static let surfaceBackgroundNS = NSColor.windowBackgroundColor.withAlphaComponent(0.98)
+    static let surfaceStrokeNS = NSColor.separatorColor
+    static let sectionDividerNS = NSColor.separatorColor
 
     // Text + status
     static let statusGreenNS = NSColor.systemGreen
     static let statusOrangeNS = NSColor.systemOrange
-    static let textPrimaryNS = OverlayTokens.textPrimary
-    static let textSecondaryNS = OverlayTokens.textSecondary
-    static let textMutedNS = OverlayTokens.textMuted
+    static let textPrimaryNS = NSColor.labelColor
+    static let textSecondaryNS = NSColor.secondaryLabelColor
+    static let textMutedNS = NSColor.tertiaryLabelColor
+    static let selectedTextPrimaryNS = NSColor.alternateSelectedControlTextColor
+    static let selectedTextSecondaryNS = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.78)
+    static let selectedTextMutedNS = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.82)
 
     // Rows
-    static let actionBackgroundNS = NSColor.white.withAlphaComponent(0.06)
-    static let actionPressedNS = NSColor.white.withAlphaComponent(0.10)
-    static let actionDisabledNS = NSColor.white.withAlphaComponent(0.03)
-    static let actionBorderNS = NSColor.white.withAlphaComponent(0.08)
-    static let flatRowHoverNS = NSColor.systemBlue.withAlphaComponent(0.95)
-    static let flatRowPressedNS = NSColor.systemBlue.withAlphaComponent(0.78)
-    static let flatRowDisabledNS = NSColor.white.withAlphaComponent(0.02)
-    static let badgeBackgroundNS = NSColor.white.withAlphaComponent(0.08)
-    static let badgeBorderNS = NSColor.white.withAlphaComponent(0.12)
-    static let symbolBackgroundNS = NSColor.white.withAlphaComponent(0.05)
-    static let symbolBorderNS = NSColor.white.withAlphaComponent(0.08)
-    static let secondaryButtonBackgroundNS = NSColor.white.withAlphaComponent(0.02)
-    static let secondaryButtonHoverNS = NSColor.white.withAlphaComponent(0.07)
-    static let secondaryButtonPressedNS = NSColor.white.withAlphaComponent(0.10)
-    static let secondaryButtonBorderNS = NSColor.white.withAlphaComponent(0.10)
-    static let accentButtonBackgroundNS = NSColor.systemBlue.withAlphaComponent(0.16)
-    static let accentButtonHoverNS = NSColor.systemBlue.withAlphaComponent(0.22)
-    static let accentButtonPressedNS = NSColor.systemBlue.withAlphaComponent(0.28)
-    static let accentButtonBorderNS = NSColor.systemBlue.withAlphaComponent(0.34)
+    static let actionBackgroundNS = NSColor.controlBackgroundColor.withAlphaComponent(0.82)
+    static let actionPressedNS = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.16)
+    static let actionDisabledNS = NSColor.controlBackgroundColor.withAlphaComponent(0.42)
+    static let actionBorderNS = NSColor.separatorColor
+    static let flatRowHoverNS = NSColor.selectedContentBackgroundColor
+    static let flatRowPressedNS = NSColor.controlAccentColor
+    static let flatRowDisabledNS = NSColor.controlBackgroundColor.withAlphaComponent(0.42)
+    static let badgeBackgroundNS = NSColor.labelColor.withAlphaComponent(0.08)
+    static let badgeBorderNS = NSColor.separatorColor
+    static let symbolBackgroundNS = NSColor.labelColor.withAlphaComponent(0.06)
+    static let symbolBorderNS = NSColor.separatorColor
+    static let secondaryButtonBackgroundNS = NSColor.controlBackgroundColor.withAlphaComponent(0.72)
+    static let secondaryButtonHoverNS = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.12)
+    static let secondaryButtonPressedNS = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.20)
+    static let secondaryButtonBorderNS = NSColor.separatorColor
+    static let accentButtonBackgroundNS = NSColor.controlAccentColor.withAlphaComponent(0.16)
+    static let accentButtonHoverNS = NSColor.controlAccentColor.withAlphaComponent(0.22)
+    static let accentButtonPressedNS = NSColor.controlAccentColor.withAlphaComponent(0.28)
+    static let accentButtonBorderNS = NSColor.controlAccentColor.withAlphaComponent(0.34)
     static let savedBackgroundNS = NSColor.systemGreen.withAlphaComponent(0.14)
     static let savedBorderNS = NSColor.systemGreen.withAlphaComponent(0.24)
 

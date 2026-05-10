@@ -55,7 +55,6 @@ final class MenuBarPanelController: NSViewController {
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
-        view.appearance = NSAppearance(named: .darkAqua)
 
         refresh()
         setupSubscriptions()

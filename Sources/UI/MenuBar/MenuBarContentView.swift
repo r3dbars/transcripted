@@ -39,7 +39,6 @@ final class MenuBarContentView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        appearance = NSAppearance(named: .darkAqua)
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.surfaceCornerRadius
         layer?.masksToBounds = true
