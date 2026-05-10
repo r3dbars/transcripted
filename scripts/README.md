@@ -8,7 +8,7 @@ These stay at the repo root as thin wrappers so the public command surface stays
 stable and the docs can keep pointing at the same commands:
 
 - `build-deps.sh` — build and cache the shared dependency bundle
-- `build.sh` — local app build; use `bash build.sh --no-open` for non-interactive verification, or `bash build.sh --thin --no-open` to verify the model-download app variant
+- `build.sh` — local app build; defaults to the thin model-download app variant. Use `bash build.sh --no-open` for non-interactive verification, or `bash build.sh --full --no-open` to verify the full offline variant
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification

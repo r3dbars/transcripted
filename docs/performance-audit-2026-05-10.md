@@ -7,11 +7,11 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after sixteen audit/fix loops: **98/100, A**
+Current score after seventeen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
-The app does not yet feel "super lightweight" in the full sense. The main blockers are local model footprint, first-use dictation start proof, and the still-default 524 MB public DMG / 550 MB expanded offline app bundle. A signed thin build path now exists at 105.4 MiB expanded, but the shipped default is still the full offline bundle until the distribution decision changes.
+The app does not yet feel "super lightweight" in the full sense. The main blockers are local model footprint, first-use dictation start proof, and the currently shipped public DMG, which is still the old 524 MB full/offline release until the next release is cut. On this branch, the default local and beta build path is now the 105.4 MiB thin app; full/offline bundling remains available as an explicit option.
 
 ## Scorecard
 
@@ -22,14 +22,14 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
-| Bundle and download size | A- | 92 | Full offline build remains 566.3 MiB expanded; new signed thin build is 105.4 MiB expanded with 1.9 MiB resources and runtime model download | Make thin the default public DMG under 150 MB, or explicitly ship full/offline and thin/download variants |
+| Bundle and download size | A | 96 | Default local and beta builds now produce the 105.4 MiB thin app with 1.9 MiB resources; explicit full/offline build remains 566.3 MiB | Ship the next public DMG/appcast/cask from the thin default, or explicitly publish separate full/offline and thin/download variants |
 | Local disk/cache hygiene | A- | 91 | Storage page reports model/cache footprint and offers confirmed cleanup for known stale Parakeet folders plus optional Whisper cache; local footprint can still exceed 3 GB with active/optional caches | Normal default footprint under 700 MB excluding active bundled model |
 | Meeting transcription throughput | A | 96 | Stats DB gate now checks recordings >=30s: 36 samples, meeting p95 RTF 0.022; all-recording p95 remains distorted by 1-12s test clips | Add peak RSS/memory cap proof during a current long-meeting corpus run |
 | Meeting capture realtime path | A- | 90 | Dedicated capture/recovery code, async model gate, AGC uses vDSP, capture status events present | Live long-meeting profile shows stable CPU/memory and no dropped capture state |
 | UI/rendering perceived lightness | A- | 90 | Settings home now coalesces passive activation/navigation refreshes while preserving forced refreshes for new/deleted captures; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A | 95 | Async event capture, allowlisted analytics, local reliability packets; launch smoke no longer writes dirty-shutdown markers | Batch low-priority local events and keep privacy/event budgets tested |
-| Build and dev loop speed | B- | 82 | Fresh deps build took 3:26 wall; app build still takes over 60s, but `bash build.sh --no-open` now verifies signing, smoke, and budgets without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1579 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
+| Build and dev loop speed | B | 86 | Timed default thin `bash build.sh --no-open` takes 68.17s; it skips the model copy and verifies signing/smoke/budget without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
+| Performance regression guardrails | A+ | 99 | 1581 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -165,7 +165,7 @@ Change made:
 Measured proof:
 
 - `scripts/ops/performance-budget.rb`: passed.
-- Current signed build: expanded app 566.2 MiB by file-size walk, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
+- Current explicit full signed build: expanded app 566.3 MiB by file-size walk, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
 
 ### 6. Added runtime latency budgets to the performance checker
 
@@ -382,7 +382,7 @@ Change made:
 - Added `bash build.sh --thin --no-open` for a signed app that skips bundled Parakeet models.
 - Added `BUNDLE_PARAKEET_MODELS=0` support for beta/release packaging flows.
 - Added `--allow-missing-parakeet-model` plus tighter thin-build size budgets to the performance checker.
-- Kept full/offline bundling as the default build behavior.
+- Initially kept full/offline bundling as the default build behavior; loop 17 later made the thin build the default.
 
 Measured proof:
 
@@ -392,7 +392,7 @@ Measured proof:
 - Thin resources: 1.9 MiB.
 - Thin Parakeet model: not bundled, runtime download.
 - `bash build.sh --full --no-open`: signed build passed, launch smoke passed, performance budget passed.
-- Full expanded app: 566.2 MiB.
+- Full expanded app: 566.3 MiB.
 - After both no-open builds, no Transcripted process from the temp build remained running.
 
 ### 14. Added a meeting throughput stats budget
@@ -450,24 +450,57 @@ Measured proof:
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
 - Performance budget after the signed build: expanded app 566.3 MiB, resources 462.8 MiB, Parakeet model `parakeet-tdt-0.6b-v3-coreml`, resource icon `Transcripted.icns`.
 
+### 16. Made thin builds the default distribution path
+
+Files:
+
+- `scripts/entrypoints/build.sh`
+- `scripts/entrypoints/build-beta.sh`
+- `scripts/README.md`
+- `docs/release-packaging.md`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- The biggest remaining app-footprint problem was not warm runtime speed; it was shipping the 461 MB speech model inside every default build.
+- The thin model-download variant already passed verification, but it was still opt-in.
+
+Change made:
+
+- Local `bash build.sh` now defaults to the thin model-download app.
+- Beta/release packaging now defaults to the thin model-download distribution.
+- `bash build.sh --full` and `BUNDLE_PARAKEET_MODELS=1 REQUIRE_BUNDLED_PARAKEET_MODELS=1 bash build-beta.sh ...` keep the full/offline path explicit.
+- Repo contract tests now assert the lightweight default so the scripts cannot silently drift back to full/offline.
+
+Measured proof:
+
+- `bash -n scripts/entrypoints/build.sh`: passed.
+- `bash -n scripts/entrypoints/build-beta.sh`: passed.
+- `bash run-tests.sh`: 1581 tests passed.
+- `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed.
+- Default thin build: 105.4 MiB expanded, 1.9 MiB resources, no bundled Parakeet model.
+- `bash build.sh --full --no-open`: explicit full signed build passed, launch smoke passed, performance budget passed.
+- Explicit full build: 566.3 MiB expanded, 462.8 MiB resources, bundled `parakeet-tdt-0.6b-v3-coreml`.
+- Timed default thin build: `real 68.17`, `user 51.73`, `sys 11.30`.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1579 tests, 1579 passed, 0 failed**.
+- `bash run-tests.sh`: **1581 tests, 1581 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
-- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
-- `bash build.sh --thin --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
-- `bash build.sh --full --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
+- `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed, no app left running.
+- `bash build.sh --thin --no-open`: signed thin build passed, launch smoke passed, performance budget passed, no app left running.
+- `bash build.sh --full --no-open`: explicit full signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash -n scripts/entrypoints/build.sh`: passed.
 - `bash -n scripts/entrypoints/build-beta.sh`: passed.
 - `scripts/ops/performance-budget.rb`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`: passed.
 - `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
 - `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"`: passed.
-- Incremental post-fix build wall time: **1:08.04**.
-- Full rebuilt app size: **566.3 MiB**.
-- Thin rebuilt app size: **105.4 MiB**.
+- Timed default thin build wall time: **68.17s**.
+- Default thin rebuilt app size: **105.4 MiB**.
+- Explicit full rebuilt app size: **566.3 MiB**.
 
 ### Latest Public Release
 
@@ -479,12 +512,12 @@ Measured proof:
 
 ### Bundle Breakdown
 
-Post-fix rebuilt app:
+Post-fix rebuilt app variants:
 
 | Bundle path | Size |
 | --- | ---: |
-| Full `build/Transcripted.app` | 566.3 MiB |
-| Thin `build/Transcripted.app` | 105.4 MiB |
+| Default thin `build/Transcripted.app` | 105.4 MiB |
+| Explicit full `build/Transcripted.app` | 566.3 MiB |
 | Full `Contents/Resources` | 462.8 MiB |
 | Thin `Contents/Resources` | 1.9 MiB |
 | `Contents/Resources/parakeet-models` | 461 MB |
@@ -611,9 +644,9 @@ These are the next improvements I would execute in order.
    - Dictation and meeting models now stay on demand by default, with explicit UI/status copy and an eager-warmup env escape hatch for diagnostics.
 
 3. **Distribution strategy**
-   - Partly done in loop 14.
-   - A signed thin app is now 105.4 MiB expanded and downloads the model on first use.
-   - A+ gate: make the default public DMG thin under 150 MB, or consciously ship separate full/offline and thin/download installers.
+   - Mostly done in loop 17.
+   - Default local and beta builds now create the 105.4 MiB thin app and download the model on first use.
+   - A+ gate: cut and verify a public thin DMG under 150 MB, then update appcast/cask/download surfaces.
 
 4. **Meeting performance harness**
    - Partly done in loop 15.
@@ -641,4 +674,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, a thin build path now exists, and passive Settings dashboard refreshes are coalesced. The default public distribution decision, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is now the default, and passive Settings dashboard refreshes are coalesced. The next public release, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.

@@ -148,6 +148,10 @@ func testRepoCommandContract() {
             "local build should support a thin app variant that downloads the model on first use"
         )
         assertTrue(
+            localBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
+            "local build should default to the lightweight model-download app variant"
+        )
+        assertTrue(
             localBuildScript.contains("BUNDLE_PARAKEET_MODELS"),
             "local build should make model bundling an explicit build choice"
         )
@@ -175,6 +179,10 @@ func testRepoCommandContract() {
         assertTrue(
             betaBuildScript.contains("BUNDLE_PARAKEET_MODELS"),
             "beta release build should support an intentional thin distribution variant"
+        )
+        assertTrue(
+            betaBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
+            "beta release build should default to the lightweight model-download distribution"
         )
     }
 
