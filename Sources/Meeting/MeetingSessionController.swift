@@ -906,39 +906,95 @@ final class MeetingSessionController: ObservableObject {
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcription_cancelled")
     }
 
+    private func preserveQueuedTranscriptionJobsForTermination(errorMessage: String) -> Int {
+        let queuedJobs = queuedTranscriptionJobs
+        queuedTranscriptionJobs.removeAll()
+
+        var preservedCount = 0
+        for job in queuedJobs {
+            switch job.kind {
+            case .recorded(let micURL, let systemURL, _):
+                failedManager.addFailedTranscription(
+                    micAudioURL: micURL,
+                    systemAudioURL: systemURL,
+                    errorMessage: errorMessage
+                )
+                preservedCount += 1
+            case .imported(let audioURL, _):
+                taskManager.discardManagedTranscriptionScratchFile(
+                    audioURL,
+                    label: "interrupted queued imported audio"
+                )
+            }
+        }
+
+        return preservedCount
+    }
+
     func prepareForTermination() async {
-        guard case .recording = state else { return }
-        guard !isFinishingRecording else { return }
-        isFinishingRecording = true
-        defer { isFinishingRecording = false }
+        let terminationMessage = "Transcription interrupted by app quit"
+        var preservedRecordingCount = 0
 
-        _ = audioInactivityDetector.stopRecording()
-        audioInactivityWarning = nil
+        if case .recording = state, !isFinishingRecording {
+            isFinishingRecording = true
+            defer { isFinishingRecording = false }
 
-        let recordingTrigger = activeRecordingTrigger
-        let files = await capture.stopAndAwaitFiles()
-        activeRecordingTrigger = .unknown
+            _ = audioInactivityDetector.stopRecording()
+            audioInactivityWarning = nil
 
-        if let micURL = files.micURL {
-            failedManager.addFailedTranscription(
-                micAudioURL: micURL,
-                systemAudioURL: files.systemURL,
-                errorMessage: "Transcripted quit before this meeting could be transcribed."
+            let recordingTrigger = activeRecordingTrigger
+            let files = await capture.stopAndAwaitFiles()
+            activeRecordingTrigger = .unknown
+
+            if let micURL = files.micURL {
+                failedManager.addFailedTranscription(
+                    micAudioURL: micURL,
+                    systemAudioURL: files.systemURL,
+                    errorMessage: "Transcripted quit before this meeting could be transcribed."
+                )
+                preservedRecordingCount = 1
+            }
+
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_recording_saved_for_shutdown",
+                message: "Meeting recording was preserved during app termination",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": recordingTrigger.rawValue,
+                        "mic_file_present": boolString(files.micURL != nil),
+                        "system_file_present": boolString(files.systemURL != nil)
+                    ]
+                )
             )
+        }
+
+        let queuedPreservedCount = preserveQueuedTranscriptionJobsForTermination(errorMessage: terminationMessage)
+        let activePreservedCount = taskManager.preserveActiveTranscriptionsForTermination(
+            errorMessage: terminationMessage
+        )
+        taskManager.cancelAll()
+        taskManager.cleanupPendingNaming()
+
+        let totalPreserved = preservedRecordingCount + queuedPreservedCount + activePreservedCount
+        if totalPreserved > 0 {
             refreshFailedMeetings()
         }
 
         state = .ready
+        activeTranscriptionTrigger = .unknown
+
+        guard queuedPreservedCount > 0 || activePreservedCount > 0 else { return }
         DiagnosticsTrail.record(
             level: .warning,
             engine: "meeting",
-            event: "meeting_recording_saved_for_shutdown",
-            message: "Meeting recording was preserved during app termination",
+            event: "meeting_transcription_saved_for_shutdown",
+            message: "Meeting transcription work was preserved during app termination",
             context: baseDiagnosticsContext(
                 extra: [
-                    "trigger": recordingTrigger.rawValue,
-                    "mic_file_present": boolString(files.micURL != nil),
-                    "system_file_present": boolString(files.systemURL != nil)
+                    "active_preserved": "\(activePreservedCount)",
+                    "queued_preserved": "\(queuedPreservedCount)"
                 ]
             )
         )

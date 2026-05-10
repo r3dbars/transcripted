@@ -18,7 +18,13 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
 
+    enum ActiveTranscriptionAudioFiles: Equatable {
+        case recorded(micURL: URL, systemURL: URL?)
+        case imported(audioURL: URL)
+    }
+
     var activeTasks: [UUID: Task<Void, Never>] = [:]
+    var activeTaskAudioFiles: [UUID: ActiveTranscriptionAudioFiles] = [:]
     public let transcription: Transcription
 
     public let failedTranscriptionManager: FailedTranscriptionManager
@@ -152,6 +158,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
+        activeTaskAudioFiles[task.id] = .recorded(micURL: micURL, systemURL: systemURL)
         displayStatus = .gettingReady
 
         AppLogger.pipeline.info("Starting transcription task", [
@@ -246,6 +253,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
+        activeTaskAudioFiles[taskId] = .imported(audioURL: audioURL)
         displayStatus = .gettingReady
 
         AppLogger.pipeline.info("Starting imported transcription task", [
@@ -386,6 +394,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func handleTaskCompletion(taskId: UUID) {
         activeTasks.removeValue(forKey: taskId)
+        activeTaskAudioFiles.removeValue(forKey: taskId)
         activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
@@ -406,9 +415,55 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
         activeTasks.removeAll()
+        activeTaskAudioFiles.removeAll()
         activeCount = 0
         backgroundTaskCount = 0
         displayStatus = .idle
+    }
+
+    @discardableResult
+    public func preserveActiveTranscriptionsForTermination(errorMessage: String) -> Int {
+        for task in activeTasks.values {
+            task.cancel()
+        }
+
+        let audioFilesByTask = activeTaskAudioFiles
+        activeTaskAudioFiles.removeAll()
+
+        var preservedCount = 0
+        for (taskId, audioFiles) in audioFilesByTask {
+            switch audioFiles {
+            case .recorded(let micURL, let systemURL):
+                let retainedAudio = archiveFailedRecordingAudioIfConfigured(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    taskId: taskId
+                )
+                let failedMicURL = retainedAudio?.micURL ?? micURL
+                let failedSystemURL = retainedAudio?.systemURL ?? systemURL
+                if retainedAudio?.micURL != nil {
+                    removeManagedCleanupFile(micURL, label: "archived interrupted mic scratch")
+                }
+                if retainedAudio?.systemURL != nil {
+                    removeManagedCleanupFile(systemURL, label: "archived interrupted system scratch")
+                }
+                failedTranscriptionManager.addFailedTranscription(
+                    micAudioURL: failedMicURL,
+                    systemAudioURL: failedSystemURL,
+                    errorMessage: errorMessage
+                )
+                preservedCount += 1
+
+            case .imported(let audioURL):
+                removeManagedCleanupFile(audioURL, label: "interrupted imported audio")
+            }
+        }
+
+        return preservedCount
+    }
+
+    public nonisolated func discardManagedTranscriptionScratchFile(_ url: URL?, label: String) {
+        removeManagedCleanupFile(url, label: label)
     }
 
     /// Populate saved transcript metadata from the file's YAML frontmatter.

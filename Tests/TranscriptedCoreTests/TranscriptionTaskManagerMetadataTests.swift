@@ -146,6 +146,77 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
     }
 
+    func testPreserveActiveTranscriptionsForTerminationQueuesRecordedAudio() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("active-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("active-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        let taskId = UUID()
+        manager.activeTasks[taskId] = Task {}
+        manager.activeTaskAudioFiles[taskId] = .recorded(micURL: micURL, systemURL: systemURL)
+
+        let preservedCount = manager.preserveActiveTranscriptionsForTermination(
+            errorMessage: "Transcription interrupted by app quit"
+        )
+        manager.cancelAll()
+
+        XCTAssertEqual(preservedCount, 1)
+        XCTAssertTrue(manager.activeTaskAudioFiles.isEmpty)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.errorMessage, "Transcription interrupted by app quit")
+        XCTAssertTrue(
+            failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"),
+            "interrupted active audio should be retained before scratch cleanup"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
+    func testPreserveActiveTranscriptionsForTerminationRemovesImportedScratchAudio() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let importedURL = scratchDirectory.appendingPathComponent("active-imported.m4a")
+        try Data("scratch".utf8).write(to: importedURL)
+
+        let taskId = UUID()
+        manager.activeTasks[taskId] = Task {}
+        manager.activeTaskAudioFiles[taskId] = .imported(audioURL: importedURL)
+
+        let preservedCount = manager.preserveActiveTranscriptionsForTermination(
+            errorMessage: "Transcription interrupted by app quit"
+        )
+        manager.cancelAll()
+
+        XCTAssertEqual(preservedCount, 0)
+        XCTAssertTrue(manager.activeTaskAudioFiles.isEmpty)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: importedURL.path))
+    }
+
+    func testDiscardManagedTranscriptionScratchFileDoesNotDeleteOutOfSandboxFile() throws {
+        let manager = makeManager()
+        let externalURL = tempDirectory.appendingPathComponent("outside-imported.m4a")
+        try Data("external".utf8).write(to: externalURL)
+
+        manager.discardManagedTranscriptionScratchFile(
+            externalURL,
+            label: "external imported audio"
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
     private func makeManager(
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil
