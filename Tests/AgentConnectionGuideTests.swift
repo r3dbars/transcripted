@@ -23,12 +23,37 @@ func testAgentConnectionGuide() {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
         assertTrue(
-            prompt.contains("Read my saved Transcripted Markdown files directly:"),
-            "prompt should tell local agents to read Transcripted files directly"
+            prompt.contains("Use Transcripted direct tools first if they are connected:"),
+            "prompt should tell local agents to use direct tools when available"
         )
         assertTrue(
-            prompt.contains("Use these files as the source of truth."),
-            "prompt should ground answers in saved Markdown files"
+            AgentConnectionGuide.directToolNames.count == 9,
+            "prompt should track the full Transcripted MCP direct tool set"
+        )
+        for toolName in AgentConnectionGuide.directToolNames {
+            assertTrue(
+                prompt.contains("- \(toolName)"),
+                "prompt should name the \(toolName) direct tool"
+            )
+        }
+        assertEqual(
+            Set(AgentConnectionGuide.directToolNames),
+            Set([
+                "recent_context",
+                "search_context",
+                "list_meetings",
+                "read_meeting",
+                "list_dictations",
+                "read_dictation",
+                "search",
+                "who_is",
+                "recap",
+            ]),
+            "direct tool list should mirror Tools/TranscriptedMCP tool registration"
+        )
+        assertTrue(
+            prompt.contains("If direct tools are not connected, read my saved Transcripted Markdown files directly:"),
+            "prompt should keep saved Markdown as the fallback path"
         )
         assertTrue(
             !prompt.contains("Install for Claude Desktop"),
@@ -39,20 +64,24 @@ func testAgentConnectionGuide() {
             "local agent prompt should not include web/Cowork routing"
         )
         assertTrue(
-            prompt.contains("Search meetings and dictations together when useful."),
-            "prompt should support combined meeting and dictation searches"
+            prompt.contains("Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files."),
+            "prompt should support direct-tool retrieval and folder fallback"
         )
         assertTrue(
             prompt.contains("For relative dates like today or yesterday, state the exact dates searched."),
             "prompt should force exact dates for relative-date work"
         )
         assertTrue(
-            prompt.contains("If you cannot read a folder, tell me which folder failed."),
-            "prompt should name the folder failure when blocked"
+            prompt.contains("If a direct tool fails, fall back to the folders."),
+            "prompt should recover from direct-tool failures"
         )
         assertTrue(
-            prompt.contains("Do not suggest Claude Desktop or MCP unless I ask."),
-            "prompt should keep local-agent flow separate from Claude Desktop setup"
+            prompt.contains("If you cannot use direct tools or read a folder, say exactly what failed."),
+            "prompt should name the failed access path when blocked"
+        )
+        assertTrue(
+            prompt.contains("Do not suggest installing Claude Desktop or MCP unless I ask."),
+            "prompt should avoid pushing setup work unless the user asks"
         )
         assertTrue(
             prompt.contains("Meetings:\n- \(AgentConnectionGuide.meetingsFolder.path)"),
