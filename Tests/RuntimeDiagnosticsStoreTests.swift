@@ -29,6 +29,25 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(context["session_duration_bucket"], "1_4m", "context should bucket previous session duration")
         assertEqual(context["session_kind"], "dictation", "context should keep coarse session kind")
         assertEqual(context["session_stage"], "recording", "context should keep coarse session stage")
+        assertEqual(
+            Set(context.keys),
+            [
+                "app_version",
+                "build_version",
+                "heartbeat_age_bucket",
+                "last_event",
+                "os_major",
+                "session_active",
+                "session_duration_bucket",
+                "session_kind",
+                "session_stage",
+            ],
+            "unclean shutdown context should stay limited to previous-session runtime keys"
+        )
+        assertNil(context["previous_clean_shutdown"], "unclean shutdown context should not include current-session-only clean state")
+        assertNil(context["launch_id"], "launch IDs should not leak into unclean shutdown context")
+        assertNil(context["started_at"], "raw start timestamps should not leak into unclean shutdown context")
+        assertNil(context["updated_at"], "raw heartbeat timestamps should not leak into unclean shutdown context")
     }
 
     runSuite("RuntimeDiagnosticsStore builds current Sentry runtime context") {
