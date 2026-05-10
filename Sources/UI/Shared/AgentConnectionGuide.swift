@@ -125,7 +125,18 @@ enum AgentConnectionGuide {
         var prompt = """
         I use Transcripted on this Mac.
 
-        Read my saved Transcripted Markdown files directly:
+        Use Transcripted direct tools first if they are connected:
+        - recent_context
+        - search_context
+        - list_meetings
+        - read_meeting
+        - list_dictations
+        - read_dictation
+        - search
+        - who_is
+        - recap
+
+        If direct tools are not connected, read my saved Transcripted Markdown files directly:
 
         Meetings:
         - \(meetingsFolder.path)
@@ -136,11 +147,12 @@ enum AgentConnectionGuide {
         Use these files as the source of truth.
 
         Rules:
-        - Search meetings and dictations together when useful.
+        - Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files.
         - Cite filenames, dates, speakers, and timestamps when useful.
         - For relative dates like today or yesterday, state the exact dates searched.
-        - If you cannot read a folder, tell me which folder failed.
-        - Do not suggest Claude Desktop or MCP unless I ask.
+        - If a direct tool fails, fall back to the folders.
+        - If you cannot use direct tools or read a folder, say exactly what failed.
+        - Do not suggest installing Claude Desktop or MCP unless I ask.
         """
 
         if let filename {
