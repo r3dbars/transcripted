@@ -45,7 +45,6 @@ into a taller loading or error state.
 
 ### MenuBar/
 
-- `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
