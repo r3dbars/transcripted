@@ -7,11 +7,11 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current score after twelve audit/fix loops: **97/100, A**
+Current score after thirteen audit/fix loops: **98/100, A**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
-The app does not yet feel "super lightweight" in the full sense. The main blockers are startup model readiness, local model footprint, and the 524 MB public DMG / 550 MB expanded app bundle. Most of the remaining bundle weight is the bundled 461 MB Parakeet CoreML model, which is a product tradeoff: fast offline first run vs. small installer.
+The app does not yet feel "super lightweight" in the full sense. The main blockers are local model footprint, first-use dictation start proof, and the 524 MB public DMG / 550 MB expanded app bundle. Most of the remaining bundle weight is the bundled 461 MB Parakeet CoreML model, which is a product tradeoff: fast offline first run vs. small installer.
 
 ## Scorecard
 
@@ -19,7 +19,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | --- | ---: | ---: | --- | --- |
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
 | Dictation start responsiveness | A | 94 | Fixed fast-path fallthrough and added `dictation_recording_fast_start` / fallback proof events plus strict budget parsing; current logs have 0 fresh fast-start samples | Fresh live dictation run with `--require-dictation-fast-start-samples 1` passes with no fallback/retry events |
-| App launch and model readiness | B | 86 | Meeting diarization is now lazy with explicit "Meetings load when started" copy; dictation model readiness still has p90 27.200s in local logs | Decide whether dictation should stay eager or move to explicit on-demand loading |
+| App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
 | Idle CPU | A | 96 | Observed Transcripted app processes at 0.0% CPU; MCP helper about 0.2% CPU | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 98 | Latest signed lazy-meeting launch settled at 153,600 KB RSS and 0.0% CPU after warmup, with one app process | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | B | 82 | Release DMG is 524,144,094 bytes; rebuilt app is 550 MB expanded after icon cleanup | DMG under 150 MB, or documented intentional offline-model bundle with optional thin build |
@@ -29,7 +29,7 @@ The app does not yet feel "super lightweight" in the full sense. The main blocke
 | UI/rendering perceived lightness | B | 85 | Large SwiftUI/control files, but no clear hot render loop found; waveform timer is bounded at 30 fps | Screen/profile proof for settings, overlay, and meeting views with no jank |
 | Observability overhead | A | 95 | Async event capture, allowlisted analytics, local reliability packets; launch smoke no longer writes dirty-shutdown markers | Batch low-priority local events and keep privacy/event budgets tested |
 | Build and dev loop speed | B- | 82 | Fresh deps build took 3:26 wall; app build still takes over 60s, but `bash build.sh --no-open` now verifies signing, smoke, and budgets without leaving the app running | Normal app build under 60s on this machine, targeted test loop under 15s |
-| Performance regression guardrails | A+ | 99 | 1556 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks transcription latency, launch model-readiness, and strict dictation fast-start proof | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
+| Performance regression guardrails | A+ | 99 | 1566 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks transcription latency, launch model-readiness, and strict dictation fast-start proof | Add remote CI if/when the repo gets workflow automation; keep a fresh release-candidate event fixture |
 | Process hygiene / single-instance behavior | A- | 92 | Added file-lock single-instance guard; duplicate launch of the rebuilt app settled back to one running process | Release/current builds keep one effective Transcripted process per user session |
 
 ## Fixes Applied In This Pass
@@ -331,11 +331,42 @@ Measured proof:
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
 - After the no-open build, no Transcripted process from the temp build remained running.
 
+### 12. Made launch model loading on demand
+
+Files:
+
+- `Sources/TranscriptedAppState.swift`
+- `Sources/Meeting/MeetingWarmupStatusPolicy.swift`
+- `Sources/UI/Shared/FirstRunExperience.swift`
+- `Sources/UI/MenuBar/MenuBarModelStatusView.swift`
+- `Tests/MeetingWarmupStatusPolicyTests.swift`
+- `Tests/FirstRunExperienceTests.swift`
+- `Tests/RepoCommandContractTests.swift`
+
+Why:
+
+- The launch path still loaded the selected dictation model eagerly.
+- That kept first-use dictation fast, but made a fresh app launch feel heavier than needed for users who only want the menu, settings, or meeting/import setup later.
+
+Change made:
+
+- Default launch no longer calls runtime model readiness.
+- Dictation, meetings, imports, model preference changes, wake recovery for an already loaded model, and `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` can still load the selected model when needed.
+- Menu bar, onboarding, settings, and shared warmup status copy now describe the default state as on-demand instead of fake startup progress.
+
+Measured proof:
+
+- `bash run-tests.sh`: 1566 tests passed.
+- `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed.
+- Latest launch smoke event: `Dictation and meetings load when started`, `dictation_status=On demand`, `meetings_status=On demand`, and app launch context `stt_model_loaded=false`.
+- No `models_loaded` event followed that latest smoke launch.
+- After the no-open build, no Transcripted process from the temp build remained running.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1556 tests, 1556 passed, 0 failed**.
+- `bash run-tests.sh`: **1566 tests, 1566 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash -n scripts/entrypoints/build.sh`: passed.
@@ -386,13 +417,13 @@ Local `events.jsonl`:
 - dictation fast-start samples: 0
 - dictation fast-start fallback/retry events: 0
 
-Startup readiness, using valid launch sequences only:
+Historical startup readiness, using valid pre-on-demand launch sequences:
 
 - app to `models_loaded`: n=20, avg 17.478s, p50 19.836s, p90 21.956s, max 27.200s
 - app to meeting ready: n=20, avg 17.682s, p50 19.985s, p90 22.128s, max 27.752s
 - many launch events were skipped because repeated local/dev launches overlapped before a matching model-ready event.
-- performance-budget parser, using app launch to next model-ready before the next launch: n=31, p90 27.200s.
-- latest signed launch with lazy meeting warmup: RSS 153,600 KB, CPU 0.0%, meeting models left on demand.
+- performance-budget parser, using app launch to next model-ready before the next launch: n=31, p90 27.200s. This remains useful as a regression view for older/eager launches, but the default current launch no longer waits for model readiness.
+- latest signed launch with lazy dictation and meeting warmup: launch context `stt_model_loaded=false`; status event `Dictation and meetings load when started`; no following `models_loaded` event.
 
 ### Local Stats Database
 
@@ -431,12 +462,9 @@ This is the clearest "not lightweight" area. The app needs a cleanup surface and
 
 ### Startup
 
-`TranscriptedAppState.startRuntimeReadinessIfNeeded()` starts model readiness at launch:
+The default launch path now keeps both voice and meeting models out of memory. `TranscriptedAppState.startRuntimeReadinessIfNeeded()` still exists, but it is reached only from explicit work such as dictation/import/meeting use, model preference changes, wake recovery for an already loaded model, or `TRANSCRIPTED_EAGER_MODEL_WARMUP=1`.
 
-- `sttRouter.initializeSelectedModel()`
-- `meetingSession.prepareModels(showLoadingUI: false)`
-
-This keeps first dictation and meetings ready, but it creates the 17 to 22 second readiness window. The UI may still appear before that, but the app is not truly ready until the model load completes.
+This trades a slower first dictation after a cold launch for a much lighter default app launch. The UI now says the models are on demand instead of showing fake startup progress.
 
 ### Dictation
 
@@ -478,9 +506,8 @@ These are the next improvements I would execute in order.
    - Raise dictation start responsiveness to A+/98 only if the log proves it.
 
 2. **Launch readiness policy**
-   - Meeting models are now honestly lazy and the app says so.
-   - The remaining decision is dictation: keep eager warmup for first-use speed, or make dictation explicitly on demand for the lightest launch.
-   - A+ gate: selected dictation model ready under 10s, or a clear on-demand dictation startup path.
+   - Done in loop 13.
+   - Dictation and meeting models now stay on demand by default, with explicit UI/status copy and an eager-warmup env escape hatch for diagnostics.
 
 3. **Distribution strategy**
    - The bundled model is the reason the app is 550 MB expanded.
@@ -508,4 +535,4 @@ The best next work is not micro-optimizing Swift code. It is:
 - expose and then clean local model caches,
 - make a clear product call on bundled vs. downloaded models.
 
-The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, and meeting model warmup is lazy with explicit copy. Dictation model readiness and distribution strategy still keep the overall score below A+.
+The first three are done, safe Parakeet plus Whisper cache cleanup is in place, release builds now run a performance budget before packaging, and dictation plus meeting model loading is now lazy with explicit copy. Distribution strategy, first-use dictation proof, and live meeting/UI profiling still keep the overall score below A+.

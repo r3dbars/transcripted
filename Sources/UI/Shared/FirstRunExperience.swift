@@ -286,10 +286,10 @@ enum FirstRunExperience {
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(
-                title: "Getting \(model.title) ready",
-                detail: "Transcripted uses \(model.title), an on-device voice model, and starts it the first time you use it.",
-                status: "Starting",
-                progress: 0.06,
+                title: "\(model.title) starts on first use",
+                detail: "Transcripted keeps the local voice model out of memory until you start dictation, a meeting, or an import.",
+                status: "On demand",
+                progress: nil,
                 tone: .working
             )
         case .downloading(let progress):

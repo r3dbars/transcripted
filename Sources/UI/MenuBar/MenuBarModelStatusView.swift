@@ -105,8 +105,8 @@ final class MenuBarModelStatusView: NSControl {
             toolTip = "Finishing local model setup. Click to open settings."
         case .notLoaded:
             statusDot.layer?.backgroundColor = MenuTokens.textMutedNS.cgColor
-            label.stringValue = "Parakeet TDT V3 · Not loaded"
-            toolTip = "Parakeet TDT V3 has not started yet. Click to open settings."
+            label.stringValue = "Parakeet TDT V3 · On demand"
+            toolTip = "Parakeet TDT V3 starts the first time you use dictation, meetings, or import. Click to open settings."
         case .failed:
             statusDot.layer?.backgroundColor = MenuTokens.statusOrangeNS.cgColor
             label.stringValue = "Parakeet TDT V3 · Tap to retry"

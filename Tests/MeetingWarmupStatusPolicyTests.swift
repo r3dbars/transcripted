@@ -50,6 +50,20 @@ func testMeetingWarmupStatusPolicy() {
         assertEqual(status.meetingsStatus, "On demand", "meeting status should show the lazy model policy")
     }
 
+    runSuite("MeetingWarmupStatusPolicy.status — explains lazy dictation loading") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .notLoaded,
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status.title, "Transcripted is ready", "lazy default launch should not look like stuck startup work")
+        assertEqual(status.subtitle, "Dictation and meetings load when started", "lazy model loading should be explicit")
+        assertEqual(status.dictationStatus, "On demand", "dictation status should show the lazy model policy")
+        assertEqual(status.meetingsStatus, "On demand", "meeting status should show the lazy model policy")
+    }
+
     runSuite("MeetingWarmupStatusPolicy.status — dictation failures still take priority") {
         let status = MeetingWarmupStatusPolicy.status(
             dictationState: .failed("Model load failed"),

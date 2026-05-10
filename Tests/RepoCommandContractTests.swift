@@ -172,9 +172,14 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - launch warmup stays dictation-only") {
+    runSuite("Repo command contract - launch warmup stays on demand") {
         let contents = readRepoTextFile("Sources/TranscriptedAppState.swift")
         guard
+            let initializeStart = contents.range(of: "func initialize() async"),
+            let wakeRecoveryStart = contents.range(
+                of: "// MARK: - Wake Recovery",
+                range: initializeStart.upperBound..<contents.endIndex
+            ),
             let warmupStart = contents.range(of: "private func startRuntimeReadinessIfNeeded()"),
             let nextFunction = contents.range(
                 of: "private func startAudioStorageMaintenanceIfNeeded()",
@@ -185,10 +190,24 @@ func testRepoCommandContract() {
             return
         }
 
+        let initializeBlock = String(contents[initializeStart.lowerBound..<wakeRecoveryStart.lowerBound])
+        assertTrue(
+            initializeBlock.contains("if eagerModelWarmupEnabled"),
+            "launch voice-model warmup should be behind an explicit opt-in"
+        )
+        assertTrue(
+            initializeBlock.contains("startRuntimeReadinessIfNeeded()"),
+            "the explicit eager-warmup path should still reuse runtime readiness"
+        )
+        assertTrue(
+            contents.contains("TRANSCRIPTED_EAGER_MODEL_WARMUP"),
+            "eager voice-model warmup should stay an explicit opt-in for testing or diagnostics"
+        )
+
         let warmupBlock = String(contents[warmupStart.lowerBound..<nextFunction.lowerBound])
         assertTrue(
             warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
-            "launch readiness should keep warming the selected dictation model"
+            "on-demand readiness should load the selected dictation model when requested"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),

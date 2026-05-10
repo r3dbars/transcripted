@@ -25,6 +25,15 @@ struct MeetingWarmupStatus: Equatable {
         dictationStatus: "Ready",
         meetingsStatus: "On demand"
     )
+
+    static let modelsOnDemand = MeetingWarmupStatus(
+        title: "Transcripted is ready",
+        subtitle: "Dictation and meetings load when started",
+        detail: "Transcripted keeps local voice models out of memory until you use them.",
+        progress: 1.0,
+        dictationStatus: "On demand",
+        meetingsStatus: "On demand"
+    )
 }
 
 enum MeetingWarmupDictationState: Equatable {
@@ -88,14 +97,7 @@ enum MeetingWarmupStatusPolicy {
                 shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure
             )
         case .notLoaded:
-            return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Starting local dictation",
-                detail: "Transcripted is waking up the on-device dictation model.",
-                progress: 0.05,
-                dictationStatus: "Starting",
-                meetingsStatus: "Waiting"
-            )
+            return .modelsOnDemand
         }
     }
 

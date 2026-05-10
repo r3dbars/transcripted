@@ -231,6 +231,17 @@ func testFirstRunExperience() {
         assertTrue(card.title.contains("Parakeet TDT V3"), "ready card should tell the user which model is running")
     }
 
+    runSuite("FirstRunExperience.modelCard — explains on-demand model loading") {
+        let card = FirstRunExperience.modelCard(for: .notLoaded)
+
+        assertEqual(card.status, "On demand", "not-loaded model state should be presented as intentional lazy loading")
+        assertTrue(
+            card.detail.contains("out of memory"),
+            "not-loaded model detail should explain the lightweight launch behavior"
+        )
+        assertNil(card.progress, "on-demand model state should not show fake startup progress")
+    }
+
     runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {
         let card = FirstRunExperience.modelCard(
             for: .downloading(progress: 0.25),

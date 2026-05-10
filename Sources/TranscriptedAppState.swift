@@ -25,6 +25,8 @@ class TranscriptedAppState: ObservableObject {
     private var runtimeReadinessTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
+    private let eagerModelWarmupEnabled =
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
@@ -76,8 +78,9 @@ class TranscriptedAppState: ObservableObject {
         }
         AppSoundPlayer.shared.preload()
 
-        // Kick off shared runtime prep once; wake recovery can await or reuse it.
-        startRuntimeReadinessIfNeeded()
+        if eagerModelWarmupEnabled {
+            startRuntimeReadinessIfNeeded()
+        }
         startAudioStorageMaintenanceIfNeeded()
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
@@ -165,9 +168,9 @@ class TranscriptedAppState: ObservableObject {
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
-            // Loading models at launch keeps first-use latency down without
-            // touching AVAudioEngine input nodes on the main thread. Sentry app
-            // hang reports showed launch-time prewarm blocking inside CoreAudio.
+            // Keep default launch lightweight. Dictation, imports, model
+            // preference changes, and the optional eager-warmup env flag load
+            // the selected model only when that work is actually needed.
             guard !Task.isCancelled else { return }
             await self.sttRouter.initializeSelectedModel()
             // Keep heavier meeting diarization lazy. Meeting start/import paths
@@ -186,6 +189,11 @@ class TranscriptedAppState: ObservableObject {
     }
 
     private func waitForRuntimeReadiness() async {
+        guard eagerModelWarmupEnabled || sttRouter.isModelLoaded else {
+            logger.log("WAKE | skipping voice-model readiness wait until first use")
+            return
+        }
+
         startRuntimeReadinessIfNeeded()
         guard let runtimeReadinessTask else { return }
 
