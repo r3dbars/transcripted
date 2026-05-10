@@ -188,6 +188,8 @@ struct AgentConnectionWindowView: View {
                     viewModel.copyStarterPrompt()
                 }
                 .buttonStyle(AgentConnectionPrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .accessibilityLabel("Copy starter prompt to clipboard")
             }
         }
     }
