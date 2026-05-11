@@ -1974,6 +1974,8 @@ struct TranscriptedSettingsView: View {
         switch FirstRunLocalModelState(sttRouter.modelDownloadState) {
         case .notLoaded:
             return "Download Now"
+        case .cached:
+            return "Load Now"
         case .failed:
             return "Retry Download"
         case .downloading, .loading, .ready:

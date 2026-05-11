@@ -277,6 +277,14 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation joins existing model downloads") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            contents.contains("case .notLoaded, .downloading, .cached, .failed:"),
+            "dictation start should join an in-progress model file prefetch instead of waiting forever for ready"
+        )
+    }
+
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
         let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
         assertTrue(

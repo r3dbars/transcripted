@@ -39,6 +39,7 @@ struct MeetingWarmupStatus: Equatable {
 enum MeetingWarmupDictationState: Equatable {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -80,6 +81,15 @@ enum MeetingWarmupStatusPolicy {
                 progress: 0.68,
                 dictationStatus: "Loading",
                 meetingsStatus: "Waiting"
+            )
+        case .cached:
+            return MeetingWarmupStatus(
+                title: "Dictation model cached",
+                subtitle: "Dictation loads when started",
+                detail: "The local voice model files are saved outside app updates. Transcripted will load them into memory on first use.",
+                progress: 1.0,
+                dictationStatus: "Cached",
+                meetingsStatus: "On demand"
             )
         case .failed(let message):
             return MeetingWarmupStatus(

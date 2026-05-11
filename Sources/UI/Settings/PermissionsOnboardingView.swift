@@ -13,6 +13,8 @@ extension FirstRunLocalModelState {
             self = .notLoaded
         case .downloading(let progress):
             self = .downloading(progress: progress)
+        case .cached:
+            self = .cached
         case .loading:
             self = .loading
         case .ready:

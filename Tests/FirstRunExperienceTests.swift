@@ -259,6 +259,17 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.modelCard — distinguishes cached files from loaded model") {
+        let card = FirstRunExperience.modelCard(for: .cached)
+
+        assertEqual(card.status, "Cached", "cached model card should not look like a missing download")
+        assertTrue(
+            card.detail.contains("load them into memory"),
+            "cached model copy should explain that dictation still loads the files on first use"
+        )
+        assertNil(card.progress, "cached files should not show fake download progress")
+    }
+
     runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {
         let card = FirstRunExperience.modelCard(
             for: .downloading(progress: 0.25),

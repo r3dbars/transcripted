@@ -322,6 +322,7 @@ private actor StreamingEouAsrManager {
 enum ParakeetModelState {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -411,6 +412,7 @@ class ParakeetEngine: ObservableObject {
     // FluidAudio ASR
     private var asrManager: AsrManager?
     private var modelFilePrefetchTask: Task<URL, Error>?
+    private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
@@ -517,6 +519,7 @@ class ParakeetEngine: ObservableObject {
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
                 message: "initialize() called but ASR manager already exists — ignoring")
+            modelDownloadState = .ready
             return
         }
 
@@ -525,7 +528,7 @@ class ParakeetEngine: ObservableObject {
             guard modelFilePrefetchTask != nil else { return }
         case .loading:
             return
-        case .notLoaded, .ready, .failed:
+        case .notLoaded, .cached, .ready, .failed:
             break
         }
 
@@ -576,9 +579,13 @@ class ParakeetEngine: ObservableObject {
                 let downloadedPath: URL
                 if let modelFilePrefetchTask {
                     downloadedPath = try await modelFilePrefetchTask.value
+                    prefetchedModelPath = downloadedPath
                     self.modelFilePrefetchTask = nil
+                } else if let prefetchedModelPath {
+                    downloadedPath = prefetchedModelPath
                 } else {
                     downloadedPath = try await AsrModels.download(version: .v3)
+                    prefetchedModelPath = downloadedPath
                 }
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 modelDownloadState = .loading
@@ -610,6 +617,8 @@ class ParakeetEngine: ObservableObject {
 
         } catch {
             guard !Task.isCancelled, !isShuttingDown else { return }
+            modelFilePrefetchTask = nil
+            prefetchedModelPath = nil
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -636,7 +645,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         switch modelDownloadState {
-        case .downloading, .loading, .ready:
+        case .downloading, .cached, .loading, .ready:
             return
         case .notLoaded, .failed:
             break
@@ -654,11 +663,10 @@ class ParakeetEngine: ObservableObject {
         }
 
         do {
-            _ = try await task.value
+            let downloadedPath = try await task.value
             guard !Task.isCancelled, !isShuttingDown else { return }
-            if case .downloading = modelDownloadState {
-                modelDownloadState = .notLoaded
-            }
+            prefetchedModelPath = downloadedPath
+            modelDownloadState = .cached
             if modelFilePrefetchTask != nil {
                 modelFilePrefetchTask = nil
             }

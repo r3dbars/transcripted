@@ -3,6 +3,7 @@ import Foundation
 enum FirstRunLocalModelState: Equatable {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -253,7 +254,7 @@ enum FirstRunExperience {
                 detail = "Start with a short dictation. Transcripted will paste it back into the app you were just using."
             case .failed:
                 detail = "Start again to retry the local voice model. Transcripted will begin listening as soon as it's ready."
-            case .notLoaded, .downloading, .loading:
+            case .notLoaded, .downloading, .cached, .loading:
                 detail = "Start now. Transcripted will begin listening as soon as the local voice model finishes getting ready."
             }
 
@@ -273,6 +274,8 @@ enum FirstRunExperience {
             detail = "Setup is done, but the local voice model needs another try. Start Dictation from the menu to retry it."
         case .notLoaded, .downloading, .loading:
             detail = "Setup is done. Transcripted is still getting the local voice model ready in the background. When it's ready, click back into any text field and use Dictation from the menu."
+        case .cached:
+            detail = "Setup is done. The local voice model files are cached; dictation will load them into memory when you start."
         }
 
         return FirstRunPrimaryActionState(
@@ -303,6 +306,14 @@ enum FirstRunExperience {
                 status: progress > 0 ? "\(Int(progress * 100))% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
+            )
+        case .cached:
+            return FirstRunModelCardState(
+                title: "\(model.title) cached on device",
+                detail: "The model files are saved outside app updates. Transcripted will load them into memory when dictation, a meeting, or an import starts.",
+                status: "Cached",
+                progress: nil,
+                tone: .ready
             )
         case .loading:
             return FirstRunModelCardState(
@@ -342,6 +353,8 @@ enum FirstRunExperience {
             subtitle = "Starts local voice setup on first use"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
+        case .cached:
+            subtitle = "Cached; loads when started"
         case .loading:
             subtitle = "Finishing local voice setup"
         }

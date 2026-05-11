@@ -83,6 +83,21 @@ func testMeetingWarmupStatusPolicy() {
         )
     }
 
+    runSuite("MeetingWarmupStatusPolicy.status — shows cached dictation files without fake readiness") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .cached,
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status.dictationStatus, "Cached", "cached dictation files should have their own status")
+        assertTrue(
+            status.detail.contains("load them into memory on first use"),
+            "cached copy should not claim the speech model is already loaded"
+        )
+    }
+
     runSuite("MeetingWarmupStatusPolicy.status — dictation failures still take priority") {
         let status = MeetingWarmupStatusPolicy.status(
             dictationState: .failed("Model load failed"),

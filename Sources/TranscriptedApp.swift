@@ -454,6 +454,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             modelState = "not_loaded"
         case .downloading:
             modelState = "downloading"
+        case .cached:
+            modelState = "cached"
         case .loading:
             modelState = "loading"
         case .ready:

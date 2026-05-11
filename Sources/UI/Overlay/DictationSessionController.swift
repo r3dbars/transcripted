@@ -949,9 +949,9 @@ class DictationSessionController: ObservableObject {
             guard let self else { return }
 
             switch appState.sttRouter.modelDownloadState {
-            case .notLoaded, .failed:
+            case .notLoaded, .downloading, .cached, .failed:
                 await appState.sttRouter.initializeSelectedModel()
-            case .downloading, .loading, .ready:
+            case .loading, .ready:
                 break
             }
 
@@ -1042,6 +1042,13 @@ class DictationSessionController: ObservableObject {
                 detail: "Transcripted is downloading the on-device voice model needed for local dictation.",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 status: "\(Int(progress * 100))% complete"
+            )
+        case .cached:
+            return .init(
+                title: "Loading dictation",
+                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                progress: 0.88,
+                status: "Loading cached model"
             )
         case .loading:
             return .init(

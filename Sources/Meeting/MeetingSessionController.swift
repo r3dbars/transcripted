@@ -1733,6 +1733,8 @@ private extension MeetingWarmupDictationState {
             self = .notLoaded
         case .downloading(let progress):
             self = .downloading(progress: progress)
+        case .cached:
+            self = .cached
         case .loading:
             self = .loading
         case .ready:
@@ -1763,6 +1765,7 @@ private extension ParakeetModelState {
         switch self {
         case .notLoaded: return "not_loaded"
         case .downloading: return "downloading"
+        case .cached: return "cached"
         case .loading: return "loading"
         case .ready: return "ready"
         case .failed: return "failed"
