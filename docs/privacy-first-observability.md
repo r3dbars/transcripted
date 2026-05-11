@@ -72,22 +72,63 @@ transport.
 
 ## Allowlisted analytics events
 
+This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
+
 - `app_launched`
+- `app_unclean_shutdown_detected`
+- `app_session_stall_detected`
+- `support_diagnostics_copied`
+- `support_diagnostic_event_sent`
+- `onboarding_shown`
+- `onboarding_step_viewed`
+- `onboarding_permission_cta_clicked`
+- `onboarding_permission_status_changed`
+- `onboarding_model_state_changed`
+- `onboarding_primary_cta_clicked`
+- `onboarding_first_dictation_started`
+- `onboarding_first_dictation_saved`
+- `onboarding_first_dictation_stop_clicked`
+- `onboarding_first_dictation_empty`
+- `onboarding_meeting_dry_run_clicked`
+- `onboarding_agent_cta_clicked`
+- `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
+- `onboarding_dismissed`
+- `menu_bar_opened`
+- `menu_bar_action_clicked`
+- `update_action_clicked`
+- `update_setting_changed`
+- `update_check_finished`
+- `update_download_started`
+- `update_download_finished`
+- `update_ready_to_install`
+- `update_relaunching`
+- `settings_opened`
+- `settings_page_viewed`
+- `settings_action_clicked`
+- `settings_toggle_changed`
+- `settings_permission_cta_clicked`
+- `settings_capture_library_changed`
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
 - `dictation_cancelled`
 - `dictation_no_speech`
+- `dictation_audio_route_changed`
+- `dictation_audio_route_recovery_finished`
+- `dictation_audio_route_recovery_timeout`
+- `meeting_recording_started`
+- `meeting_recording_start_failed`
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
-- `meeting_recording_started`
 - `meeting_recording_stopped`
+- `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
+- `meeting_transcript_skipped`
 
 ## Allowed property style
 

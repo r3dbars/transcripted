@@ -1,6 +1,19 @@
 import Foundation
 
 func testAnalyticsEventPolicy() {
+    runSuite("AnalyticsEventPolicy docs list matches the source allowlist") {
+        let documentedEvents = documentedAnalyticsEvents().sorted()
+        let policyEvents = sourceAnalyticsPolicyEvents().sorted()
+
+        assertFalse(documentedEvents.isEmpty, "privacy observability doc should list analytics events")
+        assertFalse(policyEvents.isEmpty, "analytics event policy source should expose parseable policy events")
+        assertEqual(
+            documentedEvents,
+            policyEvents,
+            "docs/privacy-first-observability.md should list the same analytics events as AnalyticsEventPolicy.swift"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
         let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")
@@ -359,5 +372,76 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
+    }
+}
+
+private func documentedAnalyticsEvents() -> [String] {
+    let text = loadRepoText("docs/privacy-first-observability.md")
+    let section = markdownSection(
+        named: "## Allowlisted analytics events",
+        in: text
+    )
+
+    return section.split(separator: "\n").compactMap { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("- `"), trimmed.hasSuffix("`") else {
+            return nil
+        }
+
+        return String(trimmed.dropFirst(3).dropLast())
+    }
+}
+
+private func sourceAnalyticsPolicyEvents() -> [String] {
+    let text = loadRepoText("Sources/Observability/AnalyticsEventPolicy.swift")
+    guard let start = text.range(of: "private static let allowedPolicies: [String: AnalyticsEventPolicy] = [") else {
+        return []
+    }
+
+    let sourceAfterStart = String(text[start.upperBound...])
+    guard let end = sourceAfterStart.range(of: "\n    ]") else {
+        return []
+    }
+
+    let policyBody = String(sourceAfterStart[..<end.lowerBound])
+    return policyBody.split(separator: "\n").compactMap { line in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("\""), trimmed.contains("\": .init(") else {
+            return nil
+        }
+
+        let withoutLeadingQuote = trimmed.dropFirst()
+        guard let closingQuote = withoutLeadingQuote.firstIndex(of: "\"") else {
+            return nil
+        }
+
+        return String(withoutLeadingQuote[..<closingQuote])
+    }
+}
+
+private func markdownSection(named heading: String, in text: String) -> String {
+    guard let start = text.range(of: heading) else {
+        return ""
+    }
+
+    let sourceAfterHeading = String(text[start.upperBound...])
+    guard let end = sourceAfterHeading.range(of: "\n## ") else {
+        return sourceAfterHeading
+    }
+
+    return String(sourceAfterHeading[..<end.lowerBound])
+}
+
+private func loadRepoText(_ relativePath: String, file: String = #file, line: Int = #line) -> String {
+    let url = repoFixtureURL(relativePath)
+
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        failedTests += 1
+        totalTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not load \(relativePath): \(error)")
+        return ""
     }
 }
