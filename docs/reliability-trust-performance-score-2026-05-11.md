@@ -53,6 +53,7 @@ Patch made:
 
 - Sentry observability events now add safe diagnostic tags for allowlisted events.
 - Future timeout/stall events will be searchable by coarse fields like `format_ready`, `recovering`, `start_attempts`, `readiness_refreshes`, `recovery_start_attempts`, `forced_readiness_recoveries`, `input_device_class`, `route_shape`, `trigger`, and bucketed wait time.
+- The dictation timeout path now attaches the same coarse route/retry shape to the paired runtime-stall event, so Sentry can connect the two symptoms without raw device names or transcript/audio content.
 - Raw device names, transcript text, audio paths, secrets, URLs, and similar sensitive values stay out of Sentry tags.
 
 ## Trustworthiness - 36/40
@@ -115,4 +116,3 @@ bash run-daily-audio-reliability.sh --synthetic --skip-build --no-launch
 3. Provide `POSTHOG_PERSONAL_API_KEY` and rerun product-success scoring.
 4. Run the live daily audio reliability matrix, especially Bluetooth/input-device change and sleep/wake.
 5. Triage issue #500 with fresh retained-audio diagnostics and close or downgrade it with proof.
-
