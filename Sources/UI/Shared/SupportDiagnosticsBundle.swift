@@ -117,8 +117,9 @@ enum SupportDiagnosticsBundle {
     }
 
     private static func render(_ values: [String: String]) -> String {
-        guard !values.isEmpty else { return "Unavailable" }
-        return values
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay(values)
+        guard !sanitized.isEmpty else { return "Unavailable" }
+        return sanitized
             .sorted { $0.key < $1.key }
             .map { "\($0.key): \($0.value)" }
             .joined(separator: "\n")
