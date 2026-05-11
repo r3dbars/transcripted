@@ -7,7 +7,7 @@ Goal: raise every category toward A+/100 with measured fixes, not cosmetic scori
 
 ## Executive Score
 
-Current implementation score after twenty-five audit/fix loops: **100/100, A+**
+Current implementation score after twenty-six audit/fix loops: **100/100, A+**
 
 Transcripted is very fast once the local model is warm. The strongest proof is dictation transcription: 59 local `transcription_complete` events averaged **0.164s** of processing for **21.956s** of audio, with p50 **0.118s**, p90 **0.300s**, and p95 **0.316s**.
 
@@ -19,7 +19,7 @@ The current branch now meets the A+ implementation target across the runtime, bu
 | --- | ---: | ---: | --- | --- |
 | Warm dictation transcription latency | A+ | 99 | `transcription_complete` p50 0.118s, p90 0.300s, avg RTF 0.013 | Keep p95 under 0.500s and p95 RTF under 0.050 on local logs |
 | Dictation start responsiveness | A+ | 98 | Live UI-triggered dictation emitted `dictation_recording_fast_start` at 112 ms, then `audio_samples_detected`; strict event budget passed with 1 fast-start sample and 0 fallback/retry events | Keep ready-engine start p95 under 250 ms with no fallback/retry events after the first fast-start sample |
-| App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false` and "Dictation and meetings load when started" with no follow-on `models_loaded` event | Keep first-use loading explicit and preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch |
+| App launch and model readiness | A+ | 98 | Dictation and meeting models now stay on demand by default; latest smoke launch reported `stt_model_loaded=false`; existing installs now get delayed Parakeet file prefetch so the thin update is quiet for current users without keeping the full speech model loaded while idle | Keep first-use loading explicit for new users, preserve the `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` diagnostic escape hatch, and keep existing-user prefetch delayed/off the launch path |
 | Idle CPU | A+ | 99 | Latest signed thin build idled at 0.0% CPU after 15s with no duplicate Transcripted processes | Stay below 1% CPU idle after warmup |
 | Idle memory | A+ | 99 | Latest signed thin build idled at 81,248 KB RSS after 15s, then exited cleanly after proof cleanup | Single process under 250 MB warm idle, no duplicate resident copies |
 | Bundle and download size | A+ | 98 | Default local and beta builds now produce the 104.7 MiB thin app with 1.9 MiB resources; explicit full/offline build remains available | Keep default/beta builds under 150 MB and cut the next public release from the thin default |
@@ -29,7 +29,7 @@ The current branch now meets the A+ implementation target across the runtime, bu
 | UI/rendering perceived lightness | A+ | 97 | Settings navigation proof across 11 pages averaged 2.58% CPU, peaked at 14.5%, and stayed at 135 MB RSS; Settings idle averaged 0.36% CPU; waveform timer is bounded at 30 fps | Keep Settings navigation under 20% peak CPU, under 200 MB RSS, and keep overlay timers bounded |
 | Observability overhead | A+ | 98 | Info-level JSONL events now batch up to 8 records or 500 ms; warning/error events still flush immediately; privacy/event budgets remain tested | Keep error diagnostics immediate and measure event-write overhead if high-volume telemetry grows |
 | Build and dev loop speed | A+ | 98 | Threaded whole-module Swift compilation dropped the full signed `bash build.sh --no-open` loop from 69.12s to 29.72s while preserving signing, launch smoke, and the performance budget | Keep strict signed local build under 60s on this machine |
-| Performance regression guardrails | A+ | 99 | 1599 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
+| Performance regression guardrails | A+ | 99 | 1621 tests pass; `build.sh` and `build-beta.sh` now run `scripts/ops/performance-budget.rb`; optional `--events` checks dictation latency and optional `--stats` checks meeting throughput | Add remote CI if/when the repo gets workflow automation; keep fresh release-candidate event/stats fixtures |
 | Process hygiene / single-instance behavior | A+ | 98 | Cleaned 8 stale temp/worktree Transcripted build processes; latest signed build stayed at one PID after a duplicate launch attempt | Keep one effective Transcripted process per user session and avoid leaving test builds running |
 
 ## Fixes Applied In This Pass
@@ -672,11 +672,48 @@ Measured proof:
 - The faster build still signed with Developer ID, verified the signature, ran launch smoke, ran the performance budget, and left no app process running.
 - `bash run-tests.sh --filter RepoCommandContractTests`: fast-test runner compiled and ran the full manifest; `1599 tests, 1599 passed, 0 failed`.
 
+### 26. Made the thin update quieter for existing users
+
+Files:
+
+- `Sources/Support/ExistingInstallModelPrefetchPolicy.swift`
+- `Sources/TranscriptedAppState.swift`
+- `Sources/Speech/STTRouter.swift`
+- `Sources/Speech/ParakeetEngine.swift`
+- `Tests/ExistingInstallModelPrefetchPolicyTests.swift`
+
+Why:
+
+- The thin app keeps normal updates around app size instead of shipping the ~600 MB Parakeet model every time.
+- Existing users who only had the old bundled model could otherwise hit the first model download right when they tried to dictate after updating.
+- The fix needed to protect current users without making brand-new installs heavier or reintroducing launch-time model loading.
+
+Change made:
+
+- Added an existing-install detector based on completed onboarding, saved capture-library content, or an explicit launch-at-login preference.
+- For existing Parakeet users only, the app schedules delayed background model-file prefetch after launch.
+- Brand-new installs remain explicitly on-demand.
+- Users who selected Whisper do not get Parakeet downloaded behind their model choice.
+- Active downloads/loads and already-ready models are not duplicated.
+- The prefetch task is cancelled during shutdown and delayed so it stays out of the main launch path.
+- The background path caches files only; it does not keep the full speech model loaded in idle memory.
+
+Expected user experience:
+
+- Existing users update to the thin app and keep using Transcripted normally.
+- If Parakeet is already cached, the app does no extra download.
+- If Parakeet is not cached, the app starts caching it shortly after launch instead of waiting until the first dictation attempt.
+- If the user reaches dictation first, the visible download/progress/retry UI from the Models page still handles it.
+
+Measured proof:
+
+- `bash run-tests.sh --filter ExistingInstallModelPrefetchPolicyTests`: fast-test runner compiled and ran the full manifest; `1621 tests, 1621 passed, 0 failed`.
+
 ## Evidence
 
 ### Build And Verification
 
-- `bash run-tests.sh`: **1599 tests, 1599 passed, 0 failed**.
+- `bash run-tests.sh --filter ExistingInstallModelPrefetchPolicyTests`: **1621 tests, 1621 passed, 0 failed**.
 - `bash build.sh`: signed build passed, launch smoke passed, performance budget passed.
 - `bash build.sh --no-open`: default thin signed build passed, launch smoke passed, performance budget passed, no app left running.
 - `bash build.sh --thin --no-open`: signed thin build passed, launch smoke passed, performance budget passed, no app left running.
@@ -830,8 +867,9 @@ Every implementation category in this report is now A+. These are the follow-up 
    - Keep this strict gate in release-candidate checks so the category stays A+.
 
 2. **Launch readiness policy**
-   - Done in loop 13.
+   - Done in loop 13, with existing-user thin-update protection added in loop 26.
    - Dictation and meeting models now stay on demand by default, with explicit UI/status copy and an eager-warmup env escape hatch for diagnostics.
+   - Existing Parakeet installs get delayed background model-file prefetch so the first thin update is quieter without blocking launch or keeping the speech model loaded while idle.
 
 3. **Distribution strategy**
    - Done for the branch in loop 17, reproved in loop 25.
@@ -890,4 +928,4 @@ The best next work is not more micro-optimizing. It is:
 - expose and then clean local model caches,
 - ship the thin/download build so public users get the same footprint this branch now proves.
 
-The implementation work is done for this pass: safe one-step Parakeet plus Whisper cache cleanup is in place and proved on this Mac, release builds run a performance budget before packaging, dictation plus meeting model loading is lazy, the thin build path is the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, single-instance behavior is reproved, clean idle CPU/memory are A+, live dictation fast-start is A+, live meeting capture is A+, Settings UI profiling is A+, local cache hygiene is A+, and the strict signed build loop is A+ at 29.72s. The public release still needs a separate thin-release rollout before customers see the smaller DMG.
+The implementation work is done for this pass: safe one-step Parakeet plus Whisper cache cleanup is in place and proved on this Mac, release builds run a performance budget before packaging, dictation plus meeting model loading is lazy, existing Parakeet installs get delayed background file prefetch after the thin update, the thin build path is the default, passive Settings dashboard refreshes are coalesced, low-priority local event writes are batched, single-instance behavior is reproved, clean idle CPU/memory are A+, live dictation fast-start is A+, live meeting capture is A+, Settings UI profiling is A+, local cache hygiene is A+, and the strict signed build loop is A+ at 29.72s. The public release still needs a separate thin-release rollout before customers see the smaller DMG.
