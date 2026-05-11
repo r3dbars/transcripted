@@ -5,6 +5,7 @@ final class RuntimeDiagnostics {
     private let markerURL: URL
     private var marker: RuntimeDiagnosticsMarker?
     private var heartbeatTimer: Timer?
+    private var activeWorkProvider: (() -> Bool)?
     private let isDisabled: Bool
 
     init(
@@ -54,6 +55,10 @@ final class RuntimeDiagnostics {
         )
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+    }
+
+    func setActiveWorkProvider(_ provider: (() -> Bool)?) {
+        activeWorkProvider = provider
     }
 
     func recordSession(kind: String, stage: String, active: Bool = true) {
