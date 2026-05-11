@@ -236,7 +236,7 @@ enum ModelCacheInventory {
         let whisperKitDirectory = cacheRoot
             .appendingPathComponent("whisperkit", isDirectory: true)
             .standardizedFileURL
-        let checkedDirectories = [whisperKitDirectory, directory]
+        let checkedDirectories = [cacheRoot, whisperKitDirectory, directory]
 
         for url in checkedDirectories {
             if isSymbolicLink(at: url, fileManager: fileManager) {

@@ -191,6 +191,32 @@ func testModelCacheInventory() {
         assertTrue(FileManager.default.fileExists(atPath: outsideModelFile.path), "symlink targets outside the app cache must stay untouched")
         assertTrue(FileManager.default.fileExists(atPath: cacheWhisperKit.path), "cleanup should not remove the symlink escape")
     }
+
+    runSuite("ModelCacheInventory cleanup refuses symlinked cache roots") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let cacheLink = root.appendingPathComponent("cache", isDirectory: true)
+        let outsideCache = root.appendingPathComponent("outside-cache", isDirectory: true)
+        let outsideModelFile = outsideCache
+            .appendingPathComponent("whisperkit/models/openai_whisper-large-v3-v20240930_626MB/model.bin")
+        let symlinkedWhisperModels = cacheLink.appendingPathComponent("whisperkit/models", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(outsideModelFile, bytes: 31)
+        try? FileManager.default.createSymbolicLink(
+            at: cacheLink,
+            withDestinationURL: outsideCache
+        )
+
+        let result = try? ModelCacheInventory.removeWhisperModels(
+            transcriptedCacheDirectory: cacheLink,
+            whisperModelsDirectory: symlinkedWhisperModels
+        )
+
+        assertEqual(result?.removedBytes, 0, "cleanup should refuse a symlinked Transcripted cache root")
+        assertTrue(FileManager.default.fileExists(atPath: outsideModelFile.path), "symlinked cache targets outside the app cache must stay untouched")
+        assertTrue(FileManager.default.fileExists(atPath: cacheLink.path), "cleanup should not remove the cache-root symlink")
+    }
 }
 
 private func writeTestFile(_ url: URL, bytes: Int) {
