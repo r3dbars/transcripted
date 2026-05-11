@@ -456,11 +456,16 @@ struct StorageRow: View {
 }
 
 struct HotkeyRecorderContainer: NSViewRepresentable {
+    var dictationShortcutsEnabled = true
+
     func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
-        HotkeyRecorderAppKitView(frame: .zero)
+        let view = HotkeyRecorderAppKitView(frame: .zero)
+        view.dictationShortcutsEnabled = dictationShortcutsEnabled
+        return view
     }
 
     func updateNSView(_ nsView: HotkeyRecorderAppKitView, context: Context) {
+        nsView.dictationShortcutsEnabled = dictationShortcutsEnabled
         nsView.refreshDisplay()
     }
 }

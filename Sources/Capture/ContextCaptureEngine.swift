@@ -492,6 +492,10 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private static func currentDictationShortcutDisplay() -> String {
+        guard HotkeyPreferences.dictationShortcutsEnabled() else {
+            return "Off"
+        }
+
         let pushToTalk = PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
@@ -519,20 +523,32 @@ class ContextCaptureEngine: ObservableObject {
 
     private func configurePhysicalShortcutDetector() {
         physicalShortcutDetector.bindingProvider = {
-            [
-                PhysicalShortcutBinding(
-                    action: .dictationPushToTalk,
-                    binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-                ),
-                PhysicalShortcutBinding(
-                    action: .dictationHandsFree,
-                    binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
-                ),
+            var bindings = [
                 PhysicalShortcutBinding(
                     action: .meeting,
                     binding: PhysicalDictationTriggerPreferences.meetingBinding()
                 )
             ]
+
+            guard HotkeyPreferences.dictationShortcutsEnabled() else {
+                return bindings
+            }
+
+            bindings.insert(
+                PhysicalShortcutBinding(
+                    action: .dictationPushToTalk,
+                    binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
+                ),
+                at: 0
+            )
+            bindings.insert(
+                PhysicalShortcutBinding(
+                    action: .dictationHandsFree,
+                    binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
+                ),
+                at: 1
+            )
+            return bindings
         }
         physicalShortcutDetector.onShortcut = { [weak self] action, phase in
             Task { @MainActor [weak self] in
@@ -548,8 +564,7 @@ class ContextCaptureEngine: ObservableObject {
                 event: "physical_shortcut_trigger_failed",
                 message: physicalTriggerError,
                 context: [
-                    "push_to_talk": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding()),
-                    "hands_free": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.handsFreeBinding()),
+                    "dictation_shortcuts_enabled": HotkeyPreferences.dictationShortcutsEnabled() ? "true" : "false",
                     "meeting": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding())
                 ]
             )
@@ -561,9 +576,11 @@ class ContextCaptureEngine: ObservableObject {
         let errors = [
             carbonHotkeyError,
             physicalTriggerError,
-            PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
-                for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-            )
+            HotkeyPreferences.dictationShortcutsEnabled()
+                ? PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                    for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
+                )
+                : nil
         ].compactMap { $0 }
         let nextError = errors.isEmpty ? nil : errors.joined(separator: " and ")
         if hotkeyError != nextError {
