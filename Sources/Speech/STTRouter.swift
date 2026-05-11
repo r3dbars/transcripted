@@ -80,6 +80,12 @@ class STTRouter: ObservableObject {
         await initialize(model: selectedModel)
     }
 
+    func prefetchSelectedModelFilesForExistingInstall() async {
+        guard selectedModel == .parakeetTDTv3 else { return }
+        await parakeetEngine.prefetchModelFilesIfNeeded()
+        refreshModelDownloadState()
+    }
+
     func initialize(model: TranscriptionModelChoice) async {
         guard !isModelLoaded(for: model) else {
             refreshModelDownloadState()

@@ -322,6 +322,7 @@ private actor StreamingEouAsrManager {
 enum ParakeetModelState {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -410,6 +411,9 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
+    private var modelInitializationTask: Task<Void, Never>?
+    private var modelFilePrefetchTask: Task<URL, Error>?
+    private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
@@ -511,18 +515,38 @@ class ParakeetEngine: ObservableObject {
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
         guard !isShuttingDown, !Task.isCancelled else { return }
+
+        if let modelInitializationTask {
+            await modelInitializationTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performInitialize()
+        }
+        modelInitializationTask = task
+        await task.value
+    }
+
+    private func performInitialize() async {
+        defer { modelInitializationTask = nil }
+        guard !isShuttingDown, !Task.isCancelled else { return }
         scheduleInputDeviceNameRefresh()
 
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
                 message: "initialize() called but ASR manager already exists — ignoring")
+            modelDownloadState = .ready
             return
         }
 
         switch modelDownloadState {
-        case .downloading, .loading:
+        case .downloading:
+            break
+        case .loading:
             return
-        case .notLoaded, .ready, .failed:
+        case .notLoaded, .cached, .ready, .failed:
             break
         }
 
@@ -570,7 +594,17 @@ class ParakeetEngine: ObservableObject {
                 loadSource = .download
                 print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
                 modelDownloadState = .downloading(progress: 0.0)
-                let downloadedPath = try await AsrModels.download(version: .v3)
+                let downloadedPath: URL
+                if let modelFilePrefetchTask {
+                    downloadedPath = try await modelFilePrefetchTask.value
+                    prefetchedModelPath = downloadedPath
+                    self.modelFilePrefetchTask = nil
+                } else if let prefetchedModelPath {
+                    downloadedPath = prefetchedModelPath
+                } else {
+                    downloadedPath = try await AsrModels.download(version: .v3)
+                    prefetchedModelPath = downloadedPath
+                }
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 modelDownloadState = .loading
                 print("🌐 PARAKEET | loading downloaded models from: \(downloadedPath.path)")
@@ -601,6 +635,8 @@ class ParakeetEngine: ObservableObject {
 
         } catch {
             guard !Task.isCancelled, !isShuttingDown else { return }
+            modelFilePrefetchTask = nil
+            prefetchedModelPath = nil
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
             print("❌ PARAKEET | model initialization failed: \(error.localizedDescription)")
@@ -612,6 +648,66 @@ class ParakeetEngine: ObservableObject {
                     bundledModelPresent: bundledModelPresent,
                     microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
                 ))
+        }
+    }
+
+    func prefetchModelFilesIfNeeded() async {
+        guard !isShuttingDown, !Task.isCancelled else { return }
+        guard asrManager == nil else { return }
+
+        guard bundledModelPath(
+            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
+            checkFile: "Encoder.mlmodelc"
+        ) == nil else {
+            return
+        }
+
+        switch modelDownloadState {
+        case .downloading, .cached, .loading, .ready:
+            return
+        case .notLoaded, .failed:
+            break
+        }
+
+        let task: Task<URL, Error>
+        if let modelFilePrefetchTask {
+            task = modelFilePrefetchTask
+        } else {
+            modelDownloadState = .downloading(progress: 0.0)
+            task = Task.detached(priority: .utility) {
+                try await AsrModels.download(version: .v3)
+            }
+            modelFilePrefetchTask = task
+        }
+
+        do {
+            let downloadedPath = try await task.value
+            guard !Task.isCancelled, !isShuttingDown else { return }
+            prefetchedModelPath = downloadedPath
+            modelDownloadState = .cached
+            if modelFilePrefetchTask != nil {
+                modelFilePrefetchTask = nil
+            }
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "parakeet",
+                event: "model_files_prefetched",
+                message: "Parakeet model files are cached for first use",
+                context: ["load_source": ParakeetModelLoadSource.download.rawValue]
+            )
+        } catch {
+            guard !Task.isCancelled, !isShuttingDown else { return }
+            if modelFilePrefetchTask != nil {
+                modelFilePrefetchTask = nil
+            }
+            let friendlyMessage = ModelDownloadService.classifyError(error).detail
+            modelDownloadState = .failed(friendlyMessage)
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "model_file_prefetch_failed",
+                message: error.localizedDescription
+            )
         }
     }
 
@@ -2646,6 +2742,10 @@ class ParakeetEngine: ObservableObject {
 
     func cleanup() {
         isShuttingDown = true
+        modelInitializationTask?.cancel()
+        modelInitializationTask = nil
+        modelFilePrefetchTask?.cancel()
+        modelFilePrefetchTask = nil
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -2676,6 +2776,8 @@ class ParakeetEngine: ObservableObject {
     }
 
     deinit {
+        modelInitializationTask?.cancel()
+        modelFilePrefetchTask?.cancel()
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }

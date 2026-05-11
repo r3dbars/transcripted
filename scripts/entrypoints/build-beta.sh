@@ -25,6 +25,8 @@ BETA_TOKEN="${1:-}"
 USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
+BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
 
 if [ -z "$BETA_TOKEN" ]; then
@@ -390,7 +392,10 @@ mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
 # Bundle Parakeet CoreML models
 PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
-if [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    echo "⚠️  Skipping bundled Parakeet models because BUNDLE_PARAKEET_MODELS=0"
+    echo "   Runtime model download may occur on first launch."
+elif [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
     echo "Bundling Parakeet models..."
     mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models"
     cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
@@ -448,10 +453,13 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
+echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
+    -whole-module-optimization \
+    -num-threads "$SWIFTC_NUM_THREADS" \
     -D BETA_BUILD \
     -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
@@ -514,6 +522,13 @@ else
 fi
 
 validate_signed_app
+
+echo "Checking performance budget..."
+PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    PERFORMANCE_BUDGET_ARGS+=(--allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80)
+fi
+scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 # Create DMG
 echo "Creating DMG..."

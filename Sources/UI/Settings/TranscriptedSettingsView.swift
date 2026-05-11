@@ -57,8 +57,19 @@ struct TranscriptedSettingsView: View {
     @State private var recentDictations: [SavedDictationEntry] = []
     @State private var recentCapturesLoading = false
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
+    @State private var homeDashboardRefreshTask: Task<Void, Never>?
+    @State private var homeDashboardRefreshInFlight = false
+    @State private var homeDashboardRefreshGeneration = 0
+    @State private var lastHomeDashboardRefreshStartedAt: Date?
     @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
+    @State private var modelCacheSnapshot: ModelCacheSnapshot?
+    @State private var modelCacheLoading = false
+    @State private var modelCacheCleanupInProgress = false
+    @State private var modelCacheCleanupStatus: String?
+    @State private var showModelCacheCleanupConfirmation = false
+    @State private var showWhisperCacheCleanupConfirmation = false
+    @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
@@ -151,10 +162,10 @@ struct TranscriptedSettingsView: View {
             trackSettingsPageViewed(page, source: "navigation")
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -176,6 +187,9 @@ struct TranscriptedSettingsView: View {
         .onDisappear {
             recentCaptureRefreshTask?.cancel()
             recentCaptureRefreshTask = nil
+            homeDashboardRefreshTask?.cancel()
+            homeDashboardRefreshTask = nil
+            homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
             homeViewModel.cancel()
@@ -570,7 +584,7 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("delete_dictation_confirm", page: .home)
                     do {
                         try DictationTranscriptStore.deleteEntry(entry)
-                        refreshRecentCaptures()
+                        refreshRecentCaptures(force: true)
                     } catch {
                         presentHomeDeleteFailure(
                             title: "Could not delete dictation",
@@ -621,7 +635,7 @@ struct TranscriptedSettingsView: View {
             if let audio = item.audio {
                 try removeItemIfPresent(at: audio.directoryURL)
             }
-            refreshRecentCaptures()
+            refreshRecentCaptures(force: true)
         } catch {
             presentHomeDeleteFailure(
                 title: "Could not delete meeting",
@@ -1092,7 +1106,10 @@ struct TranscriptedSettingsView: View {
                     title: "Model files",
                     status: modelCard.status,
                     detail: modelCard.detail,
-                    tone: tone(for: modelCard.tone)
+                    tone: tone(for: modelCard.tone),
+                    progress: modelCard.progress,
+                    actionTitle: modelDownloadActionTitle,
+                    action: modelDownloadAction
                 )
             }
 
@@ -1420,6 +1437,127 @@ struct TranscriptedSettingsView: View {
                 Text("Choosing 7 or 30 days asks before deleting old replay audio.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
+                title: "Local Model Storage",
+                detail: "On-device models and optional transcription caches."
+            ) {
+                if modelCacheLoading, modelCacheSnapshot == nil {
+                    ProgressView("Scanning model storage...")
+                        .controlSize(.small)
+                }
+
+                if let snapshot = modelCacheSnapshot {
+                    let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModel.isWhisper
+                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
+                    ModelCacheMetricRow(
+                        title: "Known model and cache footprint",
+                        value: snapshot.formattedTotalKnownSize,
+                        detail: "FluidAudio models plus Transcripted's app cache."
+                    )
+                    ModelCacheMetricRow(
+                        title: "Reclaimable cache",
+                        value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
+                        detail: includeWhisperInReclaimableCleanup
+                            ? "Known stale models plus optional Whisper files."
+                            : "Known stale models. Whisper is preserved while selected."
+                    )
+                    if reclaimableBytes > 0 {
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache", role: .destructive) {
+                            showReclaimableCacheCleanupConfirmation = true
+                        }
+                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                    }
+                    ModelCacheMetricRow(
+                        title: "FluidAudio models",
+                        value: snapshot.formattedFluidAudioModelsSize,
+                        detail: "Parakeet, diarization, and related local model files."
+                    )
+                    ModelCacheMetricRow(
+                        title: "Whisper cache",
+                        value: snapshot.formattedWhisperModelsSize,
+                        detail: "Optional Whisper models stored by Transcripted."
+                    )
+                    if snapshot.whisperModelsBytes > 0 {
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache", role: .destructive) {
+                            showWhisperCacheCleanupConfirmation = true
+                        }
+                        .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
+
+                        if effectiveTranscriptionModel.isWhisper {
+                            Text("Switch back to Parakeet before removing the Whisper cache.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if snapshot.staleFluidAudioModelBytes > 0 {
+                        ModelCacheMetricRow(
+                            title: "Known stale candidates",
+                            value: snapshot.formattedStaleFluidAudioModelSize,
+                            detail: snapshot.staleModelSummary
+                        )
+
+                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models", role: .destructive) {
+                            showModelCacheCleanupConfirmation = true
+                        }
+                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                    } else {
+                        Text("No known stale Parakeet model folders found.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let modelCacheCleanupStatus {
+                        Text(modelCacheCleanupStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if !modelCacheLoading {
+                    Text("Model storage has not been scanned yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
+                    trackSettingsAction("refresh_model_cache_storage", page: .storage)
+                    refreshModelCacheSnapshot()
+                }
+                .disabled(modelCacheLoading)
+            }
+            .onAppear {
+                if modelCacheSnapshot == nil, !modelCacheLoading {
+                    refreshModelCacheSnapshot()
+                }
+            }
+            .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeReclaimableModelCaches()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                let includeWhisper = !effectiveTranscriptionModel.isWhisper
+                Text(includeWhisper
+                    ? "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays."
+                    : "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected.")
+            }
+            .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeStaleModelCaches()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
+            }
+            .alert("Remove Whisper cache?", isPresented: $showWhisperCacheCleanupConfirmation) {
+                Button("Remove", role: .destructive) {
+                    removeWhisperModelCache()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
             }
 
             SettingsSection(
@@ -1847,7 +1985,30 @@ struct TranscriptedSettingsView: View {
     }
 
     private var activeModelDetail: String {
-        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local."
+        "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local. Model files are stored outside app updates."
+    }
+
+    private var modelDownloadActionTitle: String? {
+        switch FirstRunLocalModelState(sttRouter.modelDownloadState) {
+        case .notLoaded:
+            return "Download Now"
+        case .cached:
+            return "Load Now"
+        case .failed:
+            return "Retry Download"
+        case .downloading, .loading, .ready:
+            return nil
+        }
+    }
+
+    private var modelDownloadAction: (() -> Void)? {
+        guard modelDownloadActionTitle != nil else { return nil }
+        return {
+            trackSettingsAction("download_model", page: .models)
+            Task { @MainActor in
+                await sttRouter.initializeSelectedModel()
+            }
+        }
     }
 
     private var missingRequiredPermissions: [TranscriptedPermissionKind] {
@@ -1927,7 +2088,7 @@ struct TranscriptedSettingsView: View {
     private func refreshState() {
         refreshPermissions()
         refreshStoragePaths()
-        refreshRecentCaptures()
+        refreshRecentCaptures(force: true)
         refreshShortcutState()
         refreshMenuBarVisibility()
         refreshDockVisibility()
@@ -1996,6 +2157,104 @@ struct TranscriptedSettingsView: View {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     }
 
+    private func refreshModelCacheSnapshot() {
+        guard !modelCacheLoading else { return }
+        modelCacheLoading = true
+
+        Task.detached(priority: .utility) {
+            let snapshot = ModelCacheInventory.snapshot()
+            await MainActor.run {
+                modelCacheSnapshot = snapshot
+                modelCacheLoading = false
+            }
+        }
+    }
+
+    private func removeStaleModelCaches() {
+        guard !modelCacheCleanupInProgress else { return }
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeKnownStaleFluidAudioModels()
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedNames.isEmpty {
+                        modelCacheCleanupStatus = "No stale model folders needed removal."
+                    } else {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func removeReclaimableModelCaches() {
+        guard !modelCacheCleanupInProgress else { return }
+        let includeWhisper = !effectiveTranscriptionModel.isWhisper
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeReclaimableCaches(includeWhisper: includeWhisper)
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedNames.isEmpty {
+                        modelCacheCleanupStatus = "No reclaimable model cache needed removal."
+                    } else {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove reclaimable cache: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func removeWhisperModelCache() {
+        guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
+        modelCacheCleanupInProgress = true
+        modelCacheCleanupStatus = nil
+
+        Task.detached(priority: .utility) {
+            do {
+                let result = try ModelCacheInventory.removeWhisperModels()
+                let snapshot = ModelCacheInventory.snapshot()
+                await MainActor.run {
+                    modelCacheSnapshot = snapshot
+                    modelCacheCleanupInProgress = false
+                    if result.removedBytes > 0 {
+                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
+                        modelCacheCleanupStatus = "Removed \(size) from the Whisper cache."
+                    } else {
+                        modelCacheCleanupStatus = "No Whisper model files needed removal."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    modelCacheCleanupInProgress = false
+                    modelCacheCleanupStatus = "Could not remove Whisper cache: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
     private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {
         guard window != audioRetentionWindow else { return }
         guard window.days == nil else {
@@ -2018,17 +2277,14 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func refreshRecentCaptures() {
+    private func refreshRecentCaptures(force: Bool = false) {
         recentCaptureRefreshTask?.cancel()
         recentCaptureRefreshTask = nil
         recentCapturesLoading = false
 
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
-            homeViewModel.refresh()
-            Task { @MainActor in
-                await statsService.refreshStats()
-            }
+            refreshHomeDashboard(force: force)
         case .recentLists:
             recentCapturesLoading = true
             recentCaptureRefreshTask = Task { @MainActor in
@@ -2040,6 +2296,32 @@ struct TranscriptedSettingsView: View {
             }
         case .none:
             break
+        }
+    }
+
+    private func refreshHomeDashboard(force: Bool) {
+        let now = Date()
+        guard SettingsDashboardRefreshPolicy.shouldStartRefresh(
+            force: force,
+            isInFlight: homeDashboardRefreshInFlight,
+            lastStartedAt: lastHomeDashboardRefreshStartedAt,
+            now: now
+        ) else {
+            return
+        }
+
+        homeDashboardRefreshTask?.cancel()
+        homeDashboardRefreshGeneration += 1
+        let generation = homeDashboardRefreshGeneration
+        lastHomeDashboardRefreshStartedAt = now
+        homeDashboardRefreshInFlight = true
+        homeViewModel.refresh()
+
+        homeDashboardRefreshTask = Task { @MainActor in
+            await statsService.refreshStats()
+            guard !Task.isCancelled, generation == homeDashboardRefreshGeneration else { return }
+            homeDashboardRefreshInFlight = false
+            homeDashboardRefreshTask = nil
         }
     }
 

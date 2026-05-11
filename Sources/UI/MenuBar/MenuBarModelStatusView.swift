@@ -94,23 +94,29 @@ final class MenuBarModelStatusView: NSControl {
         case .ready:
             statusDot.layer?.backgroundColor = MenuTokens.statusGreenNS.cgColor
             label.stringValue = "Parakeet TDT V3 · On-device"
-            toolTip = "Parakeet TDT V3 is ready. Click to open settings."
+            toolTip = "Parakeet TDT V3 is cached outside app updates. Click to open settings."
         case .downloading(let progress):
             statusDot.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            label.stringValue = "Downloading Parakeet TDT V3 · \(Int(progress * 100))%"
-            toolTip = "Downloading from huggingface.co. Click to open settings."
+            label.stringValue = progress > 0
+                ? "Downloading Parakeet · \(Int(progress * 100))%"
+                : "Downloading Parakeet · one-time setup"
+            toolTip = "One-time local model download. It stays cached outside future app updates. Click to open settings."
+        case .cached:
+            statusDot.layer?.backgroundColor = MenuTokens.statusGreenNS.cgColor
+            label.stringValue = "Parakeet TDT V3 · Cached"
+            toolTip = "Parakeet model files are cached outside app updates. They load into memory when dictation starts."
         case .loading:
             statusDot.layer?.backgroundColor = NSColor.systemBlue.cgColor
             label.stringValue = "Loading Parakeet TDT V3…"
             toolTip = "Finishing local model setup. Click to open settings."
         case .notLoaded:
             statusDot.layer?.backgroundColor = MenuTokens.textMutedNS.cgColor
-            label.stringValue = "Parakeet TDT V3 · Not loaded"
-            toolTip = "Parakeet TDT V3 has not started yet. Click to open settings."
+            label.stringValue = "Parakeet TDT V3 · On demand"
+            toolTip = "First use downloads Parakeet once, then stores it outside app updates. Click to open settings."
         case .failed:
             statusDot.layer?.backgroundColor = MenuTokens.statusOrangeNS.cgColor
-            label.stringValue = "Parakeet TDT V3 · Tap to retry"
-            toolTip = "Local model failed. Click to open settings for details."
+            label.stringValue = "Parakeet TDT V3 · Needs retry"
+            toolTip = "Local model failed. Open Models settings to retry the download."
         }
     }
 

@@ -23,8 +23,12 @@ class TranscriptedAppState: ObservableObject {
 
     private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
+    private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
+    private var isShutDown = false
+    private let eagerModelWarmupEnabled =
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
         hotkeyRetryAttempts: Self.wakeHotkeyRetryAttempts,
         hotkeyRetryDelay: Self.wakeHotkeyRetryDelay,
@@ -76,8 +80,11 @@ class TranscriptedAppState: ObservableObject {
         }
         AppSoundPlayer.shared.preload()
 
-        // Kick off shared runtime prep once; wake recovery can await or reuse it.
-        startRuntimeReadinessIfNeeded()
+        if eagerModelWarmupEnabled {
+            startRuntimeReadinessIfNeeded()
+        } else {
+            startExistingInstallModelPrefetchIfNeeded()
+        }
         startAudioStorageMaintenanceIfNeeded()
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
@@ -141,9 +148,13 @@ class TranscriptedAppState: ObservableObject {
     }
 
     func shutdown() {
+        guard !isShutDown else { return }
+        isShutDown = true
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil
+        existingInstallModelPrefetchTask?.cancel()
+        existingInstallModelPrefetchTask = nil
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
@@ -165,16 +176,111 @@ class TranscriptedAppState: ObservableObject {
             guard let self else { return }
             defer { self.runtimeReadinessTask = nil }
 
-            // Loading models at launch keeps first-use latency down without
-            // touching AVAudioEngine input nodes on the main thread. Sentry app
-            // hang reports showed launch-time prewarm blocking inside CoreAudio.
+            // Keep default launch lightweight. Dictation, imports, model
+            // preference changes, and the optional eager-warmup env flag load
+            // the selected model only when that work is actually needed.
             guard !Task.isCancelled else { return }
             await self.sttRouter.initializeSelectedModel()
-            guard !Task.isCancelled else { return }
+            // Keep heavier meeting diarization lazy. Meeting start/import paths
+            // call prepareModels() with visible loading state when needed.
+        }
+    }
 
-            if #available(macOS 14.0, *) {
-                await self.meetingSession.prepareModels(showLoadingUI: false)
+    private func startExistingInstallModelPrefetchIfNeeded() {
+        guard existingInstallModelPrefetchTask == nil else { return }
+        guard ExistingInstallModelPrefetchPolicy.shouldPrefetch(existingInstallPrefetchContext()) else { return }
+
+        existingInstallModelPrefetchTask = Task(priority: .utility) { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.existingInstallModelPrefetchTask = nil }
+
+            do {
+                try await Task.sleep(nanoseconds: ExistingInstallModelPrefetchPolicy.startupDelayNanoseconds)
+            } catch {
+                return
             }
+
+            guard !Task.isCancelled else { return }
+            let context = self.existingInstallPrefetchContext()
+            guard ExistingInstallModelPrefetchPolicy.shouldPrefetch(context) else { return }
+
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "app",
+                event: "existing_install_model_prefetch_started",
+                message: "Caching local dictation model files in the background for an existing install",
+                context: [
+                    "model": context.selectedModel.rawValue,
+                    "delay_s": "12",
+                ]
+            )
+
+            await self.sttRouter.prefetchSelectedModelFilesForExistingInstall()
+
+            let failed = self.prefetchModelStateFailed(self.sttRouter.modelDownloadState)
+            EventReporter.shared.capture(
+                level: failed ? .warning : .info,
+                engine: "app",
+                event: failed
+                    ? "existing_install_model_prefetch_unavailable"
+                    : "existing_install_model_prefetch_completed",
+                message: failed
+                    ? "Existing-install model prefetch did not finish"
+                    : "Existing-install model files are cached for first use",
+                context: [
+                    "model": self.sttRouter.selectedModel.rawValue,
+                    "model_state": self.prefetchModelStateName(self.sttRouter.modelDownloadState),
+                ]
+            )
+        }
+    }
+
+    private func existingInstallPrefetchContext() -> ExistingInstallModelPrefetchContext {
+        ExistingInstallModelPrefetchContext(
+            isExistingInstall: hasExistingInstallSignals(),
+            selectedModel: sttRouter.selectedModel,
+            isModelLoaded: sttRouter.isModelLoaded,
+            isModelWorkInFlight: sttRouter.modelDownloadState.isExistingInstallPrefetchWorkInFlight,
+            eagerModelWarmupEnabled: eagerModelWarmupEnabled
+        )
+    }
+
+    private func hasExistingInstallSignals() -> Bool {
+        ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals(
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
+            hasCaptureLibraryContent: hasExistingCaptureLibraryContent(),
+            hasExplicitLaunchAtLoginChoice: LaunchAtLoginPreferences.hasExplicitChoice()
+        )
+    }
+
+    private func hasExistingCaptureLibraryContent() -> Bool {
+        let fileManager = FileManager.default
+        return ExistingInstallModelPrefetchPolicy.captureLibraryCandidateURLs(
+            customPath: UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
+            appSupportRoot: fileManager.transcriptedAppSupportRootURL
+        ).contains { captureLibraryURL in
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(
+                at: captureLibraryURL,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private func prefetchModelStateFailed(_ state: ParakeetModelState) -> Bool {
+        if case .failed = state {
+            return true
+        }
+        return false
+    }
+
+    private func prefetchModelStateName(_ state: ParakeetModelState) -> String {
+        switch state {
+        case .notLoaded: return "not_loaded"
+        case .downloading: return "downloading"
+        case .cached: return "cached"
+        case .loading: return "loading"
+        case .ready: return "ready"
+        case .failed: return "failed"
         }
     }
 
@@ -189,6 +295,11 @@ class TranscriptedAppState: ObservableObject {
     }
 
     private func waitForRuntimeReadiness() async {
+        guard eagerModelWarmupEnabled || sttRouter.isModelLoaded else {
+            logger.log("WAKE | skipping voice-model readiness wait until first use")
+            return
+        }
+
         startRuntimeReadinessIfNeeded()
         guard let runtimeReadinessTask else { return }
 
@@ -226,5 +337,16 @@ class TranscriptedAppState: ObservableObject {
             }
         }
         return "unavailable"
+    }
+}
+
+private extension ParakeetModelState {
+    var isExistingInstallPrefetchWorkInFlight: Bool {
+        switch self {
+        case .downloading, .loading:
+            return true
+        case .notLoaded, .cached, .ready, .failed:
+            return false
+        }
     }
 }

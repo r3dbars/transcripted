@@ -264,7 +264,9 @@ class DictationSessionController: ObservableObject {
                       self.isDictating,
                       let appState = self.appState,
                       let overlayController = self.overlayController else { return }
+                let startAttemptedAt = CFAbsoluteTimeGetCurrent()
                 let started = await appState.sttRouter.startRecording()
+                let startMs = Int((CFAbsoluteTimeGetCurrent() - startAttemptedAt) * 1000)
                 guard !Task.isCancelled, self.isDictating else {
                     if started {
                         await appState.sttRouter.stopRecording()
@@ -280,9 +282,38 @@ class DictationSessionController: ObservableObject {
                     self.resizePanelToCompact()
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                     appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        engine: "dictation",
+                        event: "dictation_recording_fast_start",
+                        message: "Dictation recording started through the ready-engine fast path",
+                        context: self.dictationContext(
+                            extra: [
+                                "start_ms": "\(startMs)",
+                                "audio_device": appState.sttRouter.inputDeviceName,
+                                "trigger": self.currentDictationTrigger.rawValue
+                            ]
+                        )
+                    )
                     AppSoundPlayer.shared.play(.dictationStart)
                     self.installSessionTimeout()
                 } else {
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        level: .warning,
+                        engine: "dictation",
+                        event: "dictation_fast_start_fell_back_to_wait",
+                        message: "Ready-engine dictation fast start failed and fell back to recovery wait",
+                        context: self.dictationContext(
+                            extra: [
+                                "start_ms": "\(startMs)",
+                                "audio_device": appState.sttRouter.inputDeviceName,
+                                "trigger": self.currentDictationTrigger.rawValue,
+                                "is_recovering": "\(appState.sttRouter.isRecovering)",
+                                "format_ready": "\(appState.sttRouter.inputFormatReady)"
+                            ]
+                        )
+                    )
                     await self.waitForEngineAndStart(sourceApp: sourceApp)
                 }
             }
@@ -928,9 +959,9 @@ class DictationSessionController: ObservableObject {
             guard let self else { return }
 
             switch appState.sttRouter.modelDownloadState {
-            case .notLoaded, .failed:
+            case .notLoaded, .downloading, .cached, .failed:
                 await appState.sttRouter.initializeSelectedModel()
-            case .downloading, .loading, .ready:
+            case .loading, .ready:
                 break
             }
 
@@ -1021,6 +1052,13 @@ class DictationSessionController: ObservableObject {
                 detail: "Transcripted is downloading the on-device voice model needed for local dictation.",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 status: "\(Int(progress * 100))% complete"
+            )
+        case .cached:
+            return .init(
+                title: "Loading dictation",
+                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                progress: 0.88,
+                status: "Loading cached model"
             )
         case .loading:
             return .init(

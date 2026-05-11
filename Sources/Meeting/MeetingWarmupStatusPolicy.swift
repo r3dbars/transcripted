@@ -16,11 +16,30 @@ struct MeetingWarmupStatus: Equatable {
         dictationStatus: "Ready",
         meetingsStatus: "Ready"
     )
+
+    static let dictationReadyMeetingsOnDemand = MeetingWarmupStatus(
+        title: "Dictation is ready",
+        subtitle: "Meetings load when started",
+        detail: "",
+        progress: 1.0,
+        dictationStatus: "Ready",
+        meetingsStatus: "On demand"
+    )
+
+    static let modelsOnDemand = MeetingWarmupStatus(
+        title: "Transcripted is ready",
+        subtitle: "Dictation and meetings load when started",
+        detail: "The first use may download the local voice model once. The model is saved outside app updates after that.",
+        progress: 1.0,
+        dictationStatus: "On demand",
+        meetingsStatus: "On demand"
+    )
 }
 
 enum MeetingWarmupDictationState: Equatable {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -49,9 +68,9 @@ enum MeetingWarmupStatusPolicy {
             return MeetingWarmupStatus(
                 title: "Getting Transcripted ready",
                 subtitle: "Downloading local dictation model",
-                detail: "Transcripted is downloading the on-device voice model used for dictation. This can take a minute or two on first launch.",
+                detail: "One-time local model download. Keep Transcripted open; future app updates should reuse the cached model.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
-                dictationStatus: "Downloading \(Int(progress * 100))%",
+                dictationStatus: progress > 0 ? "Downloading \(Int(progress * 100))%" : "Downloading",
                 meetingsStatus: "Waiting"
             )
         case .loading:
@@ -63,11 +82,20 @@ enum MeetingWarmupStatusPolicy {
                 dictationStatus: "Loading",
                 meetingsStatus: "Waiting"
             )
+        case .cached:
+            return MeetingWarmupStatus(
+                title: "Dictation model cached",
+                subtitle: "Dictation loads when started",
+                detail: "The local voice model files are saved outside app updates. Transcripted will load them into memory on first use.",
+                progress: 1.0,
+                dictationStatus: "Cached",
+                meetingsStatus: "On demand"
+            )
         case .failed(let message):
             return MeetingWarmupStatus(
                 title: "Couldn’t start dictation",
                 subtitle: "The local dictation model failed to load",
-                detail: message,
+                detail: "\(message) Try dictation again or use Retry Download in Models settings.",
                 progress: 0,
                 dictationStatus: "Failed",
                 meetingsStatus: "Waiting"
@@ -79,14 +107,7 @@ enum MeetingWarmupStatusPolicy {
                 shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure
             )
         case .notLoaded:
-            return MeetingWarmupStatus(
-                title: "Getting Transcripted ready",
-                subtitle: "Starting local dictation",
-                detail: "Transcripted is waking up the on-device dictation model.",
-                progress: 0.05,
-                dictationStatus: "Starting",
-                meetingsStatus: "Waiting"
-            )
+            return .modelsOnDemand
         }
     }
 
@@ -100,7 +121,7 @@ enum MeetingWarmupStatusPolicy {
             return .ready
         case .failed(let message):
             guard shouldSurfaceMeetingWarmupFailure else {
-                return .ready
+                return .dictationReadyMeetingsOnDemand
             }
             return MeetingWarmupStatus(
                 title: "Couldn’t load meetings",
@@ -124,7 +145,7 @@ enum MeetingWarmupStatusPolicy {
             )
         case .notLoaded:
             guard isMeetingWarmupInFlight else {
-                return .ready
+                return .dictationReadyMeetingsOnDemand
             }
             return MeetingWarmupStatus(
                 title: "Getting Transcripted ready",

@@ -218,6 +218,10 @@ func testFirstRunExperience() {
             "model card should tell the user where the model is being downloaded from"
         )
         assertTrue(
+            card.detail.contains("normal Transcripted updates do not download it again"),
+            "model card should explain that app updates reuse the cached model"
+        )
+        assertTrue(
             card.detail.contains("on this Mac") || card.detail.contains("locally"),
             "model card should reassure the user the model stays local"
         )
@@ -229,6 +233,41 @@ func testFirstRunExperience() {
         let card = FirstRunExperience.modelCard(for: .ready)
 
         assertTrue(card.title.contains("Parakeet TDT V3"), "ready card should tell the user which model is running")
+    }
+
+    runSuite("FirstRunExperience.modelCard — explains on-demand model loading") {
+        let card = FirstRunExperience.modelCard(for: .notLoaded)
+
+        assertEqual(card.status, "On demand", "not-loaded model state should be presented as intentional lazy loading")
+        assertTrue(
+            card.detail.contains("out of memory"),
+            "not-loaded model detail should explain the lightweight launch behavior"
+        )
+        assertTrue(
+            card.detail.contains("One-time ~600 MB download"),
+            "not-loaded model detail should warn about the first Parakeet download size"
+        )
+        assertNil(card.progress, "on-demand model state should not show fake startup progress")
+    }
+
+    runSuite("FirstRunExperience.modelCard — explains update-safe model cache when ready") {
+        let card = FirstRunExperience.modelCard(for: .ready)
+
+        assertTrue(
+            card.detail.contains("outside app updates"),
+            "ready model card should explain that future app updates do not redownload the model"
+        )
+    }
+
+    runSuite("FirstRunExperience.modelCard — distinguishes cached files from loaded model") {
+        let card = FirstRunExperience.modelCard(for: .cached)
+
+        assertEqual(card.status, "Cached", "cached model card should not look like a missing download")
+        assertTrue(
+            card.detail.contains("load them into memory"),
+            "cached model copy should explain that dictation still loads the files on first use"
+        )
+        assertNil(card.progress, "cached files should not show fake download progress")
     }
 
     runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {

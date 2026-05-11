@@ -15,6 +15,7 @@
 
 - [ ] `bash build.sh`
 - [ ] `bash run-tests.sh`
+- [ ] Performance budget passed (`bash build.sh` runs the bundle gate; run `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"` for runtime-sensitive changes)
 - [ ] `bash run-integration-smoke.sh` if I touched `Sources/Meeting/` or `Sources/TranscriptedCore/`
 - [ ] Manual check:
 

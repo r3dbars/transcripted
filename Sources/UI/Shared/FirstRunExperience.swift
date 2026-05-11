@@ -3,6 +3,7 @@ import Foundation
 enum FirstRunLocalModelState: Equatable {
     case notLoaded
     case downloading(progress: Double)
+    case cached
     case loading
     case ready
     case failed(String)
@@ -121,6 +122,10 @@ struct FirstRunOnboardingCopy {
 }
 
 enum FirstRunExperience {
+    static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
+        "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
+    }
+
     static func onboardingSteps() -> [FirstRunOnboardingStep] {
         FirstRunOnboardingStep.allCases
     }
@@ -249,7 +254,7 @@ enum FirstRunExperience {
                 detail = "Start with a short dictation. Transcripted will paste it back into the app you were just using."
             case .failed:
                 detail = "Start again to retry the local voice model. Transcripted will begin listening as soon as it's ready."
-            case .notLoaded, .downloading, .loading:
+            case .notLoaded, .downloading, .cached, .loading:
                 detail = "Start now. Transcripted will begin listening as soon as the local voice model finishes getting ready."
             }
 
@@ -269,6 +274,8 @@ enum FirstRunExperience {
             detail = "Setup is done, but the local voice model needs another try. Start Dictation from the menu to retry it."
         case .notLoaded, .downloading, .loading:
             detail = "Setup is done. Transcripted is still getting the local voice model ready in the background. When it's ready, click back into any text field and use Dictation from the menu."
+        case .cached:
+            detail = "Setup is done. The local voice model files are cached; dictation will load them into memory when you start."
         }
 
         return FirstRunPrimaryActionState(
@@ -286,24 +293,32 @@ enum FirstRunExperience {
         switch modelState {
         case .notLoaded:
             return FirstRunModelCardState(
-                title: "Getting \(model.title) ready",
-                detail: "Transcripted uses \(model.title), an on-device voice model, and starts it the first time you use it.",
-                status: "Starting",
-                progress: 0.06,
+                title: "\(model.title) starts on first use",
+                detail: "Transcripted keeps the local voice model out of memory until you use it. \(modelPersistenceDetail(for: model)) Start dictation, a meeting, an import, or use Download now to set it up before you need it.",
+                status: "On demand",
+                progress: nil,
                 tone: .working
             )
         case .downloading(let progress):
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "One-time \(model.approximateDownloadSize) download from huggingface.co. The model stays on this Mac so dictation, meetings, and imports run locally.",
-                status: "\(Int(progress * 100))% complete",
+                detail: "\(modelPersistenceDetail(for: model)) Downloading from huggingface.co. Keep Transcripted open; if the download fails, use Retry Download.",
+                status: progress > 0 ? "\(Int(progress * 100))% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
+            )
+        case .cached:
+            return FirstRunModelCardState(
+                title: "\(model.title) cached on device",
+                detail: "The model files are saved outside app updates. Transcripted will load them into memory when dictation, a meeting, or an import starts.",
+                status: "Cached",
+                progress: nil,
+                tone: .ready
             )
         case .loading:
             return FirstRunModelCardState(
                 title: "Loading \(model.title)",
-                detail: "Transcripted has the model files and is loading them into memory.",
+                detail: "Transcripted has the model files on this Mac and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -311,7 +326,7 @@ enum FirstRunExperience {
         case .ready:
             return FirstRunModelCardState(
                 title: "\(model.title) ready on device",
-                detail: "Your first dictation can start immediately.",
+                detail: "The model is cached outside app updates. Future Transcripted updates should stay around the app size, not the model size.",
                 status: "Ready",
                 progress: 1.0,
                 tone: .ready
@@ -319,7 +334,7 @@ enum FirstRunExperience {
         case .failed(let message):
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: message,
+                detail: "\(message) Retry Download will try the same one-time local model setup again.",
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed
@@ -338,6 +353,8 @@ enum FirstRunExperience {
             subtitle = "Starts local voice setup on first use"
         case .downloading:
             subtitle = "Downloads once, then starts automatically"
+        case .cached:
+            subtitle = "Cached; loads when started"
         case .loading:
             subtitle = "Finishing local voice setup"
         }

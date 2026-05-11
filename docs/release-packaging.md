@@ -57,8 +57,9 @@ also require the app binary to exist before signature validation runs.
 1. Install a `Developer ID Application` certificate.
 2. Store a notarytool profile in the login keychain.
 3. Build the unified dependency bundle once with exact pinned versions.
-4. Make sure local Parakeet models are present so `build-beta.sh` can bundle
-   them into the app.
+4. Decide whether this release should be thin or full/offline. Thin is the
+   default and downloads the Parakeet model on first use. Full/offline requires
+   the local Parakeet models so `build-beta.sh` can bundle them into the app.
 
 Useful checks:
 
@@ -74,14 +75,13 @@ SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 
-`build-beta.sh` now fails by default when the local Parakeet model bundle is
-missing. That protects distribution builds from quietly shipping a DMG that has
-to download the speech model on first launch.
+`build-beta.sh` now defaults to a thin distribution so the DMG stays lightweight.
+The app still downloads the local speech model on first dictation/meeting use.
 
-If you deliberately want a thin local test artifact, you can opt out:
+If you deliberately want a full offline artifact, opt into model bundling:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+BUNDLE_PARAKEET_MODELS=1 REQUIRE_BUNDLED_PARAKEET_MODELS=1 bash build-beta.sh <beta-token> <user-name>
 ```
 
 ## Release Flow

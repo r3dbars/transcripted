@@ -8,7 +8,7 @@ These stay at the repo root as thin wrappers so the public command surface stays
 stable and the docs can keep pointing at the same commands:
 
 - `build-deps.sh` — build and cache the shared dependency bundle
-- `build.sh` — local app build
+- `build.sh` — local app build; defaults to the thin model-download app variant. Use `bash build.sh --no-open` for non-interactive verification, or `bash build.sh --full --no-open` to verify the full offline variant
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
@@ -46,6 +46,11 @@ not have to carry the full operational logic:
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Optional built-app verification: `python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json`
+- `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
+  - Usage: `scripts/ops/performance-budget.rb`
+  - Thin-build usage: `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
+  - Optional runtime log verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`
+  - Optional meeting throughput verification: `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"` (defaults to recordings 30s or longer)
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`

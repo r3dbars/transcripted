@@ -18,3 +18,29 @@ enum SettingsRecentCaptureRefreshPolicy {
         }
     }
 }
+
+enum SettingsDashboardRefreshPolicy {
+    static let passiveRefreshMinimumInterval: TimeInterval = 1.5
+
+    static func shouldStartRefresh(
+        force: Bool,
+        isInFlight: Bool,
+        lastStartedAt: Date?,
+        now: Date,
+        minimumInterval: TimeInterval = passiveRefreshMinimumInterval
+    ) -> Bool {
+        if force {
+            return true
+        }
+
+        if isInFlight {
+            return false
+        }
+
+        guard let lastStartedAt else {
+            return true
+        }
+
+        return now.timeIntervalSince(lastStartedAt) >= minimumInterval
+    }
+}

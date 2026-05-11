@@ -219,6 +219,9 @@ struct SettingsStatusCard: View {
     let status: String
     let detail: String
     let tone: Tone
+    var progress: Double? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -241,6 +244,21 @@ struct SettingsStatusCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .accessibilityLabel(Text(status))
+            }
+
+            if let actionTitle, let action {
+                Button(actionTitle) {
+                    action()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -451,6 +469,33 @@ struct StorageRow: View {
                 }
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
+        }
+    }
+}
+
+struct ModelCacheMetricRow: View {
+    let title: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Text(value)
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 }

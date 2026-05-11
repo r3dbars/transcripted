@@ -1153,8 +1153,12 @@ final class MeetingSessionController: ObservableObject {
 
     private func refreshWarmupStatus() {
         let isMeetingWarmupInFlight = modelPreparationTask != nil || state == .loadingModels
+        let dictationState: MeetingWarmupDictationState = sttRouter.isModelLoaded
+            ? .ready
+            : MeetingWarmupDictationState(sttRouter.modelDownloadState)
+
         warmupStatus = MeetingWarmupStatusPolicy.status(
-            dictationState: MeetingWarmupDictationState(sttRouter.modelDownloadState),
+            dictationState: dictationState,
             meetingState: MeetingWarmupMeetingState(diarization.modelState),
             isMeetingWarmupInFlight: isMeetingWarmupInFlight,
             shouldSurfaceMeetingWarmupFailure: shouldSurfaceMeetingWarmupFailure
@@ -1729,6 +1733,8 @@ private extension MeetingWarmupDictationState {
             self = .notLoaded
         case .downloading(let progress):
             self = .downloading(progress: progress)
+        case .cached:
+            self = .cached
         case .loading:
             self = .loading
         case .ready:
@@ -1759,6 +1765,7 @@ private extension ParakeetModelState {
         switch self {
         case .notLoaded: return "not_loaded"
         case .downloading: return "downloading"
+        case .cached: return "cached"
         case .loading: return "loading"
         case .ready: return "ready"
         case .failed: return "failed"

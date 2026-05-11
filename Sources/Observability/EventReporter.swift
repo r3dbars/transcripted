@@ -20,6 +20,8 @@ private actor EventFileWriter {
     private let fileURL: URL
     private var handle: FileHandle?
     private var isPrepared = false
+    private var bufferedInfoEventLines: [Data] = []
+    private var infoFlushTask: Task<Void, Never>?
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = []  // Compact — one record per line
@@ -32,18 +34,67 @@ private actor EventFileWriter {
     }
 
     func append(_ event: ObservabilityEvent) {
+        guard let lineData = lineData(for: event) else { return }
+        guard prepareIfNeeded() else { return }
+
+        if EventFileWritePolicy.shouldBuffer(level: event.level) {
+            bufferedInfoEventLines.append(lineData)
+            if EventFileWritePolicy.shouldFlushBufferedInfoEvents(count: bufferedInfoEventLines.count) {
+                flushBufferedInfoEvents()
+            } else {
+                scheduleInfoFlush()
+            }
+            return
+        }
+
+        flushBufferedInfoEvents()
+        write(lineData)
+    }
+
+    func flushForShutdown() {
+        guard prepareIfNeeded() else { return }
+        flushBufferedInfoEvents()
+        handle?.synchronizeFile()
+    }
+
+    private func lineData(for event: ObservabilityEvent) -> Data? {
         let data: Data
         do {
             data = try encoder.encode(event)
         } catch {
             fputs("⚠️ EVENT | failed to encode event '\(event.event)': \(error.localizedDescription)\n", stderr)
-            return
+            return nil
         }
-
-        guard prepareIfNeeded() else { return }
 
         var lineData = data
         lineData.append(0x0A)
+        return lineData
+    }
+
+    private func scheduleInfoFlush() {
+        guard infoFlushTask == nil else { return }
+        let delay = EventFileWritePolicy.infoFlushDelayNanoseconds
+        infoFlushTask = Task {
+            try? await Task.sleep(nanoseconds: delay)
+            self.flushBufferedInfoEvents()
+        }
+    }
+
+    private func flushBufferedInfoEvents() {
+        guard !bufferedInfoEventLines.isEmpty else { return }
+
+        let task = infoFlushTask
+        infoFlushTask = nil
+        task?.cancel()
+
+        let payload = bufferedInfoEventLines.reduce(into: Data()) { partial, line in
+            partial.append(line)
+        }
+        bufferedInfoEventLines.removeAll(keepingCapacity: true)
+        write(payload)
+    }
+
+    private func write(_ lineData: Data) {
         if let handle {
             LockedFileAppender.append(lineData, to: handle)
         }
@@ -78,6 +129,13 @@ private actor EventFileWriter {
     }
 
     deinit {
+        if let handle, !bufferedInfoEventLines.isEmpty {
+            let payload = bufferedInfoEventLines.reduce(into: Data()) { partial, line in
+                partial.append(line)
+            }
+            LockedFileAppender.append(payload, to: handle)
+        }
+        infoFlushTask?.cancel()
         try? handle?.close()
     }
 }
@@ -90,6 +148,8 @@ final class EventReporter {
 
     private let writer = EventFileWriter()
     private var engineStateSummary: (() -> [String: String])?
+    private var pendingAppendTasks: [Int: Task<Void, Never>] = [:]
+    private var nextAppendTaskID = 0
 
     private let appVersion: String = {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -140,9 +200,15 @@ final class EventReporter {
             osVersion: osVersion
         )
 
-        Task.detached(priority: .utility) { [writer, entry] in
+        let appendTaskID = nextAppendTaskID
+        nextAppendTaskID += 1
+        let appendTask = Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
+            await MainActor.run {
+                EventReporter.shared.markAppendTaskFinished(appendTaskID)
+            }
         }
+        pendingAppendTasks[appendTaskID] = appendTask
         ReliabilityPacketRecorder.record(event: entry)
 
         if level == .error,
@@ -155,5 +221,20 @@ final class EventReporter {
                 context: mergedContext
             )
         }
+    }
+
+    func flushLocalEventsForShutdown() async {
+        while !pendingAppendTasks.isEmpty {
+            let tasks = Array(pendingAppendTasks.values)
+            pendingAppendTasks.removeAll(keepingCapacity: true)
+            for task in tasks {
+                await task.value
+            }
+        }
+        await writer.flushForShutdown()
+    }
+
+    private func markAppendTaskFinished(_ id: Int) {
+        pendingAppendTasks[id] = nil
     }
 }

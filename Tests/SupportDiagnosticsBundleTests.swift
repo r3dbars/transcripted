@@ -24,6 +24,10 @@ func testSupportDiagnosticsBundle() {
                 "session_stage": "recording",
                 "session_active": "true",
             ],
+            storage: [
+                "model_cache_total": "3 GB",
+                "known_stale_model_count": "2",
+            ],
             meetingState: "ready",
             meetingRecording: false,
             meetingDurationBucket: "lt_10s",
@@ -47,6 +51,7 @@ func testSupportDiagnosticsBundle() {
         assertTrue(text.contains("Version: 1.2.3"), "diagnostics should include app version")
         assertTrue(text.contains("input_device_class: bluetooth"), "diagnostics should include coarse route facts")
         assertTrue(text.contains("session_stage: recording"), "diagnostics should include runtime session stage")
+        assertTrue(text.contains("model_cache_total: 3 GB"), "diagnostics should include coarse model cache size")
         assertTrue(text.contains("meeting.stop recovered"), "diagnostics should include recent reliability packet summaries")
         assertFalse(text.contains("/Users/redbars"), "diagnostics should redact home paths")
         assertFalse(text.contains("person@example.com"), "diagnostics should redact emails")
@@ -71,6 +76,7 @@ func testSupportDiagnosticsBundle() {
             calendarGranted: true,
             audioRoute: ["input_device_class": "bluetooth"],
             runtime: ["session_stage": "recording"],
+            storage: ["known_stale_model_count": "1"],
             meetingState: "recording",
             meetingRecording: true,
             meetingDurationBucket: "2_9m",
@@ -84,6 +90,7 @@ func testSupportDiagnosticsBundle() {
         let sanitized = SentryPayloadSanitizer.sanitizeContext(context)
 
         assertEqual(sanitized["route_input_device_class"], "bluetooth", "route context should survive Sentry key sanitization")
+        assertEqual(sanitized["storage_known_stale_model_count"], "1", "storage context should survive Sentry key sanitization")
         assertEqual(sanitized["reliability_packet_count"], "1", "support diagnostics should include packet count")
         assertNil(sanitized["audio_input_device_class"], "support diagnostics should not use audio-prefixed Sentry keys")
     }

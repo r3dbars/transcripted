@@ -5,12 +5,19 @@ final class RuntimeDiagnostics {
     private let markerURL: URL
     private var marker: RuntimeDiagnosticsMarker?
     private var heartbeatTimer: Timer?
+    private var activeWorkProvider: (() -> Bool)?
+    private let isDisabled: Bool
 
-    init(markerURL: URL = RuntimeDiagnosticsStore.defaultMarkerURL()) {
+    init(
+        markerURL: URL = RuntimeDiagnosticsStore.defaultMarkerURL(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.markerURL = markerURL
+        self.isDisabled = environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] == "1"
     }
 
     func start() {
+        guard !isDisabled else { return }
         guard marker == nil else { return }
 
         if let previous = RuntimeDiagnosticsStore.load(from: markerURL),
@@ -36,6 +43,7 @@ final class RuntimeDiagnostics {
     }
 
     func markCleanShutdown() {
+        guard !isDisabled else { return }
         guard var marker else { return }
         marker.cleanShutdown = true
         marker.updatedAt = Date()
@@ -49,7 +57,12 @@ final class RuntimeDiagnostics {
         heartbeatTimer = nil
     }
 
+    func setActiveWorkProvider(_ provider: (() -> Bool)?) {
+        activeWorkProvider = provider
+    }
+
     func recordSession(kind: String, stage: String, active: Bool = true) {
+        guard !isDisabled else { return }
         if marker == nil {
             start()
         }
@@ -63,6 +76,7 @@ final class RuntimeDiagnostics {
     }
 
     func clearSession(kind: String, outcome: String) {
+        guard !isDisabled else { return }
         if marker == nil {
             start()
         }
@@ -81,6 +95,7 @@ final class RuntimeDiagnostics {
         durationSeconds: Double,
         extra: [String: String] = [:]
     ) {
+        guard !isDisabled else { return }
         recordSession(kind: kind, stage: stage, active: true)
         var context = currentAnalyticsContext()
         context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)

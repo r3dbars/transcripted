@@ -14,6 +14,9 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-bin"
 LOCAL_ENTITLEMENTS="config/entitlements/local.plist"
 SIGN_IDENTITY="${SIGN_IDENTITY:-${SIGNING_IDENTITY:-}}"
+OPEN_APP_AFTER_BUILD="${OPEN_APP_AFTER_BUILD:-1}"
+BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
@@ -27,6 +30,29 @@ SPARKLE_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/Sparkle.framework"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --no-open)
+            OPEN_APP_AFTER_BUILD=0
+            ;;
+        --open)
+            OPEN_APP_AFTER_BUILD=1
+            ;;
+        --thin)
+            BUNDLE_PARAKEET_MODELS=0
+            ;;
+        --full)
+            BUNDLE_PARAKEET_MODELS=1
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: bash build.sh [--no-open] [--thin|--full]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 dependency_input_listing() {
     {
@@ -135,7 +161,7 @@ verify_launch_smoke() {
     local smoke_log="$BUILD_DIR/launch-smoke.log"
     rm -f "$smoke_log"
 
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
     local app_pid=$!
 
     sleep 5
@@ -216,16 +242,20 @@ PARAKEET_BUNDLE_DIR="$APP_BUNDLE/Contents/Resources/parakeet-models"
 PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3-coreml"
 
 bundled_parakeet_models=false
-mkdir -p "$PARAKEET_BUNDLE_DIR"
 model_src="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
-if [ -d "$model_src/Encoder.mlmodelc" ]; then
-    echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
-    rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
-    ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
-    bundled_parakeet_models=true
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    echo "Skipping bundled Parakeet models (--thin); runtime download will occur on first use."
+else
+    mkdir -p "$PARAKEET_BUNDLE_DIR"
+    if [ -d "$model_src/Encoder.mlmodelc" ]; then
+        echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
+        rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+        ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
+        bundled_parakeet_models=true
+    fi
 fi
 
-if [ "$bundled_parakeet_models" = false ]; then
+if [ "$BUNDLE_PARAKEET_MODELS" != "0" ] && [ "$bundled_parakeet_models" = false ]; then
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
@@ -267,10 +297,13 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
 # Compile
 echo "Compiling..."
+echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
+    -whole-module-optimization \
+    -num-threads "$SWIFTC_NUM_THREADS" \
     -o "$STAGED_APP_BINARY" \
     -framework AVFoundation \
     -framework AppKit \
@@ -336,6 +369,17 @@ fi
 echo "Running launch smoke check..."
 verify_launch_smoke
 
+echo "Checking performance budget..."
+PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
+    PERFORMANCE_BUDGET_ARGS+=(--allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80)
+fi
+scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
+
 echo "Build complete!"
-echo "Opening Transcripted..."
-open "$APP_BUNDLE"
+if [ "$OPEN_APP_AFTER_BUILD" = "1" ]; then
+    echo "Opening Transcripted..."
+    open "$APP_BUNDLE"
+else
+    echo "Skipping app open (--no-open)."
+fi
