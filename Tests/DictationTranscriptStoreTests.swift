@@ -6,7 +6,7 @@ import Foundation
 func testDictationTranscriptStore() {
     runSuite("DictationTranscriptStore.latestSavedText — returns the newest saved dictation across days") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -36,7 +36,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.latestSavedText — reads older Timestamp metadata too") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -71,7 +71,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.recentSavedDictations — returns the newest entries across day files and same-day sections") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -116,7 +116,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.latestSavedText — preserves markdown headings inside dictation body") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -144,7 +144,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.savedDictationCounts — totals entries and dictated words") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -174,7 +174,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.deleteEntry — removes only the matching entry ID") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -234,7 +234,7 @@ func testDictationTranscriptStore() {
 
     runSuite("DictationTranscriptStore.deleteEntry — same-timestamp saved entries keep distinct IDs") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -275,6 +275,13 @@ func testDictationTranscriptStore() {
         assertEqual(remainingEntries.count, 1, "deleting one same-timestamp entry should keep the other")
         assertEqual(remainingEntries.first?.text, "first saved text", "first same-timestamp entry should remain")
     }
+}
+
+private func temporaryDictationStoreTestRoot(fileManager: FileManager) -> URL {
+    fileManager.temporaryDirectory.appendingPathComponent(
+        "TranscriptedDictationStoreTests-\(UUID().uuidString)",
+        isDirectory: true
+    )
 }
 
 private func isoDate(_ string: String) -> Date {

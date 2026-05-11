@@ -6,7 +6,7 @@ import Foundation
 func testDictationTranscriptWriter() {
     runSuite("DictationTranscriptWriter.save — groups dictations by day") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -43,7 +43,7 @@ func testDictationTranscriptWriter() {
 
     runSuite("DictationTranscriptWriter.save — separates different days") {
         let fm = FileManager.default
-        let tempRoot = fm.temporaryDirectory.appendingPathComponent("DraftDictationTests-\(UUID().uuidString)", isDirectory: true)
+        let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
@@ -69,6 +69,13 @@ func testDictationTranscriptWriter() {
         assertTrue(firstSaved?.url.lastPathComponent == "Dictations_2026-04-07.md", "first day filename")
         assertTrue(secondSaved?.url.lastPathComponent == "Dictations_2026-04-08.md", "second day filename")
     }
+}
+
+private func temporaryDictationWriterTestRoot(fileManager: FileManager) -> URL {
+    fileManager.temporaryDirectory.appendingPathComponent(
+        "TranscriptedDictationWriterTests-\(UUID().uuidString)",
+        isDirectory: true
+    )
 }
 
 private func isoDate(_ string: String) -> Date {
