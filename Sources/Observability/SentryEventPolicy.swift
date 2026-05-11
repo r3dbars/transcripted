@@ -9,6 +9,62 @@ struct SentryEventPolicy: Equatable {
         allowedPolicies["\(engine).\(event)"]
     }
 
+    static func diagnosticTags(
+        forEngine engine: String,
+        event: String,
+        context: [String: String]
+    ) -> [String: String] {
+        guard policy(forEngine: engine, event: event) != nil else { return [:] }
+
+        var tags = context.filter { allowedDiagnosticTagKeys.contains($0.key) }
+        if let waitBucket = durationBucket(fromMilliseconds: context["wait_ms"]) {
+            tags["wait_bucket"] = waitBucket
+        }
+
+        return SentryPayloadSanitizer.sanitizeTags(tags)
+    }
+
+    private static let allowedDiagnosticTagKeys: Set<String> = [
+        "default_input_class",
+        "default_output_class",
+        "duration_bucket",
+        "failure_kind",
+        "forced_readiness_recoveries",
+        "format_ready",
+        "hfp_suspected",
+        "input_channels",
+        "input_device_class",
+        "input_rate_hz",
+        "output_channels",
+        "output_device_class",
+        "output_rate_hz",
+        "readiness_refreshes",
+        "recovering",
+        "recovery_start_attempts",
+        "route_shape",
+        "sample_flow_started",
+        "selected_input_class",
+        "selection_overrode_default",
+        "selection_reason",
+        "session_active",
+        "session_kind",
+        "session_stage",
+        "stall_kind",
+        "stall_stage",
+        "start_attempts",
+        "stt_model",
+        "trigger",
+        "was_recording",
+    ]
+
+    private static func durationBucket(fromMilliseconds value: String?) -> String? {
+        guard let value,
+              let milliseconds = Double(value) else {
+            return nil
+        }
+        return AnalyticsReporter.durationBucket(seconds: milliseconds / 1000)
+    }
+
     private static let allowedPolicies: [String: SentryEventPolicy] = [
         "app.session_stall_detected": .init(
             engine: "app",
