@@ -70,6 +70,7 @@ enum HotkeyPreferences {
     private static let meetingKeyCodeKey     = "hotkey-meeting-keyCode"
     private static let meetingModifiersKey   = "hotkey-meeting-modifiers"
     private static let dictationShortcutModeKey = "hotkey-dictation-shortcut-mode"
+    private static let dictationShortcutsEnabledKey = "hotkey-dictation-shortcuts-enabled"
 
     // MARK: - Read
 
@@ -115,6 +116,14 @@ enum HotkeyPreferences {
         return mode
     }
 
+    static func dictationShortcutsEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        guard userDefaults.object(forKey: dictationShortcutsEnabledKey) != nil else {
+            return true
+        }
+
+        return userDefaults.bool(forKey: dictationShortcutsEnabledKey)
+    }
+
     // MARK: - Write
 
     static func save(draft binding: HotkeyBinding, userDefaults: UserDefaults = .standard) {
@@ -143,6 +152,11 @@ enum HotkeyPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
+    static func setDictationShortcutsEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(enabled, forKey: dictationShortcutsEnabledKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         let ud = userDefaults
         ud.removeObject(forKey: draftKeyCodeKey)
@@ -152,6 +166,7 @@ enum HotkeyPreferences {
         ud.removeObject(forKey: meetingKeyCodeKey)
         ud.removeObject(forKey: meetingModifiersKey)
         ud.removeObject(forKey: dictationShortcutModeKey)
+        ud.removeObject(forKey: dictationShortcutsEnabledKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 

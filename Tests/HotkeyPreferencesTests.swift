@@ -27,6 +27,32 @@ func testHotkeyPreferences() {
         )
     }
 
+    runSuite("HotkeyPreferences dictation shortcuts default to enabled") {
+        let suiteName = "HotkeyPreferencesTests.shortcutsEnabledDefault.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertEqual(
+            HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
+            true,
+            "existing users should keep working dictation shortcuts by default"
+        )
+    }
+
+    runSuite("HotkeyPreferences stores disabled dictation shortcuts") {
+        let suiteName = "HotkeyPreferencesTests.shortcutsDisabled.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        HotkeyPreferences.setDictationShortcutsEnabled(false, userDefaults: defaults)
+
+        assertEqual(
+            HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
+            false,
+            "users should be able to turn off accidental dictation triggers"
+        )
+    }
+
     runSuite("HotkeyPreferences ignores unknown dictation modes") {
         let suiteName = "HotkeyPreferencesTests.unknown.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -47,12 +73,18 @@ func testHotkeyPreferences() {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         HotkeyPreferences.setDictationShortcutMode(.pushToTalk, userDefaults: defaults)
+        HotkeyPreferences.setDictationShortcutsEnabled(false, userDefaults: defaults)
         HotkeyPreferences.resetToDefaults(userDefaults: defaults)
 
         assertEqual(
             HotkeyPreferences.dictationShortcutMode(userDefaults: defaults),
             .handsFree,
             "reset should restore the default dictation mode"
+        )
+        assertEqual(
+            HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
+            true,
+            "reset should re-enable dictation shortcuts"
         )
     }
 }

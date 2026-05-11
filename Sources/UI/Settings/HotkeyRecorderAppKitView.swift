@@ -16,11 +16,28 @@ final class HotkeyRecorderAppKitView: NSView {
     private var recordingTarget: RecordingTarget?
     private var pendingDictationModifier: PhysicalDictationTriggerBinding?
     private var pendingDictationModifierKeyCode: UInt32?
+    var dictationShortcutsEnabled = true {
+        didSet {
+            if !dictationShortcutsEnabled, recordingTarget?.isDictation == true {
+                stopRecording()
+            }
+            refreshDisplay()
+        }
+    }
 
     enum RecordingTarget {
         case pushToTalk
         case handsFree
         case meeting
+
+        var isDictation: Bool {
+            switch self {
+            case .pushToTalk, .handsFree:
+                return true
+            case .meeting:
+                return false
+            }
+        }
     }
 
     override init(frame: NSRect) {
@@ -90,23 +107,31 @@ final class HotkeyRecorderAppKitView: NSView {
         let handsFreeBinding = PhysicalDictationTriggerPreferences.handsFreeBinding()
         let meetingBinding = PhysicalDictationTriggerPreferences.meetingBinding()
         pushToTalkRow.update(
-            displayText: recordingTarget == .pushToTalk ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding),
+            displayText: dictationShortcutsEnabled
+                ? (recordingTarget == .pushToTalk ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding))
+                : "Off",
             isRecording: recordingTarget == .pushToTalk,
-            isDefault: pushToTalkBinding == PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+            isDefault: pushToTalkBinding == PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            isEnabled: dictationShortcutsEnabled
         )
         handsFreeRow.update(
-            displayText: recordingTarget == .handsFree ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: handsFreeBinding),
+            displayText: dictationShortcutsEnabled
+                ? (recordingTarget == .handsFree ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: handsFreeBinding))
+                : "Off",
             isRecording: recordingTarget == .handsFree,
-            isDefault: handsFreeBinding == PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
+            isDefault: handsFreeBinding == PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            isEnabled: dictationShortcutsEnabled
         )
         meetingRow.update(
             displayText: recordingTarget == .meeting ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: meetingBinding),
             isRecording: recordingTarget == .meeting,
-            isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding
+            isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            isEnabled: true
         )
     }
 
     private func startRecording(_ target: RecordingTarget) {
+        guard dictationShortcutsEnabled || !target.isDictation else { return }
         stopRecording()
         recordingTarget = target
         refreshDisplay()
@@ -256,13 +281,23 @@ private final class ShortcutRecorderRow: NSView {
         }
     }
 
-    func update(displayText: String, isRecording: Bool, isDefault: Bool) {
+    func update(displayText: String, isRecording: Bool, isDefault: Bool, isEnabled: Bool) {
         shortcutButton.title = displayText
         shortcutButton.bezelColor = isRecording ? NSColor.systemOrange.withAlphaComponent(0.35) : MenuTokens.buttonBackgroundNS
-        resetRowButton.isHidden = isDefault
+        shortcutButton.isEnabled = isEnabled
+        shortcutButton.alphaValue = isEnabled ? 1.0 : 0.55
+        nameLabel.alphaValue = isEnabled ? 1.0 : 0.55
+        resetRowButton.isHidden = isDefault || !isEnabled
         needsLayout = true
     }
 
-    @objc private func recordTapped() { recordAction() }
-    @objc private func resetTapped() { resetAction() }
+    @objc private func recordTapped() {
+        guard shortcutButton.isEnabled else { return }
+        recordAction()
+    }
+
+    @objc private func resetTapped() {
+        guard !resetRowButton.isHidden else { return }
+        resetAction()
+    }
 }

@@ -32,6 +32,7 @@ struct TranscriptedSettingsView: View {
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
+    @State private var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
@@ -757,10 +758,27 @@ struct TranscriptedSettingsView: View {
                 title: "Keys",
                 detail: "Set push-to-talk, hands-free, and meeting shortcuts."
             ) {
-                HotkeyRecorderContainer()
+                Toggle("Enable dictation shortcuts", isOn: Binding(
+                    get: { dictationShortcutsEnabled },
+                    set: { newValue in
+                        dictationShortcutsEnabled = newValue
+                        trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .shortcuts)
+                        HotkeyPreferences.setDictationShortcutsEnabled(newValue)
+                    }
+                ))
+
+                Text(
+                    dictationShortcutsEnabled
+                        ? "Push-to-talk and hands-free keys can start dictation."
+                        : "Off. You can still start dictation from the app, and meeting controls still work."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
                     .frame(height: 108)
 
-                if let dictationTriggerSystemWarning {
+                if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -1919,6 +1937,7 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
+        dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: navigation.selectedPage == .shortcuts)
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
@@ -2025,6 +2044,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshShortcutState() {
+        dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
