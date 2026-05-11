@@ -15,14 +15,18 @@ func testSupportDiagnosticsBundle() {
             pastebackGranted: true,
             calendarGranted: false,
             audioRoute: [
+                "audio_device": "MacBook Pro Microphone",
                 "input_device_class": "bluetooth",
                 "input_rate_hz": "24000",
+                "raw_url": "https://meet.example.com/private-room",
                 "route_shape": "bluetooth_input_to_built_in_output",
             ],
             runtime: [
+                "file_path": "/Users/redbars/private-runtime.json",
                 "session_kind": "dictation",
                 "session_stage": "recording",
                 "session_active": "true",
+                "transcript_title": "Private Customer Call",
             ],
             meetingState: "ready",
             meetingRecording: false,
@@ -54,6 +58,9 @@ func testSupportDiagnosticsBundle() {
         assertFalse(text.contains("com.openai.codex"), "diagnostics should redact source app bundle IDs from recent logs")
         assertFalse(text.contains("source_app_name=Codex"), "diagnostics should redact source app names from recent logs")
         assertFalse(text.contains("MacBook Pro Microphone"), "diagnostics should redact raw device names from recent logs")
+        assertFalse(text.contains("https://meet.example.com/private-room"), "diagnostics should redact raw route URLs")
+        assertFalse(text.contains("private-runtime.json"), "diagnostics should redact runtime file paths")
+        assertFalse(text.contains("Private Customer Call"), "diagnostics should redact runtime transcript titles")
     }
 
     runSuite("SupportDiagnosticsBundle Sentry context avoids sanitizer-dropped audio keys") {
