@@ -283,7 +283,7 @@ final class OverlayHeaderView: NSView {
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted
         case .starting, .loading:
-            shortcutHint.stringValue = "Cancel: \(dictationShortcutHint)"
+            shortcutHint.stringValue = DictationCancelHintPolicy.cancelHintText(for: dictationShortcutHint)
             shortcutHint.textColor = OverlayTokens.textSecondary
         case .drafting:
             shortcutHint.stringValue = ""
