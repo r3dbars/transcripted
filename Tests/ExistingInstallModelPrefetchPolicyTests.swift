@@ -1,7 +1,7 @@
 import Foundation
 
 func testExistingInstallModelPrefetchPolicy() {
-    runSuite("ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals — detects real users") {
+    runSuite("ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals — requires durable evidence") {
         assertFalse(
             ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals(
                 onboardingCompleted: false,
@@ -10,13 +10,13 @@ func testExistingInstallModelPrefetchPolicy() {
             ),
             "brand-new installs should not get automatic background model work"
         )
-        assertTrue(
+        assertFalse(
             ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals(
                 onboardingCompleted: true,
                 hasCaptureLibraryContent: false,
                 hasExplicitLaunchAtLoginChoice: false
             ),
-            "completed onboarding should count as an existing user"
+            "onboarding alone should not make a fresh install prefetch models"
         )
         assertTrue(
             ExistingInstallModelPrefetchPolicy.hasExistingInstallSignals(

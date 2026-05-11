@@ -143,12 +143,23 @@ enum ModelCacheInventory {
 
     static func removeWhisperModels(
         fileManager: FileManager = .default,
+        transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
         whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
     ) throws -> ModelCacheCleanupResult {
-        let directory = whisperModelsDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        let cacheRoot = transcriptedCacheDirectory.standardizedFileURL
+        let directory = whisperModelsDirectory.standardizedFileURL
+        let expectedDirectory = cacheRoot
+            .appendingPathComponent("whisperkit", isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true)
+            .standardizedFileURL
+
         guard
-            directory.lastPathComponent == "models",
-            directory.deletingLastPathComponent().lastPathComponent == "whisperkit",
+            directory.path == expectedDirectory.path,
+            resolvedDirectoryIsInsideAppCache(
+                directory,
+                cacheRoot: cacheRoot,
+                fileManager: fileManager
+            ),
             fileManager.fileExists(atPath: directory.path)
         else {
             return ModelCacheCleanupResult(removedBytes: 0, removedNames: [])
@@ -166,6 +177,7 @@ enum ModelCacheInventory {
         includeWhisper: Bool,
         fileManager: FileManager = .default,
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
+        transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
         whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
     ) throws -> ModelCacheCleanupResult {
         let staleResult = try removeKnownStaleFluidAudioModels(
@@ -177,6 +189,7 @@ enum ModelCacheInventory {
 
         let whisperResult = try removeWhisperModels(
             fileManager: fileManager,
+            transcriptedCacheDirectory: transcriptedCacheDirectory,
             whisperModelsDirectory: whisperModelsDirectory
         )
         return staleResult.merging(whisperResult)
@@ -213,6 +226,38 @@ enum ModelCacheInventory {
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values?.isRegularFile == true else { return 0 }
         return Int64(values?.fileSize ?? 0)
+    }
+
+    private static func resolvedDirectoryIsInsideAppCache(
+        _ directory: URL,
+        cacheRoot: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let whisperKitDirectory = cacheRoot
+            .appendingPathComponent("whisperkit", isDirectory: true)
+            .standardizedFileURL
+        let checkedDirectories = [whisperKitDirectory, directory]
+
+        for url in checkedDirectories {
+            if isSymbolicLink(at: url, fileManager: fileManager) {
+                return false
+            }
+        }
+
+        let resolvedRoot = cacheRoot.resolvingSymlinksInPath()
+        let resolvedDirectory = directory.resolvingSymlinksInPath()
+        let resolvedRootPath = resolvedRoot.path
+        return resolvedDirectory.path == resolvedRootPath
+            || resolvedDirectory.path.hasPrefix(resolvedRootPath + "/")
+    }
+
+    private static func isSymbolicLink(at url: URL, fileManager: FileManager) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
+        return values?.isSymbolicLink == true
     }
 
     private static func defaultFluidAudioModelsDirectory() -> URL {

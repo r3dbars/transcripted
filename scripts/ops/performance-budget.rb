@@ -35,6 +35,7 @@ options = {
   max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
   max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
   min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
+  require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
   allow_missing_parakeet_model: false
 }
@@ -52,6 +53,7 @@ OptionParser.new do |parser|
   parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
   parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
   parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
+  parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
 end.parse!
@@ -242,10 +244,12 @@ if options[:events_path]
       errors << "Dictation transcription p95 RTF is #{format("%.3f", percentile(transcription_rtf, 0.95))}, above #{format("%.3f", options[:max_transcription_p95_rtf])}"
     end
 
-    if startup_durations.length < MIN_STARTUP_SAMPLES
-      errors << "Only #{startup_durations.length} launch to model-ready samples, need at least #{MIN_STARTUP_SAMPLES}"
-    elsif percentile(startup_durations, 0.90) > options[:max_model_ready_p90_seconds]
-      errors << "Launch to model-ready p90 is #{format("%.3fs", percentile(startup_durations, 0.90))}, above #{format("%.3fs", options[:max_model_ready_p90_seconds])}"
+    if options[:require_launch_model_ready_samples].positive?
+      if startup_durations.length < options[:require_launch_model_ready_samples]
+        errors << "Only #{startup_durations.length} launch to model-ready samples, need at least #{options[:require_launch_model_ready_samples]}"
+      elsif percentile(startup_durations, 0.90) > options[:max_model_ready_p90_seconds]
+        errors << "Launch to model-ready p90 is #{format("%.3fs", percentile(startup_durations, 0.90))}, above #{format("%.3fs", options[:max_model_ready_p90_seconds])}"
+      end
     end
 
     if options[:require_dictation_fast_start_samples].positive?
@@ -315,7 +319,11 @@ if runtime_summary
   puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])}"
   puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
   puts "Launch model-ready samples: #{runtime_summary[:startup_samples]}"
-  puts "Launch to model-ready p90: #{format("%.3fs", runtime_summary[:startup_p90])}"
+  if runtime_summary[:startup_p90]
+    puts "Launch to model-ready p90: #{format("%.3fs", runtime_summary[:startup_p90])}"
+  else
+    puts "Launch to model-ready p90: n/a"
+  end
   puts "Dictation fast-start samples: #{runtime_summary[:dictation_fast_start_samples]}"
   if runtime_summary[:dictation_fast_start_p95]
     puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"

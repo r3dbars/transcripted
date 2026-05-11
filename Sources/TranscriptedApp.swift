@@ -260,6 +260,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             if #available(macOS 14.0, *) {
                 await self.appState.meetingSession.prepareForTermination()
             }
+            self.appState.shutdown()
+            await EventReporter.shared.flushLocalEventsForShutdown()
             sender.reply(toApplicationShouldTerminate: true)
         }
 

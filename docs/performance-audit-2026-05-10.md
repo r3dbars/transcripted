@@ -1,8 +1,8 @@
 # Transcripted Performance Audit
 
-Date: 2026-05-10  
-Repo snapshot: `5136fc24913cb3556fdb329f413837fdbd816587` (`origin/main`)  
-Audited build: local signed `build/Transcripted.app`, version `1.1.33`  
+Date: 2026-05-10
+Repo snapshot: `5136fc24913cb3556fdb329f413837fdbd816587` (`origin/main`)
+Audited build: local signed `build/Transcripted.app`, version `1.1.33`
 Goal: raise every category toward A+/100 with measured fixes, not cosmetic scoring.
 
 ## Executive Score
@@ -183,7 +183,7 @@ Change made:
 - Added optional `--events` parsing for Transcripted `events.jsonl`.
 - The checker now enforces warmed dictation transcription p95 under 0.500s.
 - The checker now enforces warmed dictation p95 real-time factor under 0.050.
-- The checker now enforces app launch to model-ready p90 under 30.000s.
+- The checker can enforce app launch to model-ready p90 under 30.000s when eager-load samples are explicitly required.
 - Repo contract tests keep the runtime budgets and event parser entrypoint explicit.
 
 Measured proof:

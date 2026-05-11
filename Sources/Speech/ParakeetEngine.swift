@@ -411,6 +411,7 @@ class ParakeetEngine: ObservableObject {
 
     // FluidAudio ASR
     private var asrManager: AsrManager?
+    private var modelInitializationTask: Task<Void, Never>?
     private var modelFilePrefetchTask: Task<URL, Error>?
     private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
@@ -514,6 +515,23 @@ class ParakeetEngine: ObservableObject {
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
     func initialize() async {
         guard !isShuttingDown, !Task.isCancelled else { return }
+
+        if let modelInitializationTask {
+            await modelInitializationTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performInitialize()
+        }
+        modelInitializationTask = task
+        await task.value
+    }
+
+    private func performInitialize() async {
+        defer { modelInitializationTask = nil }
+        guard !isShuttingDown, !Task.isCancelled else { return }
         scheduleInputDeviceNameRefresh()
 
         guard asrManager == nil else {
@@ -525,7 +543,7 @@ class ParakeetEngine: ObservableObject {
 
         switch modelDownloadState {
         case .downloading:
-            guard modelFilePrefetchTask != nil else { return }
+            break
         case .loading:
             return
         case .notLoaded, .cached, .ready, .failed:
@@ -2724,6 +2742,8 @@ class ParakeetEngine: ObservableObject {
 
     func cleanup() {
         isShuttingDown = true
+        modelInitializationTask?.cancel()
+        modelInitializationTask = nil
         modelFilePrefetchTask?.cancel()
         modelFilePrefetchTask = nil
         cancelAudioWatchdog()
@@ -2756,6 +2776,8 @@ class ParakeetEngine: ObservableObject {
     }
 
     deinit {
+        modelInitializationTask?.cancel()
+        modelFilePrefetchTask?.cancel()
         if let observer = configChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }

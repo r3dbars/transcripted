@@ -26,6 +26,7 @@ class TranscriptedAppState: ObservableObject {
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
+    private var isShutDown = false
     private let eagerModelWarmupEnabled =
         ProcessInfo.processInfo.environment["TRANSCRIPTED_EAGER_MODEL_WARMUP"] == "1"
     private lazy var wakeRecoveryCoordinator = WakeRecoveryCoordinator(
@@ -147,6 +148,8 @@ class TranscriptedAppState: ObservableObject {
     }
 
     func shutdown() {
+        guard !isShutDown else { return }
+        isShutDown = true
         wakeRecoveryCoordinator.cancel()
         runtimeReadinessTask?.cancel()
         runtimeReadinessTask = nil

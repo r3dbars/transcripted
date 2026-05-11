@@ -16,7 +16,10 @@ enum ExistingInstallModelPrefetchPolicy {
         hasCaptureLibraryContent: Bool,
         hasExplicitLaunchAtLoginChoice: Bool
     ) -> Bool {
-        onboardingCompleted || hasCaptureLibraryContent || hasExplicitLaunchAtLoginChoice
+        // Fresh installs can complete onboarding before first dictation, so
+        // this flag is not strong enough by itself for background model work.
+        _ = onboardingCompleted
+        return hasCaptureLibraryContent || hasExplicitLaunchAtLoginChoice
     }
 
     static func shouldPrefetch(_ context: ExistingInstallModelPrefetchContext) -> Bool {

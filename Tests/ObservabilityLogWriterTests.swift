@@ -31,6 +31,20 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("EventReporter exposes shutdown flushing for buffered info events") {
+        let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+        let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
+
+        assertTrue(
+            reporterSource.contains("func flushLocalEventsForShutdown() async"),
+            "buffered local info events should have an explicit shutdown flush path"
+        )
+        assertTrue(
+            appSource.contains("await EventReporter.shared.flushLocalEventsForShutdown()"),
+            "termination cleanup should flush buffered event logs before replying to AppKit"
+        )
+    }
+
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogWriterTests-\(UUID().uuidString)", isDirectory: true)
@@ -72,4 +86,10 @@ func testObservabilityLogWriter() {
         }
         assertEqual(validLines.count, expectedCount, "concurrent appends should not concatenate or split JSONL records")
     }
+}
+
+private func readObservabilityTestRepoTextFile(_ relativePath: String) -> String {
+    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent(relativePath)
+    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

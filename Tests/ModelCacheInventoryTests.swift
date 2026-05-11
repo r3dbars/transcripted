@@ -82,7 +82,10 @@ func testModelCacheInventory() {
         writeTestFile(whisperModels.appendingPathComponent("openai_whisper-large-v3-v20240930_626MB/model.bin"), bytes: 31)
         writeTestFile(unrelatedCacheFile, bytes: 11)
 
-        let result = try? ModelCacheInventory.removeWhisperModels(whisperModelsDirectory: whisperModels)
+        let result = try? ModelCacheInventory.removeWhisperModels(
+            transcriptedCacheDirectory: root.appendingPathComponent("cache", isDirectory: true),
+            whisperModelsDirectory: whisperModels
+        )
 
         assertEqual(result?.removedBytes, 31, "cleanup should report the Whisper models directory size")
         assertEqual(result?.removedNames, ["Whisper cache"], "cleanup should name the removed cache")
@@ -108,6 +111,7 @@ func testModelCacheInventory() {
         let result = try? ModelCacheInventory.removeReclaimableCaches(
             includeWhisper: true,
             fluidAudioModelsDirectory: fluid,
+            transcriptedCacheDirectory: root.appendingPathComponent("cache", isDirectory: true),
             whisperModelsDirectory: whisperModels
         )
 
@@ -151,10 +155,41 @@ func testModelCacheInventory() {
 
         writeTestFile(modelFile, bytes: 31)
 
-        let result = try? ModelCacheInventory.removeWhisperModels(whisperModelsDirectory: nonWhisperModels)
+        let result = try? ModelCacheInventory.removeWhisperModels(
+            transcriptedCacheDirectory: root.appendingPathComponent("cache", isDirectory: true),
+            whisperModelsDirectory: nonWhisperModels
+        )
 
         assertEqual(result?.removedBytes, 0, "cleanup should refuse model folders outside whisperkit")
         assertTrue(FileManager.default.fileExists(atPath: modelFile.path), "non-Whisper model paths should stay untouched")
+    }
+
+    runSuite("ModelCacheInventory cleanup refuses Whisper symlink escapes") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let cache = root.appendingPathComponent("cache", isDirectory: true)
+        let cacheWhisperKit = cache.appendingPathComponent("whisperkit", isDirectory: true)
+        let outsideWhisperKit = root.appendingPathComponent("outside/whisperkit", isDirectory: true)
+        let outsideModelFile = outsideWhisperKit
+            .appendingPathComponent("models/openai_whisper-large-v3-v20240930_626MB/model.bin")
+        let symlinkedWhisperModels = cacheWhisperKit.appendingPathComponent("models", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeTestFile(outsideModelFile, bytes: 31)
+        try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try? FileManager.default.createSymbolicLink(
+            at: cacheWhisperKit,
+            withDestinationURL: outsideWhisperKit
+        )
+
+        let result = try? ModelCacheInventory.removeWhisperModels(
+            transcriptedCacheDirectory: cache,
+            whisperModelsDirectory: symlinkedWhisperModels
+        )
+
+        assertEqual(result?.removedBytes, 0, "cleanup should refuse symlinked Whisper cache paths")
+        assertTrue(FileManager.default.fileExists(atPath: outsideModelFile.path), "symlink targets outside the app cache must stay untouched")
+        assertTrue(FileManager.default.fileExists(atPath: cacheWhisperKit.path), "cleanup should not remove the symlink escape")
     }
 }
 

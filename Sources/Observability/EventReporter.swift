@@ -51,6 +51,12 @@ private actor EventFileWriter {
         write(lineData)
     }
 
+    func flushForShutdown() {
+        guard prepareIfNeeded() else { return }
+        flushBufferedInfoEvents()
+        handle?.synchronizeFile()
+    }
+
     private func lineData(for event: ObservabilityEvent) -> Data? {
         let data: Data
         do {
@@ -142,6 +148,8 @@ final class EventReporter {
 
     private let writer = EventFileWriter()
     private var engineStateSummary: (() -> [String: String])?
+    private var pendingAppendTasks: [Int: Task<Void, Never>] = [:]
+    private var nextAppendTaskID = 0
 
     private let appVersion: String = {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -192,9 +200,15 @@ final class EventReporter {
             osVersion: osVersion
         )
 
-        Task.detached(priority: .utility) { [writer, entry] in
+        let appendTaskID = nextAppendTaskID
+        nextAppendTaskID += 1
+        let appendTask = Task.detached(priority: .utility) { [writer, entry] in
             await writer.append(entry)
+            await MainActor.run {
+                EventReporter.shared.markAppendTaskFinished(appendTaskID)
+            }
         }
+        pendingAppendTasks[appendTaskID] = appendTask
         ReliabilityPacketRecorder.record(event: entry)
 
         if level == .error,
@@ -207,5 +221,20 @@ final class EventReporter {
                 context: mergedContext
             )
         }
+    }
+
+    func flushLocalEventsForShutdown() async {
+        while !pendingAppendTasks.isEmpty {
+            let tasks = Array(pendingAppendTasks.values)
+            pendingAppendTasks.removeAll(keepingCapacity: true)
+            for task in tasks {
+                await task.value
+            }
+        }
+        await writer.flushForShutdown()
+    }
+
+    private func markAppendTaskFinished(_ id: Int) {
+        pendingAppendTasks[id] = nil
     }
 }

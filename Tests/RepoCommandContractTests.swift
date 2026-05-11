@@ -98,11 +98,15 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("MAX_MODEL_READY_P90_SECONDS = 30.0"),
-            "performance budget should cap launch model-ready regressions"
+            "performance budget should keep a launch model-ready budget for explicit eager-load samples"
         )
         assertTrue(
             contents.contains("startup_model_ready_durations(events)"),
             "performance budget should parse launch to model-ready events"
+        )
+        assertTrue(
+            contents.contains("--require-launch-model-ready-samples"),
+            "lazy startup should not require launch-to-model-ready samples unless the budget asks for them"
         )
         assertTrue(
             contents.contains("MAX_DICTATION_FAST_START_P95_MS = 250.0"),
@@ -278,10 +282,16 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - dictation joins existing model downloads") {
-        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
         assertTrue(
-            contents.contains("case .notLoaded, .downloading, .cached, .failed:"),
+            overlayContents.contains("case .notLoaded, .downloading, .cached, .failed:"),
             "dictation start should join an in-progress model file prefetch instead of waiting forever for ready"
+        )
+        assertTrue(
+            engineContents.contains("private var modelInitializationTask: Task<Void, Never>?")
+                && engineContents.contains("await modelInitializationTask.value"),
+            "Parakeet initialization should join an in-progress direct first-use download/load"
         )
     }
 
