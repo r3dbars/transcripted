@@ -5,6 +5,7 @@ final class RuntimeDiagnostics {
     private let markerURL: URL
     private var marker: RuntimeDiagnosticsMarker?
     private var heartbeatTimer: Timer?
+    private var activeWorkProvider: (() -> Bool)?
 
     init(markerURL: URL = RuntimeDiagnosticsStore.defaultMarkerURL()) {
         self.markerURL = markerURL
@@ -47,6 +48,10 @@ final class RuntimeDiagnostics {
         )
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+    }
+
+    func setActiveWorkProvider(_ provider: (() -> Bool)?) {
+        activeWorkProvider = provider
     }
 
     func recordSession(kind: String, stage: String, active: Bool = true) {
@@ -133,7 +138,10 @@ final class RuntimeDiagnostics {
         updateMarker { marker in
             marker.lastEvent = event
             if event == "heartbeat" {
-                RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(&marker)
+                RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(
+                    &marker,
+                    runtimeWorkActive: activeWorkProvider?() ?? false
+                )
             }
         }
     }

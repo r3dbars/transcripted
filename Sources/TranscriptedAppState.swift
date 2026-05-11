@@ -82,6 +82,14 @@ class TranscriptedAppState: ObservableObject {
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
+        runtimeDiagnostics.setActiveWorkProvider { [weak self] in
+            guard let self else { return false }
+            var workActive = self.sttRouter.isRecording || self.sttRouter.isTranscribing
+            if #available(macOS 14.0, *) {
+                workActive = workActive || self.meetingSession.hasRuntimeDiagnosticsWork
+            }
+            return workActive
+        }
         runtimeDiagnostics.start()
         if #available(macOS 14.0, *) {
             MeetingSessionController.runtimeDiagnosticsRecorder = runtimeDiagnostics
@@ -155,6 +163,7 @@ class TranscriptedAppState: ObservableObject {
         if #available(macOS 14.0, *) {
             MeetingSessionController.runtimeDiagnosticsRecorder = nil
         }
+        runtimeDiagnostics.setActiveWorkProvider(nil)
         runtimeDiagnostics.markCleanShutdown()
     }
 

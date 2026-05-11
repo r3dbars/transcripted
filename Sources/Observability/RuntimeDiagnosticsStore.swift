@@ -152,8 +152,12 @@ enum RuntimeDiagnosticsStore {
         return heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now) != "lt_15s"
     }
 
-    static func clearInactiveSessionContextForHeartbeat(_ marker: inout RuntimeDiagnosticsMarker) {
+    static func clearInactiveSessionContextForHeartbeat(
+        _ marker: inout RuntimeDiagnosticsMarker,
+        runtimeWorkActive: Bool = false
+    ) {
         guard !marker.sessionActive else { return }
+        guard !runtimeWorkActive else { return }
 
         marker.sessionKind = "none"
         marker.sessionStage = "idle"
