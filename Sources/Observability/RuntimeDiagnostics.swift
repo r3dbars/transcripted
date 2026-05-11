@@ -147,6 +147,12 @@ final class RuntimeDiagnostics {
     private func persist(event: String) {
         updateMarker { marker in
             marker.lastEvent = event
+            if event == "heartbeat" {
+                RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(
+                    &marker,
+                    runtimeWorkActive: activeWorkProvider?() ?? false
+                )
+            }
         }
     }
 

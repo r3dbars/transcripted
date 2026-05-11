@@ -209,4 +209,104 @@ func testRuntimeDiagnosticsStore() {
 
         assertEqual(shouldReport, true, "active meeting shutdowns should stay visible")
     }
+
+    runSuite("RuntimeDiagnosticsStore clears inactive session context on heartbeat") {
+        var marker = RuntimeDiagnosticsMarker(
+            launchID: "completed-dictation",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "heartbeat",
+            sessionKind: "dictation",
+            sessionStage: "completed",
+            sessionActive: false
+        )
+
+        RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(&marker)
+
+        assertEqual(marker.sessionKind, "none", "inactive completed work should stop polluting later shutdown reports")
+        assertEqual(marker.sessionStage, "idle", "inactive completed work should reset to idle after the next heartbeat")
+    }
+
+    runSuite("RuntimeDiagnosticsStore suppresses cleaned heartbeat-only shutdown markers") {
+        var marker = RuntimeDiagnosticsMarker(
+            launchID: "completed-dictation-heartbeat",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "heartbeat",
+            sessionKind: "dictation",
+            sessionStage: "completed",
+            sessionActive: false
+        )
+
+        RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(
+            &marker,
+            runtimeWorkActive: false
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_220)
+        )
+
+        assertEqual(shouldReport, false, "idle heartbeat-only markers should stay suppressed after cleanup")
+    }
+
+    runSuite("RuntimeDiagnosticsStore keeps queued work attribution across heartbeat cleanup") {
+        var marker = RuntimeDiagnosticsMarker(
+            launchID: "queued-meeting",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "heartbeat",
+            sessionKind: "meeting",
+            sessionStage: "transcript_saved",
+            sessionActive: false
+        )
+
+        RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(
+            &marker,
+            runtimeWorkActive: true
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_220)
+        )
+
+        assertEqual(marker.sessionKind, "meeting", "queued meeting work should keep its attribution across heartbeats")
+        assertEqual(marker.sessionStage, "transcript_saved", "queued meeting stage should survive heartbeat cleanup")
+        assertEqual(shouldReport, true, "queued work interrupted after a heartbeat should still report unclean shutdown")
+    }
+
+    runSuite("RuntimeDiagnosticsStore keeps active session context on heartbeat") {
+        var marker = RuntimeDiagnosticsMarker(
+            launchID: "active-dictation",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "heartbeat",
+            sessionKind: "dictation",
+            sessionStage: "recording",
+            sessionActive: true
+        )
+
+        RuntimeDiagnosticsStore.clearInactiveSessionContextForHeartbeat(&marker)
+
+        assertEqual(marker.sessionKind, "dictation", "active work should stay attributed across heartbeats")
+        assertEqual(marker.sessionStage, "recording", "active session stage should survive heartbeat persistence")
+    }
 }

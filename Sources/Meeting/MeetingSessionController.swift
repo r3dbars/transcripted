@@ -1215,6 +1215,10 @@ final class MeetingSessionController: ObservableObject {
         taskManager.activeCount > 0 || taskManager.speakerNamingRequest != nil || !queuedTranscriptionJobs.isEmpty
     }
 
+    var hasRuntimeDiagnosticsWork: Bool {
+        isCaptureSessionActive || isFinishingRecording || hasBackgroundTranscriptionWork
+    }
+
     private var hasVisibleBackgroundTranscriptionWork: Bool {
         MeetingSessionUIPolicy.shouldShowTranscribing(
             activeTranscriptions: taskManager.activeCount,
