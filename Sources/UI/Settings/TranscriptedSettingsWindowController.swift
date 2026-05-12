@@ -28,13 +28,14 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Transcripted Settings"
         window.titleVisibility = .hidden
         window.contentViewController = hostingController
+        window.contentMinSize = NSSize(width: 880, height: 640)
         window.isReleasedWhenClosed = false
         window.center()
 
