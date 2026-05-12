@@ -2680,6 +2680,38 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Cleanup
 
+    func resetAfterFailedRecordingStart() async {
+        cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        recoveryState.reset()
+        recoveryState.markFormatUnready()
+        publishRecoveryState()
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
+        streamingSamplesLock.withLock {
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+        }
+        await eouManager?.reset()
+        isRecording = false
+        isTranscribing = false
+        audioLevel = 0
+        didReceiveAudioSamples = false
+        sampleBuffer.removeAll(keepingCapacity: true)
+        liveTranscript = ""
+        committedStreamText = ""
+        audioGraphGeneration += 1
+        let cleanupGeneration = audioGraphGeneration
+        await releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
+    }
+
     func cancel() {
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()

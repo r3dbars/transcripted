@@ -75,17 +75,22 @@ final class RuntimeDiagnostics {
         }
     }
 
-    func clearSession(kind: String, outcome: String) {
+    func clearSession(kind: String, outcome: String, resetToIdle: Bool = false) {
         guard !isDisabled else { return }
         if marker == nil {
             start()
         }
         guard marker != nil else { return }
         updateMarker { marker in
-            marker.sessionKind = kind
-            marker.sessionStage = outcome
             marker.sessionActive = false
             marker.lastEvent = "\(kind)_\(outcome)"
+            if resetToIdle {
+                marker.sessionKind = "none"
+                marker.sessionStage = "idle"
+            } else {
+                marker.sessionKind = kind
+                marker.sessionStage = outcome
+            }
         }
     }
 
