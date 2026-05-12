@@ -62,6 +62,10 @@ func testFirstRunExperience() {
         )
 
         assertEqual(result.primaryTitle, "Continue", "saved first dictation should move into meetings")
+        assertTrue(
+            result.detail.contains("saved local Markdown file"),
+            "saved first dictation should prove the local Markdown artifact"
+        )
         assertEqual(meetings.primaryTitle, "Set up meetings", "meeting intro should offer setup")
         assertEqual(meetings.secondaryTitle, "Skip for now", "meeting intro should not trap dictation-first users")
         assertEqual(agent.primaryTitle, "Open Transcripted", "last step should land users in the app")
