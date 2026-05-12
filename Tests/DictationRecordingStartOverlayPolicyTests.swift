@@ -84,4 +84,13 @@ func testDictationRecordingStartOverlayPolicy() {
             "idle compact overlay stops should stay ignored"
         )
     }
+
+    runSuite("DictationRecordingStartFailurePolicy treats microphone timeout as a handled startup failure") {
+        let plan = DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout")
+
+        assertEqual(plan.outcome, "microphone_start_timeout", "cleanup should keep the concrete failure outcome")
+        assertTrue(plan.resetRuntimeSessionToIdle, "handled mic-start failures should not leave an active runtime session")
+        assertTrue(plan.resetSpeechEngine, "failed startup should release the partial audio graph")
+        assertFalse(plan.reportRuntimeStall, "the timeout event already reports this failure; it should not also emit app.session_stall_detected")
+    }
 }

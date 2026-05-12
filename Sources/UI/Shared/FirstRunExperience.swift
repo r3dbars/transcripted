@@ -197,7 +197,7 @@ enum FirstRunExperience {
                 primaryTitle: hasFirstDictation ? "Continue" : "Try Again",
                 secondaryTitle: nil,
                 detail: hasFirstDictation
-                    ? "This is the first useful moment: spoken work became a saved dictation."
+                    ? "This is the first useful moment: spoken work became a saved local Markdown file."
                     : "No dictation has been saved yet. Try again with one clear sentence.",
                 isPrimaryEnabled: true
             )

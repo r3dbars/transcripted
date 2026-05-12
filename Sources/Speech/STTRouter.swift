@@ -123,6 +123,11 @@ class STTRouter: ObservableObject {
         await parakeetEngine.stopRecording()
     }
 
+    func resetAfterFailedRecordingStart() async {
+        activeRecordingModel = nil
+        await parakeetEngine.resetAfterFailedRecordingStart()
+    }
+
     func transcribe() async -> String? {
         let model = activeRecordingModel ?? selectedModel
         defer {

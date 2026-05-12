@@ -250,14 +250,25 @@ struct CLIContextDirectories {
             return nil
         }
 
-        let configuredURL = URL(fileURLWithPath: trimmed, isDirectory: true)
-        let standardizedPath = configuredURL.standardizedFileURL.path
-        let homePath = home.standardizedFileURL.path
-        guard standardizedPath.hasPrefix(homePath) else {
+        let directory = URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL
+        guard directory.path != "/", !directory.pathComponents.contains("..") else {
             return nil
         }
 
-        return configuredURL
+        let resolvedDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedHome = home.resolvingSymlinksInPath().standardizedFileURL
+        let isUnderHome = resolvedDirectory.path == resolvedHome.path
+            || resolvedDirectory.path.hasPrefix(resolvedHome.path + "/")
+        let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
+        let isForbidden = forbiddenPrefixes.contains { prefix in
+            resolvedDirectory.path == prefix || resolvedDirectory.path.hasPrefix(prefix + "/")
+        }
+
+        guard !isForbidden || isUnderHome else {
+            return nil
+        }
+
+        return directory
     }
 
     private static func isManifestDirectory(_ directory: URL, named name: String, under captureLibrary: URL) -> Bool {

@@ -38,3 +38,21 @@ struct DictationRecordingStartLifecyclePolicy {
         return .ignoreInactive
     }
 }
+
+struct DictationRecordingStartFailureCleanupPlan: Equatable {
+    let outcome: String
+    let resetRuntimeSessionToIdle: Bool
+    let resetSpeechEngine: Bool
+    let reportRuntimeStall: Bool
+}
+
+struct DictationRecordingStartFailurePolicy {
+    static func cleanupPlan(for failureKind: String) -> DictationRecordingStartFailureCleanupPlan {
+        DictationRecordingStartFailureCleanupPlan(
+            outcome: failureKind,
+            resetRuntimeSessionToIdle: true,
+            resetSpeechEngine: true,
+            reportRuntimeStall: false
+        )
+    }
+}

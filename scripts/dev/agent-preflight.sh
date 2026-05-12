@@ -84,6 +84,11 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-tests.sh"
         fi
 
+        if matches_any "$path" "Info.plist"; then
+            add_command "bash build.sh"
+            add_command "bash run-tests.sh"
+        fi
+
         if matches_any "$path" "Sources/Meeting/*" "Sources/TranscriptedCore/*" "Tests/Integration/*"; then
             add_command "bash build.sh"
             add_command "bash run-tests.sh"

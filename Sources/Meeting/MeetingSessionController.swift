@@ -954,6 +954,20 @@ final class MeetingSessionController: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
+            await self.prepareModels()
+            guard case .ready = self.state else {
+                DiagnosticsTrail.record(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "meeting_failed_retry_blocked_models",
+                    message: "Failed meeting retry blocked because models were not ready",
+                    context: self.baseDiagnosticsContext(extra: ["failed_id": id.uuidString])
+                )
+                self.retryingFailedMeetingIDs.remove(id)
+                self.refreshFailedMeetings()
+                return
+            }
+
             _ = await self.taskManager.retryFailedTranscription(
                 failedId: id,
                 outputFolder: MeetingStoragePaths.transcriptsFolder
