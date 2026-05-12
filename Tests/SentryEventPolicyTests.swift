@@ -84,4 +84,48 @@ func testSentryEventPolicy() {
         assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
         assertNil(unknown, "unknown events should stay local-only by default")
     }
+
+    runSuite("SentryEventPolicy diagnosticTags keeps timeout triage searchable and safe") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "microphone_start_timeout",
+            context: [
+                "audio_device": "Justin's AirPods",
+                "forced_readiness_recoveries": "2",
+                "format_ready": "false",
+                "input_device_class": "bluetooth",
+                "readiness_refreshes": "8",
+                "recovering": "false",
+                "recovery_start_attempts": "1",
+                "route_shape": "bluetooth_input_to_builtin_output",
+                "start_attempts": "3",
+                "transcript_text": "private words",
+                "trigger": "hands_free",
+                "wait_ms": "6000",
+            ]
+        )
+
+        assertEqual(tags["format_ready"], "false", "format readiness should be queryable")
+        assertEqual(tags["recovering"], "false", "recovery state should be queryable")
+        assertEqual(tags["input_device_class"], "bluetooth", "coarse device class should be queryable")
+        assertEqual(tags["route_shape"], "bluetooth_input_to_builtin_output", "coarse route shape should be queryable")
+        assertEqual(tags["start_attempts"], "3", "bounded retry count should be queryable")
+        assertEqual(tags["readiness_refreshes"], "8", "readiness refresh count should be queryable")
+        assertEqual(tags["recovery_start_attempts"], "1", "recovery start count should be queryable")
+        assertEqual(tags["forced_readiness_recoveries"], "2", "forced recovery count should be queryable")
+        assertEqual(tags["trigger"], "hands_free", "coarse trigger should be queryable")
+        assertEqual(tags["wait_bucket"], "lt_10s", "raw wait time should be bucketed")
+        assertNil(tags["audio_device"], "raw device names should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
+    }
+
+    runSuite("SentryEventPolicy diagnosticTags ignores non-allowlisted events") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_export_failed",
+            context: ["format_ready": "false"]
+        )
+
+        assertTrue(tags.isEmpty, "local-only events should not get Sentry diagnostic tags")
+    }
 }
