@@ -553,6 +553,8 @@ class DictationSessionController: ObservableObject {
         readinessRefresher.cancel()
 
         let waited = Int(TranscriptedConstants.dictationRecoveryBudget * 1000)
+        let cleanupPlan = DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout")
+        await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
         DiagnosticsTrail.record(
             logger: appState.logger,
             level: .error,
@@ -572,18 +574,18 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        trackDictationStartFailed("microphone_start_timeout")
-        appState.runtimeDiagnostics.recordStall(
-            kind: "dictation",
-            stage: "microphone_start_timeout",
-            durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
-            extra: [
-                "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                "recovering": "\(appState.sttRouter.isRecovering)"
-            ]
-        )
-        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_start_timeout")
-        isDictating = false
+        trackDictationStartFailed(cleanupPlan.outcome)
+        if cleanupPlan.reportRuntimeStall {
+            appState.runtimeDiagnostics.recordStall(
+                kind: "dictation",
+                stage: cleanupPlan.outcome,
+                durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
+                extra: [
+                    "format_ready": "\(appState.sttRouter.inputFormatReady)",
+                    "recovering": "\(appState.sttRouter.isRecovering)"
+                ]
+            )
+        }
         overlayController.showError(
             microphoneTimeoutMessage(
                 deviceName: appState.sttRouter.inputDeviceName,
@@ -596,6 +598,24 @@ class DictationSessionController: ObservableObject {
                 self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
             }
         )
+    }
+
+    private func finishFailedDictationStart(
+        appState: TranscriptedAppState,
+        cleanupPlan: DictationRecordingStartFailureCleanupPlan
+    ) async {
+        recordingStartRetryTask = nil
+        sessionTimeoutTask?.cancel()
+        sessionTimeoutTask = nil
+        if cleanupPlan.resetSpeechEngine {
+            await appState.sttRouter.resetAfterFailedRecordingStart()
+        }
+        appState.runtimeDiagnostics.clearSession(
+            kind: "dictation",
+            outcome: cleanupPlan.outcome,
+            resetToIdle: cleanupPlan.resetRuntimeSessionToIdle
+        )
+        isDictating = false
     }
 
     private func presentMicrophonePermissionError(
