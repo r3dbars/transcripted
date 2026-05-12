@@ -146,7 +146,32 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
     }
 
+    func testPipelineModelReadinessReloadsModelsAfterCleanup() async throws {
+        let speech = MetadataStubSpeechToTextEngine(isReady: false)
+        let diarization = MetadataStubDiarizationEngine(isReady: false)
+        let manager = makeManager(speechToText: speech, diarization: diarization)
+
+        try await manager.transcription.ensureModelsReadyForPipeline()
+
+        XCTAssertTrue(speech.isReady)
+        XCTAssertTrue(diarization.isReady)
+        XCTAssertEqual(speech.initializeCallCount, 1)
+        XCTAssertEqual(diarization.initializeCallCount, 1)
+
+        speech.cleanup()
+        diarization.cleanup()
+
+        try await manager.transcription.ensureModelsReadyForPipeline()
+
+        XCTAssertTrue(speech.isReady)
+        XCTAssertTrue(diarization.isReady)
+        XCTAssertEqual(speech.initializeCallCount, 2)
+        XCTAssertEqual(diarization.initializeCallCount, 2)
+    }
+
     private func makeManager(
+        speechToText: (any SpeechToTextEngine)? = nil,
+        diarization: (any DiarizationEngine)? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil
     ) -> TranscriptionTaskManager {
@@ -164,10 +189,13 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         try? FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: paths.logs, withIntermediateDirectories: true)
 
+        let resolvedSpeechToText = speechToText ?? MetadataStubSpeechToTextEngine()
+        let resolvedDiarization = diarization ?? MetadataStubDiarizationEngine()
+
         return TranscriptionTaskManager(
             failedTranscriptionManager: FailedTranscriptionManager(paths: paths),
-            speechToText: MetadataStubSpeechToTextEngine(),
-            diarization: MetadataStubDiarizationEngine(),
+            speechToText: resolvedSpeechToText,
+            diarization: resolvedDiarization,
             speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
             cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
             retainedAudioDirectory: retainedAudioDirectory,
@@ -214,21 +242,41 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 @MainActor
 private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
-    var isReady: Bool = true
+    var isReady: Bool
+    var initializeCallCount = 0
 
-    func initialize() async {}
+    init(isReady: Bool = true) {
+        self.isReady = isReady
+    }
+
+    func initialize() async {
+        initializeCallCount += 1
+        isReady = true
+    }
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String { "" }
-    func cleanup() {}
+    func cleanup() {
+        isReady = false
+    }
 }
 
 @available(macOS 14.0, *)
 @MainActor
 private final class MetadataStubDiarizationEngine: DiarizationEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
-    var isReady: Bool = true
+    var isReady: Bool
+    var initializeCallCount = 0
 
-    func initialize() async {}
+    init(isReady: Bool = true) {
+        self.isReady = isReady
+    }
+
+    func initialize() async {
+        initializeCallCount += 1
+        isReady = true
+    }
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] { [] }
     func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] { [] }
-    func cleanup() {}
+    func cleanup() {
+        isReady = false
+    }
 }
