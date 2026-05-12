@@ -232,6 +232,51 @@ final class ContextDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveUsesAppDirectoryManifestOutsideHome() throws {
+        let tempHome = makeTempDir()
+        let externalCaptureLibrary = makeTempDir()
+        defer {
+            removeTempDir(tempHome)
+            removeTempDir(externalCaptureLibrary)
+        }
+
+        let transcriptedRoot = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("Transcripted", isDirectory: true)
+        let manifestMeetings = externalCaptureLibrary.appendingPathComponent("meetings", isDirectory: true)
+        let manifestDictations = externalCaptureLibrary.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptedRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manifestMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manifestDictations, withIntermediateDirectories: true)
+
+        let manifestURL = transcriptedRoot.appendingPathComponent("mcp-directories.json", isDirectory: false)
+        try """
+        {
+          "version": 1,
+          "captureLibraryDirectory": "\(externalCaptureLibrary.path)",
+          "meetingsDirectory": "\(manifestMeetings.path)",
+          "dictationsDirectory": "\(manifestDictations.path)"
+        }
+        """.write(to: manifestURL, atomically: true, encoding: .utf8)
+
+        let directories = CLIContextDirectories.resolve(
+            dataDir: nil,
+            meetingsDir: nil,
+            dictationsDir: nil,
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            manifestMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            manifestDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveIgnoresManifestWhenDirectoriesDoNotMatchCaptureLibrary() throws {
         let tempHome = makeTempDir()
         defer { removeTempDir(tempHome) }
@@ -292,6 +337,48 @@ final class ContextDirectoriesTests: XCTestCase {
         let plistURL = preferencesDir.appendingPathComponent("app.transcripted.Transcripted.plist", isDirectory: false)
         let plistData = try PropertyListSerialization.data(
             fromPropertyList: ["transcriptSaveLocation": customCaptureLibrary.path],
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(to: plistURL)
+
+        let directories = CLIContextDirectories.resolve(
+            dataDir: nil,
+            meetingsDir: nil,
+            dictationsDir: nil,
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            customMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            customDictations.standardizedFileURL.path,
+        ])
+    }
+
+    func testResolveUsesAppCaptureLibraryPreferenceOutsideHome() throws {
+        let tempHome = makeTempDir()
+        let externalCaptureLibrary = makeTempDir()
+        defer {
+            removeTempDir(tempHome)
+            removeTempDir(externalCaptureLibrary)
+        }
+
+        let preferencesDir = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Preferences", isDirectory: true)
+        let customMeetings = externalCaptureLibrary.appendingPathComponent("meetings", isDirectory: true)
+        let customDictations = externalCaptureLibrary.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: preferencesDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: customMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: customDictations, withIntermediateDirectories: true)
+
+        let plistURL = preferencesDir.appendingPathComponent("app.transcripted.Transcripted.plist", isDirectory: false)
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": externalCaptureLibrary.path],
             format: .xml,
             options: 0
         )
