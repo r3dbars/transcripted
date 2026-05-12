@@ -25,12 +25,14 @@ struct SentryEventPolicy: Equatable {
     }
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
+        "capture_quality",
         "default_input_class",
         "default_output_class",
         "duration_bucket",
         "failure_kind",
         "forced_readiness_recoveries",
         "format_ready",
+        "gap_count_bucket",
         "hfp_suspected",
         "input_channels",
         "input_device_class",
@@ -38,9 +40,11 @@ struct SentryEventPolicy: Equatable {
         "output_channels",
         "output_device_class",
         "output_rate_hz",
+        "queue_depth_bucket",
         "readiness_refreshes",
         "recovering",
         "recovery_start_attempts",
+        "route_change_count_bucket",
         "route_shape",
         "sample_flow_started",
         "selected_input_class",
@@ -53,6 +57,7 @@ struct SentryEventPolicy: Equatable {
         "stall_stage",
         "start_attempts",
         "stt_model",
+        "system_status",
         "trigger",
         "was_recording",
     ]

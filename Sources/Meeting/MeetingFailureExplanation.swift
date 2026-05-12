@@ -153,6 +153,7 @@ struct MeetingFailureExplanation: Equatable {
             return .audioStart
         case .modelDownloadFailed,
              .modelNotLoaded,
+             .pipelineFailed,
              .transcriptionInferenceFailed,
              .emptyAudio,
              .invalidAudioFormat,

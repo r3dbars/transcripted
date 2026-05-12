@@ -57,6 +57,22 @@ func testMeetingFailureKind() {
         assertEqual(kind, .pipelineBusy, "pipeline-busy rejections from TranscriptionTaskManager should not fall to unexpected_error")
     }
 
+    runSuite("MeetingFailureKind classifies retry pipeline failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "Retry failed"
+        )
+
+        assertEqual(kind, .pipelineFailed, "retry orchestration failures should stay out of unexpected_error")
+    }
+
+    runSuite("MeetingFailureKind classifies model runtime wording") {
+        let kind = MeetingFailureKind.classify(
+            message: "ASR preprocessor failed while running CoreML prediction"
+        )
+
+        assertEqual(kind, .transcriptionInferenceFailed, "model runtime failures should land in the inference bucket")
+    }
+
     runSuite("MeetingFailureKind classifies stop-timeout errors") {
         let kind = MeetingFailureKind.classify(
             message: "Recording stop timed out before audio files were finalized."
