@@ -70,6 +70,50 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - release metadata stays aligned") {
+        let infoPlist = readRepoTextFile("Info.plist")
+        let cask = readRepoTextFile("Casks/transcripted.rb")
+        let appcast = readRepoTextFile("docs/appcast.xml")
+
+        let appVersion = plistStringValue("CFBundleShortVersionString", in: infoPlist)
+        let buildVersion = plistStringValue("CFBundleVersion", in: infoPlist)
+        let caskVersion = rubyStringAssignment("version", in: cask)
+        let caskSHA = rubyStringAssignment("sha256", in: cask)
+        let latestAppcastItem = firstAppcastItem(in: appcast)
+        let appcastVersion = xmlText("sparkle:version", in: latestAppcastItem)
+        let appcastShortVersion = xmlText("sparkle:shortVersionString", in: latestAppcastItem)
+        let appcastEnclosureURL = xmlAttribute("url", inFirstTagNamed: "enclosure", text: latestAppcastItem)
+        let appcastLength = xmlAttribute("length", inFirstTagNamed: "enclosure", text: latestAppcastItem)
+        let appcastSignature = xmlAttribute("sparkle:edSignature", inFirstTagNamed: "enclosure", text: latestAppcastItem)
+
+        assertNotNil(appVersion, "Info.plist should expose CFBundleShortVersionString")
+        assertEqual(buildVersion, appVersion, "marketing and build versions should move together for Sparkle")
+        assertEqual(caskVersion, appVersion, "Homebrew cask version should match the app bundle version")
+        assertEqual(appcastVersion, appVersion, "latest appcast item should match the app bundle version")
+        assertEqual(appcastShortVersion, appVersion, "Sparkle shortVersionString should match the app bundle version")
+        assertEqual(
+            appcastEnclosureURL,
+            appVersion.map { "https://github.com/r3dbars/transcripted/releases/download/v\($0)/Transcripted-\($0).dmg" },
+            "latest appcast enclosure should point at the matching GitHub DMG"
+        )
+        assertTrue(
+            isPositiveInteger(appcastLength),
+            "latest appcast enclosure should include a positive asset length"
+        )
+        assertTrue(
+            isNonEmptyBase64Like(appcastSignature),
+            "latest appcast enclosure should include a Sparkle EdDSA signature"
+        )
+        assertTrue(
+            isSHA256Hex(caskSHA),
+            "Homebrew cask should include a real 64-character SHA-256 digest"
+        )
+        assertTrue(
+            cask.contains("releases/download/v#{version}/Transcripted-#{version}.dmg"),
+            "Homebrew cask URL should keep tracking the matching GitHub release asset"
+        )
+    }
+
     runSuite("Repo command contract - performance budget checks release bloat") {
         let contents = readRepoTextFile("scripts/ops/performance-budget.rb")
         assertTrue(
@@ -315,6 +359,87 @@ private func repoRootURL() -> URL {
 private func readRepoTextFile(_ relativePath: String) -> String {
     let url = repoRootURL().appendingPathComponent(relativePath)
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+private func plistStringValue(_ key: String, in contents: String) -> String? {
+    guard let keyRange = contents.range(of: "<key>\(key)</key>"),
+          let stringStart = contents.range(of: "<string>", range: keyRange.upperBound..<contents.endIndex),
+          let stringEnd = contents.range(of: "</string>", range: stringStart.upperBound..<contents.endIndex)
+    else {
+        return nil
+    }
+
+    return String(contents[stringStart.upperBound..<stringEnd.lowerBound])
+}
+
+private func rubyStringAssignment(_ key: String, in contents: String) -> String? {
+    for line in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("\(key) \""),
+              let start = trimmed.firstIndex(of: "\""),
+              let end = trimmed[trimmed.index(after: start)...].firstIndex(of: "\"")
+        else {
+            continue
+        }
+
+        return String(trimmed[trimmed.index(after: start)..<end])
+    }
+
+    return nil
+}
+
+private func firstAppcastItem(in contents: String) -> String {
+    guard let start = contents.range(of: "<item>"),
+          let end = contents.range(of: "</item>", range: start.upperBound..<contents.endIndex)
+    else {
+        return ""
+    }
+
+    return String(contents[start.lowerBound..<end.upperBound])
+}
+
+private func xmlText(_ elementName: String, in contents: String) -> String? {
+    guard let start = contents.range(of: "<\(elementName)>"),
+          let end = contents.range(of: "</\(elementName)>", range: start.upperBound..<contents.endIndex)
+    else {
+        return nil
+    }
+
+    return String(contents[start.upperBound..<end.lowerBound])
+}
+
+private func xmlAttribute(_ name: String, inFirstTagNamed tagName: String, text: String) -> String? {
+    guard let tagStart = text.range(of: "<\(tagName) "),
+          let tagEnd = text.range(of: ">", range: tagStart.upperBound..<text.endIndex)
+    else {
+        return nil
+    }
+
+    let tag = String(text[tagStart.lowerBound..<tagEnd.upperBound])
+    guard let attributeStart = tag.range(of: "\(name)=\""),
+          let valueEnd = tag.range(of: "\"", range: attributeStart.upperBound..<tag.endIndex)
+    else {
+        return nil
+    }
+
+    return String(tag[attributeStart.upperBound..<valueEnd.lowerBound])
+}
+
+private func isPositiveInteger(_ value: String?) -> Bool {
+    guard let value, let integer = Int(value) else { return false }
+    return integer > 0
+}
+
+private func isNonEmptyBase64Like(_ value: String?) -> Bool {
+    guard let value, !value.isEmpty else { return false }
+    let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+    return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+}
+
+private func isSHA256Hex(_ value: String?) -> Bool {
+    guard let value, value.count == 64 else { return false }
+    let allowed = CharacterSet(charactersIn: "0123456789abcdef")
+    return value.unicodeScalars.allSatisfy { allowed.contains($0) }
 }
 
 private func repoTextFiles(relativeTo root: URL) -> [String] {
