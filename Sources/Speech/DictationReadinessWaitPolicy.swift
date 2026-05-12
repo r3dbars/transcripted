@@ -14,6 +14,7 @@ enum DictationReadinessWaitAction: Equatable {
 
 struct DictationReadinessWaitPolicy {
     private static let refreshesBeforeRecoveryStart = 4
+    private static let maxRecoveryStartAttempts = 2
 
     static func action(
         isRecovering: Bool,
@@ -33,12 +34,17 @@ struct DictationReadinessWaitPolicy {
             return .startRecording
         }
 
-        if readinessRefreshTimedOut, recoveryStartAttempts == 0 {
+        let shouldTryRecoveryStart = readinessRefreshTimedOut
+            || readinessRefreshes >= refreshesBeforeRecoveryStart
+        if shouldTryRecoveryStart,
+           recoveryStartAttempts == 0 {
             return .startRecoveryRecording
         }
 
-        if readinessRefreshes >= refreshesBeforeRecoveryStart,
-           recoveryStartAttempts == 0 {
+        if shouldTryRecoveryStart,
+           forcedRecoveryAttempts > 0,
+           forcedRecoveryAttempts < maxForcedRecoveryAttempts,
+           recoveryStartAttempts < maxRecoveryStartAttempts {
             return .startRecoveryRecording
         }
 

@@ -108,15 +108,22 @@ final class CrashReporter {
         message: String,
         context: [String: String]
     ) {
+        let diagnosticTags = SentryEventPolicy.diagnosticTags(
+            forEngine: engine,
+            event: event,
+            context: context
+        )
+        let tags = [
+            "source": "observability",
+            "engine": engine,
+            "event": event,
+        ].merging(diagnosticTags) { current, _ in current }
+
         _ = captureMessageEvent(
             level: sentryLevel(for: level),
             title: "\(engine).\(event)",
             message: message,
-            tags: [
-                "source": "observability",
-                "engine": engine,
-                "event": event,
-            ],
+            tags: tags,
             extra: context,
             fingerprint: [engine, event]
         )

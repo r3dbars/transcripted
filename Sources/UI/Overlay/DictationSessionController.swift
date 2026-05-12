@@ -563,6 +563,7 @@ class DictationSessionController: ObservableObject {
                 extra: [
                     "wait_ms": "\(waited)",
                     "audio_device": appState.sttRouter.inputDeviceName,
+                    "failure_kind": "microphone_start_timeout",
                     "is_recovering": "\(appState.sttRouter.isRecovering)",
                     "format_ready": "\(appState.sttRouter.inputFormatReady)",
                     "start_attempts": "\(startAttempts)",
@@ -577,10 +578,16 @@ class DictationSessionController: ObservableObject {
             kind: "dictation",
             stage: "microphone_start_timeout",
             durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
-            extra: [
+            extra: dictationAnalyticsProperties(extra: [
+                "failure_kind": "microphone_start_timeout",
                 "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                "recovering": "\(appState.sttRouter.isRecovering)"
-            ]
+                "forced_readiness_recoveries": "\(forcedReadinessRecoveries)",
+                "readiness_refreshes": "\(readinessRefreshes)",
+                "recovering": "\(appState.sttRouter.isRecovering)",
+                "recovery_start_attempts": "\(recoveryStartAttempts)",
+                "start_attempts": "\(startAttempts)",
+                "trigger": currentDictationTrigger.rawValue,
+            ])
         )
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_start_timeout")
         isDictating = false

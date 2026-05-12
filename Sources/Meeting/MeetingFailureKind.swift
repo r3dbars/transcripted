@@ -14,6 +14,7 @@ enum MeetingFailureKind: String {
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
     case pipelineBusy = "pipeline_busy"
+    case pipelineFailed = "pipeline_failed"
     case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
@@ -95,8 +96,14 @@ enum MeetingFailureKind: String {
             return .saveFailed
         }
 
-        if normalized.contains("transcription already in progress") {
+        if normalized.contains(anyOf: [
+            "transcription already in progress",
+        ]) {
             return .pipelineBusy
+        }
+
+        if normalized.contains("retry failed") {
+            return .pipelineFailed
         }
 
         if normalized.contains("model not loaded") {
@@ -117,7 +124,16 @@ enum MeetingFailureKind: String {
         }
 
         if normalized.contains(anyOf: [
+            "asr",
+            "core ml",
+            "coreml",
+            "failed to transcribe",
+            "fluid",
+            "mlmodel",
+            "multiarray",
             "parakeet",
+            "prediction",
+            "preprocessor",
             "inference failed",
             "transcription failed",
         ]) {
