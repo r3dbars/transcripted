@@ -67,6 +67,7 @@ extension TranscriptionTaskManager {
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
+        try await transcription.ensureModelsReadyForPipeline()
 
         let speechEngine = await MainActor.run {
             transcription.parakeet.transcriptionEngineDescriptor
