@@ -197,7 +197,7 @@ private final class RecentMeetingRowView: NSView {
 
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
         layer?.backgroundColor = NSColor.clear.cgColor
 
         titleLabel.stringValue = item.title
@@ -256,6 +256,7 @@ private final class RecentMeetingRowView: NSView {
     override func layout() {
         super.layout()
         let buttonSize = MenuTokens.secondaryButtonSize
+        let leftPad: CGFloat = 10
         copyButton.frame = NSRect(
             x: bounds.width - buttonSize,
             y: (bounds.height - buttonSize) / 2,
@@ -263,10 +264,10 @@ private final class RecentMeetingRowView: NSView {
             height: buttonSize
         )
 
-        let textWidth = max(0, copyButton.frame.minX - 12)
-        titleLabel.frame = NSRect(x: 0, y: 6, width: textWidth, height: 14)
-        dateLabel.frame = NSRect(x: 0, y: 21, width: textWidth, height: 12)
-        divider.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+        let textWidth = max(0, copyButton.frame.minX - leftPad - 8)
+        titleLabel.frame = NSRect(x: leftPad, y: 6, width: textWidth, height: 14)
+        dateLabel.frame = NSRect(x: leftPad, y: 21, width: textWidth, height: 12)
+        divider.frame = NSRect(x: leftPad, y: bounds.height - 1, width: bounds.width - leftPad, height: 1)
     }
 
     override var intrinsicContentSize: NSSize {
@@ -324,9 +325,18 @@ private final class FailedMeetingRowView: NSView {
 
     override var isFlipped: Bool { true }
 
+    private let retryingSpinner: NSProgressIndicator = {
+        let indicator = NSProgressIndicator()
+        indicator.style = .spinning
+        indicator.controlSize = .small
+        indicator.isIndeterminate = true
+        indicator.isDisplayedWhenStopped = false
+        return indicator
+    }()
+
     private func setupViews() {
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = MenuTokens.cardCornerRadius
         layer?.backgroundColor = MenuTokens.failedBackgroundNS.cgColor
         layer?.borderWidth = 1
         layer?.borderColor = MenuTokens.failedBorderNS.cgColor
@@ -352,6 +362,8 @@ private final class FailedMeetingRowView: NSView {
         retryButton.action = #selector(retry)
         addSubview(retryButton)
 
+        addSubview(retryingSpinner)
+
         secondaryButton.target = self
         secondaryButton.action = #selector(secondaryAction)
         addSubview(secondaryButton)
@@ -366,10 +378,18 @@ private final class FailedMeetingRowView: NSView {
             secondaryButton.toolTip = "Dismiss failed meeting"
         }
 
-        retryButton.title = item.isRetrying ? "Retrying..." : "Retry"
-        retryButton.setSymbol(item.isRetrying ? "arrow.trianglehead.2.clockwise.rotate.90" : "arrow.clockwise", accessibilityLabel: "Retry failed meeting")
+        retryButton.title = item.isRetrying ? "Retrying…" : "Retry"
+        retryButton.setSymbol(item.isRetrying ? nil : "arrow.clockwise", accessibilityLabel: "Retry failed meeting")
         retryButton.isEnabled = item.isRetryable && !item.isRetrying
         retryButton.isHidden = !item.isRetryable && !item.isRetrying
+
+        if item.isRetrying {
+            retryingSpinner.isHidden = false
+            retryingSpinner.startAnimation(nil)
+        } else {
+            retryingSpinner.stopAnimation(nil)
+            retryingSpinner.isHidden = true
+        }
     }
 
     override func layout() {
@@ -385,14 +405,29 @@ private final class FailedMeetingRowView: NSView {
 
         if retryButton.isHidden {
             retryButton.frame = .zero
+            retryingSpinner.frame = .zero
         } else {
+            let spinnerSize: CGFloat = 12
             let retrySize = retryButton.fittingSize
+            let showSpinner = !retryingSpinner.isHidden
+            let spinnerGap: CGFloat = showSpinner ? spinnerSize + 6 : 0
             retryButton.frame = NSRect(
                 x: secondaryButton.frame.minX - 8 - retrySize.width,
                 y: bounds.height - pad - retrySize.height,
                 width: retrySize.width,
                 height: retrySize.height
             )
+
+            if showSpinner {
+                retryingSpinner.frame = NSRect(
+                    x: retryButton.frame.minX - spinnerGap,
+                    y: retryButton.frame.midY - spinnerSize / 2,
+                    width: spinnerSize,
+                    height: spinnerSize
+                )
+            } else {
+                retryingSpinner.frame = .zero
+            }
         }
 
         let rightEdge = retryButton.isHidden ? secondaryButton.frame.minX : retryButton.frame.minX

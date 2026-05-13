@@ -35,4 +35,8 @@ enum OverlayTokens {
     static let headerHeight: CGFloat = 32
     static let toolbarHeight: CGFloat = 28
     static let dividerHeight: CGFloat = 1
+    static let preferredWaveformWidth: CGFloat = 126
+
+    // Status / warning
+    static let warningColor = NSColor.systemOrange
 }

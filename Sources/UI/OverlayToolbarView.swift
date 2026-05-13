@@ -5,6 +5,11 @@ import AppKit
 
 @MainActor
 final class OverlayToolbarView: NSView {
+    private enum Glyph {
+        static let returnKey = "\u{21A9}"
+        static let separator = "\u{00B7}"
+    }
+
     private let leftContainer = NSView()
     private let editedDot = NSView()
     private let editedLabel = NSTextField(labelWithString: "")
@@ -85,7 +90,7 @@ final class OverlayToolbarView: NSView {
             if hasEdits {
                 editedDot.isHidden = false
                 editedLabel.isHidden = false
-                editedLabel.stringValue = "edited \u{00B7} teaching Transcripted"
+                editedLabel.stringValue = "edited \(Glyph.separator) teaching Transcripted"
                 voiceOnlyLabel.isHidden = true
             } else if !hasContext {
                 editedDot.isHidden = true
@@ -96,7 +101,7 @@ final class OverlayToolbarView: NSView {
                 editedLabel.isHidden = true
                 voiceOnlyLabel.isHidden = true
             }
-            hintLabel.stringValue = "\u{21A9} send \u{00B7} Esc cancel"
+            hintLabel.stringValue = "\(Glyph.returnKey) send \(Glyph.separator) Esc cancel"
 
         case .diffFlash:
             isHidden = false
@@ -104,7 +109,7 @@ final class OverlayToolbarView: NSView {
             editedLabel.isHidden = false
             editedLabel.stringValue = "learning from your edits"
             voiceOnlyLabel.isHidden = true
-            hintLabel.stringValue = "\u{21A9} confirm \u{00B7} Esc go back"
+            hintLabel.stringValue = "\(Glyph.returnKey) confirm \(Glyph.separator) Esc go back"
 
         default:
             isHidden = true

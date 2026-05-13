@@ -61,7 +61,7 @@ final class MenuBarSettingsView: NSView {
         super.layout()
 
         let buttonSize = MenuTokens.secondaryButtonSize
-        let buttonY: CGFloat = 7
+        let buttonY = max(0, (bounds.height - buttonSize) / 2)
         quitButton.frame = NSRect(x: bounds.width - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
         feedbackButton.frame = NSRect(
             x: quitButton.frame.minX - 8 - buttonSize,

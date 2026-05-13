@@ -250,6 +250,39 @@ private final class PrimaryActionRowView: NSView {
         addSubview(badgeButton)
     }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if rowEnabled {
+            addCursorRect(badgeButton.frame, cursor: .pointingHand)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 14
+        symbolWellView.frame = NSRect(
+            x: pad,
+            y: (bounds.height - MenuTokens.symbolWellSize) / 2,
+            width: MenuTokens.symbolWellSize,
+            height: MenuTokens.symbolWellSize
+        )
+        symbolView.frame = symbolWellView.bounds
+
+        let badgeWidth = max(70, badgeButton.fittingSize.width + 18)
+        badgeButton.frame = NSRect(
+            x: bounds.width - pad - badgeWidth,
+            y: (bounds.height - MenuTokens.badgeHeight) / 2,
+            width: badgeWidth,
+            height: MenuTokens.badgeHeight
+        )
+
+        let textX = symbolWellView.frame.maxX + 10
+        let textWidth = badgeButton.frame.minX - textX - 10
+        titleLabel.frame = NSRect(x: textX, y: 8, width: textWidth, height: 15)
+        subtitleLabel.frame = NSRect(x: textX, y: 24, width: textWidth, height: 13)
+        window?.invalidateCursorRects(for: self)
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingAreaRef {
@@ -294,31 +327,6 @@ private final class PrimaryActionRowView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         layer?.backgroundColor = (rowEnabled ? MenuTokens.actionBackgroundNS : MenuTokens.actionDisabledNS).cgColor
-    }
-
-    override func layout() {
-        super.layout()
-        let pad: CGFloat = 14
-        symbolWellView.frame = NSRect(
-            x: pad,
-            y: (bounds.height - MenuTokens.symbolWellSize) / 2,
-            width: MenuTokens.symbolWellSize,
-            height: MenuTokens.symbolWellSize
-        )
-        symbolView.frame = symbolWellView.bounds
-
-        let badgeWidth = max(70, badgeButton.fittingSize.width + 18)
-        badgeButton.frame = NSRect(
-            x: bounds.width - pad - badgeWidth,
-            y: (bounds.height - MenuTokens.badgeHeight) / 2,
-            width: badgeWidth,
-            height: MenuTokens.badgeHeight
-        )
-
-        let textX = symbolWellView.frame.maxX + 10
-        let textWidth = badgeButton.frame.minX - textX - 10
-        titleLabel.frame = NSRect(x: textX, y: 8, width: textWidth, height: 15)
-        subtitleLabel.frame = NSRect(x: textX, y: 24, width: textWidth, height: 13)
     }
 
     override func mouseDown(with event: NSEvent) {

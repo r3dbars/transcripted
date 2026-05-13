@@ -42,7 +42,7 @@ final class OverlayDraftingView: NSView {
         // Error icon
         if let image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error") {
             errorIcon.image = image
-            errorIcon.contentTintColor = NSColor.systemYellow
+            errorIcon.contentTintColor = OverlayTokens.warningColor
             let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
             errorIcon.symbolConfiguration = config
         }
