@@ -103,6 +103,7 @@ enum ParakeetAudioFormatReadinessPolicy {
         inputSampleRate: Double,
         inputChannelCount: UInt32,
         selectedInputClass: String,
+        outputDeviceClass: String,
         selectionOverrodeDefault: Bool
     ) -> ParakeetAudioFormatReadiness {
         guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
@@ -112,6 +113,7 @@ enum ParakeetAudioFormatReadinessPolicy {
 
         if selectionOverrodeDefault,
            selectedInputClass != "bluetooth",
+           outputDeviceClass != "bluetooth",
            inputSampleRate >= 44_100,
            likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
             return .routeNotSettled
