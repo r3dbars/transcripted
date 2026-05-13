@@ -1,22 +1,27 @@
 // BetaConfig.swift
-// Per-user beta configuration — only compiled into beta builds.
-// The token placeholder is replaced by build-beta.sh via sed for each user's DMG.
+// Beta-build compile-time configuration. Currently empty.
+//
+// History: this file used to ship a per-user bearer token baked in at build time
+// via sed/perl substitution in build-beta.sh. That token authenticated the app
+// against the archived proxy worker at draft-proxy.tz427gsydr.workers.dev, which
+// also re-exposed Anthropic's /v1/messages endpoint.
+//
+// The proxy client is no longer part of the app target (BetaTelemetry and the
+// /config update-check flow are gone — Sparkle handles updates, Sentry handles
+// crash reports, PostHog handles analytics). The token was therefore dead code
+// that still ended up recoverable from the Mach-O binary via `strings` for
+// anyone with read access to the bundle. It has been removed.
+//
+// If beta-only auth comes back, generate the secret at first launch into the
+// Keychain rather than baking it into the binary, and pair it to the server via
+// a short-lived enrollment code handed out-of-band.
 
 #if BETA_BUILD
 
 import Foundation
 
 enum BetaConfig {
-    /// Per-user beta token, baked in at build time.
-    /// build-beta.sh replaces BETA_TOKEN_PLACEHOLDER with the actual token.
-    static let userToken: String = {
-        let token = "BETA_TOKEN_PLACEHOLDER"
-        // Crash early in debug/test if build-beta.sh did not substitute the token.
-        assert(token != "BETA_TOKEN_PLACEHOLDER",
-               "BetaConfig.userToken was not substituted — run build-beta.sh before use")
-        return token
-    }()
-
+    // Intentionally empty — see file header.
 }
 
 #endif

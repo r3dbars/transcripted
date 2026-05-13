@@ -23,16 +23,19 @@ cd "$REPO_ROOT"
 
 BETA_TOKEN="${1:-}"
 USER_NAME="${2:-beta}"
+
+# BETA_TOKEN is retained as a positional arg for backwards-compatible invocations,
+# but it is no longer injected into the app binary — the app no longer has a beta
+# proxy client. Builds without a token are fine. See Sources/Beta/BetaConfig.swift
+# for the rationale.
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
 
-if [ -z "$BETA_TOKEN" ]; then
-    echo "Usage: ./build-beta.sh <beta-token> <user-name>"
-    echo "Example: ./build-beta.sh transcripted-beta-nate Nate"
-    exit 1
+if [ -n "$BETA_TOKEN" ]; then
+    echo "ℹ️  BETA_TOKEN passed but no longer injected into the binary. Continuing."
 fi
 
 if [ -z "$APP_VERSION" ]; then
@@ -59,8 +62,6 @@ DMG_BACKGROUND_PATH="scripts/release/assets/dmg-background.png"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-${SIGN_IDENTITY:-}}"
 SIGNING_DISPLAY_NAME=""
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
-BETA_CONFIG_PATH="Sources/Beta/BetaConfig.swift"
-BETA_CONFIG_BACKUP="$(mktemp -t transcripted-beta-config)"
 BETA_ENTITLEMENTS="config/entitlements/beta.plist"
 DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
 DEPS_FRAMEWORK_ROOT="deps-frameworks"
@@ -110,28 +111,6 @@ mask_secret() {
     fi
 
     printf '%s...%s' "${value:0:4}" "${value: -2}"
-}
-
-escape_for_swift_string_literal() {
-    local value="$1"
-
-    value=${value//\\/\\\\}
-    value=${value//\"/\\\"}
-    value=${value//$'\n'/\\n}
-    value=${value//$'\r'/\\r}
-    value=${value//$'\t'/\\t}
-
-    printf '%s' "$value"
-}
-
-inject_beta_token() {
-    local escaped_token
-    escaped_token="$(escape_for_swift_string_literal "$BETA_TOKEN")"
-
-    BETA_TOKEN_SWIFT_LITERAL="$escaped_token" perl -0pi -e '
-        my $replacement = $ENV{BETA_TOKEN_SWIFT_LITERAL};
-        s/BETA_TOKEN_PLACEHOLDER/$replacement/g;
-    ' "$BETA_CONFIG_PATH"
 }
 
 validate_signed_app() {
@@ -341,15 +320,6 @@ bundle_mcp_server() {
     chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
-cleanup() {
-    if [ -f "$BETA_CONFIG_BACKUP" ]; then
-        cp "$BETA_CONFIG_BACKUP" "$BETA_CONFIG_PATH"
-        rm -f "$BETA_CONFIG_BACKUP"
-    fi
-}
-
-trap cleanup EXIT
-
 if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     echo "❌ Missing entitlements file: $BETA_ENTITLEMENTS"
     exit 1
@@ -422,11 +392,6 @@ if [ -d "Resources" ]; then
 fi
 
 bundle_mcp_server
-
-# Inject the user's beta token after dependency preflight succeeds.
-echo "Injecting token for $USER_NAME..."
-cp "$BETA_CONFIG_PATH" "$BETA_CONFIG_BACKUP"
-inject_beta_token
 
 # Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
@@ -597,7 +562,6 @@ fi
 echo ""
 echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
 echo "   Size: $(du -sh "$BUILD_DIR/$DMG_NAME" | cut -f1)"
-echo "   Token: $(mask_secret "$BETA_TOKEN")"
 echo "   User: $USER_NAME"
 if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     echo "   Note: this build is not notarized yet, so Gatekeeper rejection is still expected."
