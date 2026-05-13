@@ -65,10 +65,21 @@ public struct ModelDownloadError: Error, LocalizedError {
 
 public enum ModelDownloadService {
 
-    /// HuggingFace mirror URLs, tried in order
+    /// HuggingFace endpoint.
+    ///
+    /// Security: previously this list also contained a third-party mirror
+    /// (`https://hf-mirror.com`) as a fallback. That fallback was removed because the manifest
+    /// served by the mirror is what supplies the per-file SHA-256 used for verification — so a
+    /// compromised mirror could simply hand back a manifest whose `lfs.sha256` matches the
+    /// malicious file it intends to serve, and the integrity check would still pass. The mirror
+    /// also lets non-LFS files (tokenizer.json, config.json, etc.) ride along with no digest
+    /// anywhere in the response.
+    ///
+    /// Treat `huggingface.co` as the only source of truth. If huggingface.co is unreachable,
+    /// fail closed and surface the network error instead of degrading silently to an untrusted
+    /// mirror.
     private static let mirrors: [String] = [
-        "https://huggingface.co",
-        "https://hf-mirror.com"
+        "https://huggingface.co"
     ]
 
     /// Default retry configuration
@@ -231,8 +242,8 @@ public enum ModelDownloadService {
         let size: Int?
         /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
         /// Populated from the HuggingFace API response when available.
-        /// Security: used to verify file integrity after download from mirrors,
-        /// so a compromised third-party mirror cannot silently serve malicious weights.
+        /// Security: used to verify file integrity end-to-end against the digest
+        /// huggingface.co reports for the file.
         let sha256: String?
     }
 
@@ -307,15 +318,15 @@ public enum ModelDownloadService {
         )
     }
 
-    /// Download a single file with mirror fallback and retry.
+    /// Download a single file with retry. (The previous mirror-fallback loop was reduced to
+    /// huggingface.co only — see `mirrors` above for the security rationale.)
     /// - Parameters:
     ///   - modelId: HuggingFace model identifier
     ///   - filename: Filename within the model repository (pre-validated by isSafeModelFilename)
     ///   - destination: Local destination URL
     ///   - expectedSHA256: SHA-256 hex digest from the HuggingFace API manifest (optional).
-    ///     Security: when provided, the downloaded file is verified against this digest before being
-    ///     moved to its destination. This prevents a compromised third-party mirror (hf-mirror.com)
-    ///     from silently serving malicious model weights in place of the genuine files.
+    ///     Security: when provided, the downloaded file is verified against this digest before
+    ///     being moved to its destination.
     static func downloadFileWithMirrorFallback(
         modelId: String,
         filename: String,
