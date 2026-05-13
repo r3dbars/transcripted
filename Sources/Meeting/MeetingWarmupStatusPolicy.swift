@@ -8,6 +8,12 @@ struct MeetingWarmupStatus: Equatable {
     let dictationStatus: String
     let meetingsStatus: String
 
+    var isReadyForMenuHeader: Bool {
+        guard progress >= 1.0 else { return false }
+        return !Self.blockingDictationStatuses.contains(dictationStatus)
+            && !Self.blockingMeetingStatuses.contains(meetingsStatus)
+    }
+
     static let ready = MeetingWarmupStatus(
         title: "Transcripted is ready",
         subtitle: "Dictation and meetings are available",
@@ -34,6 +40,19 @@ struct MeetingWarmupStatus: Equatable {
         dictationStatus: "On demand",
         meetingsStatus: "On demand"
     )
+
+    private static let blockingDictationStatuses: Set<String> = [
+        "Downloading",
+        "Loading",
+        "Failed",
+    ]
+
+    private static let blockingMeetingStatuses: Set<String> = [
+        "Waiting",
+        "Loading",
+        "Starting",
+        "Failed",
+    ]
 }
 
 enum MeetingWarmupDictationState: Equatable {

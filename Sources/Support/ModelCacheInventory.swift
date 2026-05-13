@@ -71,6 +71,8 @@ struct ModelCacheCleanupResult: Equatable {
 }
 
 enum ModelCacheInventory {
+    static let activeParakeetModelDirectoryName = "parakeet-tdt-0.6b-v3-coreml"
+
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
         "parakeet-tdt-0.6b-v2",
         "parakeet-tdt-0.6b-v2-coreml",
@@ -107,6 +109,21 @@ enum ModelCacheInventory {
         formatter.countStyle = .file
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         return formatter.string(fromByteCount: bytes)
+    }
+
+    static func activeParakeetModelDirectory(
+        fileManager: FileManager = .default,
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
+    ) -> URL? {
+        let candidate = fluidAudioModelsDirectory
+            .appendingPathComponent(activeParakeetModelDirectoryName, isDirectory: true)
+            .standardizedFileURL
+
+        guard hasCompleteParakeetModel(at: candidate, fileManager: fileManager) else {
+            return nil
+        }
+
+        return candidate
     }
 
     static func removeKnownStaleFluidAudioModels(
@@ -226,6 +243,48 @@ enum ModelCacheInventory {
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values?.isRegularFile == true else { return 0 }
         return Int64(values?.fileSize ?? 0)
+    }
+
+    private static func hasCompleteParakeetModel(at directory: URL, fileManager: FileManager) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              !isSymbolicLink(at: directory, fileManager: fileManager)
+        else {
+            return false
+        }
+
+        let requiredDirectories = [
+            "Encoder.mlmodelc",
+            "JointDecision.mlmodelc",
+            "Decoder.mlmodelc",
+            "Preprocessor.mlmodelc",
+        ]
+
+        for name in requiredDirectories {
+            let modelDirectory = directory.appendingPathComponent(name, isDirectory: true)
+            guard fileManager.fileExists(atPath: modelDirectory.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue,
+                  !isSymbolicLink(at: modelDirectory, fileManager: fileManager)
+            else {
+                return false
+            }
+
+            let coreMLData = modelDirectory.appendingPathComponent("coremldata.bin")
+            guard fileManager.fileExists(atPath: coreMLData.path) else {
+                return false
+            }
+        }
+
+        let requiredFiles = [
+            "config.json",
+            "parakeet_v3_vocab.json",
+            "parakeet_vocab.json",
+        ]
+
+        return requiredFiles.allSatisfy { name in
+            fileManager.fileExists(atPath: directory.appendingPathComponent(name).path)
+        }
     }
 
     private static func resolvedDirectoryIsInsideAppCache(

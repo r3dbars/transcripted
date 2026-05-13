@@ -65,7 +65,7 @@ final class MenuBarHeaderView: NSView {
     override func layout() {
         super.layout()
 
-        let isReady = currentWarmupStatus == .ready
+        let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
 
         if isReady && !hasWarning {
@@ -104,7 +104,7 @@ final class MenuBarHeaderView: NSView {
         currentWarmupStatus = warmupStatus
         currentHotkeyError = hotkeyError
 
-        let isReady = warmupStatus == .ready
+        let isReady = warmupStatus.isReadyForMenuHeader
         statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
         statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
         progressBar.doubleValue = warmupStatus.progress
@@ -116,7 +116,7 @@ final class MenuBarHeaderView: NSView {
     }
 
     var intrinsicHeight: CGFloat {
-        let isReady = currentWarmupStatus == .ready
+        let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
         if isReady {
             return hasWarning ? 56 : 0
