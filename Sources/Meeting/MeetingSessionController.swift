@@ -84,6 +84,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
 
+        let id = UUID()
         let kind: Kind
         let startTrigger: StartTrigger
         let sttModel: TranscriptionModelChoice
@@ -1335,6 +1336,8 @@ final class MeetingSessionController: ObservableObject {
 
     private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {
         let modelsReady = await ensureModelsReadyForQueuedTranscription(job)
+        guard preparingQueuedTranscriptionJob?.id == job.id else { return }
+
         queuedTranscriptionStartTask = nil
         preparingQueuedTranscriptionJob = nil
 

@@ -340,8 +340,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             controllerContents.contains("preparingQueuedTranscriptionJob")
-                && controllerContents.contains("isPreparingQueuedTranscriptionStart"),
-            "model recovery should count as active background work so the queue cannot double-start"
+                && controllerContents.contains("isPreparingQueuedTranscriptionStart")
+                && controllerContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
+            "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
         assertTrue(
             downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
