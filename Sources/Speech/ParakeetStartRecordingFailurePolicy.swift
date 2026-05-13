@@ -18,6 +18,16 @@ struct ParakeetDeviceRecoveryFailureAction: Equatable {
     let schedulePrewarmRetry: Bool
 }
 
+enum ParakeetAudioEngineRebuildStrategy: Equatable {
+    case queuedOnAudioEngineQueue
+    case abandonBlockedAudioGraph
+}
+
+struct ParakeetDeviceRecoveryTimeoutAction: Equatable {
+    let failureAction: ParakeetDeviceRecoveryFailureAction
+    let rebuildStrategy: ParakeetAudioEngineRebuildStrategy
+}
+
 enum ParakeetStartRecordingFailurePolicy {
     static func action(
         for reason: ParakeetStartRecordingFailureReason,
@@ -45,6 +55,21 @@ enum ParakeetDeviceRecoveryFailurePolicy {
             schedulePrewarmRetry: true
         )
     }
+}
+
+enum ParakeetDeviceRecoveryTimeoutPolicy {
+    static func action(wasRecording: Bool) -> ParakeetDeviceRecoveryTimeoutAction {
+        ParakeetDeviceRecoveryTimeoutAction(
+            failureAction: ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: wasRecording),
+            rebuildStrategy: .abandonBlockedAudioGraph
+        )
+    }
+}
+
+enum ParakeetAudioEngineRetirementPolicy {
+    /// CoreAudio can still deliver queued AVAudioIOUnit property-listener blocks
+    /// after Transcripted has stopped and replaced an AVAudioEngine during route churn.
+    static let deferredReleaseDelayNanoseconds: UInt64 = 3_000_000_000
 }
 
 enum ParakeetAudioFormatReadiness: String, Equatable {

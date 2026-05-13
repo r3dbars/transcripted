@@ -83,6 +83,24 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
     }
 
+    runSuite("ParakeetDeviceRecoveryTimeoutPolicy abandons blocked audio graph") {
+        let idleAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: false)
+        let recordingAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: true)
+
+        assertEqual(idleAction.rebuildStrategy, .abandonBlockedAudioGraph, "timeout recovery must not queue behind a stuck CoreAudio snapshot")
+        assertEqual(recordingAction.rebuildStrategy, .abandonBlockedAudioGraph, "active recording timeout needs the same hard graph reset")
+        assertFalse(idleAction.failureAction.reportSentryFailure, "idle timeout should stay local-only")
+        assertTrue(recordingAction.failureAction.reportSentryFailure, "active recording timeout should still be visible")
+    }
+
+    runSuite("ParakeetAudioEngineRetirementPolicy outlives CoreAudio recovery") {
+        assertTrue(
+            ParakeetAudioEngineRetirementPolicy.deferredReleaseDelayNanoseconds
+                > TranscriptedConstants.audioDeviceRecoveryTimeout,
+            "retired AVAudioEngine instances should stay alive beyond the route recovery timeout"
+        )
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,

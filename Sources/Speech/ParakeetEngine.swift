@@ -352,6 +352,28 @@ private struct ParakeetInputDeviceApplication {
     let errorDescription: String?
 }
 
+private final class ParakeetRetiredAudioEngineStore {
+    static let shared = ParakeetRetiredAudioEngineStore()
+
+    private let lock = NSLock()
+    private var engines: [AVAudioEngine] = []
+
+    func retire(_ engine: AVAudioEngine, reason: String) {
+        lock.withLock {
+            engines.append(engine)
+        }
+
+        let delay = ParakeetAudioEngineRetirementPolicy.deferredReleaseDelayNanoseconds
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .nanoseconds(Int(delay))) { [weak self, engine] in
+            guard let self else { return }
+            self.lock.withLock {
+                guard let index = self.engines.firstIndex(where: { $0 === engine }) else { return }
+                self.engines.remove(at: index)
+            }
+        }
+    }
+}
+
 @MainActor
 class ParakeetEngine: ObservableObject {
     @Published var isRecording = false
@@ -364,7 +386,7 @@ class ParakeetEngine: ObservableObject {
     @Published var inputFormatReady = true
 
     private var audioEngine = AVAudioEngine()
-    private let audioEngineQueue = DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
+    private var audioEngineQueue = ParakeetEngine.makeAudioEngineQueue()
     private var audioGraphGeneration = 0
     private var audioStartInProgress = false
     private var inputTapInstalled = false
@@ -434,6 +456,10 @@ class ParakeetEngine: ObservableObject {
         scheduleInputDeviceNameRefresh()
     }
 
+    private static func makeAudioEngineQueue() -> DispatchQueue {
+        DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
+    }
+
     nonisolated private static func loadDictationInputDeviceSelection() -> DictationInputDeviceSelection? {
         do {
             return try CoreAudioInputDeviceLookup.preferredDictationInputSelection()
@@ -467,11 +493,13 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func runAudioEngineWork<T>(_ work: @escaping () throws -> T) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            audioEngineQueue.async {
+    private func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) throws -> T) async throws -> T {
+        let queue = audioEngineQueue
+        let engine = audioEngine
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async {
                 do {
-                    continuation.resume(returning: try work())
+                    continuation.resume(returning: try work(engine))
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -479,10 +507,12 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func runAudioEngineWork<T>(_ work: @escaping () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            audioEngineQueue.async {
-                continuation.resume(returning: work())
+    private func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) -> T) async -> T {
+        let queue = audioEngineQueue
+        let engine = audioEngine
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: work(engine))
             }
         }
     }
@@ -973,7 +1003,7 @@ class ParakeetEngine: ObservableObject {
             ]
         )
 
-        await rebuildAudioEngine(reason: reason)
+        abandonBlockedAudioEngine(reason: reason)
         markFormatUnreadyAndPublish()
         try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
         await prewarm()
@@ -1144,11 +1174,17 @@ class ParakeetEngine: ObservableObject {
                 // Two-step format validation. CoreAudio sometimes reports zero
                 // sample rate on first read after device change, even past the
                 // initial settle delay. One extra wait + re-read is enough.
-                var snapshot = try await self.audioInputSnapshot(operation: "device_recovery")
+                var snapshot = try await self.audioInputSnapshot(
+                    operation: "device_recovery",
+                    recoveryGeneration: myGeneration
+                )
                 if self.audioFormatReadiness(outputFormat: snapshot.outputFormat, hwFormat: snapshot.hwFormat, selection: snapshot.selection) != .ready {
                     try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
                     guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                    snapshot = try await self.audioInputSnapshot(operation: "device_recovery_retry")
+                    snapshot = try await self.audioInputSnapshot(
+                        operation: "device_recovery_retry",
+                        recoveryGeneration: myGeneration
+                    )
                 }
                 let readiness = self.audioFormatReadiness(
                     outputFormat: snapshot.outputFormat,
@@ -1238,6 +1274,7 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
             } catch {
+                guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                 let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: shouldRestartRecording)
                 if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
                     self.cancelConfigRecoveryTimeout()
@@ -1310,7 +1347,8 @@ class ParakeetEngine: ObservableObject {
 
             self.configRecoveryTimeoutTask = nil
             self.publishRecoveryState()
-            let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: wasRecording)
+            let timeoutAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: wasRecording)
+            let failureAction = timeoutAction.failureAction
             AnalyticsReporter.track(
                 "dictation_audio_route_recovery_timeout",
                 properties: self.dictationRouteAnalyticsContext(
@@ -1361,7 +1399,12 @@ class ParakeetEngine: ObservableObject {
                     )
                 )
             }
-            await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
+            switch timeoutAction.rebuildStrategy {
+            case .queuedOnAudioEngineQueue:
+                await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
+            case .abandonBlockedAudioGraph:
+                self.abandonBlockedAudioEngine(reason: "device_change_recovery_timeout")
+            }
             if failureAction.schedulePrewarmRetry {
                 self.prewarmRetryCount = 0
                 self.schedulePrewarmRetry()
@@ -1549,36 +1592,51 @@ class ParakeetEngine: ObservableObject {
         return inputRate <= 24_000 && outputRate >= 44_100
     }
 
-    private func audioInputSnapshot(operation: String) async throws -> ParakeetAudioInputSnapshot {
+    private func audioInputSnapshot(
+        operation: String,
+        recoveryGeneration: UInt64? = nil
+    ) async throws -> ParakeetAudioInputSnapshot {
         let selection = Self.loadDictationInputDeviceSelection()
         if let selection, selection.didOverrideDefault {
-            let shouldApplyOverride = await runAudioEngineWork {
-                self.audioEngine.inputNode.auAudioUnit.deviceID != selection.selectedInput.id
+            let shouldApplyOverride = await runAudioEngineWork { engine in
+                engine.inputNode.auAudioUnit.deviceID != selection.selectedInput.id
+            }
+            if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
+                throw CancellationError()
             }
             if shouldApplyOverride {
                 ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
             }
         }
 
-        let snapshot = try await runAudioEngineWork { () throws -> ParakeetAudioInputSnapshot in
-            let inputNode = self.audioEngine.inputNode
+        if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
+            throw CancellationError()
+        }
+        let snapshotGraphGeneration = audioGraphGeneration
+        let snapshot = await runAudioEngineWork { audioEngine in
+            let inputNode = audioEngine.inputNode
             let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
             return ParakeetAudioInputSnapshot(
                 outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
                 hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
                 selection: selection,
                 selectionApplication: selectionApplication,
-                engineWasRunning: self.audioEngine.isRunning
+                engineWasRunning: audioEngine.isRunning
             )
         }
-        recordInputSelection(snapshot.selectionApplication, operation: operation)
+        if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
+            throw CancellationError()
+        }
+        if snapshotGraphGeneration == audioGraphGeneration {
+            recordInputSelection(snapshot.selectionApplication, operation: operation)
+        }
         return snapshot
     }
 
     private func installTapAndStartEngine(isRecoveryAttempt: Bool) async throws -> ParakeetAudioStartSnapshot {
         let wasPrewarmed = isEnginePrewarmed
-        return try await runAudioEngineWork {
-            let inputNode = self.audioEngine.inputNode
+        return try await runAudioEngineWork { audioEngine in
+            let inputNode = audioEngine.inputNode
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
                 guard let self = self,
@@ -1644,10 +1702,10 @@ class ParakeetEngine: ObservableObject {
                 }
             }
 
-            let engineWasRunning = self.audioEngine.isRunning
-            if !wasPrewarmed || !self.audioEngine.isRunning {
-                self.audioEngine.prepare()
-                try self.audioEngine.start()
+            let engineWasRunning = audioEngine.isRunning
+            if !wasPrewarmed || !audioEngine.isRunning {
+                audioEngine.prepare()
+                try audioEngine.start()
             }
             return ParakeetAudioStartSnapshot(engineWasRunning: engineWasRunning)
         }
@@ -1655,16 +1713,16 @@ class ParakeetEngine: ObservableObject {
 
     private func removeRecordingTap(force: Bool = false) async {
         guard force || inputTapInstalled else { return }
-        await runAudioEngineWork {
-            self.audioEngine.inputNode.removeTap(onBus: 0)
+        await runAudioEngineWork { audioEngine in
+            audioEngine.inputNode.removeTap(onBus: 0)
         }
         inputTapInstalled = false
     }
 
     private func stopAudioEngine() async {
-        await runAudioEngineWork {
-            if self.audioEngine.isRunning {
-                self.audioEngine.stop()
+        await runAudioEngineWork { audioEngine in
+            if audioEngine.isRunning {
+                audioEngine.stop()
             }
         }
     }
@@ -1682,12 +1740,12 @@ class ParakeetEngine: ObservableObject {
             return
         }
         audioGraphGeneration += 1
-        await runAudioEngineWork {
-            self.audioEngine.inputNode.removeTap(onBus: 0)
-            if self.audioEngine.isRunning {
-                self.audioEngine.stop()
+        await runAudioEngineWork { audioEngine in
+            audioEngine.inputNode.removeTap(onBus: 0)
+            if audioEngine.isRunning {
+                audioEngine.stop()
             }
-            self.audioEngine.reset()
+            audioEngine.reset()
         }
         inputTapInstalled = false
         isEnginePrewarmed = false
@@ -1696,14 +1754,17 @@ class ParakeetEngine: ObservableObject {
     private func rebuildAudioEngine(reason: String) async {
         audioGraphGeneration += 1
         removeAudioEngineConfigObserver()
-        await runAudioEngineWork {
-            self.audioEngine.inputNode.removeTap(onBus: 0)
-            if self.audioEngine.isRunning {
-                self.audioEngine.stop()
+        let retiredEngine = audioEngine
+        await runAudioEngineWork { audioEngine in
+            audioEngine.inputNode.removeTap(onBus: 0)
+            if audioEngine.isRunning {
+                audioEngine.stop()
             }
-            self.audioEngine.reset()
-            self.audioEngine = AVAudioEngine()
+            audioEngine.reset()
         }
+        guard audioEngine === retiredEngine else { return }
+        audioEngine = AVAudioEngine()
+        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
         inputTapInstalled = false
         isEnginePrewarmed = false
         didReceiveAudioSamples = false
@@ -1717,6 +1778,34 @@ class ParakeetEngine: ObservableObject {
             message: "Audio engine rebuilt after microphone graph failure",
             context: [
                 "reason": reason,
+                "recovering": "\(recoveryState.isRecovering)",
+                "format_ready": "\(recoveryState.inputFormatReady)",
+                "generation": "\(recoveryState.generation)"
+            ]
+        )
+    }
+
+    private func abandonBlockedAudioEngine(reason: String) {
+        audioGraphGeneration += 1
+        removeAudioEngineConfigObserver()
+        let retiredEngine = audioEngine
+        audioEngine = AVAudioEngine()
+        audioEngineQueue = Self.makeAudioEngineQueue()
+        ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
+        inputTapInstalled = false
+        isEnginePrewarmed = false
+        didReceiveAudioSamples = false
+        if !isShuttingDown {
+            installAudioEngineConfigObserverIfNeeded()
+        }
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "audio_engine_rebuilt",
+            message: "Audio engine rebuilt after blocked microphone graph recovery",
+            context: [
+                "reason": reason,
+                "hard_reset": "true",
                 "recovering": "\(recoveryState.isRecovering)",
                 "format_ready": "\(recoveryState.inputFormatReady)",
                 "generation": "\(recoveryState.generation)"
@@ -2852,7 +2941,9 @@ class ParakeetEngine: ObservableObject {
             if audioEngine.isRunning {
                 audioEngine.stop()
             }
+            audioEngine.reset()
         }
+        ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
         let mgr = asrManager
         Task { mgr?.cleanup() }
         eouManager = nil
