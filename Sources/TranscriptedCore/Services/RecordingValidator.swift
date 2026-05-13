@@ -112,7 +112,7 @@ public enum RecordingValidator {
         }
     }
 
-    private static func resolvedSaveDirectory(paths: CoreStoragePaths) -> URL {
+    static func resolvedSaveDirectory(paths: CoreStoragePaths) -> URL {
         if let customPath = normalizedCustomSavePath(),
            !customPath.isEmpty {
             if validateRawSavePath(customPath) != nil {
