@@ -250,6 +250,9 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("system_peak"), true, "meeting stop events should preserve system audio peak for issue 500 diagnostics")
         assertEqual(policy?.allowedProperties.contains("default_input_volume_before"), true, "meeting stop events should preserve input volume before recording")
         assertEqual(policy?.allowedProperties.contains("default_output_volume_during"), true, "meeting stop events should preserve output volume during recording")
+        assertEqual(policy?.allowedProperties.contains("default_output_volume_after"), true, "meeting stop events should preserve output volume after recording")
+        assertEqual(policy?.allowedProperties.contains("default_output_volume_dropped"), true, "meeting stop events should preserve issue 500 output-drop flags")
+        assertEqual(healthPolicy?.allowedProperties.contains("default_system_output_volume_dropped"), true, "health snapshots should preserve system-output drop flags")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
@@ -259,8 +262,12 @@ func testAnalyticsEventPolicy() {
                 "default_input_volume_during": "0.650",
                 "default_output_volume_before": "0.750",
                 "default_output_volume_during": "0.750",
+                "default_output_volume_after": "0.500",
+                "default_output_volume_dropped": "true",
                 "default_system_output_volume_before": "0.750",
                 "default_system_output_volume_during": "0.750",
+                "default_system_output_volume_after": "0.500",
+                "default_system_output_volume_dropped": "true",
                 "gap_count_bucket": "1",
                 "input_device_class": "bluetooth",
                 "input_rate_hz": "48000",
@@ -283,8 +290,12 @@ func testAnalyticsEventPolicy() {
                 "default_input_volume_during",
                 "default_output_volume_before",
                 "default_output_volume_during",
+                "default_output_volume_after",
+                "default_output_volume_dropped",
                 "default_system_output_volume_before",
                 "default_system_output_volume_during",
+                "default_system_output_volume_after",
+                "default_system_output_volume_dropped",
                 "gap_count_bucket",
                 "input_device_class",
                 "input_rate_hz",
@@ -305,6 +316,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["buffer_success_bucket"], "90_97", "buffer success buckets should survive sanitization")
         assertEqual(sanitized["default_input_volume_before"], "0.650", "input volume before should survive sanitization")
         assertEqual(sanitized["default_output_volume_during"], "0.750", "output volume during should survive sanitization")
+        assertEqual(sanitized["default_output_volume_after"], "0.500", "output volume after should survive sanitization")
+        assertEqual(sanitized["default_output_volume_dropped"], "true", "output volume drop flags should survive sanitization")
         assertEqual(sanitized["gap_count_bucket"], "1", "gap count buckets should survive sanitization")
         assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input device class should survive sanitization")
         assertEqual(sanitized["input_rate_hz"], "48000", "input sample rate should survive sanitization")

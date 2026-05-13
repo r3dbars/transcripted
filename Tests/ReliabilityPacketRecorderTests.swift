@@ -15,6 +15,7 @@ func testReliabilityPacketRecorder() {
                 "default_input_volume_during": "0.620",
                 "default_output_volume_after": "0.740",
                 "default_output_volume_before": "0.740",
+                "default_output_volume_dropped": "false",
                 "default_output_volume_during": "0.740",
                 "device_switches": "2",
                 "duration_ms": "143400",
@@ -46,6 +47,7 @@ func testReliabilityPacketRecorder() {
         assertEqual(packet?.context["system_peak"], "0.25000", "system audio peak should stay available for manual QA")
         assertEqual(packet?.context["default_output_volume_before"], "0.740", "before volume scalar should stay available for manual QA")
         assertEqual(packet?.context["default_output_volume_after"], "0.740", "after volume scalar should stay available for manual QA")
+        assertEqual(packet?.context["default_output_volume_dropped"], "false", "issue 500 volume-drop flags should stay available for manual QA")
         assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
         assertNil(packet?.context["source_app_name"], "source app names should not be copied into reliability packets")
     }

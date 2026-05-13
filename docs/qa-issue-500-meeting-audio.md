@@ -70,11 +70,14 @@ For each run, capture:
 - `default_system_output_volume_before`
 - `default_system_output_volume_during`
 - `default_system_output_volume_after`
+- `default_output_volume_dropped`
+- `default_system_output_volume_dropped`
 - pass or fail
 - notes
 
 The volume `before` and `during` values come from `meeting_recording_started` or `meeting_recording_stopped`. The `after` values and peak values come from `meeting_recording_stopped` or `meeting_recording_cancelled`.
 `system_peak` is the system-audio peak.
+The dropped flags are generated from the same scalar fields and are also attached to degraded-capture diagnostics.
 
 ## Pass Bar
 

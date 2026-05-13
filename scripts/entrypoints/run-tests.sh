@@ -148,6 +148,7 @@ APP_SOURCES=(
     "Sources/Speech/RecordedAudioTimeline.swift"
     "Sources/Speech/DictationAudioLevelMeter.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
+    "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingFailureExplanation.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"

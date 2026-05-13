@@ -534,15 +534,14 @@ final class MeetingSessionController: ObservableObject {
         let stopResult = await capture.stopAndAwaitFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
+        let stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+            afterStopContext: afterStopVolumeContext
+        )
         activeRecordingTrigger = .unknown
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
-        let stopDiagnosticsContext = meetingCaptureAnalyticsProperties(
-            snapshot: recordingSnapshot.pipelineSnapshot
-        ).merging(
-            afterStopVolumeContext,
-            uniquingKeysWith: { _, new in new }
-        ).merging(
+        let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
             [
                 "trigger": recordingSnapshot.trigger.rawValue,
                 "reason": reason.rawValue,
@@ -566,7 +565,7 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_recording_stopped",
-            properties: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot).merging(
+            properties: stopCaptureDiagnostics.merging(
                 [
                     "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
@@ -583,7 +582,7 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: meetingCaptureHealthSnapshotProperties(
-                snapshot: recordingSnapshot.pipelineSnapshot,
+                captureDiagnostics: stopCaptureDiagnostics,
                 healthInfo: recordingSnapshot.healthInfo,
                 trigger: recordingSnapshot.trigger.rawValue,
                 reason: reason.rawValue,
@@ -594,6 +593,7 @@ final class MeetingSessionController: ObservableObject {
         )
         reportCaptureHealthIfNeeded(
             snapshot: recordingSnapshot.pipelineSnapshot,
+            captureDiagnostics: stopCaptureDiagnostics,
             healthInfo: recordingSnapshot.healthInfo,
             trigger: recordingSnapshot.trigger,
             reason: reason,
@@ -736,16 +736,15 @@ final class MeetingSessionController: ObservableObject {
         let stopResult = await capture.stopAndDiscardFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
+        let cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+            afterStopContext: afterStopVolumeContext
+        )
         activeRecordingTrigger = .unknown
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
-        let cancelDiagnosticsContext = meetingCaptureAnalyticsProperties(
-            snapshot: recordingSnapshot.pipelineSnapshot
-        ).merging(
-            afterStopVolumeContext,
-            uniquingKeysWith: { _, new in new }
-        ).merging(
+        let cancelDiagnosticsContext = cancelCaptureDiagnostics.merging(
             [
                 "trigger": recordingSnapshot.trigger.rawValue,
                 "reason": reason.rawValue,
@@ -765,7 +764,7 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_recording_cancelled",
-            properties: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot).merging(
+            properties: cancelCaptureDiagnostics.merging(
                 [
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
                     "reason": reason.rawValue,
@@ -779,7 +778,7 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: meetingCaptureHealthSnapshotProperties(
-                snapshot: recordingSnapshot.pipelineSnapshot,
+                captureDiagnostics: cancelCaptureDiagnostics,
                 healthInfo: recordingSnapshot.healthInfo,
                 trigger: recordingSnapshot.trigger.rawValue,
                 reason: reason.rawValue,
@@ -1563,7 +1562,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func meetingCaptureHealthSnapshotProperties(
-        snapshot: AudioPipelineDiagnosticsSnapshot,
+        captureDiagnostics: [String: String],
         healthInfo: RecordingHealthInfo,
         trigger: String,
         reason: String,
@@ -1571,7 +1570,7 @@ final class MeetingSessionController: ObservableObject {
         systemStreamPresent: Bool,
         stopTimedOut: Bool
     ) -> [String: String] {
-        meetingCaptureAnalyticsProperties(snapshot: snapshot).merging(
+        captureDiagnostics.merging(
             [
                 "capture_quality": healthInfo.captureQuality.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
@@ -1588,6 +1587,7 @@ final class MeetingSessionController: ObservableObject {
 
     private func reportCaptureHealthIfNeeded(
         snapshot: AudioPipelineDiagnosticsSnapshot,
+        captureDiagnostics: [String: String],
         healthInfo: RecordingHealthInfo,
         trigger: StartTrigger,
         reason: StopReason,
@@ -1603,7 +1603,7 @@ final class MeetingSessionController: ObservableObject {
             snapshot.systemStatus == "failed"
         guard shouldReport else { return }
 
-        var context = snapshot.privacySafeContext
+        var context = captureDiagnostics
         context["capture_quality"] = healthInfo.captureQuality.rawValue
         context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
         context["gap_count"] = "\(healthInfo.audioGaps)"

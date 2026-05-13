@@ -141,6 +141,24 @@ func testSentryEventPolicy() {
         assertEqual(tags["trigger"], "hotkey", "trigger should be queryable")
     }
 
+    runSuite("SentryEventPolicy diagnosticTags keeps issue 500 volume-drop flags searchable") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_capture_degraded",
+            context: [
+                "default_output_volume_dropped": "true",
+                "default_system_output_volume_dropped": "true",
+                "default_input_volume_dropped": "false",
+                "system_status": "failed",
+            ]
+        )
+
+        assertEqual(tags["default_output_volume_dropped"], "true", "output volume drops should be queryable in APPLE-MACOS-1B")
+        assertEqual(tags["default_system_output_volume_dropped"], "true", "system output drops should be queryable in APPLE-MACOS-1B")
+        assertEqual(tags["default_input_volume_dropped"], "false", "input volume state should stay available as a control")
+        assertEqual(tags["system_status"], "failed", "existing meeting health tags should still survive")
+    }
+
     runSuite("SentryEventPolicy diagnosticTags ignores non-allowlisted events") {
         let tags = SentryEventPolicy.diagnosticTags(
             forEngine: "dictation",
