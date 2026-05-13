@@ -58,6 +58,8 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Machine-readable path-to-verification map for agents.
 - `docs/storage-paths.md`
   Canonical app, tool, and fallback storage layout.
+- `docs/docs.md`
+  Documentation tone, drift checks, and follow-up PR rules.
 - `docs/release-packaging.md` + `docs/sparkle-updates.md`
   Release, notarization, Sparkle, and Homebrew contract.
 - `docs/archive/`
