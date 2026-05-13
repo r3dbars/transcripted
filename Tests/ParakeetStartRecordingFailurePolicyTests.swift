@@ -101,6 +101,19 @@ func testParakeetStartRecordingFailurePolicy() {
         )
     }
 
+    runSuite("ParakeetASRManagerCleanupPolicy defers cleanup during active inference") {
+        assertEqual(
+            ParakeetASRManagerCleanupPolicy.decision(isTranscribing: true),
+            .deferUntilProcessExit,
+            "shutdown must not clean up CoreML ASR objects while prediction is active"
+        )
+        assertEqual(
+            ParakeetASRManagerCleanupPolicy.decision(isTranscribing: false),
+            .cleanupNow,
+            "idle shutdown can still release ASR objects normally"
+        )
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,

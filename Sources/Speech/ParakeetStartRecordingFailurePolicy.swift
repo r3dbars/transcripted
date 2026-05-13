@@ -72,6 +72,17 @@ enum ParakeetAudioEngineRetirementPolicy {
     static let deferredReleaseDelayNanoseconds: UInt64 = 3_000_000_000
 }
 
+enum ParakeetASRManagerCleanupDecision: Equatable {
+    case cleanupNow
+    case deferUntilProcessExit
+}
+
+enum ParakeetASRManagerCleanupPolicy {
+    static func decision(isTranscribing: Bool) -> ParakeetASRManagerCleanupDecision {
+        isTranscribing ? .deferUntilProcessExit : .cleanupNow
+    }
+}
+
 enum ParakeetAudioFormatReadiness: String, Equatable {
     case ready
     case invalid

@@ -66,6 +66,7 @@ class DictationSessionController: ObservableObject {
     private var sessionTimeoutTask: Task<Void, Never>?
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
+    private var currentDictationSessionID = UUID()
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -122,7 +123,12 @@ class DictationSessionController: ObservableObject {
     ) {
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating, !isInSession else { return }
+        guard !appState.sttRouter.isTranscribing else {
+            overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+            return
+        }
         isDictating = true
+        currentDictationSessionID = UUID()
         sessionSourceApp = sourceApp
         sessionAnchorRect = anchorRect
         sessionStartTime = CFAbsoluteTimeGetCurrent()
@@ -797,9 +803,13 @@ class DictationSessionController: ObservableObject {
         recordingStartRetryTask = nil
 
         streamingTask?.cancel()
+        let taskSessionID = currentDictationSessionID
         streamingTask = Task {
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             await appState.sttRouter.stopRecording()
+            guard !Task.isCancelled,
+                  self.isDictating,
+                  self.currentDictationSessionID == taskSessionID else { return }
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
@@ -807,11 +817,15 @@ class DictationSessionController: ObservableObject {
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
                 self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
                 for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled,
+                          self.isDictating,
+                          self.currentDictationSessionID == taskSessionID else { return }
                     if appState.sttRouter.isModelLoaded { break }
                     self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
                     try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                 }
+                guard self.isDictating,
+                      self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("Voice model failed to load")
@@ -823,7 +837,9 @@ class DictationSessionController: ObservableObject {
             overlayController.state = .drafting
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             let voiceText = await appState.sttRouter.transcribe()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  self.isDictating,
+                  self.currentDictationSessionID == taskSessionID else { return }
 
             guard let text = voiceText, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
@@ -1211,20 +1227,30 @@ class DictationSessionController: ObservableObject {
     }
 
     private func cancelActiveTasks(cancelRecording: Bool) {
+        let recordingStartWasInFlight = recordingStartRetryTask != nil
+        let sttIsRecording = appState?.sttRouter.isRecording ?? false
+        let sttIsTranscribing = appState?.sttRouter.isTranscribing ?? false
+        let cancellationPlan = DictationActiveTaskCancellationPolicy.plan(
+            cancelRecording: cancelRecording,
+            recordingStartWasInFlight: recordingStartWasInFlight,
+            sttIsRecording: sttIsRecording,
+            sttIsTranscribing: sttIsTranscribing
+        )
+
         startupTask?.cancel()
         startupTask = nil
-        streamingTask?.cancel()
-        streamingTask = nil
+        if cancellationPlan.cancelStreamingTask {
+            streamingTask?.cancel()
+            streamingTask = nil
+        }
         textPaster.cancelPendingClipboardRestore()
-        let recordingStartWasInFlight = recordingStartRetryTask != nil
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
 
-        guard cancelRecording,
-              let appState,
-              appState.sttRouter.isRecording || recordingStartWasInFlight else { return }
+        guard cancellationPlan.cancelSpeechEngine,
+              let appState else { return }
         appState.sttRouter.cancel()
     }
 

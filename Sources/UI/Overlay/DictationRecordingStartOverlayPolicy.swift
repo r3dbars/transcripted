@@ -56,3 +56,24 @@ struct DictationRecordingStartFailurePolicy {
         )
     }
 }
+
+struct DictationActiveTaskCancellationPlan: Equatable {
+    let cancelStreamingTask: Bool
+    let cancelSpeechEngine: Bool
+}
+
+enum DictationActiveTaskCancellationPolicy {
+    static func plan(
+        cancelRecording: Bool,
+        recordingStartWasInFlight: Bool,
+        sttIsRecording: Bool,
+        sttIsTranscribing: Bool
+    ) -> DictationActiveTaskCancellationPlan {
+        DictationActiveTaskCancellationPlan(
+            cancelStreamingTask: !sttIsTranscribing,
+            cancelSpeechEngine: cancelRecording
+                && !sttIsTranscribing
+                && (sttIsRecording || recordingStartWasInFlight)
+        )
+    }
+}
