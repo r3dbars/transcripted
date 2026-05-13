@@ -26,8 +26,6 @@ on `main` does not depend on this worker.
 
 - `GET /`
   Health check.
-- `POST /v1/messages`
-  Token-gated proxy to Anthropic `v1/messages`, including streaming passthrough.
 - `POST /events`
   Stores structured telemetry events from the app.
 - `POST /logs`
@@ -40,14 +38,19 @@ on `main` does not depend on this worker.
 All non-admin endpoints require a bearer token that maps to an active user in
 the D1 `users` table.
 
+The historical `POST /v1/messages` route that proxied to Anthropic has been
+removed from this source. The current app on `main` does not call Anthropic
+through this worker. If the live deployment still serves `/v1/messages`,
+redeploy from this archive and rotate `ANTHROPIC_API_KEY` out of the worker's
+secrets. The `api_calls` D1 table (see `schema.sql`) becomes dead; drop it at
+your leisure.
+
 ## Important Reality Check
 
-This worker still proxies Anthropic for beta paths, while the main app on
-`main` is otherwise local-first. Treat backend docs as beta/distribution
-context, not as the primary app architecture.
-
-The current macOS app on `main` no longer consumes `/config` for DMG
-self-update checks; that endpoint remains backend/beta-ops context.
+The app on `main` is local-first; this worker covers beta telemetry/log/config
+paths only. The current macOS app on `main` does not consume `/config` for DMG
+self-update checks (Sparkle handles updates) — that endpoint remains
+backend/beta-ops context.
 
 ## Data Model
 

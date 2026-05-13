@@ -1,11 +1,13 @@
 // Transcripted Beta Proxy — Cloudflare Worker
-// Sits between the Transcripted app and the Anthropic API.
-// Validates per-user beta tokens, streams responses transparently,
-// logs usage to D1, and supports telemetry + config endpoints.
+// Token-gated telemetry/log/config endpoints for the beta channel.
+// The historical `/v1/messages` route that proxied to Anthropic has been
+// removed: the current app on main does not chat with Anthropic via this
+// worker, and any leaked beta token used to be enough to bill operator-funded
+// LLM spend. ANTHROPIC_API_KEY is no longer read here — rotate it in the
+// Cloudflare dashboard if it is still present.
 
 interface Env {
   DB: D1Database;
-  ANTHROPIC_API_KEY: string;
   ADMIN_TOKEN?: string;
   BETA_MESSAGE?: string;
   LATEST_VERSION?: string;
@@ -37,105 +39,6 @@ async function validateToken(db: D1Database, token: string): Promise<User | null
     .bind(token)
     .first<User>();
   return result;
-}
-
-// POST /v1/messages — Proxy to Anthropic API with streaming passthrough
-async function handleMessages(
-  request: Request,
-  env: Env,
-  user: User
-): Promise<Response> {
-  const startTime = Date.now();
-
-  // Read the request body to inspect it (we need to check for stream flag)
-  const bodyText = await request.text();
-  let parsedBody: Record<string, unknown>;
-  try {
-    parsedBody = JSON.parse(bodyText);
-  } catch {
-    return new Response("Invalid JSON body", { status: 400 });
-  }
-
-  const model = (parsedBody.model as string) ?? "unknown";
-  const isStreaming = parsedBody.stream === true;
-
-  // Forward to Anthropic
-  const anthropicHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-    "x-api-key": env.ANTHROPIC_API_KEY,
-    "anthropic-version": "2023-06-01",
-  };
-
-  // Pass through beta headers if present
-  const betaHeader = request.headers.get("anthropic-beta");
-  if (betaHeader) {
-    anthropicHeaders["anthropic-beta"] = betaHeader;
-  }
-
-  const anthropicResponse = await fetch(
-    "https://api.anthropic.com/v1/messages",
-    {
-      method: "POST",
-      headers: anthropicHeaders,
-      body: bodyText,
-    }
-  );
-
-  const latencyMs = Date.now() - startTime;
-  const success = anthropicResponse.ok ? 1 : 0;
-
-  // Log the API call to D1 (non-blocking via waitUntil would be ideal,
-  // but we do it inline for simplicity — D1 writes are fast)
-  if (isStreaming && anthropicResponse.ok && anthropicResponse.body) {
-    // For streaming responses, pipe through transparently.
-    // We can't easily parse usage from SSE mid-stream, so log with zeros
-    // and rely on the /events endpoint for detailed tracking.
-    const logPromise = env.DB.prepare(
-      "INSERT INTO api_calls (user_id, model, input_tokens, output_tokens, latency_ms, success) VALUES (?, ?, 0, 0, ?, ?)"
-    )
-      .bind(user.id, model, latencyMs, success)
-      .run();
-
-    // Don't await — let it run in background
-    void logPromise;
-
-    return new Response(anthropicResponse.body, {
-      status: anthropicResponse.status,
-      headers: {
-        "Content-Type":
-          anthropicResponse.headers.get("Content-Type") ?? "text/event-stream",
-        "Cache-Control": "no-cache",
-      },
-    });
-  }
-
-  // Non-streaming: read full response, parse usage, log, return
-  const responseBody = await anthropicResponse.text();
-
-  let inputTokens = 0;
-  let outputTokens = 0;
-  if (anthropicResponse.ok) {
-    try {
-      const parsed = JSON.parse(responseBody);
-      inputTokens = parsed.usage?.input_tokens ?? 0;
-      outputTokens = parsed.usage?.output_tokens ?? 0;
-    } catch {
-      // Ignore parse errors for logging
-    }
-  }
-
-  await env.DB.prepare(
-    "INSERT INTO api_calls (user_id, model, input_tokens, output_tokens, latency_ms, success) VALUES (?, ?, ?, ?, ?, ?)"
-  )
-    .bind(user.id, model, inputTokens, outputTokens, latencyMs, success)
-    .run();
-
-  return new Response(responseBody, {
-    status: anthropicResponse.status,
-    headers: {
-      "Content-Type": anthropicResponse.headers.get("Content-Type") ?? "application/json",
-    },
-  });
 }
 
 // POST /events — Log telemetry events from the app
@@ -368,9 +271,6 @@ export default {
     }
 
     // Route to handlers
-    if (method === "POST" && path === "/v1/messages") {
-      return handleMessages(request, env, user);
-    }
     if (method === "POST" && path === "/events") {
       return handleEvents(request, env, user);
     }
