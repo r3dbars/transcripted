@@ -18,9 +18,12 @@ private var _sharedMeetingToggle: (() -> Void)?
 // Carbon hotkeys can fire back-to-back before Transcripted finishes updating its
 // session state. Ignore rapid repeats so start/stop/cancel transitions stay
 // single-shot and predictable.
-private var _lastAcceptedHotkeyTime: CFAbsoluteTime = 0
+// Use systemUptime (monotonic) instead of CFAbsoluteTimeGetCurrent (wall clock)
+// so NTP adjustments, manual time changes, or DST transitions can't make a
+// backward clock jump silently drop all subsequent hotkey presses.
+private var _lastAcceptedHotkeyTime: TimeInterval = 0
 
-private func shouldAcceptHotkeyAction(now: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()) -> Bool {
+private func shouldAcceptHotkeyAction(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
     let elapsed = now - _lastAcceptedHotkeyTime
     guard elapsed >= TranscriptedConstants.hotkeyActionDebounceInterval else { return false }
     _lastAcceptedHotkeyTime = now

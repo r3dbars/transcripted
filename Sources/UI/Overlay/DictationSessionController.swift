@@ -70,6 +70,10 @@ class DictationSessionController: ObservableObject {
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
     private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
+    private static let sessionTimeoutInterval: TimeInterval = 5 * 60
+    /// Cap on each polling sleep so a wake from system sleep gets a chance to
+    /// re-evaluate the uptime-based deadline before firing the cancel branch.
+    private static let sessionTimeoutPollIntervalNanos: UInt64 = 30 * 1_000_000_000
 
     deinit {
         startupTask?.cancel()
@@ -1161,12 +1165,25 @@ class DictationSessionController: ObservableObject {
         overlayController?.resizePanelToCompact()
     }
 
-    /// Install a timeout that auto-cancels the session after 5 minutes.
-    /// Prevents stuck sessions if the user walks away from the computer.
+    /// Install a timeout that auto-cancels the session after 5 minutes of
+    /// *active* uptime. Tracks the deadline against `ProcessInfo.systemUptime`
+    /// so Mac sleep does not consume the session's remaining record window —
+    /// otherwise a session that sees the Mac sleep for hours would auto-cancel
+    /// immediately on wake when Task.sleep's wall-clock deadline expires.
     private func installSessionTimeout() {
         sessionTimeoutTask?.cancel()
+        var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
+        timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.sessionTimeoutNanos)
+            while !Task.isCancelled {
+                let now = ProcessInfo.processInfo.systemUptime
+                if timeout.isExpired(at: now) { break }
+                let remainingSeconds = timeout.remaining(at: now) ?? 0
+                let remainingNanos = UInt64((remainingSeconds * 1_000_000_000).rounded(.up))
+                let sleepNanos = min(remainingNanos, Self.sessionTimeoutPollIntervalNanos)
+                if sleepNanos == 0 { break }
+                try? await Task.sleep(nanoseconds: sleepNanos)
+            }
             guard !Task.isCancelled, let self = self else { return }
             if self.isInSession {
                 self.appState?.logger.log("SESSION | auto-cancelled after timeout")
