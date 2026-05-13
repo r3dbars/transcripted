@@ -29,7 +29,10 @@ final class MenuBarActionRowView: NSControl {
     private var currentHeight: CGFloat = 26
 
     override var isEnabled: Bool {
-        didSet { updateAppearance() }
+        didSet {
+            updateAppearance()
+            window?.invalidateCursorRects(for: self)
+        }
     }
 
     override init(frame: NSRect) {
@@ -181,7 +184,7 @@ final class MenuBarActionRowView: NSControl {
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
             detailLabel.frame = .zero
         } else {
-            let titleY: CGFloat = rowSize == .primary ? 1 : 1
+            let titleY: CGFloat = 1
             titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
             detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
         }
@@ -229,6 +232,13 @@ final class MenuBarActionRowView: NSControl {
         )
         addTrackingArea(area)
         trackingAreaRef = area
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard isEnabled else { return }
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 
     override func mouseEntered(with event: NSEvent) {

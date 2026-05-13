@@ -128,9 +128,8 @@ final class OverlayHeaderView: NSView {
         if isCenteredListeningLayout {
             let compactPad: CGFloat = 10
             let spacing: CGFloat = 6
-            let preferredWaveWidth: CGFloat = 124
             let availableWaveWidth = max(0, bounds.width - compactPad * 2 - labelSize.width - stopSize.width - spacing * 2)
-            let waveWidth = min(preferredWaveWidth, availableWaveWidth)
+            let waveWidth = min(OverlayTokens.preferredWaveformWidth, availableWaveWidth)
             let groupWidth = labelSize.width + spacing + waveWidth + spacing + stopSize.width
             let groupOriginX = max(compactPad, (bounds.width - groupWidth) / 2)
 
