@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import TranscriptedCore
 
@@ -113,6 +114,101 @@ final class ModelDownloadServiceTests: XCTestCase {
         XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().compactMap(\.host), ["huggingface.co"])
     }
 
+    func testDownloadFileWithMirrorFallbackWritesVerifiedFileFromHuggingFace() async throws {
+        let body = Data("trusted model bytes".utf8)
+        installModelDownloadURLProtocol(statusCode: 200, data: body)
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let destination = tempRoot.appendingPathComponent("model.safetensors")
+
+        try await ModelDownloadService.downloadFileWithMirrorFallback(
+            modelId: "org/test-model",
+            filename: "model.safetensors",
+            destination: destination,
+            expectedSHA256: sha256Hex(for: body).uppercased()
+        )
+
+        XCTAssertEqual(try Data(contentsOf: destination), body)
+        XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().compactMap(\.host), ["huggingface.co"])
+        XCTAssertEqual(
+            ModelDownloadURLProtocol.requestedURLs().first?.path,
+            "/org/test-model/resolve/main/model.safetensors"
+        )
+        let permissions = try XCTUnwrap(
+            try FileManager.default.attributesOfItem(atPath: destination.path)[.posixPermissions] as? NSNumber
+        )
+        XCTAssertEqual(permissions.intValue & 0o777, 0o600)
+    }
+
+    func testDownloadFileWithMirrorFallbackAllowsNonLFSFileWithoutDigest() async throws {
+        let body = Data(#"{"model":"config"}"#.utf8)
+        installModelDownloadURLProtocol(statusCode: 200, data: body)
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let destination = tempRoot.appendingPathComponent("config.json")
+
+        try await ModelDownloadService.downloadFileWithMirrorFallback(
+            modelId: "org/test-model",
+            filename: "config.json",
+            destination: destination
+        )
+
+        XCTAssertEqual(try Data(contentsOf: destination), body)
+        XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().compactMap(\.host), ["huggingface.co"])
+    }
+
+    func testDownloadFileWithMirrorFallbackRejectsDigestMismatchAndCleansDestination() async throws {
+        installModelDownloadURLProtocol(statusCode: 200, data: Data("tampered model bytes".utf8))
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let destination = tempRoot.appendingPathComponent("model.safetensors")
+
+        do {
+            try await ModelDownloadService.downloadFileWithMirrorFallback(
+                modelId: "org/test-model",
+                filename: "model.safetensors",
+                destination: destination,
+                expectedSHA256: sha256Hex(for: Data("trusted model bytes".utf8))
+            )
+            XCTFail("Expected digest mismatch to fail")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error.kind, .unknown("Failed to download model.safetensors from all mirrors"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let requestedHosts = ModelDownloadURLProtocol.requestedURLs().compactMap(\.host)
+        XCTAssertTrue(requestedHosts.allSatisfy { $0 == "huggingface.co" })
+        XCTAssertFalse(requestedHosts.contains("hf-mirror.com"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testDownloadFileWithMirrorFallbackFailsClosedOnServerErrorWithoutMirrorFallback() async throws {
+        installModelDownloadURLProtocol(statusCode: 503, data: Data("unavailable".utf8))
+        let tempRoot = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let destination = tempRoot.appendingPathComponent("model.safetensors")
+
+        do {
+            try await ModelDownloadService.downloadFileWithMirrorFallback(
+                modelId: "org/test-model",
+                filename: "model.safetensors",
+                destination: destination,
+                expectedSHA256: sha256Hex(for: Data("trusted model bytes".utf8))
+            )
+            XCTFail("Expected server error to fail closed")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error.kind, .unknown("Failed to download model.safetensors from all mirrors"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let requestedHosts = ModelDownloadURLProtocol.requestedURLs().compactMap(\.host)
+        XCTAssertTrue(requestedHosts.allSatisfy { $0 == "huggingface.co" })
+        XCTAssertFalse(requestedHosts.contains("hf-mirror.com"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
     func testWithRetryDoesNotRetryDiskSpaceFailures() async {
         var attempts = 0
 
@@ -151,7 +247,28 @@ final class ModelDownloadServiceTests: XCTestCase {
         }
     }
 
+    private func makeTempRoot() throws -> URL {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelDownloadServiceTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        return tempRoot
+    }
+
+    private func sha256Hex(for data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     private func installModelDownloadURLProtocol(statusCode: Int, body: String) {
+        installModelDownloadURLProtocol(statusCode: statusCode, data: Data(body.utf8), contentType: "application/json")
+    }
+
+    private func installModelDownloadURLProtocol(
+        statusCode: Int,
+        data: Data,
+        contentType: String = "application/octet-stream"
+    ) {
         ModelDownloadURLProtocol.reset()
         ModelDownloadURLProtocol.handler = { request in
             let url = try XCTUnwrap(request.url)
@@ -159,9 +276,9 @@ final class ModelDownloadServiceTests: XCTestCase {
                 url: url,
                 statusCode: statusCode,
                 httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
+                headerFields: ["Content-Type": contentType]
             ))
-            return (response, Data(body.utf8))
+            return (response, data)
         }
         _ = URLProtocol.registerClass(ModelDownloadURLProtocol.self)
     }
