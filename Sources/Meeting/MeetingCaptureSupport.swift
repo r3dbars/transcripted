@@ -45,3 +45,53 @@ final class MeetingCaptureAttempt<Output> {
         return reset()
     }
 }
+
+enum MeetingCaptureVolumeDiagnostics {
+    private static let changeThreshold = 0.02
+    private static let routePrefixes = [
+        "default_input",
+        "default_output",
+        "default_system_output",
+    ]
+
+    static func annotatedStopContext(
+        baseContext: [String: String],
+        afterStopContext: [String: String]
+    ) -> [String: String] {
+        var context = baseContext.merging(afterStopContext, uniquingKeysWith: { _, new in new })
+
+        for prefix in routePrefixes {
+            let change = volumeChange(
+                before: context["\(prefix)_volume_before"],
+                after: context["\(prefix)_volume_after"] ?? context["\(prefix)_volume_during"]
+            )
+            context["\(prefix)_volume_changed"] = change.changedState
+            context["\(prefix)_volume_dropped"] = change.droppedState
+        }
+
+        return context
+    }
+
+    private static func volumeChange(before: String?, after: String?) -> (changedState: String, droppedState: String) {
+        guard let before = scalarValue(before),
+              let after = scalarValue(after) else {
+            return ("unavailable", "unavailable")
+        }
+
+        let delta = after - before
+        return (
+            abs(delta) >= changeThreshold ? "true" : "false",
+            delta <= -changeThreshold ? "true" : "false"
+        )
+    }
+
+    private static func scalarValue(_ rawValue: String?) -> Double? {
+        guard let rawValue,
+              rawValue != "unavailable",
+              let value = Double(rawValue),
+              value.isFinite else {
+            return nil
+        }
+        return value
+    }
+}
