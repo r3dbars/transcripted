@@ -43,6 +43,51 @@ Operational caveats:
 - beta builds can optionally contact the update/log proxy for update checks and diagnostics shipping
 - core dictation and transcription do not require cloud APIs
 
+## Model integrity
+
+Model files come from `https://huggingface.co` only. There is no third-party
+mirror fallback: if huggingface.co is unreachable, the download fails closed
+rather than silently degrading to a less-trusted source whose manifest could
+supply attacker-controlled digests.
+
+LFS-tracked files (weights) are verified against the SHA-256 digest reported by
+the HuggingFace API before being moved into the cache. Non-LFS files
+(tokenizer.json, config.json, etc.) ride on HTTPS to huggingface.co with no
+per-file digest — those are documented but not currently hash-pinned.
+
+## Beta build entitlements
+
+The beta build is intentionally less hardened than a typical sandboxed Mac app.
+`config/entitlements/beta.plist` sets:
+
+- `com.apple.security.app-sandbox` = false
+- `com.apple.security.cs.disable-library-validation` = true
+- `com.apple.security.cs.allow-jit` = true
+
+Combined with the TCC permissions Transcripted asks for (microphone, screen
+recording, accessibility, calendars), this means: anything running as your user
+that can write into `Transcripted.app/Contents/Frameworks/` can load its own
+code into the running app and inherit those permissions, including the ability
+to inject keystrokes into other apps via the paste-back path.
+
+The reason library validation is disabled is that the on-device ML stack (MLX,
+WhisperKit, CoreML model bundles) currently ships dylibs that do not all carry
+the same team-id signing as the app, so strict library validation refuses to
+load them. We treat that as a known cost of running ML locally on macOS today.
+
+Practical implications for users:
+
+- install Transcripted from a trusted source (the signed DMG from GitHub
+  Releases) and verify the Developer ID before granting permissions
+- treat user-level malware as already game-over for these permissions, since
+  it could substitute a framework binary and inherit them
+- the local-test entitlements profile (`config/entitlements/local.plist`) is
+  meant for ad-hoc smoke builds only and shares the sandbox-off posture — it
+  is not the shipping profile
+
+If a future version of the ML stack supports team-id-consistent signing for all
+embedded dylibs, the `disable-library-validation` entitlement will be removed.
+
 ## Supported Versions
 
 | Version | Supported |
