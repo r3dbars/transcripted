@@ -25,8 +25,13 @@ final class MeetingModelDownloader {
     /// first meeting recording starts. Safe to call multiple times - each
     /// underlying engine is idempotent after first successful load.
     func ensureModelsReady() async throws {
+        try await ensureModelsReady(sttModel: stt.selectedModel)
+    }
+
+    func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws {
         // Fast path: both already loaded.
-        if stt.isReady && diarization.modelState == .ready {
+        if stt.isReady(for: sttModel) && diarization.isReady {
+            stt.selectPreparedModel(sttModel)
             return
         }
 
@@ -35,17 +40,17 @@ final class MeetingModelDownloader {
         // Kick both initializers in parallel. Each is idempotent and each owns
         // its own progress reporting via @Published properties on the engines.
         do {
-            async let sttReady: Void = stt.initialize()
+            async let sttReady: Void = stt.prepare(model: sttModel)
             async let diarReady: Void = diarization.initialize()
             _ = await (sttReady, diarReady)
 
             // After both returns, confirm they actually reached a usable state.
-            guard stt.isReady else {
+            guard stt.isReady(for: sttModel) else {
                 throw NSError(domain: "MeetingModelDownloader", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "Selected speech model failed to load."
                 ])
             }
-            guard diarization.modelState == .ready else {
+            guard diarization.isReady else {
                 let detail: String
                 switch diarization.modelState {
                 case .failed(let msg): detail = msg

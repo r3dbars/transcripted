@@ -23,6 +23,10 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         router.isModelLoaded(for: preparedModel ?? router.selectedModel)
     }
 
+    var selectedModel: TranscriptionModelChoice {
+        router.selectedModel
+    }
+
     var transcriptionEngineDescriptor: SpeechTranscriptionEngineDescriptor {
         let model = preparedModel ?? router.selectedModel
         return SpeechTranscriptionEngineDescriptor(
@@ -31,8 +35,12 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
         )
     }
 
+    func isReady(for model: TranscriptionModelChoice) -> Bool {
+        router.isModelLoaded(for: model)
+    }
+
     func initialize() async {
-        await prepare(model: router.selectedModel)
+        await prepare(model: selectedModel)
     }
 
     func prepare(model: TranscriptionModelChoice) async {

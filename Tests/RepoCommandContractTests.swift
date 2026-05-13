@@ -325,6 +325,32 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - queued meetings recover unloaded models before transcription") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let downloaderContents = readRepoTextFile("Sources/Meeting/MeetingModelDownloader.swift")
+
+        assertTrue(
+            controllerContents.contains("await ensureModelsReadyForQueuedTranscription(job)")
+                && controllerContents.contains("runPreparedQueuedTranscription(job)"),
+            "queued meeting jobs should load models before entering TranscriptionTaskManager"
+        )
+        assertTrue(
+            controllerContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            "queued meeting jobs should reload the STT model selected when the audio was queued"
+        )
+        assertTrue(
+            controllerContents.contains("preparingQueuedTranscriptionJob")
+                && controllerContents.contains("isPreparingQueuedTranscriptionStart")
+                && controllerContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
+            "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
+        )
+        assertTrue(
+            downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
+                && downloaderContents.contains("stt.prepare(model: sttModel)"),
+            "meeting model loading should support a queued job's stored speech model"
+        )
+    }
+
     runSuite("Repo command contract - dictation joins existing model downloads") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")

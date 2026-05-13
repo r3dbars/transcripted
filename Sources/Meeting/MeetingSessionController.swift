@@ -84,6 +84,7 @@ final class MeetingSessionController: ObservableObject {
             )
         }
 
+        let id = UUID()
         let kind: Kind
         let startTrigger: StartTrigger
         let sttModel: TranscriptionModelChoice
@@ -168,6 +169,8 @@ final class MeetingSessionController: ObservableObject {
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
+    private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
+    private var queuedTranscriptionStartTask: Task<Void, Never>?
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeTranscriptionTrigger: StartTrigger = .unknown
@@ -877,10 +880,14 @@ final class MeetingSessionController: ObservableObject {
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
         let queuedJobs = queuedTranscriptionJobs
         queuedTranscriptionJobs.removeAll()
+        let preparingJob = preparingQueuedTranscriptionJob
+        queuedTranscriptionStartTask?.cancel()
+        queuedTranscriptionStartTask = nil
+        preparingQueuedTranscriptionJob = nil
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = .unknown
 
-        for job in queuedJobs {
+        for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
             case .recorded(let micURL, let systemURL, _):
                 failedManager.addFailedTranscription(
@@ -1225,7 +1232,10 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var hasBackgroundTranscriptionWork: Bool {
-        taskManager.activeCount > 0 || taskManager.speakerNamingRequest != nil || !queuedTranscriptionJobs.isEmpty
+        taskManager.activeCount > 0
+            || taskManager.speakerNamingRequest != nil
+            || isPreparingQueuedTranscriptionStart
+            || !queuedTranscriptionJobs.isEmpty
     }
 
     var hasRuntimeDiagnosticsWork: Bool {
@@ -1234,7 +1244,7 @@ final class MeetingSessionController: ObservableObject {
 
     private var hasVisibleBackgroundTranscriptionWork: Bool {
         MeetingSessionUIPolicy.shouldShowTranscribing(
-            activeTranscriptions: taskManager.activeCount,
+            activeTranscriptions: taskManager.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
             queuedTranscriptions: queuedTranscriptionJobs.count
         )
     }
@@ -1245,7 +1255,11 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var canStartQueuedTranscriptionImmediately: Bool {
-        taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil
+        taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil && !isPreparingQueuedTranscriptionStart
+    }
+
+    private var isPreparingQueuedTranscriptionStart: Bool {
+        preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
     }
 
     private var isCaptureSessionActive: Bool {
@@ -1305,10 +1319,98 @@ final class MeetingSessionController: ObservableObject {
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = job.startTrigger
         sttAdapter.selectPreparedModel(job.sttModel)
+        preparingQueuedTranscriptionJob = job
 
         if !isCaptureSessionActive {
             state = .transcribing
         }
+
+        displayStatus = .gettingReady
+        queuedTranscriptionStartTask?.cancel()
+        queuedTranscriptionStartTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.prepareAndStartQueuedTranscription(job)
+        }
+    }
+
+    private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {
+        let modelsReady = await ensureModelsReadyForQueuedTranscription(job)
+        guard preparingQueuedTranscriptionJob?.id == job.id else { return }
+
+        queuedTranscriptionStartTask = nil
+        preparingQueuedTranscriptionJob = nil
+
+        guard !Task.isCancelled else { return }
+
+        guard modelsReady else {
+            failQueuedTranscriptionJobAfterModelRecovery(job)
+            handleBackgroundTranscriptionWorkChanged()
+            return
+        }
+
+        runPreparedQueuedTranscription(job)
+    }
+
+    private func ensureModelsReadyForQueuedTranscription(_ job: QueuedTranscriptionJob) async -> Bool {
+        sttAdapter.selectPreparedModel(job.sttModel)
+
+        if sttAdapter.isReady && diarization.isReady {
+            return true
+        }
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_transcription_model_recovery_started",
+            message: "Meeting transcription is loading models before starting queued audio",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "trigger": job.startTrigger.rawValue,
+                    "queued_stt_model": job.sttModel.rawValue
+                ]
+            )
+        )
+
+        do {
+            try await downloader.ensureModelsReady(sttModel: job.sttModel)
+            sttAdapter.selectPreparedModel(job.sttModel)
+        } catch {
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_transcription_model_recovery_failed",
+                message: "Meeting transcription models could not be loaded before queued audio started",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "error": error.localizedDescription,
+                        "trigger": job.startTrigger.rawValue,
+                        "queued_stt_model": job.sttModel.rawValue
+                    ]
+                )
+            )
+            return false
+        }
+
+        let ready = sttAdapter.isReady && diarization.isReady
+        if !ready {
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_transcription_model_recovery_failed",
+                message: "Meeting transcription models were still unavailable after reload",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "trigger": job.startTrigger.rawValue,
+                        "queued_stt_model": job.sttModel.rawValue
+                    ]
+                )
+            )
+        }
+
+        return ready
+    }
+
+    private func runPreparedQueuedTranscription(_ job: QueuedTranscriptionJob) {
+        sttAdapter.selectPreparedModel(job.sttModel)
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, let healthInfo):
@@ -1325,6 +1427,24 @@ final class MeetingSessionController: ObservableObject {
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle
             )
+        }
+    }
+
+    private func failQueuedTranscriptionJobAfterModelRecovery(_ job: QueuedTranscriptionJob) {
+        let message = "Meeting transcription models were not ready. Try again after models finish loading."
+        lastTerminalTranscriptionOutcome = .failed(message)
+        state = .error(message)
+        displayStatus = .failed(message: message)
+
+        switch job.kind {
+        case .recorded(let micURL, let systemURL, _):
+            failedManager.addFailedTranscription(
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
+                errorMessage: message
+            )
+        case .imported(let audioURL, _):
+            try? FileManager.default.removeItem(at: audioURL)
         }
     }
 
