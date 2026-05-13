@@ -60,6 +60,7 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.title, "Transcripted is ready", "lazy default launch should not look like stuck startup work")
         assertEqual(status.subtitle, "Dictation and meetings load when started", "lazy model loading should be explicit")
+        assertTrue(status.isReadyForMenuHeader, "lazy model loading should not make the menu header look stuck")
         assertTrue(
             status.detail.contains("outside app updates"),
             "lazy model copy should explain the one-time cache survives normal app updates"
@@ -77,6 +78,7 @@ func testMeetingWarmupStatusPolicy() {
         )
 
         assertEqual(status.dictationStatus, "Downloading", "zero-progress Parakeet downloads should not pretend to have exact percent progress")
+        assertFalse(status.isReadyForMenuHeader, "real downloads should still surface as in-progress work")
         assertTrue(
             status.detail.contains("future app updates should reuse the cached model"),
             "download copy should explain update-safe model caching"
@@ -92,6 +94,7 @@ func testMeetingWarmupStatusPolicy() {
         )
 
         assertEqual(status.dictationStatus, "Cached", "cached dictation files should have their own status")
+        assertTrue(status.isReadyForMenuHeader, "cached files should not make the menu header look stuck or not ready")
         assertTrue(
             status.detail.contains("load them into memory on first use"),
             "cached copy should not claim the speech model is already loaded"

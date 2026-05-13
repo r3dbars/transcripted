@@ -430,6 +430,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     init() {
+        markCachedRuntimeModelIfAvailable()
         scheduleInputDeviceNameRefresh()
     }
 
@@ -533,6 +534,7 @@ class ParakeetEngine: ObservableObject {
         defer { modelInitializationTask = nil }
         guard !isShuttingDown, !Task.isCancelled else { return }
         scheduleInputDeviceNameRefresh()
+        markCachedRuntimeModelIfAvailable()
 
         guard asrManager == nil else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
@@ -592,16 +594,21 @@ class ParakeetEngine: ObservableObject {
                 // verification stub would be worse than no check at all.
                 failureStage = .downloadModels
                 loadSource = .download
-                print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
-                modelDownloadState = .downloading(progress: 0.0)
                 let downloadedPath: URL
                 if let modelFilePrefetchTask {
+                    print("🌐 PARAKEET | waiting for background Parakeet model cache...")
+                    modelDownloadState = .downloading(progress: 0.0)
                     downloadedPath = try await modelFilePrefetchTask.value
                     prefetchedModelPath = downloadedPath
                     self.modelFilePrefetchTask = nil
                 } else if let prefetchedModelPath {
                     downloadedPath = prefetchedModelPath
+                } else if let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() {
+                    prefetchedModelPath = cachedModelPath
+                    downloadedPath = cachedModelPath
                 } else {
+                    print("🌐 PARAKEET | models not bundled, downloading (~600MB)...")
+                    modelDownloadState = .downloading(progress: 0.0)
                     downloadedPath = try await AsrModels.download(version: .v3)
                     prefetchedModelPath = downloadedPath
                 }
@@ -662,6 +669,10 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
+        if markCachedRuntimeModelIfAvailable() {
+            return
+        }
+
         switch modelDownloadState {
         case .downloading, .cached, .loading, .ready:
             return
@@ -683,6 +694,12 @@ class ParakeetEngine: ObservableObject {
         do {
             let downloadedPath = try await task.value
             guard !Task.isCancelled, !isShuttingDown else { return }
+            guard modelInitializationTask == nil, asrManager == nil, !asrManagerReady else {
+                if modelFilePrefetchTask != nil {
+                    modelFilePrefetchTask = nil
+                }
+                return
+            }
             prefetchedModelPath = downloadedPath
             modelDownloadState = .cached
             if modelFilePrefetchTask != nil {
@@ -709,6 +726,19 @@ class ParakeetEngine: ObservableObject {
                 message: error.localizedDescription
             )
         }
+    }
+
+    @discardableResult
+    private func markCachedRuntimeModelIfAvailable() -> Bool {
+        guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() else {
+            return false
+        }
+
+        prefetchedModelPath = cachedModelPath
+        if !asrManagerReady {
+            modelDownloadState = .cached
+        }
+        return true
     }
 
     /// Load Parakeet EOU 120M for streaming live display.

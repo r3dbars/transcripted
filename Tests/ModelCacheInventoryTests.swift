@@ -28,6 +28,33 @@ func testModelCacheInventory() {
         assertEqual(snapshot.reclaimableBytes(includeWhisper: true), 40, "reclaimable total with Whisper should include stale and optional Whisper models")
     }
 
+    runSuite("ModelCacheInventory active Parakeet cache requires complete CoreML files") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        let active = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        assertNil(
+            ModelCacheInventory.activeParakeetModelDirectory(fluidAudioModelsDirectory: fluid),
+            "missing active Parakeet cache should not be treated as cached"
+        )
+
+        writeTestFile(active.appendingPathComponent("Encoder.mlmodelc/coremldata.bin"), bytes: 11)
+        writeTestFile(active.appendingPathComponent("JointDecision.mlmodelc/coremldata.bin"), bytes: 11)
+        writeTestFile(active.appendingPathComponent("Decoder.mlmodelc/coremldata.bin"), bytes: 11)
+        writeTestFile(active.appendingPathComponent("Preprocessor.mlmodelc/coremldata.bin"), bytes: 11)
+        writeTestFile(active.appendingPathComponent("config.json"), bytes: 2)
+        writeTestFile(active.appendingPathComponent("parakeet_v3_vocab.json"), bytes: 2)
+        writeTestFile(active.appendingPathComponent("parakeet_vocab.json"), bytes: 2)
+
+        assertEqual(
+            ModelCacheInventory.activeParakeetModelDirectory(fluidAudioModelsDirectory: fluid)?.path,
+            active.standardizedFileURL.path,
+            "complete active Parakeet cache should be reusable without showing a new download"
+        )
+    }
+
     runSuite("ModelCacheInventory diagnostics avoid raw paths") {
         let snapshot = ModelCacheSnapshot(
             fluidAudioModelsBytes: 10,
