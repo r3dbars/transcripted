@@ -430,6 +430,47 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(content, markdown)
     }
 
+    func testReadMeetingCommandAcceptsJSONFlag() throws {
+        let command = try ReadMeeting.parse([
+            "Product review",
+            "--meetings-dir", "/tmp/meetings",
+            "--dictations-dir", "/tmp/dictations",
+            "--json",
+        ])
+
+        XCTAssertTrue(command.json)
+        XCTAssertEqual(command.filename, "Product review")
+    }
+
+    func testReadDictationCommandAcceptsJSONFlag() throws {
+        let command = try ReadDictation.parse([
+            "Dictations_2026-04-07",
+            "--dictations-dir", "/tmp/dictations",
+            "--entry-id", "dictation-20260407-091500-000",
+            "--json",
+        ])
+
+        XCTAssertTrue(command.json)
+        XCTAssertEqual(command.filename, "Dictations_2026-04-07")
+        XCTAssertEqual(command.entryId, "dictation-20260407-091500-000")
+    }
+
+    func testReadMarkdownDocumentEncodesStableJSONKeys() throws {
+        let document = CLIReadMarkdownDocument(
+            kind: .dictation,
+            filename: "Dictations_2026-04-07",
+            entryId: "dictation-20260407-091500-000",
+            markdown: "# Morning note\n\nShip the agent path."
+        )
+
+        let data = try JSONEncoder.contextPretty.encode(document)
+        let json = String(data: data, encoding: .utf8)
+
+        XCTAssertTrue(json?.contains("\"kind\" : \"dictation\"") == true)
+        XCTAssertTrue(json?.contains("\"entry_id\" : \"dictation-20260407-091500-000\"") == true)
+        XCTAssertTrue(json?.contains("\"markdown\" :") == true)
+    }
+
     func testReadMeetingRejectsParentTraversal() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

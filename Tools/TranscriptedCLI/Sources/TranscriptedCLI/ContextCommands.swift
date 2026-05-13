@@ -134,8 +134,18 @@ struct ReadMeeting: ParsableCommand {
 
     @OptionGroup var paths: CLIContextPathOptions
 
+    @Flag(name: .long, help: "Output JSON instead of raw Markdown.")
+    var json: Bool = false
+
     func run() throws {
-        print(try CLIContextStore.readMeeting(filename: filename, in: paths.resolved))
+        let markdown = try CLIContextStore.readMeeting(filename: filename, in: paths.resolved)
+        try printReadMarkdown(
+            kind: .meeting,
+            filename: filename,
+            entryId: nil,
+            markdown: markdown,
+            asJSON: json
+        )
     }
 }
 
@@ -153,8 +163,18 @@ struct ReadDictation: ParsableCommand {
     @Option(name: .long, help: "Optional entry ID to read a single dictation.")
     var entryId: String?
 
+    @Flag(name: .long, help: "Output JSON instead of raw Markdown.")
+    var json: Bool = false
+
     func run() throws {
-        print(try CLIContextStore.readDictation(filename: filename, entryId: entryId, in: paths.resolved))
+        let markdown = try CLIContextStore.readDictation(filename: filename, entryId: entryId, in: paths.resolved)
+        try printReadMarkdown(
+            kind: .dictation,
+            filename: filename,
+            entryId: entryId,
+            markdown: markdown,
+            asJSON: json
+        )
     }
 }
 
@@ -176,4 +196,33 @@ private func printContextItems(_ items: [CLIContextItem], asJSON: Bool) throws {
         }
         print("  \(item.preview)")
     }
+}
+
+private func printReadMarkdown(
+    kind: CLIContextKind,
+    filename: String,
+    entryId: String?,
+    markdown: String,
+    asJSON: Bool
+) throws {
+    guard asJSON else {
+        print(markdown)
+        return
+    }
+
+    let document = CLIReadMarkdownDocument(
+        kind: kind,
+        filename: normalizedMarkdownFilename(filename),
+        entryId: entryId,
+        markdown: markdown
+    )
+    let data = try JSONEncoder.contextPretty.encode(document)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+}
+
+private func normalizedMarkdownFilename(_ filename: String) -> String {
+    if filename.hasSuffix(".md") {
+        return String(filename.dropLast(3))
+    }
+    return filename
 }

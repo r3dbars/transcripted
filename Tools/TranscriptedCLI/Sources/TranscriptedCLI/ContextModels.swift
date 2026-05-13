@@ -129,6 +129,18 @@ struct CLIDictationDaySummary: Codable {
     }
 }
 
+struct CLIReadMarkdownDocument: Codable {
+    let kind: CLIContextKind
+    let filename: String
+    let entryId: String?
+    let markdown: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind, filename, markdown
+        case entryId = "entry_id"
+    }
+}
+
 extension JSONEncoder {
     static let contextPretty: JSONEncoder = {
         let encoder = JSONEncoder()
