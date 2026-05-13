@@ -40,6 +40,62 @@ final class ModelDownloadServiceTests: XCTestCase {
         )
     }
 
+    func testClassifyErrorMapsOfflineURLErrors() {
+        let errors: [URLError.Code] = [
+            .notConnectedToInternet,
+            .networkConnectionLost,
+            .dataNotAllowed,
+            .cannotFindHost,
+            .cannotConnectToHost,
+            .dnsLookupFailed
+        ]
+
+        for code in errors {
+            XCTAssertEqual(ModelDownloadService.classifyError(URLError(code)), .networkOffline)
+        }
+        XCTAssertEqual(DownloadErrorKind.networkOffline.title, "No Internet Connection")
+        XCTAssertEqual(DownloadErrorKind.networkOffline.detail, "Connect to the internet and try again.")
+    }
+
+    func testClassifyErrorMapsTLSAndTimeoutURLErrors() {
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(URLError(.secureConnectionFailed)),
+            .tlsFailure
+        )
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(URLError(.serverCertificateUntrusted)),
+            .tlsFailure
+        )
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(URLError(.timedOut)),
+            .timeout
+        )
+    }
+
+    func testClassifyErrorMapsDiskSpaceBeforeGenericFallback() {
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)),
+            .diskSpace
+        )
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(NSError(domain: NSPOSIXErrorDomain, code: 28)),
+            .diskSpace
+        )
+    }
+
+    func testClassifyErrorPreservesUnknownLocalizedDescription() {
+        let error = NSError(
+            domain: "ModelDownloadServiceTests",
+            code: 42,
+            userInfo: [NSLocalizedDescriptionKey: "fixture download failed"]
+        )
+
+        XCTAssertEqual(
+            ModelDownloadService.classifyError(error),
+            .unknown("fixture download failed")
+        )
+    }
+
     func testFetchModelFileListReadsSafeManifestFromHuggingFace() async throws {
         installModelDownloadURLProtocol(statusCode: 200, body: """
         {
