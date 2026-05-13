@@ -84,9 +84,9 @@ on SwiftPM again:
 ./.build/debug/transcripted-cli context-recent --count 10
 ./.build/debug/transcripted-cli context-recent --kind meeting --count 3
 ./.build/debug/transcripted-cli context-search "Linus" --kind meeting --speaker "Linus" --count 5
-./.build/debug/transcripted-cli read-meeting "Call_2026-04-29_09-15-00"
+./.build/debug/transcripted-cli read-meeting "Call_2026-04-29_09-15-00" --json
 ./.build/debug/transcripted-cli list-dictations --date-from 2026-04-29 --date-to 2026-04-29
-./.build/debug/transcripted-cli read-dictation Dictations_2026-04-29
+./.build/debug/transcripted-cli read-dictation Dictations_2026-04-29 --json
 ```
 
 What these are good for:
@@ -96,6 +96,7 @@ What these are good for:
 - full meeting markdown: `read-meeting` with the filename returned by `context-recent --kind meeting`
 - meetings by speaker or topic: `context-search <query> --kind meeting --speaker <name>`
 - dictations by day: `list-dictations --date-from YYYY-MM-DD --date-to YYYY-MM-DD`, then `read-dictation`
+- machine-readable full reads: add `--json` to `read-meeting` or `read-dictation`
 
 Binary path after build:
 
