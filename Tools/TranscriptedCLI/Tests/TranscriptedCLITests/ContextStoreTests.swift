@@ -88,6 +88,51 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.first?.preview, "No transcript captured.")
     }
 
+    func testRecentMeetingSkipsMalformedLegacyTranscriptRows() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let meeting = """
+        ---
+        capture_type: meeting
+        title: Parser fixture
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:18"
+        ---
+
+        # Parser fixture
+
+        ## Full Transcript
+
+        [00:00]
+        [00:01]x
+        [00:02] [
+        [00:03] [Mic/You] Still works.
+        """
+        try meeting.write(
+            to: meetingsDir.appendingPathComponent("Parser fixture.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.preview, "Still works.")
+    }
+
     func testSearchSpeakerFilterUsesMatchingSpeakerUtterance() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

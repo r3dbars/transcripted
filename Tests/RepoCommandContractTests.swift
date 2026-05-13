@@ -235,8 +235,12 @@ func testRepoCommandContract() {
             "beta release build should support an intentional thin distribution variant"
         )
         assertTrue(
-            betaBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-0}\""),
-            "beta release build should default to the lightweight model-download distribution"
+            betaBuildScript.contains("BUNDLE_PARAKEET_MODELS=\"${BUNDLE_PARAKEET_MODELS:-1}\""),
+            "beta release build should bundle Parakeet by default for first-launch trust"
+        )
+        assertTrue(
+            betaBuildScript.contains("BUNDLE_PARAKEET_MODELS=0 requires REQUIRE_BUNDLED_PARAKEET_MODELS=0"),
+            "beta release build should not allow thin distribution unless the model requirement is explicitly disabled"
         )
         assertTrue(
             betaBuildScript.contains("SWIFTC_NUM_THREADS")
