@@ -79,7 +79,7 @@ matches_any() {
 
 if [ -n "$changed_paths" ]; then
     while IFS= read -r path; do
-        if matches_any "$path" "Sources/*.swift" "Sources/*/*.swift" "Tests/*.swift"; then
+        if matches_any "$path" "Sources/*.swift" "Sources/*/*.swift" "Tests/*.swift" "Tests/FastTests.manifest"; then
             add_command "bash build.sh"
             add_command "bash run-tests.sh"
         fi

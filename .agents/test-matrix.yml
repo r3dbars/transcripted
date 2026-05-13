@@ -8,6 +8,7 @@ rules:
   - paths:
       - "Sources/**/*.swift"
       - "Tests/*.swift"
+      - "Tests/FastTests.manifest"
     checks:
       - "bash build.sh"
       - "bash run-tests.sh"
