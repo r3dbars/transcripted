@@ -108,6 +108,7 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 48_000,
             inputChannelCount: 1,
             selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
             selectionOverrodeDefault: true
         )
 
@@ -121,10 +122,25 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 24_000,
             inputChannelCount: 1,
             selectedInputClass: "bluetooth",
+            outputDeviceClass: "bluetooth",
             selectionOverrodeDefault: false
         )
 
         assertEqual(readiness, .ready, "AirPods HFP 24k hardware to 48k output should remain valid")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts built-in mic with Bluetooth output speech bus") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: true
+        )
+
+        assertEqual(readiness, .ready, "built-in mic with Bluetooth output can capture at the 24k bus and resample")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy defers stale AirPods-to-built-in switch formats") {
@@ -134,6 +150,7 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 48_000,
             inputChannelCount: 1,
             selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
             selectionOverrodeDefault: true
         )
 
@@ -148,6 +165,7 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 48_000,
             inputChannelCount: 1,
             selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
             selectionOverrodeDefault: true
         )
 
@@ -162,6 +180,7 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 0,
             inputChannelCount: 1,
             selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
             selectionOverrodeDefault: true
         )
         let zeroInputChannels = ParakeetAudioFormatReadinessPolicy.readiness(
@@ -170,6 +189,7 @@ func testParakeetStartRecordingFailurePolicy() {
             inputSampleRate: 48_000,
             inputChannelCount: 0,
             selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
             selectionOverrodeDefault: true
         )
 
@@ -187,6 +207,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 inputSampleRate: 48_000,
                 inputChannelCount: 1,
                 selectedInputClass: "built_in",
+                outputDeviceClass: "built_in",
                 selectionOverrodeDefault: false
             )
 
@@ -202,6 +223,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 inputSampleRate: 48_000,
                 inputChannelCount: 1,
                 selectedInputClass: "built_in",
+                outputDeviceClass: "built_in",
                 selectionOverrodeDefault: false
             )
 

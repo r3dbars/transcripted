@@ -1474,6 +1474,7 @@ class ParakeetEngine: ObservableObject {
             inputSampleRate: hwFormat.sampleRate,
             inputChannelCount: hwFormat.channelCount,
             selectedInputClass: selectedInputClass(for: selection),
+            outputDeviceClass: defaultOutputClass(for: selection),
             selectionOverrodeDefault: selection?.didOverrideDefault ?? false
         )
     }
@@ -1483,6 +1484,10 @@ class ParakeetEngine: ObservableObject {
             return DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput)
         }
         return inputDeviceClass(for: inputDeviceName)
+    }
+
+    private func defaultOutputClass(for selection: DictationInputDeviceSelection?) -> String {
+        selection?.defaultOutput.map(DictationInputDeviceSelectionPolicy.deviceClass(for:)) ?? "unknown"
     }
 
     private func audioFormatContext(
@@ -1554,7 +1559,7 @@ class ParakeetEngine: ObservableObject {
             "default_input_class": defaultInputClass,
             "default_output_class": defaultOutputClass,
             "format_ready": "\(recoveryState.inputFormatReady)",
-            "hfp_suspected": "\(isLikelyBluetoothHandsFreeProfile(inputClass: selectedClass, inputRate: inputRate, outputRate: outputRate))",
+            "hfp_suspected": "\(isLikelyBluetoothHandsFreeProfile(inputClass: selectedClass, outputDeviceClass: defaultOutputClass, inputRate: inputRate, outputRate: outputRate))",
             "input_device_class": selectedClass,
             "output_device_class": defaultOutputClass,
             "recovering": "\(recoveryState.isRecovering)",
@@ -1584,12 +1589,18 @@ class ParakeetEngine: ObservableObject {
 
     private func isLikelyBluetoothHandsFreeProfile(
         inputClass: String,
+        outputDeviceClass: String,
         inputRate: Double?,
         outputRate: Double?
     ) -> Bool {
-        guard inputClass == "bluetooth" else { return false }
         guard let inputRate, let outputRate else { return false }
-        return inputRate <= 24_000 && outputRate >= 44_100
+        if inputClass == "bluetooth" {
+            return inputRate <= 24_000 && outputRate >= 44_100
+        }
+        if outputDeviceClass == "bluetooth" {
+            return outputRate <= 24_000 && inputRate >= 44_100
+        }
+        return false
     }
 
     private func audioInputSnapshot(
