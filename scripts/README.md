@@ -39,6 +39,10 @@ not have to carry the full operational logic:
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/support-email-routing-smoke.sh` — quick support-mail routing check for `help@transcripted.app`
+  - DNS-only usage: `bash scripts/ops/support-email-routing-smoke.sh`
+  - Cloudflare API usage: `CLOUDFLARE_API_TOKEN=... bash scripts/ops/support-email-routing-smoke.sh --api`
+  - See `docs/support-email-routing-smoke.md` for the suspicious-mail runbook
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

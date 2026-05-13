@@ -9,7 +9,7 @@ This document describes the observability lanes used by Transcripted and how to 
 | **Sentry** | Crash and reliability diagnostics | `SENTRY_AUTH_TOKEN` | `project:read` | Create an auth token at [Sentry API Tokens](https://sentry.io/settings/account/api/auth-tokens/) with `project:read` scope | `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/projects/r3dbars/apple-macos/issues/?query=is:unresolved&limit=10"` |
 | **PostHog** | Anonymous usage statistics | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` | Personal API key | Create a Personal API Key in PostHog project settings (Settings -> Personal API keys) | `bash scripts/ops/health-probe.sh posthog` |
 | **GitHub** | Release metadata, traffic stats | None (uses `gh auth`) | None (uses authenticated CLI) | Run `gh auth login` in your terminal | `gh api repos/r3dbars/transcripted` |
-| **Cloudflare** | Pages deployment status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Zone:Read` | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with Account permissions for `Zone:Read` | See `scripts/ops/health-probe.sh cloudflare` |
+| **Cloudflare** | Pages deployment status and support-email routing status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` for Pages health, optional `CLOUDFLARE_ZONE_ID` for email routing | Account-level `Zone:Read`; add `Email Routing Rules Read` for `help@transcripted.app` routing checks | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with the needed read scopes | See `scripts/ops/health-probe.sh cloudflare` and `scripts/ops/support-email-routing-smoke.sh --api` |
 
 ## Important Notes
 
@@ -38,6 +38,22 @@ Only report aggregate counts, status codes, deployment IDs, and issue titles. Fo
 
 The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. First-value events are limited to `onboarding_first_dictation_saved` and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
 
+### Support Email Routing Smoke
+
+When `help@transcripted.app` looks suspicious or Cloudflare warns about Email Routing DNS, run:
+
+```bash
+bash scripts/ops/support-email-routing-smoke.sh
+```
+
+For the deeper Cloudflare rule check:
+
+```bash
+CLOUDFLARE_API_TOKEN="your-token" bash scripts/ops/support-email-routing-smoke.sh --api
+```
+
+The API check uses `Zone:Read` plus `Email Routing Rules Read`. It reports whether the route exists without printing forwarding destination addresses. See [`support-email-routing-smoke.md`](./support-email-routing-smoke.md).
+
 ## Quick Start
 
 1. Set your credentials as environment variables (or in your shell profile):
@@ -47,6 +63,8 @@ The PostHog probe reports aggregate 7-day counts for active devices, workflow ev
    export POSTHOG_PROJECT_ID="your-project-id"
    export CLOUDFLARE_API_TOKEN="your-cloudflare-token"
    export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+   # Optional for support email routing checks:
+   export CLOUDFLARE_ZONE_ID="your-cloudflare-zone-id"
    ```
 
 2. Run the health probe script:
