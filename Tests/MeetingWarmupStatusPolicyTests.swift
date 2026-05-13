@@ -11,6 +11,7 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.subtitle, "Meetings load when started", "background startup failures should not become visible meeting errors")
         assertEqual(status.meetingsStatus, "On demand", "quiet meeting warmup failures should fall back to lazy meeting copy")
+        assertTrue(status.isReadyForMenuHeader, "quiet meeting warmup failures should not make the menu header look broken")
     }
 
     runSuite("MeetingWarmupStatusPolicy.status — surfaces user-requested meeting warmup failures") {
@@ -23,6 +24,7 @@ func testMeetingWarmupStatusPolicy() {
 
         assertEqual(status.subtitle, "Meeting transcription models failed to load", "explicit meeting setup should show the failure")
         assertEqual(status.meetingsStatus, "Failed", "the meeting action should offer retry copy after visible failure")
+        assertFalse(status.isReadyForMenuHeader, "visible meeting failures should not let the menu header claim Transcripted is ready")
     }
 
     runSuite("MeetingWarmupStatusPolicy.status — shows meeting loading while warmup is visible") {
