@@ -7,7 +7,7 @@ This document describes the observability lanes used by Transcripted and how to 
 | Lane | What it Reports | Required Env Vars | Required Scopes | How to Obtain Credential | Probe Command |
 |------|-----------------|-------------------|-----------------|--------------------------|---------------|
 | **Sentry** | Crash and reliability diagnostics | `SENTRY_AUTH_TOKEN` | `project:read` | Create an auth token at [Sentry API Tokens](https://sentry.io/settings/account/api/auth-tokens/) with `project:read` scope | `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/projects/r3dbars/apple-macos/issues/?query=is:unresolved&limit=10"` |
-| **PostHog** | Anonymous usage statistics | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` | Personal API key | Create a Personal API Key in PostHog project settings (Settings -> Personal API keys) | `curl -H "Authorization: Bearer $POSTHOG_PERSONAL_API_KEY" "https://us.i.posthog.com/api/projects/$POSTHOG_PROJECT_ID/query/" -d '{"query":"select uniq(distinct_id) as devices_7d, sum(case when event in (\"app_launched\",\"app_unclean_shutdown_detected\",\"app_session_stall_detected\",\"onboarding_completed\",\"dictation_started\",\"dictation_start_failed\",\"dictation_completed\",\"dictation_cancelled\",\"dictation_no_speech\",\"dictation_audio_route_recovery_timeout\",\"meeting_recording_started\",\"meeting_recording_start_failed\",\"meeting_recording_stopped\",\"meeting_recording_cancelled\",\"meeting_transcript_saved\",\"meeting_transcript_failed\",\"meeting_transcript_skipped\") then 1 else 0 end) as workflow_events_7d from events where timestamp >= now() - interval 7 day"}'` |
+| **PostHog** | Anonymous usage statistics | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` | Personal API key | Create a Personal API Key in PostHog project settings (Settings -> Personal API keys) | `bash scripts/ops/health-probe.sh posthog` |
 | **GitHub** | Release metadata, traffic stats | None (uses `gh auth`) | None (uses authenticated CLI) | Run `gh auth login` in your terminal | `gh api repos/r3dbars/transcripted` |
 | **Cloudflare** | Pages deployment status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Zone:Read` | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with Account permissions for `Zone:Read` | See `scripts/ops/health-probe.sh cloudflare` |
 
@@ -33,6 +33,10 @@ When running health checks or operational probes, **never** log or expose:
 - Full event payloads or user identifiers
 
 Only report aggregate counts, status codes, deployment IDs, and issue titles. For the full privacy contract, see [`privacy-first-observability.md`](./privacy-first-observability.md).
+
+### PostHog Probe Shape
+
+The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. First-value events are limited to `onboarding_first_dictation_saved` and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
 
 ## Quick Start
 

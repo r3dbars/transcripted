@@ -83,24 +83,31 @@ probe_posthog() {
   fi
 
   echo "PostHog health check..."
+  local workflow_events onboarding_events first_value_events query payload
+  workflow_events="'app_launched','app_unclean_shutdown_detected','app_session_stall_detected','onboarding_completed','dictation_started','dictation_start_failed','dictation_completed','dictation_cancelled','dictation_no_speech','dictation_audio_route_recovery_timeout','meeting_recording_started','meeting_recording_start_failed','meeting_recording_stopped','meeting_recording_cancelled','meeting_transcript_saved','meeting_transcript_failed','meeting_transcript_skipped'"
+  onboarding_events="'onboarding_shown','onboarding_step_viewed','onboarding_permission_cta_clicked','onboarding_permission_status_changed','onboarding_model_state_changed','onboarding_primary_cta_clicked','onboarding_first_dictation_started','onboarding_first_dictation_saved','onboarding_first_dictation_stop_clicked','onboarding_first_dictation_empty','onboarding_meeting_dry_run_clicked','onboarding_agent_cta_clicked','onboarding_reporting_toggle_changed','onboarding_completed','onboarding_dismissed'"
+  first_value_events="'onboarding_first_dictation_saved','onboarding_agent_cta_clicked'"
+  query="select uniq(distinct_id) as devices_7d, sum(case when event in ($workflow_events) then 1 else 0 end) as workflow_events_7d, sum(case when event in ($onboarding_events) then 1 else 0 end) as onboarding_events_7d, sum(case when event in ($first_value_events) then 1 else 0 end) as first_value_events_7d from events where timestamp >= now() - interval 7 day"
+  payload=$(jq -cn --arg query "$query" '{query: $query}')
+
   local response
   response=$(curl -s -f -X POST \
     -H "Authorization: Bearer $POSTHOG_PERSONAL_API_KEY" \
     -H "Content-Type: application/json" \
     "https://us.i.posthog.com/api/projects/$POSTHOG_PROJECT_ID/query/" \
-    -d '{
-      "query": "select uniq(distinct_id) as devices_7d, sum(case when event in (\"app_launched\",\"app_unclean_shutdown_detected\",\"app_session_stall_detected\",\"onboarding_completed\",\"dictation_started\",\"dictation_start_failed\",\"dictation_completed\",\"dictation_cancelled\",\"dictation_no_speech\",\"dictation_audio_route_recovery_timeout\",\"meeting_recording_started\",\"meeting_recording_start_failed\",\"meeting_recording_stopped\",\"meeting_recording_cancelled\",\"meeting_transcript_saved\",\"meeting_transcript_failed\",\"meeting_transcript_skipped\") then 1 else 0 end) as workflow_events_7d from events where timestamp >= now() - interval 7 day"
-    }')
+    -d "$payload")
 
   if [[ -z "$response" ]]; then
     echo "PostHog: query failed"
     return 1
   fi
 
-  local devices events
+  local devices events onboarding first_value
   devices=$(echo "$response" | jq -r '.data[0][0]')
   events=$(echo "$response" | jq -r '.data[0][1]')
-  echo "PostHog (last 7d): devices=$devices, workflow_events=$events"
+  onboarding=$(echo "$response" | jq -r '.data[0][2] // 0')
+  first_value=$(echo "$response" | jq -r '.data[0][3] // 0')
+  echo "PostHog (last 7d): devices=$devices, workflow_events=$events, onboarding_events=$onboarding, first_value_events=$first_value"
 }
 
 probe_cloudflare() {
