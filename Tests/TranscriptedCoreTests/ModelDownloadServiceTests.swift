@@ -3,6 +3,11 @@ import XCTest
 
 @available(macOS 14.0, *)
 final class ModelDownloadServiceTests: XCTestCase {
+    override func tearDown() {
+        URLProtocol.unregisterClass(ModelDownloadURLProtocol.self)
+        ModelDownloadURLProtocol.reset()
+        super.tearDown()
+    }
 
     func testSafeModelFilenameAllowsNestedModelFiles() {
         XCTAssertTrue(ModelDownloadService.isSafeModelFilename("config.json"))
@@ -32,6 +37,80 @@ final class ModelDownloadServiceTests: XCTestCase {
             try ModelDownloadService.sha256Hex(of: fileURL),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         )
+    }
+
+    func testFetchModelFileListReadsSafeManifestFromHuggingFace() async throws {
+        installModelDownloadURLProtocol(statusCode: 200, body: """
+        {
+          "siblings": [
+            { "rfilename": "config.json", "size": 123 },
+            {
+              "rfilename": "model.safetensors",
+              "size": 456,
+              "lfs": { "sha256": "abcdef123456" }
+            }
+          ]
+        }
+        """)
+
+        let files = try await ModelDownloadService.fetchModelFileList(modelId: "org/test-model")
+
+        XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().compactMap(\.host), ["huggingface.co"])
+        XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().first?.path, "/api/models/org/test-model")
+        XCTAssertEqual(files.map(\.name), ["config.json", "model.safetensors"])
+        XCTAssertEqual(files.map(\.size), [123, 456])
+        XCTAssertEqual(files.map(\.sha256), [nil, "abcdef123456"])
+    }
+
+    func testFetchModelFileListSkipsUnsafeManifestFilenames() async throws {
+        installModelDownloadURLProtocol(statusCode: 200, body: """
+        {
+          "siblings": [
+            { "rfilename": "../escape.bin", "size": 1 },
+            { "rfilename": "nested/./escape.bin", "size": 2 },
+            { "rfilename": "safe/model.bin", "size": 3, "lfs": { "sha256": "feedface" } }
+          ]
+        }
+        """)
+
+        let files = try await ModelDownloadService.fetchModelFileList(modelId: "org/test-model")
+
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files.first?.name, "safe/model.bin")
+        XCTAssertEqual(files.first?.size, 3)
+        XCTAssertEqual(files.first?.sha256, "feedface")
+    }
+
+    func testFetchModelFileListFailsClosedOnServerErrorWithoutMirrorFallback() async {
+        installModelDownloadURLProtocol(statusCode: 503, body: #"{"error":"unavailable"}"#)
+
+        do {
+            _ = try await ModelDownloadService.fetchModelFileList(modelId: "org/test-model")
+            XCTFail("Expected manifest fetch to fail closed")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error.kind, .unknown("Could not fetch model file list from any mirror"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let requestedHosts = ModelDownloadURLProtocol.requestedURLs().compactMap(\.host)
+        XCTAssertEqual(requestedHosts, ["huggingface.co"])
+        XCTAssertFalse(requestedHosts.contains("hf-mirror.com"))
+    }
+
+    func testFetchModelFileListFailsClosedOnMalformedManifest() async {
+        installModelDownloadURLProtocol(statusCode: 200, body: #"{"siblings":"not-an-array"}"#)
+
+        do {
+            _ = try await ModelDownloadService.fetchModelFileList(modelId: "org/test-model")
+            XCTFail("Expected malformed manifest to fail closed")
+        } catch let error as ModelDownloadError {
+            XCTAssertEqual(error.kind, .unknown("Could not fetch model file list from any mirror"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(ModelDownloadURLProtocol.requestedURLs().compactMap(\.host), ["huggingface.co"])
     }
 
     func testWithRetryDoesNotRetryDiskSpaceFailures() async {
@@ -71,4 +150,74 @@ final class ModelDownloadServiceTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    private func installModelDownloadURLProtocol(statusCode: Int, body: String) {
+        ModelDownloadURLProtocol.reset()
+        ModelDownloadURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ))
+            return (response, Data(body.utf8))
+        }
+        _ = URLProtocol.registerClass(ModelDownloadURLProtocol.self)
+    }
+}
+
+@available(macOS 14.0, *)
+private final class ModelDownloadURLProtocol: URLProtocol {
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    private static let lock = NSLock()
+    private static var urls: [URL] = []
+
+    static func reset() {
+        lock.lock()
+        handler = nil
+        urls = []
+        lock.unlock()
+    }
+
+    static func requestedURLs() -> [URL] {
+        lock.lock()
+        defer { lock.unlock() }
+        return urls
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let host = request.url?.host else { return false }
+        return host == "huggingface.co" || host == "hf-mirror.com"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.lock.lock()
+        if let url = request.url {
+            Self.urls.append(url)
+        }
+        let handler = Self.handler
+        Self.lock.unlock()
+
+        guard let handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
