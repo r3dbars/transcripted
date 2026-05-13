@@ -932,7 +932,9 @@ enum CLIContextStore {
         guard trimmed.hasPrefix("["),
               let timestampEnd = trimmed.firstIndex(of: "]") else { return nil }
         let timestamp = String(trimmed[trimmed.index(after: trimmed.startIndex)..<timestampEnd])
-        let sourceStart = trimmed.index(timestampEnd, offsetBy: 3)
+        let afterTimestamp = trimmed[trimmed.index(after: timestampEnd)...]
+        guard afterTimestamp.hasPrefix(" ["),
+              let sourceStart = trimmed.index(timestampEnd, offsetBy: 3, limitedBy: trimmed.endIndex) else { return nil }
         guard let labelEnd = trimmed.range(of: "] ", range: sourceStart..<trimmed.endIndex) else { return nil }
         let sourceLabel = trimmed[sourceStart..<labelEnd.lowerBound]
         guard let separator = sourceLabel.firstIndex(of: "/") else { return nil }

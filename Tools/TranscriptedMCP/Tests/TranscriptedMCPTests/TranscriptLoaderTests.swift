@@ -51,6 +51,33 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertNil(transcript)
     }
 
+    func testLoadMeetingSkipsMalformedLegacyTranscriptRows() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:18"
+        ---
+
+        # Parser fixture
+
+        ## Full Transcript
+
+        [00:00]
+        [00:01]x
+        [00:02] [
+        [00:03] [Mic/You] Still works.
+        """
+        try markdown.write(to: tempDir.appendingPathComponent("Call_malformed_legacy.md"), atomically: true, encoding: .utf8)
+
+        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_malformed_legacy.md"))
+
+        XCTAssertNotNil(transcript)
+        XCTAssertEqual(transcript?.utterances.count, 1)
+        XCTAssertEqual(transcript?.utterances.first?.text, "Still works.")
+    }
+
     func testLoadMissingFileReturnsNil() {
         let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.md"))
         XCTAssertNil(transcript)

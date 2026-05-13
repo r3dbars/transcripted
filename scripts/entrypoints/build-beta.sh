@@ -30,7 +30,7 @@ USER_NAME="${2:-beta}"
 # for the rationale.
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
-BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-0}"
+BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
 
@@ -40,6 +40,15 @@ fi
 
 if [ -z "$APP_VERSION" ]; then
     echo "❌ Could not read CFBundleShortVersionString from Info.plist"
+    exit 1
+fi
+
+if [ "$BUNDLE_PARAKEET_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" != "0" ]; then
+    echo "❌ BUNDLE_PARAKEET_MODELS=0 requires REQUIRE_BUNDLED_PARAKEET_MODELS=0"
+    echo "   Distribution builds bundle Parakeet by default so first launch does not"
+    echo "   depend on a runtime model download."
+    echo "   If you intentionally want a thin local test build, rerun with:"
+    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
     exit 1
 fi
 
@@ -378,7 +387,7 @@ else
         echo "   build-beta.sh now requires bundled Parakeet models by default so"
         echo "   distribution builds do not fall back to a runtime download on first launch."
         echo "   If you intentionally want a thin local test build, rerun with:"
-        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
         exit 1
     fi
 fi
