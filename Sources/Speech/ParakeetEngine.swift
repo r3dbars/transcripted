@@ -2929,12 +2929,19 @@ class ParakeetEngine: ObservableObject {
             wakeObserver = nil
         }
         removeInputDeviceChangeListener()
+        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(isTranscribing: isTranscribing)
         let mgr = asrManager
-        asrManager = nil
+        if cleanupDecision == .cleanupNow {
+            asrManager = nil
+        }
         asrManagerReady = false
         eouManager = nil
         modelDownloadState = .notLoaded
-        Task { mgr?.cleanup() }
+        if cleanupDecision == .cleanupNow {
+            Task { mgr?.cleanup() }
+        } else {
+            print("ℹ️ PARAKEET | deferring ASR manager cleanup while transcription is active")
+        }
     }
 
     deinit {

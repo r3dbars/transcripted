@@ -93,4 +93,35 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(plan.resetSpeechEngine, "failed startup should release the partial audio graph")
         assertFalse(plan.reportRuntimeStall, "the timeout event already reports this failure; it should not also emit app.session_stall_detected")
     }
+
+    runSuite("DictationActiveTaskCancellationPolicy leaves active inference alone") {
+        let plan = DictationActiveTaskCancellationPolicy.plan(
+            cancelRecording: true,
+            recordingStartWasInFlight: false,
+            sttIsRecording: false,
+            sttIsTranscribing: true
+        )
+
+        assertFalse(plan.cancelStreamingTask, "active CoreML transcription should be allowed to finish")
+        assertFalse(plan.cancelSpeechEngine, "active CoreML transcription should not race engine cleanup")
+    }
+
+    runSuite("DictationActiveTaskCancellationPolicy still cancels recording and pending starts") {
+        let recordingPlan = DictationActiveTaskCancellationPolicy.plan(
+            cancelRecording: true,
+            recordingStartWasInFlight: false,
+            sttIsRecording: true,
+            sttIsTranscribing: false
+        )
+        let pendingStartPlan = DictationActiveTaskCancellationPolicy.plan(
+            cancelRecording: true,
+            recordingStartWasInFlight: true,
+            sttIsRecording: false,
+            sttIsTranscribing: false
+        )
+
+        assertTrue(recordingPlan.cancelStreamingTask, "non-transcribing work can still be cancelled")
+        assertTrue(recordingPlan.cancelSpeechEngine, "active recording cancel should still stop the speech engine")
+        assertTrue(pendingStartPlan.cancelSpeechEngine, "pending CoreAudio starts should still be cancelled")
+    }
 }
