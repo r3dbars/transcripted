@@ -80,6 +80,7 @@ Use these docs for these jobs:
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
 - `CLAUDE.md` — Claude-specific repo orientation
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
+- `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
