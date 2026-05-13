@@ -78,7 +78,7 @@ public enum TranscriptScanner {
 
     /// Parse a transcript file and extract metadata
     /// Returns tuple of (metadata, actionItemsCount) or nil if parsing failed
-    private static func parseTranscriptFile(_ fileURL: URL) -> (RecordingMetadata, Int)? {
+    static func parseTranscriptFile(_ fileURL: URL) -> (RecordingMetadata, Int)? {
         guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
             AppLogger.pipeline.warning("TranscriptScanner could not read file", ["file": fileURL.lastPathComponent])
             return nil
