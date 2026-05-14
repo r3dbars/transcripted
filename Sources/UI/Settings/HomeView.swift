@@ -850,6 +850,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    let accessory: AnyView?
     var compact: Bool = false
     @ViewBuilder let content: () -> Content
 
@@ -871,6 +872,12 @@ private struct HomeActivityRowShell<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            if let accessory {
+                accessory
+                    .opacity(isHovering ? 1 : 0.78)
+                    .animation(.easeOut(duration: 0.12), value: isHovering)
+            }
 
             HomeRowActionButtons(
                 isCopied: isCopied,
@@ -906,7 +913,8 @@ struct HomeDictationRow: View {
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
-            menuItems: menuItems
+            menuItems: menuItems,
+            accessory: nil
         ) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(preview)
@@ -932,6 +940,7 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HomeActivityRowShell(
@@ -941,6 +950,7 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
+            accessory: audioAccessory,
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
@@ -956,6 +966,92 @@ struct HomeMeetingRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var audioAccessory: AnyView? {
+        guard let audio = item.audio else { return nil }
+        return AnyView(
+            HomeMeetingInlineAudioControl(
+                title: playback.buttonTitle(for: audio),
+                symbolName: playback.symbolName(for: audio),
+                isActive: playback.isActive(audio),
+                isPlaying: playback.isPlaying && playback.isActive(audio)
+            ) {
+                playback.toggle(audio)
+            }
+            .help("\(playback.buttonTitle(for: audio)) meeting audio")
+        )
+    }
+}
+
+private struct HomeMeetingInlineAudioControl: View {
+    let title: String
+    let symbolName: String
+    let isActive: Bool
+    let isPlaying: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(iconForeground)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(iconBackground))
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.20))
+                        .frame(width: 42, height: 4)
+
+                    Capsule()
+                        .fill(playheadColor)
+                        .frame(width: isPlaying ? 28 : 8, height: 4)
+
+                    Circle()
+                        .fill(playheadColor)
+                        .frame(width: 8, height: 8)
+                        .offset(x: isPlaying ? 24 : 4)
+                }
+                .frame(width: 42, height: 12)
+
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var background: Color {
+        isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08)
+    }
+
+    private var stroke: Color {
+        isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
+    }
+
+    private var iconBackground: Color {
+        isActive ? Color.accentColor : Color.primary.opacity(0.12)
+    }
+
+    private var iconForeground: Color {
+        isActive ? .white : .secondary
+    }
+
+    private var playheadColor: Color {
+        isActive ? .accentColor : .secondary.opacity(0.65)
     }
 }
 

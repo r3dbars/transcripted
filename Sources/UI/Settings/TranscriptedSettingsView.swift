@@ -11,7 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
@@ -53,7 +53,6 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    @State private var recentMeetings: [RecentMeetingItem] = []
     @State private var recentDictations: [SavedDictationEntry] = []
     @State private var recentCapturesLoading = false
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
@@ -70,7 +69,6 @@ struct TranscriptedSettingsView: View {
     @State private var showModelCacheCleanupConfirmation = false
     @State private var showWhisperCacheCleanupConfirmation = false
     @State private var showReclaimableCacheCleanupConfirmation = false
-    @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
@@ -259,8 +257,6 @@ struct TranscriptedSettingsView: View {
             modelsPage
         case .shortcuts:
             shortcutsPage
-        case .meetings:
-            meetingsPage
         case .dictations:
             dictationsPage
         case .people:
@@ -283,6 +279,10 @@ struct TranscriptedSettingsView: View {
         let needsAttention = homeNeedsAttentionIssues
 
         return VStack(alignment: .leading, spacing: 14) {
+            if !meetingSession.failedMeetings.isEmpty {
+                homeFailedMeetingsCard
+            }
+
             HStack(alignment: .top, spacing: 20) {
                 HomeWelcomeHeader(
                     name: homeViewModel.welcomeName,
@@ -292,6 +292,8 @@ struct TranscriptedSettingsView: View {
 
                 HomeStatsTopCard(stats: stats, streak: homeStreak)
             }
+
+            homeQuickActions
 
             HomeHeroCard(
                 selectedMode: homeHeroModeSelection
@@ -432,6 +434,112 @@ struct TranscriptedSettingsView: View {
                 },
                 secondaryButton: .cancel()
             )
+        }
+    }
+
+    private var homeFailedMeetingsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Unfinished meetings")
+                        .font(.headline)
+                    Text("Retry the transcript or delete the saved audio before this gets buried.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(meetingSession.failedMeetings) { item in
+                    SettingsFailedMeetingRow(
+                        item: item,
+                        retryAction: {
+                            trackSettingsAction("retry_failed_meeting", page: .home)
+                            meetingSession.retryFailedMeeting(id: item.id)
+                        },
+                        secondaryAction: {
+                            trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .home)
+                            if item.hasAudioFiles {
+                                meetingSession.deleteFailedMeeting(id: item.id)
+                            } else {
+                                meetingSession.dismissFailedMeeting(id: item.id)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.orange.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.orange.opacity(0.42), lineWidth: 1)
+        )
+    }
+
+    private var homeQuickActions: some View {
+        let columns = [
+            GridItem(.flexible(minimum: 240), spacing: 12),
+            GridItem(.flexible(minimum: 240), spacing: 12)
+        ]
+
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            SettingsActionTile(
+                symbolName: "record.circle.fill",
+                title: "Start Meeting",
+                detail: "Capture your mic and computer audio.",
+                tone: .accent,
+                menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
+                actionHelp: "Start a meeting recording.",
+                menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover."
+            ) {
+                trackSettingsAction("start_meeting", page: .home)
+                actions.startMeeting()
+            }
+
+            SettingsActionTile(
+                symbolName: "waveform",
+                title: "Transcribe Audio File",
+                detail: "Turn an audio file into meeting notes.",
+                actionHelp: "Choose an audio file to transcribe."
+            ) {
+                trackSettingsAction("import_recording", page: .home)
+                actions.importAudioFile()
+            }
+
+            SettingsActionTile(
+                symbolName: "mic.fill",
+                title: "Start Dictation",
+                detail: "Say something and paste it back.",
+                menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
+                actionHelp: "Start dictation.",
+                menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover."
+            ) {
+                trackSettingsAction("start_dictation", page: .home)
+                actions.startDictation()
+            }
+
+            SettingsActionTile(
+                symbolName: "sparkles",
+                title: "Connect Agent",
+                detail: "Copy a prompt or install direct local tools.",
+                actionHelp: "Open agent setup."
+            ) {
+                trackSettingsAction("open_agent", page: .home)
+                navigation.selectedPage = .connectAgent
+            }
         }
     }
 
@@ -1157,123 +1265,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var meetingsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Meetings",
-                summary: "Record meetings, import audio, and open recent transcripts."
-            )
-
-            SettingsSection(
-                title: "Start or Import",
-                detail: "Record now, or transcribe a file."
-            ) {
-                SettingsQuickLinkRow(
-                    symbolName: "record.circle.fill",
-                    title: "Start Meeting",
-                    detail: "Capture your mic and computer audio."
-                ) {
-                    trackSettingsAction("start_meeting", page: .meetings)
-                    actions.startMeeting()
-                }
-
-                SettingsQuickLinkRow(
-                    symbolName: "waveform",
-                    title: "Transcribe Audio File",
-                    detail: "Turn an audio file into meeting notes."
-                ) {
-                    trackSettingsAction("import_recording", page: .meetings)
-                    actions.importAudioFile()
-                }
-
-                Text("Blocked? Open Privacy and check microphone or system audio.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Recent Meetings",
-                detail: "The last five saved meeting transcripts."
-            ) {
-                if recentCapturesLoading && recentMeetings.isEmpty {
-                    Text("Loading recent meetings...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if recentMeetings.isEmpty {
-                    Text("Record or import a meeting and it will appear here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentMeetings) { item in
-                        SettingsRecentMeetingRow(
-                            item: item,
-                            detail: formattedRecentDate(item.date),
-                            isCopied: copiedAgentMeetingID == item.id,
-                            openAction: {
-                                trackSettingsAction("open_recent_meeting", page: .meetings)
-                                NSWorkspace.shared.open(item.transcriptURL)
-                            },
-                            copyForAgentAction: {
-                                trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
-                                copyMeetingForAgent(item)
-                            }
-                        )
-                    }
-                }
-            }
-
-            if !meetingSession.failedMeetings.isEmpty {
-                SettingsSection(
-                    title: "Needs Attention",
-                    detail: "Retry or clear unfinished meetings."
-                ) {
-                    ForEach(meetingSession.failedMeetings) { item in
-                        SettingsFailedMeetingRow(
-                            item: item,
-                            retryAction: {
-                                trackSettingsAction("retry_failed_meeting", page: .meetings)
-                                meetingSession.retryFailedMeeting(id: item.id)
-                            },
-                            secondaryAction: {
-                                trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .meetings)
-                                if item.hasAudioFiles {
-                                    meetingSession.deleteFailedMeeting(id: item.id)
-                                } else {
-                                    meetingSession.dismissFailedMeeting(id: item.id)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "Microphone Processing",
-                detail: "How Transcripted cleans up your mic for meetings."
-            ) {
-                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
-                    get: { meetingVoiceProcessingEnabled },
-                    set: { newValue in
-                        meetingVoiceProcessingEnabled = newValue
-                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .meetings)
-                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
-                    }
-                ))
-
-                Text(meetingVoiceProcessingEnabled
-                    ? "May lower other app audio in Zoom/Meet."
-                    : "Off — Transcripted boosts the saved mic and live STT copy in software without changing system audio."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                Text("Takes effect on the next recording.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
     private var peoplePage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
@@ -1599,6 +1590,31 @@ struct TranscriptedSettingsView: View {
                         refreshPermissions()
                     }
                 }
+            }
+
+            SettingsSection(
+                title: "Meeting Audio",
+                detail: "How Transcripted handles your microphone during meetings."
+            ) {
+                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
+                    get: { meetingVoiceProcessingEnabled },
+                    set: { newValue in
+                        meetingVoiceProcessingEnabled = newValue
+                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .privacy)
+                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                    }
+                ))
+
+                Text(meetingVoiceProcessingEnabled
+                    ? "May lower other app audio in Zoom/Meet."
+                    : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Text("Takes effect on the next recording.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             SettingsSection(
@@ -2290,7 +2306,6 @@ struct TranscriptedSettingsView: View {
             recentCaptureRefreshTask = Task { @MainActor in
                 let snapshot = await RecentCaptureLoader.load(limit: 5)
                 guard !Task.isCancelled else { return }
-                recentMeetings = snapshot.meetings
                 recentDictations = snapshot.dictations
                 recentCapturesLoading = false
             }
@@ -2690,29 +2705,6 @@ struct TranscriptedSettingsView: View {
         Self.recentCaptureDateFormatter.string(from: date)
     }
 
-    private func copyMeetingForAgent(_ item: RecentMeetingItem) {
-        guard let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: item.title,
-            date: item.date,
-            transcriptURL: item.transcriptURL
-        ) else {
-            NSSound.beep()
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(bundle, forType: .string)
-        copiedAgentMeetingID = item.id
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if copiedAgentMeetingID == item.id {
-                copiedAgentMeetingID = nil
-            }
-        }
-    }
-
     private static let recentCaptureDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -2891,140 +2883,6 @@ private struct AutoEnterAllowedAppRow: View {
 
             Button("Remove", action: remove)
         }
-    }
-}
-
-private struct SettingsRecentMeetingRow: View {
-    let item: RecentMeetingItem
-    let detail: String
-    let isCopied: Bool
-    let openAction: () -> Void
-    let copyForAgentAction: () -> Void
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button(action: openAction) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 12)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 10) {
-                if let audio = item.audio {
-                    SettingsRecentMeetingAudioControl(
-                        title: playback.buttonTitle(for: audio),
-                        symbolName: playback.symbolName(for: audio),
-                        isActive: playback.isActive(audio),
-                        isPlaying: playback.isPlaying && playback.isActive(audio)
-                    ) {
-                        playback.toggle(audio)
-                    }
-                    .help("\(playback.buttonTitle(for: audio)) meeting audio")
-                }
-
-                Button {
-                    copyForAgentAction()
-                } label: {
-                    Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-    }
-}
-
-private struct SettingsRecentMeetingAudioControl: View {
-    let title: String
-    let symbolName: String
-    let isActive: Bool
-    let isPlaying: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbolName)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(iconForeground)
-                    .frame(width: 20, height: 20)
-                    .background(Circle().fill(iconBackground))
-
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.secondary.opacity(0.22))
-                        .frame(width: 44, height: 4)
-
-                    Capsule()
-                        .fill(playheadColor)
-                        .frame(width: isPlaying ? 28 : 8, height: 4)
-
-                    Circle()
-                        .fill(playheadColor)
-                        .frame(width: 8, height: 8)
-                        .offset(x: isPlaying ? 24 : 4)
-                }
-                .frame(width: 44, height: 12)
-
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(background)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(stroke, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var background: Color {
-        isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08)
-    }
-
-    private var stroke: Color {
-        isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
-    }
-
-    private var iconBackground: Color {
-        isActive ? Color.accentColor : Color.primary.opacity(0.12)
-    }
-
-    private var iconForeground: Color {
-        isActive ? .white : .secondary
-    }
-
-    private var playheadColor: Color {
-        isActive ? .accentColor : .secondary.opacity(0.65)
     }
 }
 
