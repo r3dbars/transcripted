@@ -327,9 +327,26 @@ struct HomeWelcomeHeader: View {
 
 // MARK: - Hero card
 
+private enum HomeHeroTabMetrics {
+    static let width: CGFloat = 172
+    static let height: CGFloat = 52
+    static let cornerRadius: CGFloat = 14
+    static let spacing: CGFloat = 4
+
+    static var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+
+    static var inactiveFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.56)
+    }
+}
+
 struct HomeHeroCard<ActivityContent: View>: View {
     @Binding var selectedMode: HomeHeroMode
     private let activityContent: () -> ActivityContent
+
+    @Environment(\.displayScale) private var displayScale
 
     init(
         selectedMode: Binding<HomeHeroMode>,
@@ -342,7 +359,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.bottom, -1)
+                .padding(.bottom, 0)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 18) {
@@ -358,14 +375,38 @@ struct HomeHeroCard<ActivityContent: View>: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: hairline)
             )
+            .overlay(alignment: .topLeading) {
+                selectedTabSeamMask
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var cardFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+        HomeHeroTabMetrics.surfaceFill
+    }
+
+    private var hairline: CGFloat {
+        1 / max(displayScale, 1)
+    }
+
+    private var selectedTabLeadingOffset: CGFloat {
+        switch selectedMode {
+        case .meeting:
+            return 0
+        case .dictation:
+            return HomeHeroTabMetrics.width + HomeHeroTabMetrics.spacing
+        }
+    }
+
+    private var selectedTabSeamMask: some View {
+        Rectangle()
+            .fill(cardFill)
+            .frame(width: HomeHeroTabMetrics.width, height: hairline * 3)
+            .offset(x: selectedTabLeadingOffset, y: -hairline)
+            .allowsHitTesting(false)
     }
 }
 
@@ -373,18 +414,25 @@ private struct HomeHeroModeTabs: View {
     @Binding var selectedMode: HomeHeroMode
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
+        HStack(alignment: .top, spacing: HomeHeroTabMetrics.spacing) {
             ForEach(HomeHeroMode.tabOrder) { mode in
                 HomeHeroModeTab(
                     mode: mode,
                     isSelected: selectedMode == mode,
                     action: {
-                        withAnimation(.easeInOut(duration: 0.16)) {
+                        guard selectedMode != mode else { return }
+                        var transaction = Transaction()
+                        transaction.animation = nil
+                        withTransaction(transaction) {
                             selectedMode = mode
                         }
                     }
                 )
             }
+        }
+        .frame(height: HomeHeroTabMetrics.height, alignment: .topLeading)
+        .transaction { transaction in
+            transaction.animation = nil
         }
     }
 }
@@ -394,53 +442,47 @@ private struct HomeHeroModeTab: View {
     let isSelected: Bool
     let action: () -> Void
 
+    @Environment(\.displayScale) private var displayScale
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: mode.symbolName)
-                    .font(.system(size: isSelected ? 13 : 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 18, height: 18)
                 Text(mode.switchTitle)
-                    .font(.system(size: isSelected ? 14 : 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-            .frame(minWidth: 126)
-            .padding(.horizontal, 18)
-            .padding(.top, isSelected ? 14 : 11)
-            .padding(.bottom, isSelected ? 13 : 10)
+            .frame(width: HomeHeroTabMetrics.width, height: HomeHeroTabMetrics.height)
             .background(
-                HomeHeroTabShape(cornerRadius: 14)
+                HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
                     .fill(tabFill)
             )
             .overlay(
-                HomeHeroTabBorderShape(cornerRadius: 14)
-                    .stroke(tabStroke, lineWidth: 1)
+                HomeHeroTabBorderShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
+                    .stroke(tabStroke, lineWidth: hairline)
             )
-            .overlay(alignment: .top) {
-                HomeHeroTabShape(cornerRadius: 14)
-                    .stroke(Color.white.opacity(isSelected ? 0.06 : 0.025), lineWidth: 1)
-                    .padding(.top, 1)
-                    .padding(.horizontal, 1)
-            }
-            .overlay(alignment: .bottom) {
-                if isSelected {
-                    Rectangle()
-                        .fill(surfaceFill)
-                        .frame(height: 3)
-                        .offset(y: 1)
-                }
-            }
+            .contentShape(HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius))
         }
         .buttonStyle(.plain)
         .help("Show \(mode.switchTitle.lowercased())")
-        .offset(y: isSelected ? 0 : 5)
         .zIndex(isSelected ? 1 : 0)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(mode.switchTitle)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 
     private var tabFill: Color {
         if isSelected {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.96)
+            return surfaceFill
         }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.58)
+        if isHovering {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.66)
+        }
+        return HomeHeroTabMetrics.inactiveFill
     }
 
     private var tabStroke: Color {
@@ -448,7 +490,11 @@ private struct HomeHeroModeTab: View {
     }
 
     private var surfaceFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+        HomeHeroTabMetrics.surfaceFill
+    }
+
+    private var hairline: CGFloat {
+        1 / max(displayScale, 1)
     }
 }
 
