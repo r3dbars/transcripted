@@ -7,4 +7,14 @@ enum MeetingSessionUIPolicy {
     ) -> Bool {
         activeTranscriptions > 0 || queuedTranscriptions > 0
     }
+
+    static func canStartQueuedTranscription(
+        activeTranscriptions: Int,
+        isSpeakerReviewPending: Bool,
+        isPreparingQueuedTranscriptionStart: Bool
+    ) -> Bool {
+        activeTranscriptions == 0
+            && !isSpeakerReviewPending
+            && !isPreparingQueuedTranscriptionStart
+    }
 }

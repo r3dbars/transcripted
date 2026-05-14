@@ -104,6 +104,11 @@ final class MeetingSessionController: ObservableObject {
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
     }
 
+    private struct BackgroundTranscriptionWorkSnapshot {
+        let activeCount: Int
+        let speakerNamingRequest: SpeakerNamingRequest?
+    }
+
     // MARK: - Published state (for meeting UI bindings)
 
     /// High-level session state for the meeting UI.
@@ -1064,8 +1069,13 @@ final class MeetingSessionController: ObservableObject {
 
         taskManager.$activeCount
             .combineLatest(taskManager.$speakerNamingRequest)
-            .sink { [weak self] _, _ in
-                self?.handleBackgroundTranscriptionWorkChanged()
+            .sink { [weak self] activeCount, speakerNamingRequest in
+                self?.handleBackgroundTranscriptionWorkChanged(
+                    snapshot: BackgroundTranscriptionWorkSnapshot(
+                        activeCount: activeCount,
+                        speakerNamingRequest: speakerNamingRequest
+                    )
+                )
             }
             .store(in: &cancellables)
 
@@ -1243,10 +1253,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var hasVisibleBackgroundTranscriptionWork: Bool {
-        MeetingSessionUIPolicy.shouldShowTranscribing(
-            activeTranscriptions: taskManager.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
-            queuedTranscriptions: queuedTranscriptionJobs.count
-        )
+        hasVisibleBackgroundTranscriptionWork(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
 
     private var isSpeechModelPreparedForSelection: Bool {
@@ -1255,11 +1262,18 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var canStartQueuedTranscriptionImmediately: Bool {
-        taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil && !isPreparingQueuedTranscriptionStart
+        canStartQueuedTranscriptionImmediately(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
 
     private var isPreparingQueuedTranscriptionStart: Bool {
         preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
+    }
+
+    private var currentBackgroundTranscriptionWorkSnapshot: BackgroundTranscriptionWorkSnapshot {
+        BackgroundTranscriptionWorkSnapshot(
+            activeCount: taskManager.activeCount,
+            speakerNamingRequest: taskManager.speakerNamingRequest
+        )
     }
 
     private var isCaptureSessionActive: Bool {
@@ -1448,19 +1462,44 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    private func canStartQueuedTranscriptionImmediately(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) -> Bool {
+        MeetingSessionUIPolicy.canStartQueuedTranscription(
+            activeTranscriptions: snapshot.activeCount,
+            isSpeakerReviewPending: snapshot.speakerNamingRequest != nil,
+            isPreparingQueuedTranscriptionStart: isPreparingQueuedTranscriptionStart
+        )
+    }
+
+    private func hasVisibleBackgroundTranscriptionWork(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) -> Bool {
+        MeetingSessionUIPolicy.shouldShowTranscribing(
+            activeTranscriptions: snapshot.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
+            queuedTranscriptions: queuedTranscriptionJobs.count
+        )
+    }
+
     private func handleBackgroundTranscriptionWorkChanged() {
-        if canStartQueuedTranscriptionImmediately {
+        handleBackgroundTranscriptionWorkChanged(snapshot: currentBackgroundTranscriptionWorkSnapshot)
+    }
+
+    private func handleBackgroundTranscriptionWorkChanged(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) {
+        if canStartQueuedTranscriptionImmediately(snapshot: snapshot) {
             if let nextJob = popNextQueuedTranscriptionJob() {
                 startQueuedTranscription(nextJob)
                 return
             }
 
-            finalizeBackgroundTranscriptionStateIfNeeded()
+            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
             return
         }
 
-        if !hasVisibleBackgroundTranscriptionWork {
-            finalizeBackgroundTranscriptionStateIfNeeded()
+        if !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) {
+            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
             return
         }
 
@@ -1475,7 +1514,13 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
-        guard !hasVisibleBackgroundTranscriptionWork else { return }
+        finalizeBackgroundTranscriptionStateIfNeeded(snapshot: currentBackgroundTranscriptionWorkSnapshot)
+    }
+
+    private func finalizeBackgroundTranscriptionStateIfNeeded(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) {
+        guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
         guard !isCaptureSessionActive else { return }
         activeTranscriptionTrigger = .unknown
 
