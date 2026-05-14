@@ -76,7 +76,8 @@ final class MeetingSessionController: ObservableObject {
             case recorded(
                 micURL: URL,
                 systemURL: URL?,
-                healthInfo: RecordingHealthInfo
+                healthInfo: RecordingHealthInfo,
+                meetingTitle: String?
             )
             case imported(
                 audioURL: URL,
@@ -102,6 +103,12 @@ final class MeetingSessionController: ObservableObject {
         var durationMilliseconds: Int { Int(durationSeconds * 1000) }
         let healthInfo: RecordingHealthInfo
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
+        let suggestedTitle: String?
+    }
+
+    private struct BackgroundTranscriptionWorkSnapshot {
+        let activeCount: Int
+        let speakerNamingRequest: SpeakerNamingRequest?
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -164,6 +171,7 @@ final class MeetingSessionController: ObservableObject {
     private let speakerDatabase: SpeakerDatabase
     private let statsDatabase: StatsDatabase
     private let downloader: MeetingModelDownloader
+    var calendarSuggestedTitleProvider: (() -> String?)?
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
@@ -173,6 +181,7 @@ final class MeetingSessionController: ObservableObject {
     private var queuedTranscriptionStartTask: Task<Void, Never>?
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
+    private var activeRecordingSuggestedTitle: String?
     private var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -304,7 +313,7 @@ final class MeetingSessionController: ObservableObject {
     /// meeting is still transcribing, the new capture starts immediately and
     /// the older transcript continues in the background.
     @discardableResult
-    func startRecording(trigger: StartTrigger = .unknown) async -> Bool {
+    func startRecording(trigger: StartTrigger = .unknown, suggestedTitle: String? = nil) async -> Bool {
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -382,6 +391,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         activeRecordingTrigger = trigger
+        activeRecordingSuggestedTitle = MeetingRecordingTitlePolicy.resolve(
+            explicitTitle: suggestedTitle,
+            calendarTitle: calendarSuggestedTitleProvider?()
+        )
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -542,6 +555,7 @@ final class MeetingSessionController: ObservableObject {
             afterStopContext: afterStopVolumeContext
         )
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
@@ -654,6 +668,7 @@ final class MeetingSessionController: ObservableObject {
             micURL: micURL,
             systemURL: files.systemURL,
             healthInfo: recordingSnapshot.healthInfo,
+            meetingTitle: recordingSnapshot.suggestedTitle,
             startTrigger: recordingSnapshot.trigger
         )
 
@@ -744,6 +759,7 @@ final class MeetingSessionController: ObservableObject {
             afterStopContext: afterStopVolumeContext
         )
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
@@ -889,7 +905,7 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _):
+            case .recorded(let micURL, let systemURL, _, _):
                 failedManager.addFailedTranscription(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -924,6 +940,7 @@ final class MeetingSessionController: ObservableObject {
         let recordingTrigger = activeRecordingTrigger
         let files = await capture.stopAndAwaitFiles()
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
 
         if let micURL = files.micURL {
             failedManager.addFailedTranscription(
@@ -1064,8 +1081,13 @@ final class MeetingSessionController: ObservableObject {
 
         taskManager.$activeCount
             .combineLatest(taskManager.$speakerNamingRequest)
-            .sink { [weak self] _, _ in
-                self?.handleBackgroundTranscriptionWorkChanged()
+            .sink { [weak self] activeCount, speakerNamingRequest in
+                self?.handleBackgroundTranscriptionWorkChanged(
+                    snapshot: BackgroundTranscriptionWorkSnapshot(
+                        activeCount: activeCount,
+                        speakerNamingRequest: speakerNamingRequest
+                    )
+                )
             }
             .store(in: &cancellables)
 
@@ -1243,10 +1265,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var hasVisibleBackgroundTranscriptionWork: Bool {
-        MeetingSessionUIPolicy.shouldShowTranscribing(
-            activeTranscriptions: taskManager.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
-            queuedTranscriptions: queuedTranscriptionJobs.count
-        )
+        hasVisibleBackgroundTranscriptionWork(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
 
     private var isSpeechModelPreparedForSelection: Bool {
@@ -1255,11 +1274,18 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var canStartQueuedTranscriptionImmediately: Bool {
-        taskManager.activeCount == 0 && taskManager.speakerNamingRequest == nil && !isPreparingQueuedTranscriptionStart
+        canStartQueuedTranscriptionImmediately(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
 
     private var isPreparingQueuedTranscriptionStart: Bool {
         preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
+    }
+
+    private var currentBackgroundTranscriptionWorkSnapshot: BackgroundTranscriptionWorkSnapshot {
+        BackgroundTranscriptionWorkSnapshot(
+            activeCount: taskManager.activeCount,
+            speakerNamingRequest: taskManager.speakerNamingRequest
+        )
     }
 
     private var isCaptureSessionActive: Bool {
@@ -1273,13 +1299,15 @@ final class MeetingSessionController: ObservableObject {
         micURL: URL,
         systemURL: URL?,
         healthInfo: RecordingHealthInfo,
+        meetingTitle: String?,
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             kind: .recorded(
                 micURL: micURL,
                 systemURL: systemURL,
-                healthInfo: healthInfo
+                healthInfo: healthInfo,
+                meetingTitle: meetingTitle
             ),
             startTrigger: startTrigger,
             sttModel: sttRouter.selectedModel
@@ -1413,12 +1441,13 @@ final class MeetingSessionController: ObservableObject {
         sttAdapter.selectPreparedModel(job.sttModel)
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo):
+        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle):
             taskManager.startTranscription(
                 micURL: micURL,
                 systemURL: systemURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
+                meetingTitle: meetingTitle,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
         case .imported(let audioURL, let suggestedTitle):
@@ -1437,7 +1466,7 @@ final class MeetingSessionController: ObservableObject {
         displayStatus = .failed(message: message)
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _):
+        case .recorded(let micURL, let systemURL, _, _):
             failedManager.addFailedTranscription(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
@@ -1448,19 +1477,44 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    private func canStartQueuedTranscriptionImmediately(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) -> Bool {
+        MeetingSessionUIPolicy.canStartQueuedTranscription(
+            activeTranscriptions: snapshot.activeCount,
+            isSpeakerReviewPending: snapshot.speakerNamingRequest != nil,
+            isPreparingQueuedTranscriptionStart: isPreparingQueuedTranscriptionStart
+        )
+    }
+
+    private func hasVisibleBackgroundTranscriptionWork(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) -> Bool {
+        MeetingSessionUIPolicy.shouldShowTranscribing(
+            activeTranscriptions: snapshot.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
+            queuedTranscriptions: queuedTranscriptionJobs.count
+        )
+    }
+
     private func handleBackgroundTranscriptionWorkChanged() {
-        if canStartQueuedTranscriptionImmediately {
+        handleBackgroundTranscriptionWorkChanged(snapshot: currentBackgroundTranscriptionWorkSnapshot)
+    }
+
+    private func handleBackgroundTranscriptionWorkChanged(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) {
+        if canStartQueuedTranscriptionImmediately(snapshot: snapshot) {
             if let nextJob = popNextQueuedTranscriptionJob() {
                 startQueuedTranscription(nextJob)
                 return
             }
 
-            finalizeBackgroundTranscriptionStateIfNeeded()
+            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
             return
         }
 
-        if !hasVisibleBackgroundTranscriptionWork {
-            finalizeBackgroundTranscriptionStateIfNeeded()
+        if !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) {
+            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
             return
         }
 
@@ -1475,7 +1529,13 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
-        guard !hasVisibleBackgroundTranscriptionWork else { return }
+        finalizeBackgroundTranscriptionStateIfNeeded(snapshot: currentBackgroundTranscriptionWorkSnapshot)
+    }
+
+    private func finalizeBackgroundTranscriptionStateIfNeeded(
+        snapshot: BackgroundTranscriptionWorkSnapshot
+    ) {
+        guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
         guard !isCaptureSessionActive else { return }
         activeTranscriptionTrigger = .unknown
 
@@ -1782,7 +1842,8 @@ final class MeetingSessionController: ObservableObject {
             healthInfo: capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus),
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
-            )
+            ),
+            suggestedTitle: activeRecordingSuggestedTitle
         )
     }
 

@@ -73,6 +73,45 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                        "embedders that pass only the static value should still get a valid resolver result")
     }
 
+    func testTranscriptionTaskCarriesCalendarMeetingTitle() {
+        let task = TranscriptionTask(
+            micURL: tempDirectory.appendingPathComponent("mic.wav"),
+            systemURL: tempDirectory.appendingPathComponent("system.wav"),
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Customer Discovery Sync"
+        )
+
+        XCTAssertEqual(task.meetingTitle, "Customer Discovery Sync")
+    }
+
+    func testTranscriptFormatterWritesCalendarMeetingTitle() {
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(
+                    start: 0,
+                    end: 2,
+                    channel: 1,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: "Thanks for joining."
+                )
+            ],
+            duration: 2,
+            processingTime: 0.5
+        )
+
+        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(uuidString: "00000000-0000-0000-0000-000000000123")!,
+            date: Date(timeIntervalSince1970: 0),
+            meetingTitle: "Customer Discovery Sync"
+        )
+
+        XCTAssertTrue(markdown.contains("title: \"Customer Discovery Sync\""))
+    }
+
     func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
         let manager = makeManager()
         let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
