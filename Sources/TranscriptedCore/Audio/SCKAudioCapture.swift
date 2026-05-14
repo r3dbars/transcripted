@@ -21,6 +21,8 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var _audioFormat: AVAudioFormat?
     private var _isCapturing = false
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
+    private var _generation: UInt64 = 0
+    private let generationLock = NSLock()
 
     var diagnosticBackendName: String { "screen_capture_kit" }
 
@@ -47,6 +49,8 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
 
     func prepare() throws {
         AppLogger.audioSystem.info("SCKAudioCapture: preparing ScreenCaptureKit audio stream")
+        stopSync()
+        let prepareGeneration = incrementGeneration()
 
         // Fetch shareable content — triggers the system permission dialog on first use.
         // Called from a background thread (AudioFileManager dispatches to .userInitiated),
@@ -87,16 +91,26 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         config.height = 2
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
+        guard currentGeneration() == prepareGeneration else {
+            throw AudioCaptureStaleSessionError()
+        }
+
         // Pre-create the format the WAV file will use. ScreenCaptureKit delivers
         // float32 non-interleaved audio matching the configured rate/channels.
-        _audioFormat = AVAudioFormat(
+        let audioFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 48000,
             channels: 2,
             interleaved: false
         )
 
-        stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        let preparedStream = SCStream(filter: filter, configuration: config, delegate: nil)
+        guard currentGeneration() == prepareGeneration else {
+            stopStreamSynchronously(preparedStream)
+            throw AudioCaptureStaleSessionError()
+        }
+        _audioFormat = audioFormat
+        stream = preparedStream
 
         AppLogger.audioSystem.info("SCKAudioCapture: stream prepared", [
             "sampleRate": "48000",
@@ -111,6 +125,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             guard self.stream != nil else { throw "SCKAudioCapture: prepare failed silently" }
             return try start(bufferCallback: bufferCallback)
         }
+        let startGeneration = currentGeneration()
 
         self.bufferCallback = bufferCallback
         publishErrorMessage(nil)
@@ -118,6 +133,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         // Output handler converts CMSampleBuffer → AVAudioPCMBuffer
         let output = SCKAudioStreamOutput { [weak self] buffer in
             guard let self = self else { return }
+            guard self.currentGeneration() == startGeneration else { return }
             self.statsLock.lock()
             self._totalBuffers += 1
             self._buffersWithData += 1
@@ -143,11 +159,15 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
                 throw error
             }
 
+            guard currentGeneration() == startGeneration, self.stream === stream else {
+                stopStreamSynchronously(stream)
+                throw AudioCaptureStaleSessionError()
+            }
             _isCapturing = true
             AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
         } catch {
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
-            cleanup()
+            cleanupIfCurrent(generation: startGeneration, stream: stream)
             publishErrorMessage(error.localizedDescription)
             throw error
         }
@@ -155,34 +175,66 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
 
     func stop() {
         guard let stream = stream else { return }
+        let stopGeneration = currentGeneration()
         guard _isCapturing else {
-            cleanup()
+            cleanupIfCurrent(generation: stopGeneration, stream: stream)
             return
         }
 
         _isCapturing = false
-        stream.stopCapture { [weak self] error in
+        stream.stopCapture { [weak self, stream] error in
             if let error = error {
                 AppLogger.audioSystem.warning("SCKAudioCapture: stop error", ["error": error.localizedDescription])
             }
-            self?.cleanup()
+            self?.cleanupIfCurrent(generation: stopGeneration, stream: stream)
         }
     }
 
     func stopSync() {
         guard let stream = stream else { return }
+        let stopGeneration = currentGeneration()
         guard _isCapturing else {
-            cleanup()
+            cleanupIfCurrent(generation: stopGeneration, stream: stream)
             return
         }
 
         _isCapturing = false
+        stopStreamSynchronously(stream)
+        cleanupIfCurrent(generation: stopGeneration, stream: stream)
+    }
+
+    private func incrementGeneration() -> UInt64 {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        _generation &+= 1
+        return _generation
+    }
+
+    private func currentGeneration() -> UInt64 {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        return _generation
+    }
+
+    private func cleanupIfCurrent(generation: UInt64, stream expectedStream: SCStream) {
+        guard currentGeneration() == generation,
+              let currentStream = stream,
+              currentStream === expectedStream else {
+            AppLogger.audioSystem.info("SCKAudioCapture: skipping stale cleanup")
+            return
+        }
+        cleanup()
+    }
+
+    private func stopStreamSynchronously(_ stream: SCStream) {
         let semaphore = DispatchSemaphore(value: 0)
-        stream.stopCapture { _ in
+        stream.stopCapture { error in
+            if let error = error {
+                AppLogger.audioSystem.warning("SCKAudioCapture: stop error", ["error": error.localizedDescription])
+            }
             semaphore.signal()
         }
         semaphore.wait()
-        cleanup()
     }
 
     private func cleanup() {

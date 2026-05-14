@@ -179,6 +179,93 @@ final class AudioInitializationTests: XCTestCase {
         wait(for: [stopFinished], timeout: 1.0)
     }
 
+    func testStaleStopDoesNotOverwriteNewSessionArtifactsOrFileHandles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let audio = Audio(paths: paths)
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+
+        let oldMicURL = paths.audioCaptures.appendingPathComponent("old-mic.wav")
+        let oldSystemURL = paths.audioCaptures.appendingPathComponent("old-system.wav")
+        let newMicURL = paths.audioCaptures.appendingPathComponent("new-mic.wav")
+        let newSystemURL = paths.audioCaptures.appendingPathComponent("new-system.wav")
+        let oldMicFile = try AVAudioFile(forWriting: oldMicURL, settings: format.settings)
+        let oldSystemFile = try AVAudioFile(forWriting: oldSystemURL, settings: format.settings)
+        let newMicFile = try AVAudioFile(forWriting: newMicURL, settings: format.settings)
+        let newSystemFile = try AVAudioFile(forWriting: newSystemURL, settings: format.settings)
+
+        audio.originalMicAudioFileURL = oldMicURL
+        audio.micSegments = [MicRecordingSegment(url: oldMicURL)]
+        audio.micAudioFileURL = oldMicURL
+        audio.systemAudioFileURL = oldSystemURL
+        audio.micAudioFileQueue.sync { audio.micAudioFile = oldMicFile }
+        audio.systemAudioFileQueue.sync { audio.systemAudioFile = oldSystemFile }
+
+        let lockHeld = expectation(description: "audio graph lock held")
+        let releaseLock = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            audio.withAudioGraphLock {
+                lockHeld.fulfill()
+                _ = releaseLock.wait(timeout: .now() + 2)
+            }
+        }
+        wait(for: [lockHeld], timeout: 1.0)
+
+        let stopFinished = expectation(description: "stale stop completion fired")
+        var completedMicURL: URL?
+        var completedSystemURL: URL?
+        audio.onRecordingComplete = { micURL, systemURL in
+            completedMicURL = micURL
+            completedSystemURL = systemURL
+            stopFinished.fulfill()
+        }
+
+        audio.stop()
+        audio.prepareForNewRecordingStart()
+        let newGeneration = audio.recordingSessionGeneration
+        audio.originalMicAudioFileURL = newMicURL
+        audio.micSegments = [MicRecordingSegment(url: newMicURL)]
+        audio.micAudioFileURL = newMicURL
+        audio.systemAudioFileURL = newSystemURL
+        audio.micAudioFileQueue.sync { audio.micAudioFile = newMicFile }
+        audio.systemAudioFileQueue.sync { audio.systemAudioFile = newSystemFile }
+
+        releaseLock.signal()
+        wait(for: [stopFinished], timeout: 1.0)
+
+        XCTAssertEqual(completedMicURL, oldMicURL)
+        XCTAssertEqual(completedSystemURL, oldSystemURL)
+        XCTAssertEqual(audio.recordingSessionGeneration, newGeneration)
+        XCTAssertEqual(audio.originalMicAudioFileURL, newMicURL)
+        XCTAssertEqual(audio.micAudioFileURL, newMicURL)
+        XCTAssertEqual(audio.systemAudioFileURL, newSystemURL)
+
+        let activeMicFile = audio.micAudioFileQueue.sync { audio.micAudioFile }
+        let activeSystemFile = audio.systemAudioFileQueue.sync { audio.systemAudioFile }
+        XCTAssertNotNil(activeMicFile)
+        XCTAssertNotNil(activeSystemFile)
+        XCTAssertTrue(activeMicFile === newMicFile)
+        XCTAssertTrue(activeSystemFile === newSystemFile)
+    }
+
     func testPrepareForNewRecordingStartClearsStaleCaptureArtifacts() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
