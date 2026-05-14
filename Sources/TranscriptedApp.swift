@@ -120,7 +120,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let started = await self.appState.meetingSession.startRecording(trigger: .detectedPrompt)
+                    let started = await self.appState.meetingSession.startRecording(
+                        trigger: .detectedPrompt,
+                        suggestedTitle: candidate.suggestedTranscriptTitle
+                    )
                     if started {
                         self.meetingPromptDetector.markAccepted(candidate: candidate)
                     }

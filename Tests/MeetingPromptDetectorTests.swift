@@ -17,7 +17,8 @@ private func makeMeetingPromptCandidate(
         source: source,
         startDate: startDate,
         endDate: startDate.addingTimeInterval(30 * 60),
-        meetingURL: nil
+        meetingURL: nil,
+        suggestedTranscriptTitle: source == .calendarEvent ? "Design review" : nil
     )
 }
 
@@ -85,6 +86,21 @@ func testMeetingPromptDetector() async {
         assertTrue(
             decision.until.timeIntervalSince(Date()) > 25 * 60,
             "Not now should remain meaningfully longer than Remind me soon"
+        )
+    }
+
+    runSuite("MeetingPromptDetector.Candidate — calendar prompts carry a transcript title hint") {
+        let calendarCandidate = makeMeetingPromptCandidate(id: "calendar:title", source: .calendarEvent)
+        let runtimeCandidate = makeMeetingPromptCandidate(id: "runtime:title", source: .runtimeApp)
+
+        assertEqual(
+            calendarCandidate.suggestedTranscriptTitle,
+            "Design review",
+            "calendar-backed prompts should carry the event title into the recording path"
+        )
+        assertNil(
+            runtimeCandidate.suggestedTranscriptTitle,
+            "runtime-only prompts should not invent a transcript title"
         )
     }
 }

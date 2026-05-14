@@ -76,7 +76,8 @@ final class MeetingSessionController: ObservableObject {
             case recorded(
                 micURL: URL,
                 systemURL: URL?,
-                healthInfo: RecordingHealthInfo
+                healthInfo: RecordingHealthInfo,
+                meetingTitle: String?
             )
             case imported(
                 audioURL: URL,
@@ -102,6 +103,7 @@ final class MeetingSessionController: ObservableObject {
         var durationMilliseconds: Int { Int(durationSeconds * 1000) }
         let healthInfo: RecordingHealthInfo
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
+        let suggestedTitle: String?
     }
 
     private struct BackgroundTranscriptionWorkSnapshot {
@@ -178,6 +180,7 @@ final class MeetingSessionController: ObservableObject {
     private var queuedTranscriptionStartTask: Task<Void, Never>?
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
+    private var activeRecordingSuggestedTitle: String?
     private var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -309,7 +312,7 @@ final class MeetingSessionController: ObservableObject {
     /// meeting is still transcribing, the new capture starts immediately and
     /// the older transcript continues in the background.
     @discardableResult
-    func startRecording(trigger: StartTrigger = .unknown) async -> Bool {
+    func startRecording(trigger: StartTrigger = .unknown, suggestedTitle: String? = nil) async -> Bool {
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -387,6 +390,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         activeRecordingTrigger = trigger
+        activeRecordingSuggestedTitle = Self.normalizedSuggestedTitle(suggestedTitle)
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -547,6 +551,7 @@ final class MeetingSessionController: ObservableObject {
             afterStopContext: afterStopVolumeContext
         )
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
@@ -659,6 +664,7 @@ final class MeetingSessionController: ObservableObject {
             micURL: micURL,
             systemURL: files.systemURL,
             healthInfo: recordingSnapshot.healthInfo,
+            meetingTitle: recordingSnapshot.suggestedTitle,
             startTrigger: recordingSnapshot.trigger
         )
 
@@ -749,6 +755,7 @@ final class MeetingSessionController: ObservableObject {
             afterStopContext: afterStopVolumeContext
         )
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
@@ -894,7 +901,7 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _):
+            case .recorded(let micURL, let systemURL, _, _):
                 failedManager.addFailedTranscription(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
@@ -929,6 +936,7 @@ final class MeetingSessionController: ObservableObject {
         let recordingTrigger = activeRecordingTrigger
         let files = await capture.stopAndAwaitFiles()
         activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
 
         if let micURL = files.micURL {
             failedManager.addFailedTranscription(
@@ -1287,13 +1295,15 @@ final class MeetingSessionController: ObservableObject {
         micURL: URL,
         systemURL: URL?,
         healthInfo: RecordingHealthInfo,
+        meetingTitle: String?,
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             kind: .recorded(
                 micURL: micURL,
                 systemURL: systemURL,
-                healthInfo: healthInfo
+                healthInfo: healthInfo,
+                meetingTitle: meetingTitle
             ),
             startTrigger: startTrigger,
             sttModel: sttRouter.selectedModel
@@ -1427,12 +1437,13 @@ final class MeetingSessionController: ObservableObject {
         sttAdapter.selectPreparedModel(job.sttModel)
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo):
+        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle):
             taskManager.startTranscription(
                 micURL: micURL,
                 systemURL: systemURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
+                meetingTitle: meetingTitle,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
         case .imported(let audioURL, let suggestedTitle):
@@ -1451,7 +1462,7 @@ final class MeetingSessionController: ObservableObject {
         displayStatus = .failed(message: message)
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _):
+        case .recorded(let micURL, let systemURL, _, _):
             failedManager.addFailedTranscription(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
@@ -1827,8 +1838,18 @@ final class MeetingSessionController: ObservableObject {
             healthInfo: capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus),
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
-            )
+            ),
+            suggestedTitle: activeRecordingSuggestedTitle
         )
+    }
+
+    private static func normalizedSuggestedTitle(_ title: String?) -> String? {
+        guard let title else { return nil }
+        let normalized = title
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

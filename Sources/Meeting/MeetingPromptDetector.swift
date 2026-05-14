@@ -15,6 +15,7 @@ final class MeetingPromptDetector {
         let startDate: Date
         let endDate: Date
         let meetingURL: URL?
+        let suggestedTranscriptTitle: String?
     }
 
     private struct ScoredCandidate {
@@ -272,7 +273,8 @@ final class MeetingPromptDetector {
                     source: .runtimeApp,
                     startDate: now,
                     endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
-                    meetingURL: nil
+                    meetingURL: nil,
+                    suggestedTranscriptTitle: nil
                 ),
                 score: presentation.score
             )
@@ -324,7 +326,8 @@ final class MeetingPromptDetector {
         )
         guard genericWindow else { return nil }
 
-        let eventTitle = trimmedTitle(from: event)
+        let eventTitle = displayTitle(from: event)
+        let transcriptTitle = suggestedTranscriptTitle(from: event)
         let detail = buildDetail(eventTitle: eventTitle, startsIn: startsIn, runtimeReason: runtimeReason)
         let score = scoreForCandidate(startsIn: startsIn, runtimeReason: runtimeReason)
 
@@ -341,15 +344,20 @@ final class MeetingPromptDetector {
                 source: .calendarEvent,
                 startDate: event.startDate,
                 endDate: event.endDate,
-                meetingURL: meetingURL
+                meetingURL: meetingURL,
+                suggestedTranscriptTitle: transcriptTitle
             ),
             score: score
         )
     }
 
-    private func trimmedTitle(from event: EKEvent) -> String {
+    private func displayTitle(from event: EKEvent) -> String {
+        suggestedTranscriptTitle(from: event) ?? "Upcoming meeting"
+    }
+
+    private func suggestedTranscriptTitle(from event: EKEvent) -> String? {
         let trimmed = (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Upcoming meeting" : trimmed
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func buildDetail(eventTitle: String, startsIn: TimeInterval, runtimeReason: String?) -> String {

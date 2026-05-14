@@ -87,13 +87,15 @@ public struct TranscriptionTask: Identifiable {
     public let startTime: Date
     public let healthInfo: RecordingHealthInfo?
     public let splitLocalSpeakers: Bool
+    public let meetingTitle: String?
 
     public init(
         micURL: URL,
         systemURL: URL?,
         outputFolder: URL,
         healthInfo: RecordingHealthInfo? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        meetingTitle: String? = nil
     ) {
         self.id = UUID()
         self.micURL = micURL
@@ -102,5 +104,6 @@ public struct TranscriptionTask: Identifiable {
         self.startTime = Date()
         self.healthInfo = healthInfo
         self.splitLocalSpeakers = splitLocalSpeakers
+        self.meetingTitle = meetingTitle
     }
 }

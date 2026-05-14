@@ -70,6 +70,7 @@ public class TranscriptionTaskManager: ObservableObject {
         systemURL: URL?,
         outputFolder: URL,
         healthInfo: RecordingHealthInfo? = nil,
+        meetingTitle: String? = nil,
         splitLocalSpeakers: Bool = false
     ) {
 
@@ -147,7 +148,8 @@ public class TranscriptionTaskManager: ObservableObject {
             systemURL: systemURL,
             outputFolder: outputFolder,
             healthInfo: healthInfo,
-            splitLocalSpeakers: splitLocalSpeakers
+            splitLocalSpeakers: splitLocalSpeakers,
+            meetingTitle: meetingTitle
         )
 
         activeCount += 1
@@ -172,7 +174,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     outputFolder: outputFolder,
                     taskId: task.id,
                     healthInfo: task.healthInfo,
-                    splitLocalSpeakers: task.splitLocalSpeakers
+                    splitLocalSpeakers: task.splitLocalSpeakers,
+                    meetingTitle: task.meetingTitle
                 )
 
                 await MainActor.run {
