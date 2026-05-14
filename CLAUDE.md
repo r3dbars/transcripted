@@ -24,11 +24,12 @@ The older drafting / ghostwriting flow does not live on `main` anymore. `Dictati
 Read these before making assumptions about the codebase:
 
 1. `AGENT_START.md`
-2. `AGENTS.md`
-3. `docs/repo-layout.md`
-4. `docs/agent-onboarding.md`
-5. `Sources/CLAUDE.md`
-6. the nearest local `CLAUDE.md` for the area you are changing
+2. `README.md`
+3. `AGENTS.md`
+4. `docs/repo-layout.md`
+5. `docs/agent-onboarding.md`
+6. `Sources/CLAUDE.md`
+7. the nearest local `CLAUDE.md` for the area you are changing
 
 ## Build and test
 
