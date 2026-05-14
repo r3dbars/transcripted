@@ -10,13 +10,34 @@ extension Audio {
 
     // MARK: - Audio Capture Setup
 
-    func startAudioCapture() async throws {
+    func startAudioCapture(sessionGeneration: UInt64) async throws {
         ensureCaptureInfrastructureConfigured()
 
+        func sessionIsCurrent() -> Bool {
+            sessionGeneration == recordingSessionGeneration
+        }
+
+        guard sessionIsCurrent() else {
+            throw AudioCaptureStaleSessionError()
+        }
+
         let (engine, inputNode, recordingFormat, recordingSnapshot) = try withAudioGraphLock { () throws -> (AVAudioEngine, AVAudioInputNode, AVAudioFormat, AudioRecordingFormatSnapshot) in
+            guard sessionIsCurrent() else {
+                throw AudioCaptureStaleSessionError()
+            }
             let (engine, inputNode) = try ensureEngineInitialized()
-            applyPreferredMeetingInputDevice(to: inputNode, operation: "start_recording")
-            armVoiceProcessing(on: inputNode)
+            if engine.isRunning {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+                engine.reset()
+                voiceProcessingEnabled = false
+                self.inputNode = engine.inputNode
+            }
+            guard let activeInputNode = self.inputNode else {
+                throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine input node unavailable"])
+            }
+            applyPreferredMeetingInputDevice(to: activeInputNode, operation: "start_recording")
+            armVoiceProcessing(on: activeInputNode)
 
             // When VPIO is off (the default — see `enableVoiceProcessing`), run
             // a software AGC in the mic tap callback to recover attenuated
@@ -33,7 +54,7 @@ extension Audio {
             //   - Hardware format via inputFormat(forBus: 1) otherwise — required
             //     because outputFormat(forBus: 0) returns the converter format on
             //     stock AVAudioEngine, which breaks Bluetooth capture.
-            let recordingFormat = self.recordingFormat(for: inputNode)
+            let recordingFormat = self.recordingFormat(for: activeInputNode)
             guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
                 AppLogger.audioMic.error("Mic input format invalid", [
                     "sampleRate": "\(recordingFormat.sampleRate)",
@@ -42,7 +63,7 @@ extension Audio {
                 throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
             }
 
-            return (engine, inputNode, recordingFormat, recordingSnapshot)
+            return (engine, activeInputNode, recordingFormat, recordingSnapshot)
         }
         AppLogger.audioMic.info("Mic input format", [
             "sampleRate": "\(recordingSnapshot.sampleRate)",
@@ -60,7 +81,6 @@ extension Audio {
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
-            let sessionGeneration = recordingSessionGeneration
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -229,9 +249,14 @@ extension Audio {
             let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
 
+            guard sessionIsCurrent() else {
+                throw AudioCaptureStaleSessionError()
+            }
+
             self.originalMicAudioFileURL = fileURL
             self.micSegments = [MicRecordingSegment(url: fileURL)]
             DispatchQueue.main.async {
+                guard sessionGeneration == self.recordingSessionGeneration else { return }
                 self.micAudioFileURL = fileURL
             }
 
@@ -261,6 +286,9 @@ extension Audio {
         }
 
         try withAudioGraphLock {
+            guard sessionIsCurrent() else {
+                throw AudioCaptureStaleSessionError()
+            }
             // Remove any existing tap (safety check)
             inputNode.removeTap(onBus: 0)
 
@@ -269,11 +297,19 @@ extension Audio {
                 self?.handleMicBuffer(buffer)
             }
 
-            try engine.start()
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                inputNode.removeTap(onBus: 0)
+                engine.stop()
+                throw error
+            }
         }
 
         let cueHandler = self.onCaptureLifecycleCue
         await MainActor.run {
+            guard sessionGeneration == self.recordingSessionGeneration else { return }
             // isRecording already set in start()
             self.startTime = Date()
             self.recordingDuration = 0.0

@@ -90,13 +90,25 @@ extension Audio {
         // default. Keep graph mutation serialized with stop/start teardown so
         // a user stop during device recovery cannot race CoreAudio format
         // reads or tap replacement.
+        var didResetGraph = false
         withAudioGraphLock {
+            guard sessionGeneration == recordingSessionGeneration else {
+                AppLogger.audioMic.info("Skipping stale recovery before graph reset", [
+                    "expectedSession": "\(sessionGeneration)",
+                    "currentSession": "\(recordingSessionGeneration)"
+                ])
+                return
+            }
             inputNode.removeTap(onBus: 0)
             engine.stop()
             engine.reset()
             // engine.reset() clears VPIO state on the input node; require re-arm.
             voiceProcessingEnabled = false
             self.inputNode = engine.inputNode
+            didResetGraph = true
+        }
+        guard didResetGraph else {
+            return
         }
 
         // HAL settle time - wait for audio hardware to stabilize after device change
@@ -240,12 +252,22 @@ extension Audio {
         // Restart engine
         do {
             try withAudioGraphLock {
+                guard sessionGeneration == recordingSessionGeneration else {
+                    throw AudioCaptureStaleSessionError()
+                }
                 // Reinstall tap using shared buffer handler
                 newInputNode.removeTap(onBus: 0)
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                     self?.handleMicBuffer(buffer)
                 }
-                try engine.start()
+                do {
+                    engine.prepare()
+                    try engine.start()
+                } catch {
+                    newInputNode.removeTap(onBus: 0)
+                    engine.stop()
+                    throw error
+                }
             }
             lastBufferTime = CACurrentMediaTime() // Reset watchdog
 
@@ -276,6 +298,13 @@ extension Audio {
             recoveryAttemptCount = 0
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
         } catch {
+            if error is AudioCaptureStaleSessionError {
+                AppLogger.audioMic.info("Skipping stale recovery restart", [
+                    "expectedSession": "\(sessionGeneration)",
+                    "currentSession": "\(recordingSessionGeneration)"
+                ])
+                return
+            }
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }

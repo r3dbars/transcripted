@@ -48,6 +48,12 @@ struct AudioRecordingFormatSnapshot: Equatable {
     let channelCount: AVAudioChannelCount
 }
 
+struct AudioCaptureStaleSessionError: LocalizedError {
+    var errorDescription: String? {
+        "Recording start was cancelled before audio capture finished"
+    }
+}
+
 enum AudioRecordingFormatPolicy {
     private static let minimumUsableSampleRate: Double = 8_000
     private static let maximumUsableSampleRate: Double = 384_000
@@ -773,12 +779,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         Task {
             do {
-                try await startAudioCapture()
+                try await startAudioCapture(sessionGeneration: startGeneration)
                 await MainActor.run {
                     self.finishSuccessfulStartIfCurrent(startGeneration)
                 }
             } catch {
                 await MainActor.run {
+                    guard self.recordingSessionGeneration == startGeneration else {
+                        AppLogger.audio.info("Skipping stale start failure after session boundary", [
+                            "startGeneration": "\(startGeneration)",
+                            "currentGeneration": "\(self.recordingSessionGeneration)"
+                        ])
+                        return
+                    }
+
                     self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
                     self.isRecording = false
                     self.isStarting = false
@@ -802,12 +816,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         Task {
             do {
-                try await startAudioCapture()
+                try await startAudioCapture(sessionGeneration: startGeneration)
                 await MainActor.run {
                     self.finishSuccessfulStartIfCurrent(startGeneration)
                 }
             } catch {
                 await MainActor.run {
+                    guard self.recordingSessionGeneration == startGeneration else {
+                        AppLogger.audio.info("Skipping stale start failure after session boundary", [
+                            "startGeneration": "\(startGeneration)",
+                            "currentGeneration": "\(self.recordingSessionGeneration)"
+                        ])
+                        return
+                    }
+
                     self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
                     self.isRecording = false
                     self.isStarting = false
@@ -824,9 +846,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 "startGeneration": "\(startGeneration)",
                 "currentGeneration": "\(recordingSessionGeneration)"
             ])
-            isRecording = false
-            isStarting = false
-            stop()
+            if recordingSessionGeneration == startGeneration {
+                isRecording = false
+                isStarting = false
+            }
             return
         }
 
@@ -841,6 +864,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         recordingSessionGeneration &+= 1
+        let stopGeneration = recordingSessionGeneration
 
         // Snapshot every reference the teardown will need so the
         // background queue closure isn't reading mutable instance state
@@ -848,6 +872,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
         let systemCaptureRef = self.systemAudioCapture
+        let micAudioFileRef = micAudioFileQueue.sync { self.micAudioFile }
+        let systemAudioFileRef = systemAudioFileQueue.sync { self.systemAudioFile }
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
@@ -862,6 +888,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // hundreds of ms while AVAudioEngine drains in-flight callbacks
         // — the freeze Taylor reported on the meeting widget.
         DispatchQueue.main.async {
+            guard self.recordingSessionGeneration == stopGeneration else {
+                AppLogger.audio.info("Skipping stale stop UI reset because a newer session exists", [
+                    "stopGeneration": "\(stopGeneration)",
+                    "currentGeneration": "\(self.recordingSessionGeneration)"
+                ])
+                return
+            }
             self.isRecording = false
             self.isStarting = false
             self.audioLevel = 0.0
@@ -881,11 +914,21 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
+            var didTeardownCurrentSession = false
             self.withAudioGraphLock {
+                guard self.recordingSessionGeneration == stopGeneration else {
+                    AppLogger.audio.info("Skipping stale audio graph teardown because a newer session exists", [
+                        "stopGeneration": "\(stopGeneration)",
+                        "currentGeneration": "\(self.recordingSessionGeneration)"
+                    ])
+                    return
+                }
+                didTeardownCurrentSession = true
+
                 if let engineRef, let inputNodeRef {
                     AppLogger.audio.info("Stopping audio capture")
+                    inputNodeRef.removeTap(onBus: 0)
                     if engineRef.isRunning {
-                        inputNodeRef.removeTap(onBus: 0)
                         engineRef.stop()
                     }
                     self.disarmVoiceProcessing(on: inputNodeRef)
@@ -897,20 +940,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 self.realtimeAGC = nil
             }
 
-            // System audio capture's `stop()` is non-blocking (vs `stopSync`),
-            // but we keep it ordered after engine teardown so a single
-            // "stopping" log block stays readable.
-            systemCaptureRef?.stop()
+            // This closure already runs off-main, so use the synchronous system
+            // capture stop. It keeps onRecordingComplete behind backend teardown
+            // and avoids stale ScreenCaptureKit cleanup racing the next start.
+            if didTeardownCurrentSession {
+                systemCaptureRef?.stopSync()
+            }
 
             // Coordinate file close. With the engine fully stopped above,
             // no new buffers will arrive on these queues — closing here is
-            // safe and the cleanup notify will fire onRecordingComplete.
+            // safe. If this stop is stale, only clear the file handles that
+            // belonged to the stopped generation.
             let cleanupGroup = DispatchGroup()
 
             cleanupGroup.enter()
             self.micAudioFileQueue.async { [weak self] in
-                if let self, self.micAudioFile != nil {
-                    self.micAudioFile = nil
+                if let self, let micAudioFileRef {
+                    if let currentMicFile = self.micAudioFile, currentMicFile === micAudioFileRef {
+                        self.micAudioFile = nil
+                    }
                     AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
@@ -918,8 +966,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
             cleanupGroup.enter()
             self.systemAudioFileQueue.async { [weak self] in
-                if self?.systemAudioFile != nil {
-                    self?.systemAudioFile = nil
+                if let self, let systemAudioFileRef {
+                    if let currentSystemFile = self.systemAudioFile, currentSystemFile === systemAudioFileRef {
+                        self.systemAudioFile = nil
+                    }
                     AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
@@ -929,9 +979,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
                 DispatchQueue.main.async {
-                    self.originalMicAudioFileURL = nil
-                    self.micSegments = []
-                    self.micAudioFileURL = finalMicURL
+                    if self.recordingSessionGeneration == stopGeneration {
+                        self.originalMicAudioFileURL = nil
+                        self.micSegments = []
+                        self.micAudioFileURL = finalMicURL
+                    } else {
+                        AppLogger.audio.info("Recording completion belongs to stale stop; preserving current capture state", [
+                            "stopGeneration": "\(stopGeneration)",
+                            "currentGeneration": "\(self.recordingSessionGeneration)"
+                        ])
+                    }
                     self.onRecordingComplete?(finalMicURL, finalSystemURL)
                 }
             }
