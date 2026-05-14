@@ -13,6 +13,10 @@ Transcripted saves local Markdown your agents can review later.
 [Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
 · [Visit transcripted.app](https://transcripted.app)
 
+## Demo
+
+![Transcripted demo showing local meeting notes, dictation, speaker review, and agent handoff](docs/assets/launch/transcripted-demo.gif)
+
 ## Why Audio Context Matters
 
 Your agents can only help with the context they can see.
