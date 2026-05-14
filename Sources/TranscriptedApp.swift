@@ -111,6 +111,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
         if #available(macOS 14.0, *) {
             let meetingSession = appState.meetingSession
+            meetingSession.calendarSuggestedTitleProvider = { [weak self] in
+                self?.meetingPromptDetector.currentSuggestedTranscriptTitle()
+            }
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.onPromptRecord = { [weak self] candidate in
                 guard let self else { return }

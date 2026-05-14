@@ -169,6 +169,19 @@ final class MeetingPromptDetector {
         pendingUntil[candidate.id] = until
     }
 
+    func currentSuggestedTranscriptTitle(now: Date = Date()) -> String? {
+        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+        return upcomingCalendarCandidates(
+            now: now,
+            runningBundleIDs: [],
+            frontmostBundleID: nil
+        )
+        .sorted(by: sortCandidates)
+        .lazy
+        .compactMap(\.candidate.suggestedTranscriptTitle)
+        .first
+    }
+
     private func evaluate() async {
         let now = Date()
         let runningApplications = NSWorkspace.shared.runningApplications

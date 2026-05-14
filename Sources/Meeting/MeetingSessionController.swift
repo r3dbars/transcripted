@@ -171,6 +171,7 @@ final class MeetingSessionController: ObservableObject {
     private let speakerDatabase: SpeakerDatabase
     private let statsDatabase: StatsDatabase
     private let downloader: MeetingModelDownloader
+    var calendarSuggestedTitleProvider: (() -> String?)?
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
@@ -390,7 +391,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         activeRecordingTrigger = trigger
-        activeRecordingSuggestedTitle = Self.normalizedSuggestedTitle(suggestedTitle)
+        activeRecordingSuggestedTitle = MeetingRecordingTitlePolicy.resolve(
+            explicitTitle: suggestedTitle,
+            calendarTitle: calendarSuggestedTitleProvider?()
+        )
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -1841,15 +1845,6 @@ final class MeetingSessionController: ObservableObject {
             ),
             suggestedTitle: activeRecordingSuggestedTitle
         )
-    }
-
-    private static func normalizedSuggestedTitle(_ title: String?) -> String? {
-        guard let title else { return nil }
-        let normalized = title
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized.isEmpty ? nil : normalized
     }
 
     private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {

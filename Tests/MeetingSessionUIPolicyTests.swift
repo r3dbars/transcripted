@@ -71,4 +71,44 @@ func testMeetingSessionUIPolicy() {
             "a queued start already being prepared should not be started twice"
         )
     }
+
+    runSuite("MeetingRecordingTitlePolicy — explicit prompt title wins over calendar fallback") {
+        assertEqual(
+            MeetingRecordingTitlePolicy.resolve(
+                explicitTitle: "Prompt Title",
+                calendarTitle: "Calendar Title"
+            ),
+            "Prompt Title",
+            "explicit prompt context should not be overwritten by a later calendar lookup"
+        )
+    }
+
+    runSuite("MeetingRecordingTitlePolicy — manual starts can use the calendar title") {
+        assertEqual(
+            MeetingRecordingTitlePolicy.resolve(
+                explicitTitle: nil,
+                calendarTitle: "Transcripted Calendar Smoke Live"
+            ),
+            "Transcripted Calendar Smoke Live",
+            "manual, menu, and hotkey starts should still get the active calendar event title"
+        )
+    }
+
+    runSuite("MeetingRecordingTitlePolicy — blank titles are ignored") {
+        assertEqual(
+            MeetingRecordingTitlePolicy.resolve(
+                explicitTitle: " \n ",
+                calendarTitle: "Calendar Title"
+            ),
+            "Calendar Title",
+            "blank prompt titles should not block the calendar fallback"
+        )
+        assertNil(
+            MeetingRecordingTitlePolicy.resolve(
+                explicitTitle: nil,
+                calendarTitle: " \r\n "
+            ),
+            "blank calendar titles should not become transcript titles"
+        )
+    }
 }

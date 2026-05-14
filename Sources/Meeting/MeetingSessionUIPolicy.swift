@@ -18,3 +18,18 @@ enum MeetingSessionUIPolicy {
             && !isPreparingQueuedTranscriptionStart
     }
 }
+
+enum MeetingRecordingTitlePolicy {
+    static func resolve(explicitTitle: String?, calendarTitle: String?) -> String? {
+        normalized(explicitTitle) ?? normalized(calendarTitle)
+    }
+
+    static func normalized(_ title: String?) -> String? {
+        guard let title else { return nil }
+        let normalized = title
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+}
