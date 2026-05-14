@@ -82,6 +82,19 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(snapshot.channelCount, 2)
     }
 
+    func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
+        XCTAssertEqual(
+            AudioInputTapTeardownPolicy.steps(engineIsRunning: true),
+            [.stopEngine, .removeInputTap],
+            "Running AVAudioEngine graphs must be stopped before the input tap is removed so CoreAudio never receives input with tap == nil"
+        )
+        XCTAssertEqual(
+            AudioInputTapTeardownPolicy.steps(engineIsRunning: false),
+            [.removeInputTap],
+            "Stopped engines can remove the tap directly"
+        )
+    }
+
     func testStopOnIdleAudioDoesNotCrashAndBumpsGeneration() {
         // The stop refactor moves engine teardown to a background queue.
         // On a fresh Audio with no engine, stop() should still:

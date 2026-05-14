@@ -99,8 +99,11 @@ extension Audio {
                 ])
                 return
             }
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
+            tearDownInputTapSafely(
+                engine: engine,
+                inputNode: inputNode,
+                operation: "device_recovery_reset"
+            )
             engine.reset()
             // engine.reset() clears VPIO state on the input node; require re-arm.
             voiceProcessingEnabled = false
@@ -256,7 +259,11 @@ extension Audio {
                     throw AudioCaptureStaleSessionError()
                 }
                 // Reinstall tap using shared buffer handler
-                newInputNode.removeTap(onBus: 0)
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: newInputNode,
+                    operation: "device_recovery_restart"
+                )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                     self?.handleMicBuffer(buffer)
                 }
@@ -264,8 +271,11 @@ extension Audio {
                     engine.prepare()
                     try engine.start()
                 } catch {
-                    newInputNode.removeTap(onBus: 0)
-                    engine.stop()
+                    tearDownInputTapSafely(
+                        engine: engine,
+                        inputNode: newInputNode,
+                        operation: "device_recovery_restart_failed"
+                    )
                     throw error
                 }
             }
