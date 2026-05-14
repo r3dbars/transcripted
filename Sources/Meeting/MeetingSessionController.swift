@@ -647,7 +647,7 @@ final class MeetingSessionController: ObservableObject {
                     "reason": reason.rawValue
                 ]
             )
-            failedManager.addFailedTranscription(
+            taskManager.addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized."
@@ -906,7 +906,7 @@ final class MeetingSessionController: ObservableObject {
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
             case .recorded(let micURL, let systemURL, _, _):
-                failedManager.addFailedTranscription(
+                taskManager.addFailedTranscriptionRetainingAudio(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled"
@@ -943,7 +943,7 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingSuggestedTitle = nil
 
         if let micURL = files.micURL {
-            failedManager.addFailedTranscription(
+            taskManager.addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Transcripted quit before this meeting could be transcribed."
@@ -1467,7 +1467,7 @@ final class MeetingSessionController: ObservableObject {
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, _, _):
-            failedManager.addFailedTranscription(
+            taskManager.addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message
@@ -1600,7 +1600,8 @@ final class MeetingSessionController: ObservableObject {
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
             let transcriptionTrigger = activeTranscriptionTrigger
-            let failureKind = MeetingFailureKind.classify(message: message)
+            let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
+            let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
             if failureKind == .recordingTooShort {
                 DiagnosticsTrail.record(
                     engine: "meeting",
@@ -1638,7 +1639,8 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(
                     extra: [
                         "error": message,
-                        "failure_kind": analyticsFailureKind(from: message),
+                        "diagnostic_error": diagnosticMessage,
+                        "failure_kind": failureKind.rawValue,
                         "queue_depth": "\(queuedTranscriptionJobs.count)",
                         "trigger": transcriptionTrigger.rawValue
                     ]
@@ -1647,11 +1649,11 @@ final class MeetingSessionController: ObservableObject {
             AnalyticsReporter.track(
                 "meeting_transcript_failed",
                 properties: meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging(
-                    [
-                        "failure_kind": analyticsFailureKind(from: message),
+                        [
+                        "failure_kind": failureKind.rawValue,
                         "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
                         "trigger": transcriptionTrigger.rawValue,
-                    ],
+                        ],
                     uniquingKeysWith: { _, new in new }
                 )
             )
@@ -1722,10 +1724,6 @@ final class MeetingSessionController: ObservableObject {
             status.meetingsStatus,
             "\(Int(status.progress * 10))"
         ].joined(separator: "|")
-    }
-
-    private func analyticsFailureKind(from message: String) -> String {
-        MeetingFailureKind.classify(message: message).rawValue
     }
 
     private func meetingStartFailureKind(from message: String) -> String {

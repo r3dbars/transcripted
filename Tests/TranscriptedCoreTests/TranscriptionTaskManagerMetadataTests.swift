@@ -171,6 +171,31 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path), "delete should remove the empty failed-audio directory")
     }
 
+    func testManualFailedQueueRetainsAudioBeforeRemovingScratch() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.addFailedTranscriptionRetainingAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        )
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archive")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
         let manager = makeManager()
         let externalURL = tempDirectory.appendingPathComponent("outside.wav")
@@ -206,6 +231,27 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(diarization.isReady)
         XCTAssertEqual(speech.initializeCallCount, 2)
         XCTAssertEqual(diarization.initializeCallCount, 2)
+    }
+
+    func testSafeFailureDiagnosticMessageKeepsTypedRootCause() {
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(
+                for: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "/Users/redbars/private/path")
+            ),
+            "Parakeet inference failed"
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(
+                for: PipelineError.saveFailed(detail: "/Users/redbars/private/transcript.md")
+            ),
+            "Failed to save transcript"
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(
+                for: PipelineError.unknown(underlying: "PyAnnote failed while reading /Users/redbars/audio.wav")
+            ),
+            "Diarization failed"
+        )
     }
 
     private func makeManager(

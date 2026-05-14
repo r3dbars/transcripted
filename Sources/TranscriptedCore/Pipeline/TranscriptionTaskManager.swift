@@ -17,6 +17,7 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedTitle: String? = nil
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
+    @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
 
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     public let transcription: Transcription
@@ -82,7 +83,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 systemAudioURL: systemURL,
                 errorMessage: "Transcription already in progress"
             )
-            displayStatus = .failed(message: "Transcription already in progress")
+            publishFailure(
+                displayMessage: "Transcription already in progress",
+                diagnosticMessage: "Transcription already in progress"
+            )
             scheduleStatusReset(delay: 4)
             return
         }
@@ -104,7 +108,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 systemAudioURL: nil,
                 errorMessage: errorMessage
             )
-            displayStatus = .failed(message: "System audio required")
+            publishFailure(
+                displayMessage: "System audio required",
+                diagnosticMessage: errorMessage
+            )
             sendFailureNotification(errorMessage: errorMessage)
             scheduleStatusReset(delay: 4)
             return
@@ -131,7 +138,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 removeRecordingFile(systemURL, label: "short system recording")
             }
 
-            self.displayStatus = .failed(message: "Recording too short")
+            self.publishFailure(
+                displayMessage: "Recording too short",
+                diagnosticMessage: "Recording too short"
+            )
             self.scheduleStatusReset(delay: 3)
             return
         }
@@ -206,7 +216,10 @@ public class TranscriptionTaskManager: ObservableObject {
                     if retainedAudio?.systemURL != nil {
                         self.removeManagedCleanupFile(systemURL, label: "archived failed system scratch")
                     }
-                    self.displayStatus = .failed(message: "Transcription failed")
+                    self.publishFailure(
+                        displayMessage: "Transcription failed",
+                        diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
+                    )
                     self.failedTranscriptionManager.addFailedTranscription(
                         micAudioURL: failedMicURL,
                         systemAudioURL: failedSystemURL,
@@ -232,7 +245,10 @@ public class TranscriptionTaskManager: ObservableObject {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
             removeRecordingFile(audioURL, label: "rejected imported recording")
-            displayStatus = .failed(message: "Transcription already in progress")
+            publishFailure(
+                displayMessage: "Transcription already in progress",
+                diagnosticMessage: "Transcription already in progress"
+            )
             scheduleStatusReset(delay: 4)
             return
         }
@@ -241,7 +257,10 @@ public class TranscriptionTaskManager: ObservableObject {
         if let audioDuration = audioDuration(url: audioURL), audioDuration < minDuration {
             AppLogger.pipeline.info("Imported recording too short, skipping transcription", ["duration": String(format: "%.1fs", audioDuration)])
             removeRecordingFile(audioURL, label: "short imported recording")
-            displayStatus = .failed(message: "Recording too short")
+            publishFailure(
+                displayMessage: "Recording too short",
+                diagnosticMessage: "Recording too short"
+            )
             scheduleStatusReset(delay: 3)
             return
         }
@@ -287,7 +306,10 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     self.removeRecordingFile(audioURL, label: "failed imported recording")
-                    self.displayStatus = .failed(message: "Transcription failed")
+                    self.publishFailure(
+                        displayMessage: "Transcription failed",
+                        diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
+                    )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
                     self.scheduleStatusReset(delay: 4)
@@ -296,6 +318,150 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[taskId] = asyncTask
+    }
+
+    public static func safeFailureDiagnosticMessage(for error: Error) -> String {
+        if let pipelineError = error as? PipelineError {
+            switch pipelineError {
+            case .emptyAudioFile:
+                return "Empty audio file"
+            case .recordingTooShort:
+                return "Recording too short"
+            case .invalidAudioFormat:
+                return "Invalid audio format"
+            case .missingSystemAudio:
+                return PipelineError.missingSystemAudio.localizedDescription
+            case .modelNotLoaded(let model):
+                return "\(model) model not loaded"
+            case .modelInferenceFailed(let model, _):
+                return "\(model) inference failed"
+            case .saveFailed:
+                return "Failed to save transcript"
+            case .unknown(let underlying):
+                return safeFailureDiagnosticMessage(forText: underlying)
+            }
+        }
+
+        return safeFailureDiagnosticMessage(forText: error.localizedDescription)
+    }
+
+    private static func safeFailureDiagnosticMessage(forText message: String) -> String {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains("transcription already in progress") {
+            return "Transcription already in progress"
+        }
+
+        if normalized.contains(anyOf: [
+            "system audio is required",
+            "system audio recording",
+            "screen recording",
+        ]) {
+            return PipelineError.missingSystemAudio.localizedDescription
+        }
+
+        if normalized.contains(anyOf: [
+            "recording too short",
+            "at least 1 second",
+            "at least 2 seconds",
+            "at least one second",
+            "at least two seconds",
+        ]) && (normalized.contains("audio") || normalized.contains("recording")) {
+            return "Recording too short"
+        }
+
+        if normalized.contains(anyOf: [
+            "empty audio",
+            "empty audio file",
+            "no samples recorded",
+        ]) {
+            return "Empty audio file"
+        }
+
+        if normalized.contains(anyOf: [
+            "invalid audio",
+            "invalid audio data",
+            "invalid audio format",
+        ]) {
+            return "Invalid audio format"
+        }
+
+        if normalized.contains(anyOf: [
+            "failed to save",
+            "could not write transcript",
+            "permission denied",
+        ]) {
+            return "Failed to save transcript"
+        }
+
+        if normalized.contains(anyOf: [
+            "model not loaded",
+            "models were not ready",
+            "model failed to load",
+            "speech model failed to load",
+        ]) {
+            return "Model not loaded"
+        }
+
+        if normalized.contains(anyOf: [
+            "pyannote",
+            "sortformer",
+            "wespeaker",
+            "diarization",
+        ]) {
+            return "Diarization failed"
+        }
+
+        if normalized.contains(anyOf: [
+            "asr",
+            "core ml",
+            "coreml",
+            "failed to transcribe",
+            "fluid",
+            "inference",
+            "mlmodel",
+            "multiarray",
+            "parakeet",
+            "prediction",
+            "preprocessor",
+            "transcription failed",
+            "whisper",
+        ]) {
+            return "Transcription inference failed"
+        }
+
+        return "Pipeline failed"
+    }
+
+    private func publishFailure(displayMessage: String, diagnosticMessage: String) {
+        lastFailureDiagnosticMessage = diagnosticMessage
+        displayStatus = .failed(message: displayMessage)
+    }
+
+    public func addFailedTranscriptionRetainingAudio(
+        micAudioURL: URL,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        taskId: UUID = UUID()
+    ) {
+        let retainedAudio = archiveFailedRecordingAudioIfConfigured(
+            micURL: micAudioURL,
+            systemURL: systemAudioURL,
+            taskId: taskId
+        )
+        let failedMicURL = retainedAudio?.micURL ?? micAudioURL
+        let failedSystemURL = retainedAudio?.systemURL ?? systemAudioURL
+        if retainedAudio?.micURL != nil {
+            removeManagedCleanupFile(micAudioURL, label: "archived failed mic scratch")
+        }
+        if retainedAudio?.systemURL != nil {
+            removeManagedCleanupFile(systemAudioURL, label: "archived failed system scratch")
+        }
+        failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: failedMicURL,
+            systemAudioURL: failedSystemURL,
+            errorMessage: errorMessage
+        )
     }
 
     /// Retry a failed transcription by its ID
@@ -378,7 +544,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
-                self.displayStatus = .failed(message: "Retry failed")
+                self.publishFailure(
+                    displayMessage: "Retry failed",
+                    diagnosticMessage: "Retry failed: \(Self.safeFailureDiagnosticMessage(for: error))"
+                )
                 self.scheduleStatusReset(delay: 8)
             }
             return false
@@ -556,5 +725,11 @@ public class TranscriptionTaskManager: ObservableObject {
             ])
             return nil
         }
+    }
+}
+
+private extension String {
+    func contains(anyOf fragments: [String]) -> Bool {
+        fragments.contains(where: contains)
     }
 }

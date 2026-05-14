@@ -91,6 +91,8 @@ func testDictationRecordingStartOverlayPolicy() {
         assertEqual(plan.outcome, "microphone_start_timeout", "cleanup should keep the concrete failure outcome")
         assertTrue(plan.resetRuntimeSessionToIdle, "handled mic-start failures should not leave an active runtime session")
         assertTrue(plan.resetSpeechEngine, "failed startup should release the partial audio graph")
+        assertTrue(plan.hardResetSpeechEngine, "mic-start timeout cleanup must abandon the blocked CoreAudio graph instead of queuing behind it")
+        assertTrue(plan.reportBeforeCleanup, "mic-start timeout telemetry should fire before audio cleanup can block")
         assertFalse(plan.reportRuntimeStall, "the timeout event already reports this failure; it should not also emit app.session_stall_detected")
     }
 

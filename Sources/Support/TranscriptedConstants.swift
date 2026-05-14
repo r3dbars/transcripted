@@ -68,7 +68,11 @@ enum TranscriptedConstants {
     /// Max time a device-change recovery may stay active before being marked
     /// failed. This leaves room inside `dictationRecoveryBudget` for a fallback
     /// prewarm/start attempt.
-    static let audioDeviceRecoveryTimeout: UInt64 = 2_000_000_000  // 2 seconds
+    static let audioDeviceRecoveryTimeout: UInt64 = 4_000_000_000  // 4 seconds
+
+    /// Max time a single CoreAudio startup operation may sit on the audio-engine
+    /// worker before Transcripted treats the graph as blocked and rebuilds it.
+    static let audioStartOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
 
     /// Total budget for dictation to wait on engine readiness after a device change.
     /// Sized to cover slower USB/Bluetooth CoreAudio graph rebuilds without trapping

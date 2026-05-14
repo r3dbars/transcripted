@@ -359,7 +359,7 @@ class DictationSessionController: ObservableObject {
             return
         }
 
-        let startedAt = CFAbsoluteTimeGetCurrent()
+        let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
         var recoveryStartAttempts = 0
@@ -376,13 +376,13 @@ class DictationSessionController: ObservableObject {
             if readinessRefresher.start(appState: appState) {
                 readinessRefreshes += 1
             }
-            nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+            nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
         }
 
-        while CFAbsoluteTimeGetCurrent() < deadline {
+        while ProcessInfo.processInfo.systemUptime < deadline {
             guard isDictating, !Task.isCancelled else { return }
 
-            let now = CFAbsoluteTimeGetCurrent()
+            let now = ProcessInfo.processInfo.systemUptime
             if let staleRefresh = readinessRefresher.cancelIfTimedOut(now: now) {
                 readinessRefreshTimedOut = true
                 DiagnosticsTrail.record(
@@ -430,11 +430,11 @@ class DictationSessionController: ObservableObject {
                 break
 
             case .refreshInputReadiness:
-                if CFAbsoluteTimeGetCurrent() >= nextReadinessRefreshAt {
+                if now >= nextReadinessRefreshAt {
                     if readinessRefresher.start(appState: appState) {
                         readinessRefreshes += 1
                     }
-                    nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
 
             case .forceInputRecovery:
@@ -444,7 +444,7 @@ class DictationSessionController: ObservableObject {
                 ) {
                     forcedReadinessRecoveries += 1
                     readinessRefreshes = 0
-                    nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
 
             case .startRecoveryRecording:
@@ -476,7 +476,7 @@ class DictationSessionController: ObservableObject {
                 if started {
                     overlayController.state = .listening
                     resizePanelToCompact()
-                    let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+                    let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
                     appState.logger.log("DICTATION | started after forced recovery start and \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
                         logger: appState.logger,
@@ -496,9 +496,10 @@ class DictationSessionController: ObservableObject {
                     return
                 }
 
-                await appState.sttRouter.refreshInputReadiness()
-                readinessRefreshes += 1
-                nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+                if readinessRefresher.start(appState: appState) {
+                    readinessRefreshes += 1
+                }
+                nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
 
             case .startRecording:
                 startAttempts += 1
@@ -513,7 +514,7 @@ class DictationSessionController: ObservableObject {
                     overlayController.state = .listening
                     resizePanelToCompact()
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
-                    let waited = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+                    let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
                     appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
                         logger: appState.logger,
@@ -550,9 +551,10 @@ class DictationSessionController: ObservableObject {
                     )
                 )
                 if !appState.sttRouter.isRecovering {
-                    await appState.sttRouter.refreshInputReadiness()
-                    readinessRefreshes += 1
-                    nextReadinessRefreshAt = CFAbsoluteTimeGetCurrent() + TranscriptedConstants.dictationReadinessRefreshInterval
+                    if readinessRefresher.start(appState: appState) {
+                        readinessRefreshes += 1
+                    }
+                    nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
             }
 
@@ -564,7 +566,9 @@ class DictationSessionController: ObservableObject {
 
         let waited = Int(TranscriptedConstants.dictationRecoveryBudget * 1000)
         let cleanupPlan = DictationRecordingStartFailurePolicy.cleanupPlan(for: "microphone_start_timeout")
-        await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
+        if !cleanupPlan.reportBeforeCleanup {
+            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
+        }
         DiagnosticsTrail.record(
             logger: appState.logger,
             level: .error,
@@ -603,6 +607,9 @@ class DictationSessionController: ObservableObject {
                 ])
             )
         }
+        if cleanupPlan.reportBeforeCleanup {
+            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
+        }
         overlayController.showError(
             microphoneTimeoutMessage(
                 deviceName: appState.sttRouter.inputDeviceName,
@@ -625,7 +632,11 @@ class DictationSessionController: ObservableObject {
         sessionTimeoutTask?.cancel()
         sessionTimeoutTask = nil
         if cleanupPlan.resetSpeechEngine {
-            await appState.sttRouter.resetAfterFailedRecordingStart()
+            if cleanupPlan.hardResetSpeechEngine {
+                appState.sttRouter.abandonBlockedRecordingStart(reason: cleanupPlan.outcome)
+            } else {
+                await appState.sttRouter.resetAfterFailedRecordingStart()
+            }
         }
         appState.runtimeDiagnostics.clearSession(
             kind: "dictation",
@@ -1467,7 +1478,7 @@ private final class DictationReadinessRefreshRunner {
         generation &+= 1
         let taskGeneration = generation
         operation = operationName
-        startedAt = CFAbsoluteTimeGetCurrent()
+        startedAt = ProcessInfo.processInfo.systemUptime
         task = Task { @MainActor [weak self] in
             await body()
             guard !Task.isCancelled else { return }

@@ -65,6 +65,30 @@ func testMeetingFailureKind() {
         assertEqual(kind, .pipelineFailed, "retry orchestration failures should stay out of unexpected_error")
     }
 
+    runSuite("MeetingFailureKind preserves retry root causes") {
+        let kind = MeetingFailureKind.classify(
+            message: "Retry failed: Parakeet inference failed"
+        )
+
+        assertEqual(kind, .transcriptionInferenceFailed, "retry wrappers should not hide the concrete model failure")
+    }
+
+    runSuite("MeetingFailureKind classifies model-not-ready wording") {
+        let kind = MeetingFailureKind.classify(
+            message: "Meeting transcription models were not ready. Try again after models finish loading."
+        )
+
+        assertEqual(kind, .modelNotLoaded, "model warmup failures should not fall to unexpected_error")
+    }
+
+    runSuite("MeetingFailureKind classifies generic pipeline failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "Pipeline failed"
+        )
+
+        assertEqual(kind, .pipelineFailed, "generic pipeline failures should have a stable bucket")
+    }
+
     runSuite("MeetingFailureKind classifies model runtime wording") {
         let kind = MeetingFailureKind.classify(
             message: "ASR preprocessor failed while running CoreML prediction"

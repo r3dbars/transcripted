@@ -128,6 +128,11 @@ class STTRouter: ObservableObject {
         await parakeetEngine.resetAfterFailedRecordingStart()
     }
 
+    func abandonBlockedRecordingStart(reason: String) {
+        activeRecordingModel = nil
+        parakeetEngine.abandonBlockedRecordingStart(reason: reason)
+    }
+
     func transcribe() async -> String? {
         let model = activeRecordingModel ?? selectedModel
         defer {

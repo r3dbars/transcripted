@@ -87,12 +87,15 @@ enum DictationInputDeviceSelectionPolicy {
             return "built_in"
         }
 
-        if transport == .usb
-            || normalized.contains("usb")
-            || normalized.contains("scarlett")
-            || normalized.contains("rode")
-            || normalized.contains("shure")
-            || normalized.contains("yeti") {
+        if transport == .aggregate {
+            return "aggregate"
+        }
+
+        if transport == .virtual {
+            return "virtual"
+        }
+
+        if isExternalMicrophoneName(normalized, transport: transport) {
             return "external"
         }
 
@@ -195,6 +198,27 @@ enum DictationInputDeviceSelectionPolicy {
             || normalized.contains("built-in")
             || normalized.contains("built in")
             || normalized.contains("studio display")
+    }
+
+    private static func isExternalMicrophoneName(
+        _ normalized: String,
+        transport: DictationAudioTransport
+    ) -> Bool {
+        transport == .usb
+            || normalized.contains("usb")
+            || normalized.contains("audio interface")
+            || normalized.contains("camera")
+            || normalized.contains("c920")
+            || normalized.contains("elgato")
+            || normalized.contains("external")
+            || normalized.contains("interface")
+            || normalized.contains("logitech")
+            || normalized.contains("mv7")
+            || normalized.contains("rode")
+            || normalized.contains("scarlett")
+            || normalized.contains("shure")
+            || normalized.contains("webcam")
+            || normalized.contains("yeti")
     }
 
     private static func normalize(_ value: String) -> String {

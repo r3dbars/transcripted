@@ -75,6 +75,32 @@ func testDictationInputDeviceSelectionPolicy() {
         assertEqual(selection.selectedInput, airPodsInput, "without a local mic fallback, dictation should still work")
         assertEqual(selection.reason, .noBuiltInFallbackAvailable, "missing fallback should be explicit")
     }
+
+    runSuite("DictationInputDeviceSelectionPolicy classifies non-USB external mics") {
+        assertEqual(
+            DictationInputDeviceSelectionPolicy.deviceClass(forName: "Logitech C920 Camera Microphone"),
+            "external",
+            "webcam mics should not collapse to unknown"
+        )
+        assertEqual(
+            DictationInputDeviceSelectionPolicy.deviceClass(forName: "Universal Audio Interface"),
+            "external",
+            "audio interface names should produce a stable route class"
+        )
+    }
+
+    runSuite("DictationInputDeviceSelectionPolicy preserves aggregate and virtual route classes") {
+        assertEqual(
+            DictationInputDeviceSelectionPolicy.deviceClass(forName: "Multi-Output Aggregate", transport: .aggregate),
+            "aggregate",
+            "aggregate devices should be visible in route-shape analytics"
+        )
+        assertEqual(
+            DictationInputDeviceSelectionPolicy.deviceClass(forName: "BlackHole 2ch", transport: .virtual),
+            "virtual",
+            "virtual devices should be visible in route-shape analytics"
+        )
+    }
 }
 
 private func device(
