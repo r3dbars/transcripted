@@ -189,36 +189,6 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         }
     }
 
-    var title: String {
-        switch self {
-        case .dictation: return "Dictate anywhere"
-        case .meeting: return "Record meetings"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .dictation:
-            return "Speak once. Clean text lands back at your cursor."
-        case .meeting:
-            return "Capture the call. Save searchable local notes."
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .dictation: return "Start dictation"
-        case .meeting: return "Record meeting"
-        }
-    }
-
-    var learnTitle: String {
-        switch self {
-        case .dictation: return "Works anywhere you write."
-        case .meeting: return "Saved as local Markdown."
-        }
-    }
-
     var symbolName: String {
         switch self {
         case .dictation: return "mic.fill"
@@ -357,101 +327,88 @@ struct HomeWelcomeHeader: View {
 
 // MARK: - Hero card
 
+private enum HomeHeroTabMetrics {
+    static let width: CGFloat = 172
+    static let height: CGFloat = 52
+    static let cornerRadius: CGFloat = 14
+    static let cardCornerRadius: CGFloat = 18
+    static let spacing: CGFloat = 4
+
+    static var surfaceFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+
+    static var inactiveFill: Color {
+        Color(nsColor: .controlBackgroundColor).opacity(0.56)
+    }
+}
+
 struct HomeHeroCard<ActivityContent: View>: View {
     @Binding var selectedMode: HomeHeroMode
-    let onStartDictation: () -> Void
-    let onStartMeeting: () -> Void
     private let activityContent: () -> ActivityContent
+
+    @Environment(\.displayScale) private var displayScale
 
     init(
         selectedMode: Binding<HomeHeroMode>,
-        onStartDictation: @escaping () -> Void,
-        onStartMeeting: @escaping () -> Void,
         @ViewBuilder activityContent: @escaping () -> ActivityContent
     ) {
         _selectedMode = selectedMode
-        self.onStartDictation = onStartDictation
-        self.onStartMeeting = onStartMeeting
         self.activityContent = activityContent
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.leading, 36)
-                .padding(.bottom, -12)
+                .padding(.bottom, -hairline)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 18) {
-                heroCopy
-
-                Divider()
-                    .opacity(0.55)
-
                 activityContent()
             }
-            .padding(.top, 30)
+            .padding(.top, 20)
             .padding(.horizontal, 28)
             .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                HomeHeroCardShape(
+                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
+                    squareTopLeft: selectedMode == .meeting
+                )
                     .fill(cardFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                HomeHeroCardBorderShape(
+                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
+                    selectedTabMinX: selectedTabLeadingOffset,
+                    selectedTabMaxX: selectedTabTrailingOffset,
+                    squareTopLeft: selectedMode == .meeting
+                )
+                    .stroke(Color.primary.opacity(0.08), lineWidth: hairline)
             )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var heroCopy: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(selectedMode.title)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(selectedMode.subtitle)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 10) {
-                Button(action: selectedAction) {
-                    Label(selectedMode.actionTitle, systemImage: selectedMode.symbolName)
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .help(selectedMode.actionTitle)
-
-                HStack(spacing: 6) {
-                    Text(selectedMode.learnTitle)
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var cardFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+        HomeHeroTabMetrics.surfaceFill
     }
 
-    private var selectedAction: () -> Void {
+    private var hairline: CGFloat {
+        1 / max(displayScale, 1)
+    }
+
+    private var selectedTabLeadingOffset: CGFloat {
         switch selectedMode {
-        case .dictation: return onStartDictation
-        case .meeting: return onStartMeeting
+        case .meeting:
+            return 0
+        case .dictation:
+            return HomeHeroTabMetrics.width + HomeHeroTabMetrics.spacing
         }
+    }
+
+    private var selectedTabTrailingOffset: CGFloat {
+        selectedTabLeadingOffset + HomeHeroTabMetrics.width
     }
 }
 
@@ -459,30 +416,26 @@ private struct HomeHeroModeTabs: View {
     @Binding var selectedMode: HomeHeroMode
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
+        HStack(alignment: .top, spacing: HomeHeroTabMetrics.spacing) {
             ForEach(HomeHeroMode.tabOrder) { mode in
                 HomeHeroModeTab(
                     mode: mode,
                     isSelected: selectedMode == mode,
                     action: {
-                        withAnimation(.easeInOut(duration: 0.16)) {
+                        guard selectedMode != mode else { return }
+                        var transaction = Transaction()
+                        transaction.animation = nil
+                        withTransaction(transaction) {
                             selectedMode = mode
                         }
                     }
                 )
             }
         }
-        .background(alignment: .bottom) {
-            Rectangle()
-                .fill(surfaceFill)
-                .frame(height: 18)
-                .offset(y: 10)
-                .padding(.horizontal, -1)
+        .frame(height: HomeHeroTabMetrics.height, alignment: .topLeading)
+        .transaction { transaction in
+            transaction.animation = nil
         }
-    }
-
-    private var surfaceFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
     }
 }
 
@@ -491,53 +444,59 @@ private struct HomeHeroModeTab: View {
     let isSelected: Bool
     let action: () -> Void
 
+    @Environment(\.displayScale) private var displayScale
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: mode.symbolName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 18, height: 18)
                 Text(mode.switchTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-            .padding(.horizontal, 18)
-            .padding(.top, isSelected ? 12 : 10)
-            .padding(.bottom, isSelected ? 11 : 9)
+            .frame(width: HomeHeroTabMetrics.width, height: HomeHeroTabMetrics.height)
             .background(
-                HomeHeroTabShape(cornerRadius: 12)
+                HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
                     .fill(tabFill)
             )
             .overlay(
-                HomeHeroTabBorderShape(cornerRadius: 12)
-                    .stroke(tabStroke, lineWidth: 1)
+                HomeHeroTabBorderShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
+                    .stroke(tabStroke, lineWidth: hairline)
             )
-            .overlay(alignment: .bottom) {
-                if isSelected {
-                    Rectangle()
-                        .fill(surfaceFill)
-                        .frame(height: 14)
-                        .offset(y: 8)
-                }
-            }
+            .contentShape(HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius))
         }
         .buttonStyle(.plain)
         .help("Show \(mode.switchTitle.lowercased())")
         .zIndex(isSelected ? 1 : 0)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(mode.switchTitle)
+        .accessibilityValue(isSelected ? "Selected" : "")
     }
 
     private var tabFill: Color {
         if isSelected {
             return surfaceFill
         }
-        return surfaceFill.opacity(0.62)
+        if isHovering {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.66)
+        }
+        return HomeHeroTabMetrics.inactiveFill
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03)
+        isSelected ? Color.primary.opacity(0.11) : Color.primary.opacity(0.06)
     }
 
     private var surfaceFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
+        HomeHeroTabMetrics.surfaceFill
+    }
+
+    private var hairline: CGFloat {
+        1 / max(displayScale, 1)
     }
 }
 
@@ -582,6 +541,97 @@ private struct HomeHeroTabBorderShape: Shape {
             control: CGPoint(x: rect.maxX, y: rect.minY)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
+    }
+}
+
+private struct HomeHeroCardShape: Shape {
+    let cornerRadius: CGFloat
+    let squareTopLeft: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        let topLeftRadius = squareTopLeft ? 0 : radius
+        var path = Path()
+
+        path.move(to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+        if topLeftRadius > 0 {
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY),
+                control: CGPoint(x: rect.minX, y: rect.minY)
+            )
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct HomeHeroCardBorderShape: Shape {
+    let cornerRadius: CGFloat
+    let selectedTabMinX: CGFloat
+    let selectedTabMaxX: CGFloat
+    let squareTopLeft: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        let topLeftRadius = squareTopLeft ? 0 : radius
+        let topLineStart = rect.minX + topLeftRadius
+        let topLineEnd = rect.maxX - radius
+        let gapStart = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMinX))
+        let gapEnd = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMaxX))
+        var path = Path()
+
+        if topLeftRadius > 0 {
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+            path.addQuadCurve(
+                to: CGPoint(x: topLineStart, y: rect.minY),
+                control: CGPoint(x: rect.minX, y: rect.minY)
+            )
+        }
+
+        if gapStart > topLineStart {
+            path.move(to: CGPoint(x: topLineStart, y: rect.minY))
+            path.addLine(to: CGPoint(x: min(gapStart, topLineEnd), y: rect.minY))
+        }
+
+        if gapEnd < topLineEnd {
+            path.move(to: CGPoint(x: max(gapEnd, topLineStart), y: rect.minY))
+            path.addLine(to: CGPoint(x: topLineEnd, y: rect.minY))
+        }
+
+        path.move(to: CGPoint(x: topLineEnd, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+
         return path
     }
 }
@@ -980,15 +1030,6 @@ struct HomeActivityTabsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selectedTab.label)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-
-                Spacer(minLength: 12)
-            }
-
             if isLoading {
                 HStack {
                     ProgressView()
