@@ -73,6 +73,58 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                        "embedders that pass only the static value should still get a valid resolver result")
     }
 
+    func testPublishTranscriptSavedDoesNotStayFinishingWhenSpeakerReviewIsPending() throws {
+        let manager = makeManager()
+        let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
+        try """
+        ---
+        title: "Customer Call"
+        duration: "10:03"
+        mic_speakers: 1
+        system_speakers: 2
+        ---
+
+        # Meeting Recording
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        manager.displayStatus = .finishing
+        manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: UUID(),
+            systemAudioURL: tempDirectory.appendingPathComponent("system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        )
+
+        manager.publishTranscriptSaved(from: transcriptURL)
+
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(manager.lastSavedTitle, "Customer Call")
+        XCTAssertEqual(manager.lastSavedDuration, "10:03")
+        XCTAssertEqual(manager.lastSavedSpeakerCount, 3)
+    }
+
+    func testDeferPendingSpeakerNamingReviewCompletesWithReviewLater() {
+        let manager = makeManager()
+        var completedUpdates: [SpeakerNameUpdate]?
+        manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("call.md"),
+            transcriptId: UUID(),
+            systemAudioURL: tempDirectory.appendingPathComponent("system.wav"),
+            micAudioURL: nil,
+            onComplete: { updates in
+                completedUpdates = updates
+                manager.speakerNamingRequest = nil
+            }
+        )
+
+        XCTAssertTrue(manager.deferPendingSpeakerNamingReview(reason: "queued_transcription"))
+        XCTAssertEqual(completedUpdates?.count, 0)
+        XCTAssertNil(manager.speakerNamingRequest)
+        XCTAssertFalse(manager.deferPendingSpeakerNamingReview(reason: "queued_transcription"))
+    }
+
     func testTranscriptionTaskCarriesCalendarMeetingTitle() {
         let task = TranscriptionTask(
             micURL: tempDirectory.appendingPathComponent("mic.wav"),

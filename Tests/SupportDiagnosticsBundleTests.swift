@@ -35,6 +35,10 @@ func testSupportDiagnosticsBundle() {
             meetingState: "ready",
             meetingRecording: false,
             meetingDurationBucket: "lt_10s",
+            meetingDisplayStatus: "finishing",
+            speakerReviewPending: true,
+            queuedMeetingCount: 1,
+            meetingShortcut: "⌥C",
             reliabilityPackets: [
                 "2026-05-03T01:15:11Z meeting.stop recovered event=meeting_recording_stopped route_change_count_bucket=2_3 path=/Users/redbars/private.txt"
             ],
@@ -56,6 +60,10 @@ func testSupportDiagnosticsBundle() {
         assertTrue(text.contains("input_device_class: bluetooth"), "diagnostics should include coarse route facts")
         assertTrue(text.contains("session_stage: recording"), "diagnostics should include runtime session stage")
         assertTrue(text.contains("model_cache_total: 3 GB"), "diagnostics should include coarse model cache size")
+        assertTrue(text.contains("Display status: finishing"), "diagnostics should include meeting display status")
+        assertTrue(text.contains("Speaker review pending: true"), "diagnostics should include pending speaker review state")
+        assertTrue(text.contains("Queued meetings: 1"), "diagnostics should include queued meeting count")
+        assertTrue(text.contains("Meeting shortcut: ⌥C"), "diagnostics should include the active meeting shortcut")
         assertTrue(text.contains("meeting.stop recovered"), "diagnostics should include recent reliability packet summaries")
         assertFalse(text.contains("/Users/redbars"), "diagnostics should redact home paths")
         assertFalse(text.contains("person@example.com"), "diagnostics should redact emails")
@@ -87,6 +95,10 @@ func testSupportDiagnosticsBundle() {
             meetingState: "recording",
             meetingRecording: true,
             meetingDurationBucket: "2_9m",
+            meetingDisplayStatus: "transcribing",
+            speakerReviewPending: false,
+            queuedMeetingCount: 2,
+            meetingShortcut: "⌥M",
             reliabilityPackets: [
                 "2026-05-03T01:15:11Z meeting.stop recovered event=meeting_recording_stopped"
             ],
@@ -98,6 +110,10 @@ func testSupportDiagnosticsBundle() {
 
         assertEqual(sanitized["route_input_device_class"], "bluetooth", "route context should survive Sentry key sanitization")
         assertEqual(sanitized["storage_known_stale_model_count"], "1", "storage context should survive Sentry key sanitization")
+        assertEqual(sanitized["meeting_display_status"], "transcribing", "display status should survive Sentry key sanitization")
+        assertEqual(sanitized["meeting_review_pending"], "false", "speaker review state should survive under a privacy-safe key")
+        assertEqual(sanitized["queued_meeting_count"], "2", "queued meeting count should survive Sentry key sanitization")
+        assertEqual(sanitized["meeting_shortcut"], "⌥M", "meeting shortcut should survive Sentry key sanitization")
         assertEqual(sanitized["reliability_packet_count"], "1", "support diagnostics should include packet count")
         assertNil(sanitized["audio_input_device_class"], "support diagnostics should not use audio-prefixed Sentry keys")
     }

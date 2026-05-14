@@ -206,6 +206,18 @@ extension TranscriptionTaskManager {
         }
     }
 
+    @discardableResult
+    public func deferPendingSpeakerNamingReview(reason: String) -> Bool {
+        guard let request = speakerNamingRequest else { return false }
+
+        AppLogger.pipeline.info("Deferring pending speaker review", [
+            "reason": reason,
+            "speakers": "\(request.speakers.count)"
+        ])
+        request.onComplete([])
+        return true
+    }
+
     nonisolated private func cleanupNamingArtifacts(
         clips: [SpeakerNamingEntry],
         micURL: URL?,
@@ -533,17 +545,21 @@ extension TranscriptionTaskManager {
                 "named": "\(updatesCount)",
                 "transcript": resolvedURL.lastPathComponent
             ])
+            let didAlreadyPublishSavedTranscript = lastSavedTranscriptURL == resolvedURL
             populateSavedMetadata(from: resolvedURL)
-            displayStatus = .transcriptSaved
+            if !didAlreadyPublishSavedTranscript {
+                displayStatus = .transcriptSaved
+                scheduleStatusReset(delay: 8)
+            }
         } else {
             AppLogger.pipeline.error("Speaker naming finalization failed", [
                 "transcriptId": transcriptId.uuidString,
                 "transcript": resolvedURL.lastPathComponent
             ])
             displayStatus = .failed(message: "Failed to finalize speaker names")
+            scheduleStatusReset(delay: 8)
         }
 
-        scheduleStatusReset(delay: 8)
         speakerNamingRequest = nil
     }
 }

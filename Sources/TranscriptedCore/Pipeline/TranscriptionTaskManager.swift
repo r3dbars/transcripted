@@ -189,13 +189,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
-                    if self.speakerNamingRequest == nil {
-                        self.populateSavedMetadata(from: transcriptURL)
-                        self.publishNonFailureStatus(.transcriptSaved)
-                        self.scheduleStatusReset(delay: 4)
-                    } else {
-                        self.publishNonFailureStatus(.finishing)
-                    }
+                    self.publishTranscriptSaved(from: transcriptURL)
                     self.handleTaskCompletion(taskId: task.id)
                 }
 
@@ -289,13 +283,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
-                    if self.speakerNamingRequest == nil {
-                        self.populateSavedMetadata(from: transcriptURL)
-                        self.publishNonFailureStatus(.transcriptSaved)
-                        self.scheduleStatusReset(delay: 4)
-                    } else {
-                        self.publishNonFailureStatus(.finishing)
-                    }
+                    self.publishTranscriptSaved(from: transcriptURL)
                     self.handleTaskCompletion(taskId: taskId)
                 }
             } catch {
@@ -443,6 +431,12 @@ public class TranscriptionTaskManager: ObservableObject {
         displayStatus = status
     }
 
+    func publishTranscriptSaved(from transcriptURL: URL) {
+        populateSavedMetadata(from: transcriptURL)
+        publishNonFailureStatus(.transcriptSaved)
+        scheduleStatusReset(delay: 4)
+    }
+
     public func addFailedTranscriptionRetainingAudio(
         micAudioURL: URL,
         systemAudioURL: URL?,
@@ -532,13 +526,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
-                if self.speakerNamingRequest == nil {
-                    self.populateSavedMetadata(from: transcriptURL)
-                    self.publishNonFailureStatus(.transcriptSaved)
-                    self.scheduleStatusReset(delay: 4)
-                } else {
-                    self.publishNonFailureStatus(.finishing)
-                }
+                self.publishTranscriptSaved(from: transcriptURL)
             }
 
             return true
@@ -609,9 +597,12 @@ public class TranscriptionTaskManager: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
-            // Don't reset if speaker naming is in progress —
-            // SpeakerNamingCoordinator will re-publish .transcriptSaved when done
-            guard self.speakerNamingRequest == nil else { return }
+            if self.speakerNamingRequest != nil {
+                if case .transcriptSaved = self.displayStatus {
+                    self.publishNonFailureStatus(.idle)
+                }
+                return
+            }
             switch self.displayStatus {
             case .transcriptSaved, .failed:
                 self.publishNonFailureStatus(.idle)

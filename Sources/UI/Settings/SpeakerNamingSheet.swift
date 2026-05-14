@@ -31,7 +31,11 @@ final class SpeakerNamingSheet {
         subscription = taskManager.$speakerNamingRequest
             .receive(on: RunLoop.main)
             .sink { [weak self] request in
-                guard let self, let request else { return }
+                guard let self else { return }
+                guard let request else {
+                    self.dismissCurrentWindowBecauseRequestCleared()
+                    return
+                }
                 self.present(request: request)
             }
     }
@@ -48,6 +52,11 @@ final class SpeakerNamingSheet {
         controller.window?.center()
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func dismissCurrentWindowBecauseRequestCleared() {
+        currentWindowController?.closeWithoutCompleting()
+        currentWindowController = nil
     }
 }
 
@@ -101,6 +110,11 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         }
         SpeakerClipPlayback.stop()
         onClose()
+    }
+
+    func closeWithoutCompleting() {
+        didComplete = true
+        close()
     }
 
     private func finish(with updates: [SpeakerNameUpdate]) {

@@ -179,6 +179,7 @@ final class MeetingSessionController: ObservableObject {
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
     private var queuedTranscriptionStartTask: Task<Void, Never>?
+    private var isDeferringPendingSpeakerReview = false
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeRecordingSuggestedTitle: String?
@@ -1264,6 +1265,14 @@ final class MeetingSessionController: ObservableObject {
         isCaptureSessionActive || isFinishingRecording || hasBackgroundTranscriptionWork
     }
 
+    var queuedTranscriptionCount: Int {
+        queuedTranscriptionJobs.count
+    }
+
+    var isSpeakerReviewPending: Bool {
+        taskManager.speakerNamingRequest != nil
+    }
+
     private var hasVisibleBackgroundTranscriptionWork: Bool {
         hasVisibleBackgroundTranscriptionWork(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
@@ -1340,6 +1349,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         queuedTranscriptionJobs.append(job)
+        deferPendingSpeakerReviewForQueuedTranscriptionIfNeeded()
         return .queued(position: queuedTranscriptionJobs.count)
     }
 
@@ -1503,6 +1513,14 @@ final class MeetingSessionController: ObservableObject {
     private func handleBackgroundTranscriptionWorkChanged(
         snapshot: BackgroundTranscriptionWorkSnapshot
     ) {
+        if snapshot.speakerNamingRequest == nil {
+            isDeferringPendingSpeakerReview = false
+        }
+
+        if deferPendingSpeakerReviewForQueuedTranscriptionIfNeeded(snapshot: snapshot) {
+            return
+        }
+
         if canStartQueuedTranscriptionImmediately(snapshot: snapshot) {
             if let nextJob = popNextQueuedTranscriptionJob() {
                 startQueuedTranscription(nextJob)
@@ -1521,6 +1539,37 @@ final class MeetingSessionController: ObservableObject {
         if !isCaptureSessionActive {
             state = .transcribing
         }
+    }
+
+    @discardableResult
+    private func deferPendingSpeakerReviewForQueuedTranscriptionIfNeeded(
+        snapshot: BackgroundTranscriptionWorkSnapshot? = nil
+    ) -> Bool {
+        let snapshot = snapshot ?? currentBackgroundTranscriptionWorkSnapshot
+        guard !isDeferringPendingSpeakerReview,
+              snapshot.activeCount == 0,
+              snapshot.speakerNamingRequest != nil,
+              !queuedTranscriptionJobs.isEmpty,
+              !isPreparingQueuedTranscriptionStart else {
+            return false
+        }
+
+        guard taskManager.deferPendingSpeakerNamingReview(reason: "queued_transcription") else {
+            return false
+        }
+
+        isDeferringPendingSpeakerReview = true
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_speaker_review_deferred_for_queue",
+            message: "Speaker review was moved to Review Later so queued meeting transcription can start",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "queue_depth": "\(queuedTranscriptionJobs.count)"
+                ]
+            )
+        )
+        return true
     }
 
     private func popNextQueuedTranscriptionJob() -> QueuedTranscriptionJob? {
