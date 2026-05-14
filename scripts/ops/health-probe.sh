@@ -17,18 +17,18 @@ skip_lane() {
   local lane="$1"
   local var_name="$2"
   echo "SKIP $lane: missing $var_name"
-  exit 0
+  return 0
 }
 
 probe_github() {
   if ! command -v gh &> /dev/null; then
     echo "SKIP github: gh CLI not found"
-    exit 0
+    return 0
   fi
 
   if ! gh auth status &> /dev/null; then
     echo "SKIP github: not authenticated (run 'gh auth login')"
-    exit 0
+    return 0
   fi
 
   echo "GitHub health check..."
@@ -49,6 +49,7 @@ probe_github() {
 probe_sentry() {
   if [[ -z "${SENTRY_AUTH_TOKEN:-}" ]]; then
     skip_lane "sentry" "SENTRY_AUTH_TOKEN"
+    return 0
   fi
 
   echo "Sentry health check..."
@@ -80,6 +81,7 @@ probe_posthog() {
     else
       skip_lane "posthog" "POSTHOG_PROJECT_ID"
     fi
+    return 0
   fi
 
   echo "PostHog health check..."
@@ -117,6 +119,7 @@ probe_cloudflare() {
     else
       skip_lane "cloudflare" "CLOUDFLARE_ACCOUNT_ID"
     fi
+    return 0
   fi
 
   echo "Cloudflare health check..."
