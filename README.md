@@ -15,7 +15,11 @@ Transcripted saves local Markdown your agents can review later.
 
 ## Demo
 
-![Transcripted demo showing local meeting notes, dictation, speaker review, and agent handoff](docs/assets/launch/transcripted-demo.gif)
+![Transcripted quick tour showing Home, Meetings, Dictation, and Home again](docs/assets/launch/transcripted-demo.gif)
+
+![Transcripted dictation recording showing the listening control](docs/assets/launch/transcripted-dictation-recording.gif)
+
+![Transcripted meeting recording showing the local recording start flow](docs/assets/launch/transcripted-meeting-recording.gif)
 
 ## Why Audio Context Matters
 
