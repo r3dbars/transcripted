@@ -189,36 +189,6 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         }
     }
 
-    var title: String {
-        switch self {
-        case .dictation: return "Dictate anywhere"
-        case .meeting: return "Record meetings"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .dictation:
-            return "Speak once. Clean text lands back at your cursor."
-        case .meeting:
-            return "Capture the call. Save searchable local notes."
-        }
-    }
-
-    var actionTitle: String {
-        switch self {
-        case .dictation: return "Start dictation"
-        case .meeting: return "Record meeting"
-        }
-    }
-
-    var learnTitle: String {
-        switch self {
-        case .dictation: return "Works anywhere you write."
-        case .meeting: return "Saved as local Markdown."
-        }
-    }
-
     var symbolName: String {
         switch self {
         case .dictation: return "mic.fill"
@@ -359,19 +329,13 @@ struct HomeWelcomeHeader: View {
 
 struct HomeHeroCard<ActivityContent: View>: View {
     @Binding var selectedMode: HomeHeroMode
-    let onStartDictation: () -> Void
-    let onStartMeeting: () -> Void
     private let activityContent: () -> ActivityContent
 
     init(
         selectedMode: Binding<HomeHeroMode>,
-        onStartDictation: @escaping () -> Void,
-        onStartMeeting: @escaping () -> Void,
         @ViewBuilder activityContent: @escaping () -> ActivityContent
     ) {
         _selectedMode = selectedMode
-        self.onStartDictation = onStartDictation
-        self.onStartMeeting = onStartMeeting
         self.activityContent = activityContent
     }
 
@@ -383,14 +347,9 @@ struct HomeHeroCard<ActivityContent: View>: View {
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 18) {
-                heroCopy
-
-                Divider()
-                    .opacity(0.55)
-
                 activityContent()
             }
-            .padding(.top, 30)
+            .padding(.top, 28)
             .padding(.horizontal, 28)
             .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -406,52 +365,8 @@ struct HomeHeroCard<ActivityContent: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var heroCopy: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(selectedMode.title)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(selectedMode.subtitle)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 10) {
-                Button(action: selectedAction) {
-                    Label(selectedMode.actionTitle, systemImage: selectedMode.symbolName)
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .help(selectedMode.actionTitle)
-
-                HStack(spacing: 6) {
-                    Text(selectedMode.learnTitle)
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var cardFill: Color {
         Color(nsColor: .controlBackgroundColor).opacity(0.82)
-    }
-
-    private var selectedAction: () -> Void {
-        switch selectedMode {
-        case .dictation: return onStartDictation
-        case .meeting: return onStartMeeting
-        }
     }
 }
 

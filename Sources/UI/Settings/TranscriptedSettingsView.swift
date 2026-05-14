@@ -293,15 +293,7 @@ struct TranscriptedSettingsView: View {
             }
 
             HomeHeroCard(
-                selectedMode: homeHeroModeSelection,
-                onStartDictation: {
-                    trackSettingsAction("start_dictation", page: .home)
-                    actions.startDictation()
-                },
-                onStartMeeting: {
-                    trackSettingsAction("start_meeting", page: .home)
-                    actions.startMeeting()
-                }
+                selectedMode: homeHeroModeSelection
             ) {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
