@@ -83,6 +83,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
+    @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
 
     init(
         appState: TranscriptedAppState,
@@ -100,7 +101,7 @@ struct TranscriptedSettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
             List(selection: $navigation.selectedPage) {
                 ForEach(sidebarSections) { section in
                     if let title = section.title {
@@ -435,7 +436,14 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsContentTopPadding: CGFloat {
-        navigation.selectedPage == .home ? -34 : 14
+        SettingsContentLayoutPolicy.topPadding(
+            for: navigation.selectedPage,
+            sidebarPresentation: settingsSidebarPresentation
+        )
+    }
+
+    private var settingsSidebarPresentation: SettingsSidebarPresentation {
+        settingsColumnVisibility == .detailOnly ? .hidden : .visible
     }
 
     private var homeHeroModeSelection: Binding<HomeHeroMode> {

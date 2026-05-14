@@ -192,6 +192,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/AppSoundPlayer.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
+    "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
     "Sources/UI/Overlay/DictationCancelHintPolicy.swift"
