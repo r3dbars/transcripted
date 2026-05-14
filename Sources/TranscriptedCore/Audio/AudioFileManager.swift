@@ -27,8 +27,11 @@ extension Audio {
             }
             let (engine, inputNode) = try ensureEngineInitialized()
             if engine.isRunning {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "start_recording_reset"
+                )
                 engine.reset()
                 voiceProcessingEnabled = false
                 self.inputNode = engine.inputNode
@@ -290,7 +293,11 @@ extension Audio {
                 throw AudioCaptureStaleSessionError()
             }
             // Remove any existing tap (safety check)
-            inputNode.removeTap(onBus: 0)
+            tearDownInputTapSafely(
+                engine: engine,
+                inputNode: inputNode,
+                operation: "start_recording_install"
+            )
 
             // Install tap on microphone
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
@@ -301,8 +308,11 @@ extension Audio {
                 engine.prepare()
                 try engine.start()
             } catch {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "start_recording_failed"
+                )
                 throw error
             }
         }

@@ -99,6 +99,19 @@ enum AudioRecordingFormatPolicy {
     }
 }
 
+enum AudioInputTapTeardownStep: Equatable {
+    case stopEngine
+    case removeInputTap
+}
+
+enum AudioInputTapTeardownPolicy {
+    static func steps(engineIsRunning: Bool) -> [AudioInputTapTeardownStep] {
+        engineIsRunning
+            ? [.stopEngine, .removeInputTap]
+            : [.removeInputTap]
+    }
+}
+
 /// Main audio recording class that captures microphone and system audio
 /// Note: This class does NOT use @MainActor because it manages AVAudioEngine
 /// which requires synchronous access from audio tap callbacks on audio threads.
@@ -313,6 +326,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         audioGraphLock.lock()
         defer { audioGraphLock.unlock() }
         return try body()
+    }
+
+    func tearDownInputTapSafely(
+        engine: AVAudioEngine,
+        inputNode: AVAudioInputNode,
+        operation: String
+    ) {
+        let steps = AudioInputTapTeardownPolicy.steps(engineIsRunning: engine.isRunning)
+        for step in steps {
+            switch step {
+            case .stopEngine:
+                AppLogger.audioMic.info("Stopping mic engine before removing input tap", [
+                    "operation": operation
+                ])
+                engine.stop()
+            case .removeInputTap:
+                inputNode.removeTap(onBus: 0)
+            }
+        }
     }
 
     // Write error tracking — stop writing after repeated failures
@@ -927,10 +959,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
                 if let engineRef, let inputNodeRef {
                     AppLogger.audio.info("Stopping audio capture")
-                    inputNodeRef.removeTap(onBus: 0)
-                    if engineRef.isRunning {
-                        engineRef.stop()
-                    }
+                    self.tearDownInputTapSafely(
+                        engine: engineRef,
+                        inputNode: inputNodeRef,
+                        operation: "recording_stop"
+                    )
                     self.disarmVoiceProcessing(on: inputNodeRef)
                 }
 
@@ -1026,7 +1059,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         do {
             try withAudioGraphLock {
                 // Install mic tap for level metering only (no file writing)
-                inputNode.removeTap(onBus: 0)
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_start"
+                )
                 inputNode.installTap(onBus: 0, bufferSize: 4096, format: monitorFormat) { [weak self] buffer, _ in
                     self?.calculateLevel(buffer: buffer)
                 }
@@ -1035,7 +1072,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         } catch {
             AppLogger.audio.warning("Failed to start monitoring engine", ["error": error.localizedDescription])
             withAudioGraphLock {
-                inputNode.removeTap(onBus: 0)
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_start_failed"
+                )
             }
             return
         }
@@ -1069,10 +1110,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         withAudioGraphLock {
             if let engine = engine, let inputNode = inputNode {
-                if engine.isRunning {
-                    inputNode.removeTap(onBus: 0)
-                    engine.stop()
-                }
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "monitoring_stop"
+                )
                 disarmVoiceProcessing(on: inputNode)
             }
 
@@ -1106,9 +1148,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCapture?.stopSync()
 
         withAudioGraphLock {
-            if let engine, let inputNode, engine.isRunning {
-                inputNode.removeTap(onBus: 0)
-                engine.stop()
+            if let engine, let inputNode {
+                tearDownInputTapSafely(
+                    engine: engine,
+                    inputNode: inputNode,
+                    operation: "deinit"
+                )
             }
         }
     }
