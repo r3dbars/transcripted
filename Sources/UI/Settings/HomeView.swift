@@ -1099,12 +1099,11 @@ struct HomeFeedbackSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker("Issue", selection: $issueKind) {
-                ForEach(HomeFeedbackIssueKind.allCases) { kind in
-                    Text(kind.label).tag(kind)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Issue")
+                    .font(.subheadline.weight(.semibold))
+                HomeIssueKindSelector(selection: $issueKind)
             }
-            .pickerStyle(.segmented)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("What happened?")
@@ -1146,6 +1145,73 @@ struct HomeFeedbackSheet: View {
         }
         .padding(24)
         .frame(width: 520)
+    }
+}
+
+private struct HomeIssueKindSelector: View {
+    @Binding var selection: HomeFeedbackIssueKind
+
+    private let columns = [
+        GridItem(.flexible(minimum: 140), spacing: 8),
+        GridItem(.flexible(minimum: 140), spacing: 8),
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(HomeFeedbackIssueKind.allCases) { kind in
+                HomeIssueKindButton(
+                    kind: kind,
+                    isSelected: selection == kind
+                ) {
+                    selection = kind
+                }
+            }
+        }
+    }
+}
+
+private struct HomeIssueKindButton: View {
+    let kind: HomeFeedbackIssueKind
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(kind.label)
+                    .font(.callout.weight(isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(stroke, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var background: Color {
+        isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.035)
+    }
+
+    private var stroke: Color {
+        isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08)
     }
 }
 
