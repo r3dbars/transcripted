@@ -3103,7 +3103,7 @@ private struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Pick one."
+                summary: "Install direct tools for Claude Desktop, or copy a prompt for local coding agents."
             )
 
             agentActionSection
