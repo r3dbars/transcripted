@@ -342,14 +342,13 @@ struct HomeHeroCard<ActivityContent: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.leading, 36)
-                .padding(.bottom, -12)
+                .padding(.bottom, -1)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 18) {
                 activityContent()
             }
-            .padding(.top, 28)
+            .padding(.top, 20)
             .padding(.horizontal, 28)
             .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -387,17 +386,6 @@ private struct HomeHeroModeTabs: View {
                 )
             }
         }
-        .background(alignment: .bottom) {
-            Rectangle()
-                .fill(surfaceFill)
-                .frame(height: 18)
-                .offset(y: 10)
-                .padding(.horizontal, -1)
-        }
-    }
-
-    private var surfaceFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
     }
 }
 
@@ -410,45 +398,53 @@ private struct HomeHeroModeTab: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 Image(systemName: mode.symbolName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: isSelected ? 13 : 12, weight: .semibold))
                 Text(mode.switchTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: isSelected ? 14 : 13, weight: .semibold))
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .frame(minWidth: 126)
             .padding(.horizontal, 18)
-            .padding(.top, isSelected ? 12 : 10)
-            .padding(.bottom, isSelected ? 11 : 9)
+            .padding(.top, isSelected ? 14 : 11)
+            .padding(.bottom, isSelected ? 13 : 10)
             .background(
-                HomeHeroTabShape(cornerRadius: 12)
+                HomeHeroTabShape(cornerRadius: 14)
                     .fill(tabFill)
             )
             .overlay(
-                HomeHeroTabBorderShape(cornerRadius: 12)
+                HomeHeroTabBorderShape(cornerRadius: 14)
                     .stroke(tabStroke, lineWidth: 1)
             )
+            .overlay(alignment: .top) {
+                HomeHeroTabShape(cornerRadius: 14)
+                    .stroke(Color.white.opacity(isSelected ? 0.06 : 0.025), lineWidth: 1)
+                    .padding(.top, 1)
+                    .padding(.horizontal, 1)
+            }
             .overlay(alignment: .bottom) {
                 if isSelected {
                     Rectangle()
                         .fill(surfaceFill)
-                        .frame(height: 14)
-                        .offset(y: 8)
+                        .frame(height: 3)
+                        .offset(y: 1)
                 }
             }
         }
         .buttonStyle(.plain)
         .help("Show \(mode.switchTitle.lowercased())")
+        .offset(y: isSelected ? 0 : 5)
         .zIndex(isSelected ? 1 : 0)
     }
 
     private var tabFill: Color {
         if isSelected {
-            return surfaceFill
+            return Color(nsColor: .controlBackgroundColor).opacity(0.96)
         }
-        return surfaceFill.opacity(0.62)
+        return Color(nsColor: .controlBackgroundColor).opacity(0.58)
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.08) : Color.primary.opacity(0.03)
+        isSelected ? Color.primary.opacity(0.11) : Color.primary.opacity(0.06)
     }
 
     private var surfaceFill: Color {
@@ -895,15 +891,6 @@ struct HomeActivityTabsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selectedTab.label)
-                        .font(.system(size: 15, weight: .semibold))
-                }
-
-                Spacer(minLength: 12)
-            }
-
             if isLoading {
                 HStack {
                     ProgressView()
