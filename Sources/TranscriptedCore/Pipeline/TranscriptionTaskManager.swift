@@ -164,7 +164,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
-        displayStatus = .gettingReady
+        publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting transcription task", [
             "taskId": "\(task.id)",
@@ -175,7 +175,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let asyncTask = Task {
             do {
                 await MainActor.run {
-                    self.displayStatus = .transcribing(progress: 0.0)
+                    self.publishNonFailureStatus(.transcribing(progress: 0.0))
                 }
 
                 let transcriptURL = try await self.transcribeWithSpeakerIdentification(
@@ -191,10 +191,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 await MainActor.run {
                     if self.speakerNamingRequest == nil {
                         self.populateSavedMetadata(from: transcriptURL)
-                        self.displayStatus = .transcriptSaved
+                        self.publishNonFailureStatus(.transcriptSaved)
                         self.scheduleStatusReset(delay: 4)
                     } else {
-                        self.displayStatus = .finishing
+                        self.publishNonFailureStatus(.finishing)
                     }
                     self.handleTaskCompletion(taskId: task.id)
                 }
@@ -268,7 +268,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
-        displayStatus = .gettingReady
+        publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting imported transcription task", [
             "taskId": taskId.uuidString,
@@ -278,7 +278,7 @@ public class TranscriptionTaskManager: ObservableObject {
         let asyncTask = Task {
             do {
                 await MainActor.run {
-                    self.displayStatus = .transcribing(progress: 0.0)
+                    self.publishNonFailureStatus(.transcribing(progress: 0.0))
                 }
 
                 let transcriptURL = try await self.transcribeImportedAudio(
@@ -291,10 +291,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 await MainActor.run {
                     if self.speakerNamingRequest == nil {
                         self.populateSavedMetadata(from: transcriptURL)
-                        self.displayStatus = .transcriptSaved
+                        self.publishNonFailureStatus(.transcriptSaved)
                         self.scheduleStatusReset(delay: 4)
                     } else {
-                        self.displayStatus = .finishing
+                        self.publishNonFailureStatus(.finishing)
                     }
                     self.handleTaskCompletion(taskId: taskId)
                 }
@@ -438,6 +438,11 @@ public class TranscriptionTaskManager: ObservableObject {
         displayStatus = .failed(message: displayMessage)
     }
 
+    private func publishNonFailureStatus(_ status: DisplayStatus) {
+        lastFailureDiagnosticMessage = nil
+        displayStatus = status
+    }
+
     public func addFailedTranscriptionRetainingAudio(
         micAudioURL: URL,
         systemAudioURL: URL?,
@@ -504,7 +509,7 @@ public class TranscriptionTaskManager: ObservableObject {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
             self.activeCount += 1
             self.backgroundTaskCount += 1
-            self.displayStatus = .gettingReady
+            self.publishNonFailureStatus(.gettingReady)
         }
 
         do {
@@ -529,10 +534,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 if self.speakerNamingRequest == nil {
                     self.populateSavedMetadata(from: transcriptURL)
-                    self.displayStatus = .transcriptSaved
+                    self.publishNonFailureStatus(.transcriptSaved)
                     self.scheduleStatusReset(delay: 4)
                 } else {
-                    self.displayStatus = .finishing
+                    self.publishNonFailureStatus(.finishing)
                 }
             }
 
@@ -580,7 +585,7 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTasks.removeAll()
         activeCount = 0
         backgroundTaskCount = 0
-        displayStatus = .idle
+        publishNonFailureStatus(.idle)
     }
 
     /// Populate saved transcript metadata from the file's YAML frontmatter.
@@ -609,7 +614,7 @@ public class TranscriptionTaskManager: ObservableObject {
             guard self.speakerNamingRequest == nil else { return }
             switch self.displayStatus {
             case .transcriptSaved, .failed:
-                self.displayStatus = .idle
+                self.publishNonFailureStatus(.idle)
             default:
                 break
             }

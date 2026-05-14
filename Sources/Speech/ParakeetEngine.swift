@@ -532,6 +532,7 @@ class ParakeetEngine: ObservableObject {
     private func runTimedAudioEngineWork<T>(
         operation: String,
         timeoutNanoseconds: UInt64 = TranscriptedConstants.audioStartOperationTimeout,
+        cleanupAfterLateCompletion: ((AVAudioEngine) -> Void)? = nil,
         _ work: @escaping (AVAudioEngine) throws -> T
     ) async throws -> T {
         let queue = audioEngineQueue
@@ -554,10 +555,28 @@ class ParakeetEngine: ObservableObject {
             }
 
             queue.async {
+                let shouldRun = resumeLock.withLock { !didResume }
+                guard shouldRun else { return }
+
+                let result: Result<T, Error>
                 do {
-                    resumeOnce(.success(try work(engine)))
+                    result = .success(try work(engine))
                 } catch {
-                    resumeOnce(.failure(error))
+                    result = .failure(error)
+                }
+
+                var completedBeforeTimeout = false
+                resumeLock.withLock {
+                    if !didResume {
+                        didResume = true
+                        completedBeforeTimeout = true
+                    }
+                }
+
+                if completedBeforeTimeout {
+                    continuation.resume(with: result)
+                } else {
+                    cleanupAfterLateCompletion?(engine)
                 }
             }
 
@@ -574,6 +593,14 @@ class ParakeetEngine: ObservableObject {
                 )
             }
         }
+    }
+
+    private static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
+        audioEngine.inputNode.removeTap(onBus: 0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.reset()
     }
 
     private func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) -> T) async -> T {
@@ -1760,7 +1787,10 @@ class ParakeetEngine: ObservableObject {
 
     private func installTapAndStartEngine(isRecoveryAttempt: Bool) async throws -> ParakeetAudioStartSnapshot {
         let wasPrewarmed = isEnginePrewarmed
-        return try await runTimedAudioEngineWork(operation: "start_recording") { audioEngine in
+        return try await runTimedAudioEngineWork(
+            operation: "start_recording",
+            cleanupAfterLateCompletion: Self.cleanUpLateAudioStart(on:)
+        ) { audioEngine in
             let inputNode = audioEngine.inputNode
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
