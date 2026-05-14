@@ -331,6 +331,7 @@ private enum HomeHeroTabMetrics {
     static let width: CGFloat = 172
     static let height: CGFloat = 52
     static let cornerRadius: CGFloat = 14
+    static let cardCornerRadius: CGFloat = 18
     static let spacing: CGFloat = 4
 
     static var surfaceFill: Color {
@@ -359,7 +360,7 @@ struct HomeHeroCard<ActivityContent: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.bottom, 0)
+                .padding(.bottom, -hairline)
                 .zIndex(1)
 
             VStack(alignment: .leading, spacing: 18) {
@@ -370,16 +371,21 @@ struct HomeHeroCard<ActivityContent: View>: View {
             .padding(.bottom, 22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                HomeHeroCardShape(
+                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
+                    squareTopLeft: selectedMode == .meeting
+                )
                     .fill(cardFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                HomeHeroCardBorderShape(
+                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
+                    selectedTabMinX: selectedTabLeadingOffset,
+                    selectedTabMaxX: selectedTabTrailingOffset,
+                    squareTopLeft: selectedMode == .meeting
+                )
                     .stroke(Color.primary.opacity(0.08), lineWidth: hairline)
             )
-            .overlay(alignment: .topLeading) {
-                selectedTabSeamMask
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -401,12 +407,8 @@ struct HomeHeroCard<ActivityContent: View>: View {
         }
     }
 
-    private var selectedTabSeamMask: some View {
-        Rectangle()
-            .fill(cardFill)
-            .frame(width: HomeHeroTabMetrics.width, height: hairline * 3)
-            .offset(x: selectedTabLeadingOffset, y: -hairline)
-            .allowsHitTesting(false)
+    private var selectedTabTrailingOffset: CGFloat {
+        selectedTabLeadingOffset + HomeHeroTabMetrics.width
     }
 }
 
@@ -539,6 +541,97 @@ private struct HomeHeroTabBorderShape: Shape {
             control: CGPoint(x: rect.maxX, y: rect.minY)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
+    }
+}
+
+private struct HomeHeroCardShape: Shape {
+    let cornerRadius: CGFloat
+    let squareTopLeft: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        let topLeftRadius = squareTopLeft ? 0 : radius
+        var path = Path()
+
+        path.move(to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+        if topLeftRadius > 0 {
+            path.addQuadCurve(
+                to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY),
+                control: CGPoint(x: rect.minX, y: rect.minY)
+            )
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct HomeHeroCardBorderShape: Shape {
+    let cornerRadius: CGFloat
+    let selectedTabMinX: CGFloat
+    let selectedTabMaxX: CGFloat
+    let squareTopLeft: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+        let topLeftRadius = squareTopLeft ? 0 : radius
+        let topLineStart = rect.minX + topLeftRadius
+        let topLineEnd = rect.maxX - radius
+        let gapStart = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMinX))
+        let gapEnd = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMaxX))
+        var path = Path()
+
+        if topLeftRadius > 0 {
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+            path.addQuadCurve(
+                to: CGPoint(x: topLineStart, y: rect.minY),
+                control: CGPoint(x: rect.minX, y: rect.minY)
+            )
+        }
+
+        if gapStart > topLineStart {
+            path.move(to: CGPoint(x: topLineStart, y: rect.minY))
+            path.addLine(to: CGPoint(x: min(gapStart, topLineEnd), y: rect.minY))
+        }
+
+        if gapEnd < topLineEnd {
+            path.move(to: CGPoint(x: max(gapEnd, topLineStart), y: rect.minY))
+            path.addLine(to: CGPoint(x: topLineEnd, y: rect.minY))
+        }
+
+        path.move(to: CGPoint(x: topLineEnd, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
+
         return path
     }
 }
