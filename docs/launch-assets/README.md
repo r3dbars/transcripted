@@ -16,9 +16,15 @@ Static screenshots:
 
 Motion assets:
 
-- `docs/assets/launch/transcripted-demo.mov` - original 16 second screen recording
-- `docs/assets/launch/transcripted-demo.mp4` - lightweight social/video upload
+- `docs/assets/launch/transcripted-demo.mov` - fast Home -> Meetings -> Dictation -> Home tour
+- `docs/assets/launch/transcripted-demo.mp4` - lightweight social/video upload of the fast tour
 - `docs/assets/launch/transcripted-demo.gif` - GitHub README and quick previews
+- `docs/assets/launch/transcripted-dictation-recording.mov` - dictation recording control
+- `docs/assets/launch/transcripted-dictation-recording.mp4` - lightweight social/video upload
+- `docs/assets/launch/transcripted-dictation-recording.gif` - GitHub README and quick previews
+- `docs/assets/launch/transcripted-meeting-recording.mov` - meeting recording start flow
+- `docs/assets/launch/transcripted-meeting-recording.mp4` - lightweight social/video upload
+- `docs/assets/launch/transcripted-meeting-recording.gif` - GitHub README and quick previews
 
 Sample output:
 
@@ -26,12 +32,11 @@ Sample output:
 
 ## Demo Script
 
-1. Start on the Home dashboard with two demo meetings and two demo dictations.
-2. Open Meetings to show recording, audio import, and recent transcripts.
-3. Open a meeting preview to show speaker-labeled transcript output.
-4. Open Dictation to show saved dictations and paste-back.
-5. Open People to show deferred speaker review and duplicate cleanup.
-6. Open Agent to show Claude install and local-file handoff.
+1. Start on the Home dashboard with demo meetings and demo dictations.
+2. Open Meetings, then Dictation, then return Home quickly for the tour GIF.
+3. Capture dictation recording with the listening control visible.
+4. Capture meeting recording from the Home record action and local prep flow.
+5. Use the static screenshots for deeper speaker review, People, Agent, and file-output details.
 
 Keep the spoken/written pitch short:
 
