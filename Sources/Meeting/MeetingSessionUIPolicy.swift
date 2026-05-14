@@ -17,6 +17,12 @@ enum MeetingSessionUIPolicy {
             && !isSpeakerReviewPending
             && !isPreparingQueuedTranscriptionStart
     }
+
+    static func shouldClearTranscriptionTriggerWhenIdle(
+        isSpeakerReviewPending: Bool
+    ) -> Bool {
+        !isSpeakerReviewPending
+    }
 }
 
 enum MeetingRecordingTitlePolicy {

@@ -72,6 +72,22 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
+    runSuite("MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle — keeps trigger through speaker review") {
+        assertFalse(
+            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle(
+                isSpeakerReviewPending: true
+            ),
+            "speaker review can publish the terminal saved or failed status after active transcription work clears"
+        )
+
+        assertTrue(
+            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle(
+                isSpeakerReviewPending: false
+            ),
+            "completed work without speaker review should clear the last start trigger"
+        )
+    }
+
     runSuite("MeetingRecordingTitlePolicy — explicit prompt title wins over calendar fallback") {
         assertEqual(
             MeetingRecordingTitlePolicy.resolve(
