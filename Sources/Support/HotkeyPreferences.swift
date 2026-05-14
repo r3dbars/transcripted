@@ -153,7 +153,11 @@ enum HotkeyPreferences {
     }
 
     static func setDictationShortcutsEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
-        userDefaults.set(enabled, forKey: dictationShortcutsEnabledKey)
+        let ud = userDefaults
+        ud.set(enabled, forKey: dictationShortcutsEnabledKey)
+        if !enabled {
+            ud.set(false, forKey: rightOptionDictationKey)
+        }
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
@@ -167,6 +171,7 @@ enum HotkeyPreferences {
         ud.removeObject(forKey: meetingModifiersKey)
         ud.removeObject(forKey: dictationShortcutModeKey)
         ud.removeObject(forKey: dictationShortcutsEnabledKey)
+        ud.removeObject(forKey: rightOptionDictationKey)
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 

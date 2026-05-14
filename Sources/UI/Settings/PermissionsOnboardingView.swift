@@ -446,12 +446,10 @@ struct PermissionsOnboardingView: View {
     }
 
     private func applySelectedUseCasePreferences() {
-        switch selectedUseCase {
-        case .meetings:
-            HotkeyPreferences.setDictationShortcutsEnabled(!leaveDictationShortcutsOff)
-        case .dictation:
-            HotkeyPreferences.setDictationShortcutsEnabled(true)
-        }
+        OnboardingDictationShortcutPolicy.apply(
+            useCase: selectedUseCase.shortcutPolicyUseCase,
+            leaveDictationShortcutsOff: leaveDictationShortcutsOff
+        )
     }
 
     private func copyAgentItem(_ item: AgentCopyItem) {
@@ -584,6 +582,15 @@ private enum OnboardingStepKind: Hashable {
 private enum OnboardingUseCase: Hashable {
     case meetings
     case dictation
+
+    var shortcutPolicyUseCase: OnboardingDictationShortcutPolicy.UseCase {
+        switch self {
+        case .meetings:
+            return .meetings
+        case .dictation:
+            return .dictation
+        }
+    }
 }
 
 private enum AgentCopyItem: Hashable {

@@ -44,12 +44,46 @@ func testHotkeyPreferences() {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
+        HotkeyPreferences.setRightOptionDictation(enabled: true, userDefaults: defaults)
         HotkeyPreferences.setDictationShortcutsEnabled(false, userDefaults: defaults)
 
         assertEqual(
             HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
             false,
             "users should be able to turn off accidental dictation triggers"
+        )
+        assertEqual(
+            HotkeyPreferences.rightOptionDictationEnabled(userDefaults: defaults),
+            false,
+            "turning dictation shortcuts off should also keep the legacy Right Option trigger off"
+        )
+    }
+
+    runSuite("Onboarding keeps Daniel Goncalves's meeting-only setup fully off") {
+        let suiteName = "HotkeyPreferencesTests.danielMeetingOnly.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        OnboardingDictationShortcutPolicy.apply(
+            useCase: .meetings,
+            leaveDictationShortcutsOff: true,
+            userDefaults: defaults
+        )
+
+        assertEqual(
+            HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
+            false,
+            "meeting-only onboarding should let users leave dictation shortcuts off"
+        )
+        assertEqual(
+            HotkeyPreferences.rightOptionDictationEnabled(userDefaults: defaults),
+            false,
+            "meeting-only onboarding should not leave Right Option armed behind the master switch"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "meeting capture should still keep its app shortcut path available"
         )
     }
 
@@ -85,6 +119,11 @@ func testHotkeyPreferences() {
             HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
             true,
             "reset should re-enable dictation shortcuts"
+        )
+        assertEqual(
+            HotkeyPreferences.rightOptionDictationEnabled(userDefaults: defaults),
+            true,
+            "reset should restore the default Right Option behavior"
         )
     }
 }
