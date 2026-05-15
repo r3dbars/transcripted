@@ -454,20 +454,30 @@ struct PermissionsOnboardingView: View {
 
     private func copyAgentItem(_ item: AgentCopyItem) {
         let value: String
+        let agentCTA: String
         switch item {
         case .claudeDesktopSetup:
+            agentCTA = "claude_desktop_setup"
             value = """
             \(AgentConnectionGuide.mcpSetupText)
 
             \(AgentConnectionGuide.mcpConfigExample)
             """
         case .localAgentPrompt:
+            agentCTA = "local_agent_prompt"
             value = AgentConnectionGuide.starterPrompt(filename: nil)
         }
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(value, forType: .string)
+        AnalyticsReporter.track(
+            "onboarding_agent_cta_clicked",
+            properties: [
+                "agent_cta": agentCTA,
+                "step_id": "connect_agent",
+            ]
+        )
 
         copiedAgentItem = item
         copiedResetTask?.cancel()
