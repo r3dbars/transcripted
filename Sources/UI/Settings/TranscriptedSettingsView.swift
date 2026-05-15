@@ -289,8 +289,8 @@ struct TranscriptedSettingsView: View {
             if !needsAttention.isEmpty {
                 HomeNeedsAttentionCard(
                     issues: needsAttention,
-                    onReview: {
-                        reviewHomeNeedsAttention()
+                    onReview: { issue in
+                        reviewHomeNeedsAttention(issue)
                     }
                 )
             }
@@ -374,6 +374,9 @@ struct TranscriptedSettingsView: View {
                     onFlagMeeting: { item in
                         trackSettingsAction("flag_meeting", page: .home)
                         homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
+                    },
+                    onReviewMeetingSpeakers: { _ in
+                        openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
                     },
                     meetingMenuItems: { item in
                         meetingRowMenuItems(for: item)
@@ -473,27 +476,31 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func reviewHomeNeedsAttention() {
-        trackSettingsAction("open_needs_attention", page: .home)
-
-        if !meetingSession.failedMeetings.isEmpty || homeTranscriptionActivity != nil {
+    private func reviewHomeNeedsAttention(_ issue: HomeNeedsAttentionCard.Issue) {
+        switch issue.destination {
+        case .failedMeetings:
+            trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
             homeActivityTab = .meetings
             homeHeroMode = .meeting
-            return
-        }
-
-        if speakerPeopleModel.needsReviewCount > 0 {
-            speakerPeopleModel.profileFilter = .needsReview
-            navigation.selectedPage = .people
-            return
-        }
-
-        if !missingRequiredPermissions.isEmpty {
+        case .speakers:
+            openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
+        case .activity:
+            trackSettingsAction("open_needs_attention_activity", page: .home)
+            homeActivityTab = .meetings
+            homeHeroMode = .meeting
+        case .privacy:
+            trackSettingsAction("open_needs_attention_privacy", page: .home)
             navigation.selectedPage = .privacy
-            return
+        case .models:
+            trackSettingsAction("open_needs_attention_models", page: .home)
+            navigation.selectedPage = .models
         }
+    }
 
-        navigation.selectedPage = .models
+    private func openHomeSpeakerReview(actionName: String) {
+        trackSettingsAction(actionName, page: .home)
+        speakerPeopleModel.profileFilter = .needsReview
+        navigation.selectedPage = .people
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -611,6 +618,10 @@ struct TranscriptedSettingsView: View {
 
     private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         [
+            HomeRowMenuItem(title: "Open saved file", symbolName: "doc.text") {
+                trackSettingsAction("open_recent_dictation_file", page: .home)
+                NSWorkspace.shared.open(entry.url)
+            },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_dictation", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
@@ -644,7 +655,18 @@ struct TranscriptedSettingsView: View {
         var items: [HomeRowMenuItem] = [
             HomeRowMenuItem(title: "Open transcript preview", symbolName: "doc.text.magnifyingglass") {
                 presentHomeMeetingPreview(item)
-            },
+            }
+        ]
+
+        if item.speakerStatus.needsReview {
+            items.append(
+                HomeRowMenuItem(title: "Review speakers", symbolName: "person.crop.circle.badge.questionmark") {
+                    openHomeSpeakerReview(actionName: "review_meeting_speakers_menu")
+                }
+            )
+        }
+
+        items.append(contentsOf: [
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_meeting", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
@@ -665,7 +687,7 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
-        ]
+        ])
 
         if let audio = item.audio, let firstAudio = audio.urls.first {
             items.append(
@@ -830,9 +852,12 @@ struct TranscriptedSettingsView: View {
         if failedCount > 0 {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "failed-meetings",
                     symbolName: "arrow.clockwise.circle.fill",
                     title: failedCount == 1 ? "1 meeting can be recovered" : "\(failedCount) meetings can be recovered",
-                    detail: "Audio was saved. Retry when no meeting or dictation work is running."
+                    detail: "Audio was saved. Retry when no meeting or dictation work is running.",
+                    destination: .failedMeetings,
+                    actionTitle: "Recover"
                 )
             )
         }
@@ -841,9 +866,12 @@ struct TranscriptedSettingsView: View {
         if speakerReviewCount > 0 {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "speakers",
                     symbolName: "person.crop.circle.badge.questionmark",
                     title: speakerReviewCount == 1 ? "1 speaker needs a name" : "\(speakerReviewCount) speakers need names",
-                    detail: "Review later items are waiting in People."
+                    detail: "Review later items are waiting in People.",
+                    destination: .speakers,
+                    actionTitle: "Review"
                 )
             )
         }
@@ -851,9 +879,12 @@ struct TranscriptedSettingsView: View {
         if let activity = homeTranscriptionActivity, activity.tone == .working {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "activity",
                     symbolName: activity.symbolName,
                     title: activity.title,
-                    detail: activity.status
+                    detail: activity.status,
+                    destination: .activity,
+                    actionTitle: "Open"
                 )
             )
         }
@@ -861,9 +892,12 @@ struct TranscriptedSettingsView: View {
         if !missingRequiredPermissions.isEmpty {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "permissions",
                     symbolName: "lock.trianglebadge.exclamationmark",
                     title: "Permissions",
-                    detail: permissionsDetailLine
+                    detail: permissionsDetailLine,
+                    destination: .privacy,
+                    actionTitle: "Fix"
                 )
             )
         }
@@ -875,17 +909,23 @@ struct TranscriptedSettingsView: View {
         if modelCard.tone == .failed {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "voice-model-failed",
                     symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
-                    detail: modelCard.detail
+                    detail: modelCard.detail,
+                    destination: .models,
+                    actionTitle: "Fix"
                 )
             )
         } else if preferredTranscriptionModel != effectiveTranscriptionModel {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "voice-model-mismatch",
                     symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
-                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used."
+                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used.",
+                    destination: .models,
+                    actionTitle: "Review"
                 )
             )
         }

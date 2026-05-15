@@ -715,6 +715,8 @@ struct HomeStatsBadge: View {
     let stats: [HomeStatItem]
     let streak: Int?
 
+    @State private var isHovering = false
+
     var body: some View {
         Menu {
             ForEach(stats) { stat in
@@ -726,32 +728,48 @@ struct HomeStatsBadge: View {
                 Label("\(streak)d streak", systemImage: "flame.fill")
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
 
-                VStack(alignment: .leading, spacing: 1) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Overall")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .lineLimit(1)
+
                     Text(primarySummary)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
-                    Text("Overall")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.74))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.96 : 0.82))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(isHovering ? 0.14 : 0.08), lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(isHovering ? 0.18 : 0.1), radius: isHovering ? 14 : 9, x: 0, y: isHovering ? 7 : 4)
+            .scaleEffect(isHovering ? 1.01 : 1)
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+            .onHover { isHovering = $0 }
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -961,6 +979,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     var leadingAccessory: AnyView? = nil
     var bottomAccessory: AnyView? = nil
     var compact: Bool = false
+    var opensOnRowClick: Bool = true
     @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
@@ -968,20 +987,14 @@ private struct HomeActivityRowShell<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 4 : 7) {
             HStack(alignment: .top, spacing: 14) {
-                Button(action: onOpen) {
-                    HStack(alignment: .top, spacing: 14) {
-                        Text(timeString)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 64, alignment: .leading)
-                            .padding(.top, 2)
-
-                        content()
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                if opensOnRowClick {
+                    Button(action: onOpen) {
+                        mainContent
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                } else {
+                    mainContent
                 }
-                .buttonStyle(.plain)
 
                 HomeRowActionButtons(
                     isCopied: isCopied,
@@ -1007,6 +1020,20 @@ private struct HomeActivityRowShell<Content: View>: View {
         )
         .onHover { isHovering = $0 }
     }
+
+    private var mainContent: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text(timeString)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+                .padding(.top, 2)
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
 }
 
 struct HomeDictationRow: View {
@@ -1017,6 +1044,11 @@ struct HomeDictationRow: View {
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
 
+    @State private var isExpanded = false
+
+    private let collapsedCharacterLimit = 280
+    private let expandedCharacterLimit = 1_600
+
     var body: some View {
         HomeActivityRowShell(
             timeString: HomeActivityRowFormatting.timeFormatter.string(from: entry.createdAt),
@@ -1024,19 +1056,39 @@ struct HomeDictationRow: View {
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
-            menuItems: menuItems
+            menuItems: menuItems,
+            opensOnRowClick: false
         ) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(preview)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayText)
                     .font(.system(size: 13))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(1)
+                    .lineLimit(isExpanded ? 12 : 3)
+                    .lineSpacing(2)
                     .multilineTextAlignment(.leading)
 
                 Text(status.text)
                     .font(.caption2)
                     .foregroundStyle(status.foregroundStyle)
                     .lineLimit(1)
+
+                if canExpand {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(isExpanded ? "Show less" : "Show more")
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .help(isExpanded ? "Collapse dictation" : "Expand dictation")
+                }
             }
         }
     }
@@ -1045,10 +1097,25 @@ struct HomeDictationRow: View {
         HomeArtifactStatus.dictation(entry)
     }
 
-    private var preview: String {
+    private var previewText: String {
         let trimmed = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return entry.title }
         return trimmed
+    }
+
+    private var canExpand: Bool {
+        previewText.count > collapsedCharacterLimit || previewText.contains("\n")
+    }
+
+    private var displayText: String {
+        limitedPreview(characterLimit: isExpanded ? expandedCharacterLimit : collapsedCharacterLimit)
+    }
+
+    private func limitedPreview(characterLimit: Int) -> String {
+        guard previewText.count > characterLimit else { return previewText }
+        let prefix = previewText.prefix(characterLimit)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(prefix)..."
     }
 }
 
@@ -1058,6 +1125,7 @@ struct HomeMeetingRow: View {
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
+    let onReviewSpeakers: () -> Void
     let menuItems: [HomeRowMenuItem]
 
     var body: some View {
@@ -1068,6 +1136,7 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
+            leadingAccessory: reviewSpeakersAccessory,
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
@@ -1094,6 +1163,16 @@ struct HomeMeetingRow: View {
 
     private var status: HomeArtifactStatus {
         HomeArtifactStatus.meeting(item)
+    }
+
+    private var reviewSpeakersAccessory: AnyView? {
+        guard item.speakerStatus.needsReview else { return nil }
+        return AnyView(
+            Button("Review", action: onReviewSpeakers)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Review speakers")
+        )
     }
 }
 
@@ -1253,6 +1332,7 @@ struct HomeActivityTabsCard: View {
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onFlagMeeting: (RecentMeetingItem) -> Void
+    let onReviewMeetingSpeakers: (RecentMeetingItem) -> Void
     let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
     let onLoadMoreDictations: () -> Void
     let onLoadMoreMeetings: () -> Void
@@ -1304,6 +1384,7 @@ struct HomeActivityTabsCard: View {
                             onOpen: { onOpenMeeting(item) },
                             onCopy: { onCopyMeeting(item) },
                             onFlag: { onFlagMeeting(item) },
+                            onReviewSpeakers: { onReviewMeetingSpeakers(item) },
                             menuItems: meetingMenuItems(item)
                         )
                     }
@@ -1680,37 +1761,63 @@ struct HomeLoadMoreButton: View {
     let isLoading: Bool
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if isLoading {
                     ProgressView()
                         .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 13, weight: .semibold))
                 }
 
                 Text(isLoading ? "Loading" : title)
                     .font(.subheadline.weight(.medium))
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .foregroundStyle(isLoading ? Color.secondary : Color.primary)
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.92 : 0.78))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(Color.primary.opacity(isHovering ? 0.16 : 0.1), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(isHovering ? 0.1 : 0.04), radius: isHovering ? 8 : 4, x: 0, y: isHovering ? 4 : 2)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .disabled(isLoading)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: isHovering)
     }
 }
 
 // MARK: - Needs-attention card
 
 struct HomeNeedsAttentionCard: View {
+    enum Destination {
+        case failedMeetings
+        case speakers
+        case activity
+        case privacy
+        case models
+    }
+
     struct Issue: Identifiable {
-        let id = UUID()
+        let id: String
         let symbolName: String
         let title: String
         let detail: String
+        let destination: Destination
+        let actionTitle: String
     }
 
     let issues: [Issue]
-    let onReview: () -> Void
+    let onReview: (Issue) -> Void
 
     var body: some View {
         if let first = issues.first {
@@ -1739,9 +1846,7 @@ struct HomeNeedsAttentionCard: View {
 
                 Spacer(minLength: 12)
 
-                Button("Review", action: onReview)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                reviewControl(first: first)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -1754,6 +1859,36 @@ struct HomeNeedsAttentionCard: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.orange.opacity(0.28), lineWidth: 1)
             )
+        }
+    }
+
+    @ViewBuilder
+    private func reviewControl(first: Issue) -> some View {
+        if issues.count <= 1 {
+            Button(first.actionTitle) {
+                onReview(first)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        } else {
+            Menu {
+                ForEach(issues) { issue in
+                    Button {
+                        onReview(issue)
+                    } label: {
+                        Label(issue.title, systemImage: issue.symbolName)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Review")
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 }
