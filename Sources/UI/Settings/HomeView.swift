@@ -716,80 +716,192 @@ struct HomeStatsBadge: View {
     let streak: Int?
 
     @State private var isHovering = false
+    @State private var isShowingDetails = false
 
     var body: some View {
-        Menu {
-            ForEach(stats) { stat in
-                Label("\(stat.value) \(stat.label)", systemImage: stat.symbolName)
-            }
-
-            if let streak, streak > 0 {
-                Divider()
-                Label("\(streak)d streak", systemImage: "flame.fill")
-            }
+        Button {
+            isShowingDetails = true
         } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                        Text("Overall")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                    }
 
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                    Text("Click for more")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: 86, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Overall")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .lineLimit(1)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 1, height: 40)
 
-                    Text(primarySummary)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
+                ForEach(headlineStats.prefix(4)) { stat in
+                    HomeStatsStripMetric(stat: stat)
                 }
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(width: 440, alignment: .leading)
+            .frame(minHeight: 72)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.96 : 0.82))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.84))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.primary.opacity(isHovering ? 0.14 : 0.08), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(isHovering ? 0.18 : 0.1), radius: isHovering ? 14 : 9, x: 0, y: isHovering ? 7 : 4)
-            .scaleEffect(isHovering ? 1.01 : 1)
+            .shadow(color: Color.black.opacity(isHovering ? 0.18 : 0.10), radius: isHovering ? 16 : 10, x: 0, y: isHovering ? 8 : 5)
+            .scaleEffect(isHovering ? 1.006 : 1)
             .animation(.easeOut(duration: 0.14), value: isHovering)
             .onHover { isHovering = $0 }
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Show overall stats")
+        .buttonStyle(.plain)
+        .help("Show more stats")
+        .sheet(isPresented: $isShowingDetails) {
+            HomeStatsDetailSheet(
+                stats: stats,
+                streak: streak,
+                onDone: { isShowingDetails = false }
+            )
+        }
     }
 
-    private var primarySummary: String {
-        let dictations = stats.first(where: { $0.id == "dictations" })
-        let meetings = stats.first(where: { $0.id == "meetings" })
-
-        switch (meetings, dictations) {
-        case let (meeting?, dictation?):
-            return "\(meeting.value) meetings · \(dictation.value) dictations"
-        case let (meeting?, nil):
-            return "\(meeting.value) \(meeting.label)"
-        case let (nil, dictation?):
-            return "\(dictation.value) \(dictation.label)"
-        default:
-            return "Stats"
+    private var headlineStats: [HomeStatItem] {
+        let preferredIDs = ["typing-time-saved", "dictation-words", "meetings", "meeting-hours"]
+        let preferredStats = preferredIDs.compactMap { id in
+            stats.first(where: { $0.id == id })
         }
+        return preferredStats.isEmpty ? Array(stats.prefix(4)) : preferredStats
+    }
+}
+
+private struct HomeStatsStripMetric: View {
+    let stat: HomeStatItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(stat.value)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            Text(compactLabel)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 66, alignment: .leading)
+    }
+
+    private var compactLabel: String {
+        stat.id == "dictation-words" ? "words" : stat.label
+    }
+}
+
+private struct HomeStatsDetailSheet: View {
+    let stats: [HomeStatItem]
+    let streak: Int?
+    let onDone: () -> Void
+
+    private let columns = [
+        GridItem(.flexible(minimum: 140), spacing: 12),
+        GridItem(.flexible(minimum: 140), spacing: 12),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Overall")
+                        .font(.system(size: 22, weight: .semibold))
+                    Text("A quick read on saved work and time returned.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                ForEach(stats) { stat in
+                    HomeStatsDetailMetric(stat: stat)
+                }
+
+                if let streak, streak > 0 {
+                    HomeStatsDetailMetric(
+                        stat: HomeStatItem(
+                            id: "streak",
+                            symbolName: "flame.fill",
+                            value: "\(streak)d",
+                            label: "streak"
+                        )
+                    )
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+}
+
+private struct HomeStatsDetailMetric: View {
+    let stat: HomeStatItem
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+
+                Image(systemName: stat.symbolName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(stat.value)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Text(stat.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -868,7 +980,7 @@ struct HomeRowActionButtons: View {
 
             iconButton(
                 systemName: isCopied ? "checkmark" : "square.on.square",
-                help: isCopied ? "Copied" : "Copy for agent",
+                help: isCopied ? "Copied" : "Copy",
                 action: onCopy
             )
 
@@ -1583,7 +1695,6 @@ struct HomeMeetingPreviewSheet: View {
     let onReportIssue: () -> Void
     let onDone: () -> Void
     private let readableContent: HomeMeetingPreviewContent
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     init(
         preview: HomeMeetingPreview,
@@ -1618,33 +1729,18 @@ struct HomeMeetingPreviewSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
 
-            HStack(spacing: 10) {
-                if let audio = preview.audio {
-                    HomeMeetingAudioControl(
-                        title: playback.buttonTitle(for: audio),
-                        symbolName: playback.symbolName(for: audio),
-                        isActive: playback.isActive(audio),
-                        isPlaying: playback.isPlaying && playback.isActive(audio),
-                        scrubber: playback.isActive(audio)
-                            ? AnyView(MeetingAudioScrubber(attachment: audio, width: 230))
-                            : nil
-                    ) {
-                        playback.toggle(audio)
-                    }
-                    .help("\(playback.buttonTitle(for: audio)) meeting audio")
-                } else {
-                    Label("No retained audio", systemImage: "speaker.slash")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.secondary.opacity(0.08))
-                        )
-                }
-
-                Spacer()
+            if let audio = preview.audio {
+                HomeMeetingPodcastPlayer(audio: audio)
+            } else {
+                Label("No retained audio", systemImage: "speaker.slash")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
             }
 
             Group {
@@ -1729,21 +1825,135 @@ struct HomeMeetingPreviewSheet: View {
     }()
 }
 
+private struct HomeMeetingPodcastPlayer: View {
+    let audio: MeetingAudioAttachment
+
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Meeting audio")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+
+                    Text(playback.compactTimeLabel(for: audio))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                HomePodcastPlayerButton(
+                    symbolName: "gobackward.15",
+                    size: 34,
+                    isPrimary: false,
+                    isDisabled: !canSeek,
+                    help: "Skip back 15 seconds"
+                ) {
+                    playback.skip(audio, by: -15)
+                }
+
+                HomePodcastPlayerButton(
+                    symbolName: playback.symbolName(for: audio),
+                    size: 42,
+                    isPrimary: playback.isActive(audio),
+                    isDisabled: false,
+                    help: "\(playback.buttonTitle(for: audio)) meeting audio"
+                ) {
+                    playback.toggle(audio)
+                }
+
+                HomePodcastPlayerButton(
+                    symbolName: "goforward.15",
+                    size: 34,
+                    isPrimary: false,
+                    isDisabled: !canSeek,
+                    help: "Skip forward 15 seconds"
+                ) {
+                    playback.skip(audio, by: 15)
+                }
+            }
+
+            MeetingAudioScrubber(
+                attachment: audio,
+                width: nil,
+                showsTime: false
+            )
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.035))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+        )
+    }
+
+    private var canSeek: Bool {
+        playback.isActive(audio) && playback.duration > 0
+    }
+}
+
+private struct HomePodcastPlayerButton: View {
+    let symbolName: String
+    let size: CGFloat
+    let isPrimary: Bool
+    let isDisabled: Bool
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbolName)
+                .font(.system(size: size >= 40 ? 15 : 12, weight: .bold))
+                .foregroundStyle(foreground)
+                .frame(width: size, height: size)
+                .background(
+                    Circle()
+                        .fill(background)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.primary.opacity(isPrimary ? 0.0 : 0.08), lineWidth: 1)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.42 : 1)
+        .help(help)
+    }
+
+    private var foreground: Color {
+        if isPrimary { return .white }
+        return .secondary
+    }
+
+    private var background: Color {
+        if isPrimary { return Color.accentColor }
+        return Color.primary.opacity(0.08)
+    }
+}
+
 private struct HomeMeetingTranscriptLineView: View {
     let line: HomeMeetingTranscriptLine
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Text(line.time)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 44, alignment: .leading)
+                .padding(.top, 4)
 
-            Text(line.speaker)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(width: 92, alignment: .leading)
+            HomeMeetingSpeakerPill(speaker: line.speaker)
 
             Text(line.text)
                 .font(.system(size: 13))
@@ -1752,7 +1962,62 @@ private struct HomeMeetingTranscriptLineView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct HomeMeetingSpeakerPill: View {
+    let speaker: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(speakerColor)
+                .frame(width: 6, height: 6)
+
+            Text(speaker)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(speakerColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(width: 116, alignment: .leading)
+        .background(
+            Capsule(style: .continuous)
+                .fill(speakerColor.opacity(0.12))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(speakerColor.opacity(0.24), lineWidth: 1)
+        )
+    }
+
+    private var speakerColor: Color {
+        HomeMeetingSpeakerColor.color(for: speaker)
+    }
+}
+
+private enum HomeMeetingSpeakerColor {
+    static func color(for speaker: String) -> Color {
+        let palette: [NSColor] = [
+            .systemBlue,
+            .systemGreen,
+            .systemPurple,
+            .systemOrange,
+            .systemPink,
+            .systemTeal,
+            .systemRed,
+            .systemIndigo,
+        ]
+
+        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
+            partial &+ scalar.value
+        }
+        let index = Int(value % UInt32(palette.count))
+        return Color(nsColor: palette[index])
     }
 }
 

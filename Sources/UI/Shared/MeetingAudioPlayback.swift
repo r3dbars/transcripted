@@ -121,6 +121,12 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         currentTime = targetTime
     }
 
+    func skip(_ attachment: MeetingAudioAttachment, by seconds: TimeInterval) {
+        guard isActive(attachment), duration > 0 else { return }
+        let targetTime = min(max(currentTime + seconds, 0), duration)
+        seek(attachment, progress: targetTime / duration)
+    }
+
     func progress(for attachment: MeetingAudioAttachment) -> Double {
         guard isActive(attachment), duration > 0 else { return 0 }
         return min(max(currentTime / duration, 0), 1)
@@ -128,6 +134,11 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 
     func timeLabel(for attachment: MeetingAudioAttachment) -> String {
         guard isActive(attachment), duration > 0 else { return "0:00" }
+        return "\(Self.formatTime(currentTime)) / \(Self.formatTime(duration))"
+    }
+
+    func compactTimeLabel(for attachment: MeetingAudioAttachment) -> String {
+        guard isActive(attachment), duration > 0 else { return "0:00 / --:--" }
         return "\(Self.formatTime(currentTime)) / \(Self.formatTime(duration))"
     }
 

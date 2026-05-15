@@ -793,6 +793,12 @@ struct TranscriptedSettingsView: View {
                 label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
+                id: "dictation-words",
+                symbolName: "text.alignleft",
+                value: formattedInteger(homeViewModel.totalDictationWordCount),
+                label: "dictated words"
+            ),
+            HomeStatItem(
                 id: "typing-time-saved",
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
