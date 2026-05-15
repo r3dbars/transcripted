@@ -5,7 +5,7 @@
 - `main` is the current Transcripted product, derived from the earlier Draft codebase.
 - The current app on `main` supports **dictation** and **meetings**.
 - Meeting capture includes local mic + system audio, imported-audio transcription, optional local-speaker review, and agent-readable Markdown output.
-- The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` keeps compatibility stubs for removed draft-mode entry points.
+- The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` only keeps `cancelSession()` as a compatibility hook for interrupt paths left from the removed draft-mode routing.
 - `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
 - `Sources/Speech/` owns the app-owned local STT path. Meetings reuse that path through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - `Sources/Reliability/` owns wake / sleep recovery for hotkeys and active capture flows.

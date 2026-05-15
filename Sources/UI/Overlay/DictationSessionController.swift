@@ -1,6 +1,6 @@
 // DictationSessionController.swift
-// Session orchestration for dictation mode plus compatibility stubs for the
-// removed draft mode.
+// Session orchestration for dictation mode plus the remaining cancelSession()
+// compatibility hook from the removed draft-mode routing.
 
 import AppKit
 import AVFoundation
