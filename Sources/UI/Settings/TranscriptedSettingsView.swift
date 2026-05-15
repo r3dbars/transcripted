@@ -282,8 +282,10 @@ struct TranscriptedSettingsView: View {
                     summary: homeWelcomeSummary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
                 HomeStatsBadge(stats: stats, streak: homeStreak)
+                    .layoutPriority(0)
             }
 
             if !needsAttention.isEmpty {
@@ -430,7 +432,7 @@ struct TranscriptedSettingsView: View {
             Alert(
                 title: Text(confirmation.title),
                 message: Text(confirmation.message),
-                primaryButton: .destructive(Text("Delete")) {
+                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
                     confirmation.perform()
                 },
                 secondaryButton: .cancel()
@@ -652,11 +654,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
-        var items: [HomeRowMenuItem] = [
-            HomeRowMenuItem(title: "Open transcript preview", symbolName: "doc.text.magnifyingglass") {
-                presentHomeMeetingPreview(item)
-            }
-        ]
+        var items: [HomeRowMenuItem] = []
 
         if item.speakerStatus.needsReview {
             items.append(
@@ -671,19 +669,7 @@ struct TranscriptedSettingsView: View {
                 trackSettingsAction("flag_meeting", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
             },
-            HomeRowMenuItem(title: "Copy agent prompt", symbolName: "sparkles") {
-                trackSettingsAction("copy_meeting_agent_prompt", page: .home)
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(
-                    AgentConnectionGuide.starterPrompt(
-                        filename: item.transcriptURL.deletingPathExtension().lastPathComponent
-                    ),
-                    forType: .string
-                )
-                flashCopied(rowID: item.id)
-            },
-            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
+            HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
@@ -701,9 +687,11 @@ struct TranscriptedSettingsView: View {
         items.append(
             HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
                 trackSettingsAction("delete_meeting_request", page: .home)
+                let presentation = HomeDeleteConfirmationPolicy.meeting
                 homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: "Delete this meeting?",
-                    message: "This removes the transcript and any retained audio. This cannot be undone."
+                    title: presentation.title,
+                    message: presentation.message,
+                    confirmTitle: presentation.confirmTitle
                 ) {
                     trackSettingsAction("delete_meeting_confirm", page: .home)
                     deleteMeeting(item)

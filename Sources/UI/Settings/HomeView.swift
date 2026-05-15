@@ -151,7 +151,20 @@ struct HomeDeleteConfirmation: Identifiable {
     let id = UUID()
     let title: String
     let message: String
+    let confirmTitle: String
     let perform: () -> Void
+
+    init(
+        title: String,
+        message: String,
+        confirmTitle: String = "Delete",
+        perform: @escaping () -> Void
+    ) {
+        self.title = title
+        self.message = message
+        self.confirmTitle = confirmTitle
+        self.perform = perform
+    }
 }
 
 struct HomeDeleteFailure: Identifiable {
@@ -722,8 +735,8 @@ struct HomeStatsBadge: View {
         Button {
             isShowingDetails = true
         } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
                     HStack(spacing: 6) {
                         Image(systemName: "chart.bar.fill")
                             .font(.system(size: 13, weight: .semibold))
@@ -735,32 +748,31 @@ struct HomeStatsBadge: View {
                             .tracking(0.5)
                     }
 
-                    Text("Click for more")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .frame(width: 86, alignment: .leading)
+                    Spacer(minLength: 10)
 
-                Rectangle()
-                    .fill(Color.primary.opacity(0.08))
-                    .frame(width: 1, height: 40)
-
-                ForEach(headlineStats.prefix(4)) { stat in
-                    HomeStatsStripMetric(stat: stat)
+                    Label("View stats", systemImage: "info.circle")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.055))
+                        )
                 }
 
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.tertiary)
+                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 9) {
+                    ForEach(headlineStats.prefix(4)) { stat in
+                        HomeStatsStripMetric(stat: stat)
+                    }
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(width: 440, alignment: .leading)
-            .frame(minHeight: 72)
+            .padding(14)
+            .frame(width: 348, alignment: .leading)
+            .frame(minHeight: 112)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.84))
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.88))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -782,6 +794,13 @@ struct HomeStatsBadge: View {
         }
     }
 
+    private var metricColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 130), spacing: 12),
+            GridItem(.flexible(minimum: 130), spacing: 12),
+        ]
+    }
+
     private var headlineStats: [HomeStatItem] {
         let preferredIDs = ["typing-time-saved", "dictation-words", "meetings", "meeting-hours"]
         let preferredStats = preferredIDs.compactMap { id in
@@ -795,19 +814,31 @@ private struct HomeStatsStripMetric: View {
     let stat: HomeStatItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(stat.value)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
+        HStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.055))
 
-            Text(compactLabel)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                Image(systemName: stat.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(stat.value)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text(compactLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
-        .frame(width: 66, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var compactLabel: String {
@@ -1832,49 +1863,53 @@ private struct HomeMeetingPodcastPlayer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Meeting audio")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                        .tracking(0.5)
+            ZStack {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Meeting audio")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
 
-                    Text(playback.compactTimeLabel(for: audio))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        Text(playback.compactTimeLabel(for: audio))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
                 }
 
-                Spacer()
+                HStack(spacing: 14) {
+                    HomePodcastPlayerButton(
+                        symbolName: "gobackward.15",
+                        size: 34,
+                        isPrimary: false,
+                        isDisabled: !canSeek,
+                        help: "Skip back 15 seconds"
+                    ) {
+                        playback.skip(audio, by: -15)
+                    }
 
-                HomePodcastPlayerButton(
-                    symbolName: "gobackward.15",
-                    size: 34,
-                    isPrimary: false,
-                    isDisabled: !canSeek,
-                    help: "Skip back 15 seconds"
-                ) {
-                    playback.skip(audio, by: -15)
-                }
+                    HomePodcastPlayerButton(
+                        symbolName: playback.symbolName(for: audio),
+                        size: 46,
+                        isPrimary: playback.isActive(audio),
+                        isDisabled: false,
+                        help: "\(playback.buttonTitle(for: audio)) meeting audio"
+                    ) {
+                        playback.toggle(audio)
+                    }
 
-                HomePodcastPlayerButton(
-                    symbolName: playback.symbolName(for: audio),
-                    size: 42,
-                    isPrimary: playback.isActive(audio),
-                    isDisabled: false,
-                    help: "\(playback.buttonTitle(for: audio)) meeting audio"
-                ) {
-                    playback.toggle(audio)
-                }
-
-                HomePodcastPlayerButton(
-                    symbolName: "goforward.15",
-                    size: 34,
-                    isPrimary: false,
-                    isDisabled: !canSeek,
-                    help: "Skip forward 15 seconds"
-                ) {
-                    playback.skip(audio, by: 15)
+                    HomePodcastPlayerButton(
+                        symbolName: "goforward.15",
+                        size: 34,
+                        isPrimary: false,
+                        isDisabled: !canSeek,
+                        help: "Skip forward 15 seconds"
+                    ) {
+                        playback.skip(audio, by: 15)
+                    }
                 }
             }
 
