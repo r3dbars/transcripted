@@ -11,7 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.meetings, .dictations, .people, .shortcuts]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .people, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
@@ -53,7 +53,6 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    @State private var recentMeetings: [RecentMeetingItem] = []
     @State private var recentDictations: [SavedDictationEntry] = []
     @State private var recentCapturesLoading = false
     @State private var recentCaptureRefreshTask: Task<Void, Never>?
@@ -61,7 +60,6 @@ struct TranscriptedSettingsView: View {
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
     @State private var lastHomeDashboardRefreshStartedAt: Date?
-    @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
     @State private var modelCacheLoading = false
@@ -70,7 +68,6 @@ struct TranscriptedSettingsView: View {
     @State private var showModelCacheCleanupConfirmation = false
     @State private var showWhisperCacheCleanupConfirmation = false
     @State private var showReclaimableCacheCleanupConfirmation = false
-    @State private var copiedAgentMeetingID: String?
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
@@ -171,9 +168,6 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
-            refreshMenuBarVisibility()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .dockVisibilityPreferencesDidChange)) { _ in
             refreshDockVisibility()
         }
@@ -259,8 +253,6 @@ struct TranscriptedSettingsView: View {
             modelsPage
         case .shortcuts:
             shortcutsPage
-        case .meetings:
-            meetingsPage
         case .dictations:
             dictationsPage
         case .people:
@@ -284,6 +276,31 @@ struct TranscriptedSettingsView: View {
         let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
 
         return VStack(alignment: .leading, spacing: 14) {
+            if !failedMeetings.isEmpty {
+                HomeFailedMeetingsCard(
+                    items: failedMeetings,
+                    canRetry: canRetryFailedMeetings,
+                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
+                    onRetry: { item in
+                        trackSettingsAction("home_retry_failed_meeting", page: .home)
+                        meetingSession.retryFailedMeeting(id: item.id)
+                    },
+                    onRevealAudio: { item in
+                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                        revealFailedMeetingAudio(item)
+                    },
+                    onClear: { item in
+                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
+                        clearFailedMeeting(item)
+                    },
+                    onOpenMeetings: {
+                        trackSettingsAction("home_open_failed_meetings", page: .home)
+                        homeActivityTab = .meetings
+                    }
+                )
+            }
+
             HStack(alignment: .top, spacing: 20) {
                 HomeWelcomeHeader(
                     name: homeViewModel.welcomeName,
@@ -340,31 +357,6 @@ struct TranscriptedSettingsView: View {
                     onLoadMoreMeetings: {
                         trackSettingsAction("load_more_meetings", page: .home)
                         homeViewModel.loadMoreMeetings()
-                    }
-                )
-            }
-
-            if !failedMeetings.isEmpty {
-                HomeFailedMeetingsCard(
-                    items: failedMeetings,
-                    canRetry: canRetryFailedMeetings,
-                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                    onRetry: { item in
-                        trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
-                    },
-                    onRevealAudio: { item in
-                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                        revealFailedMeetingAudio(item)
-                    },
-                    onClear: { item in
-                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
-                        clearFailedMeeting(item)
-                    },
-                    onOpenMeetings: {
-                        trackSettingsAction("home_open_failed_meetings", page: .home)
-                        navigation.selectedPage = .meetings
                     }
                 )
             }
@@ -1231,126 +1223,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var meetingsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Meetings",
-                summary: "Record meetings, import audio, and open recent transcripts."
-            )
-
-            SettingsSection(
-                title: "Start or Import",
-                detail: "Record now, or transcribe a file."
-            ) {
-                SettingsQuickLinkRow(
-                    symbolName: "record.circle.fill",
-                    title: "Start Meeting",
-                    detail: "Capture your mic and computer audio."
-                ) {
-                    trackSettingsAction("start_meeting", page: .meetings)
-                    actions.startMeeting()
-                }
-
-                SettingsQuickLinkRow(
-                    symbolName: "waveform",
-                    title: "Transcribe Audio File",
-                    detail: "Turn an audio file into meeting notes."
-                ) {
-                    trackSettingsAction("import_recording", page: .meetings)
-                    actions.importAudioFile()
-                }
-
-                Text("Blocked? Open Privacy and check microphone or system audio.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Recent Meetings",
-                detail: "The last five saved meeting transcripts."
-            ) {
-                if recentCapturesLoading && recentMeetings.isEmpty {
-                    Text("Loading recent meetings...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if recentMeetings.isEmpty {
-                    Text("Record or import a meeting and it will appear here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentMeetings) { item in
-                        SettingsRecentMeetingRow(
-                            item: item,
-                            detail: formattedRecentDate(item.date),
-                            isCopied: copiedAgentMeetingID == item.id,
-                            openAction: {
-                                trackSettingsAction("open_recent_meeting", page: .meetings)
-                                NSWorkspace.shared.open(item.transcriptURL)
-                            },
-                            copyForAgentAction: {
-                                trackSettingsAction("copy_recent_meeting_for_agent", page: .meetings)
-                                copyMeetingForAgent(item)
-                            }
-                        )
-                    }
-                }
-            }
-
-            if !meetingSession.failedMeetings.isEmpty {
-                SettingsSection(
-                    title: "Needs Attention",
-                    detail: "Retry or clear unfinished meetings."
-                ) {
-                    ForEach(meetingSession.failedMeetings) { item in
-                        SettingsFailedMeetingRow(
-                            item: item,
-                            canRetry: canRetryFailedMeetings,
-                            retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                            audio: failedMeetingAudioAttachment(for: item),
-                            retryAction: {
-                                trackSettingsAction("retry_failed_meeting", page: .meetings)
-                                meetingSession.retryFailedMeeting(id: item.id)
-                            },
-                            revealAudioAction: {
-                                trackSettingsAction("reveal_failed_meeting_audio", page: .meetings)
-                                revealFailedMeetingAudio(item)
-                            },
-                            secondaryAction: {
-                                trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .meetings)
-                                clearFailedMeeting(item)
-                            }
-                        )
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "Microphone Processing",
-                detail: "How Transcripted cleans up your mic for meetings."
-            ) {
-                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
-                    get: { meetingVoiceProcessingEnabled },
-                    set: { newValue in
-                        meetingVoiceProcessingEnabled = newValue
-                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .meetings)
-                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
-                    }
-                ))
-
-                Text(meetingVoiceProcessingEnabled
-                    ? "May lower other app audio in Zoom/Meet."
-                    : "Off — Transcripted boosts the saved mic and live STT copy in software without changing system audio."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                Text("Takes effect on the next recording.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
     private var peoplePage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
@@ -1676,6 +1548,31 @@ struct TranscriptedSettingsView: View {
                         refreshPermissions()
                     }
                 }
+            }
+
+            SettingsSection(
+                title: "Meeting Audio",
+                detail: "How Transcripted handles your microphone during meetings."
+            ) {
+                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
+                    get: { meetingVoiceProcessingEnabled },
+                    set: { newValue in
+                        meetingVoiceProcessingEnabled = newValue
+                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .privacy)
+                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                    }
+                ))
+
+                Text(meetingVoiceProcessingEnabled
+                    ? "May lower other app audio in Zoom/Meet."
+                    : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Text("Takes effect on the next recording.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             SettingsSection(
@@ -2167,7 +2064,6 @@ struct TranscriptedSettingsView: View {
         refreshStoragePaths()
         refreshRecentCaptures(force: true)
         refreshShortcutState()
-        refreshMenuBarVisibility()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -2367,7 +2263,6 @@ struct TranscriptedSettingsView: View {
             recentCaptureRefreshTask = Task { @MainActor in
                 let snapshot = await RecentCaptureLoader.load(limit: 5)
                 guard !Task.isCancelled else { return }
-                recentMeetings = snapshot.meetings
                 recentDictations = snapshot.dictations
                 recentCapturesLoading = false
             }
@@ -2407,10 +2302,6 @@ struct TranscriptedSettingsView: View {
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
-    }
-
-    private func refreshMenuBarVisibility() {
-        menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     }
 
     private func refreshDockVisibility() {
@@ -2520,17 +2411,6 @@ struct TranscriptedSettingsView: View {
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
         }
-    }
-
-    private func menuBarVisibilityBinding(for item: MenuBarOptionalItem) -> Binding<Bool> {
-        Binding(
-            get: { menuBarItemVisibility[item] ?? true },
-            set: { newValue in
-                menuBarItemVisibility[item] = newValue
-                trackSettingsToggle("menu_bar_\(item.analyticsValue)", enabled: newValue, page: .home)
-                MenuBarVisibilityPreferences.setVisible(item, newValue)
-            }
-        )
     }
 
     private func sendTestSentryEvent() {
@@ -2767,29 +2647,6 @@ struct TranscriptedSettingsView: View {
         Self.recentCaptureDateFormatter.string(from: date)
     }
 
-    private func copyMeetingForAgent(_ item: RecentMeetingItem) {
-        guard let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: item.title,
-            date: item.date,
-            transcriptURL: item.transcriptURL
-        ) else {
-            NSSound.beep()
-            return
-        }
-
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(bundle, forType: .string)
-        copiedAgentMeetingID = item.id
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if copiedAgentMeetingID == item.id {
-                copiedAgentMeetingID = nil
-            }
-        }
-    }
-
     private static let recentCaptureDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
@@ -2967,72 +2824,6 @@ private struct AutoEnterAllowedAppRow: View {
             Spacer(minLength: 12)
 
             Button("Remove", action: remove)
-        }
-    }
-}
-
-private struct SettingsRecentMeetingRow: View {
-    let item: RecentMeetingItem
-    let detail: String
-    let isCopied: Bool
-    let openAction: () -> Void
-    let copyForAgentAction: () -> Void
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button(action: openAction) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 12)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 10) {
-                if let audio = item.audio {
-                    SettingsRecentMeetingAudioControl(
-                        title: playback.buttonTitle(for: audio),
-                        symbolName: playback.symbolName(for: audio),
-                        isActive: playback.isActive(audio),
-                        isPlaying: playback.isPlaying && playback.isActive(audio),
-                        scrubber: playback.isActive(audio)
-                            ? AnyView(MeetingAudioScrubber(attachment: audio, width: 210))
-                            : nil
-                    ) {
-                        playback.toggle(audio)
-                    }
-                    .help("\(playback.buttonTitle(for: audio)) meeting audio")
-                }
-
-                Button {
-                    copyForAgentAction()
-                } label: {
-                    Label(isCopied ? "Copied" : "Copy for Agent", systemImage: isCopied ? "checkmark" : "sparkles")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
         }
     }
 }

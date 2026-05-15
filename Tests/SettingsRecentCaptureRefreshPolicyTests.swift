@@ -9,12 +9,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
         )
     }
 
-    runSuite("SettingsRecentCaptureRefreshPolicy.mode — only loads recent lists for list pages") {
-        assertEqual(
-            SettingsRecentCaptureRefreshPolicy.mode(for: .meetings),
-            .recentLists,
-            "meetings should load the small recent list"
-        )
+    runSuite("SettingsRecentCaptureRefreshPolicy.mode — only loads recent lists for the dictation page") {
         assertEqual(
             SettingsRecentCaptureRefreshPolicy.mode(for: .dictations),
             .recentLists,

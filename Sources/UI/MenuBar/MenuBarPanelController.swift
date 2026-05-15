@@ -47,7 +47,7 @@ final class MenuBarPanelController: NSViewController {
         content.primaryActionsView.onStartDictation = { [weak self] in self?.startDictationFromMenu() }
         content.primaryActionsView.onStartMeeting = { [weak self] in self?.startMeetingFromMenu() }
         content.primaryActionsView.onPasteLastDictation = { [weak self] in self?.pasteLastDictationFromMenu() }
-        content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.meetings) }
+        content.primaryActionsView.onOpenRecentMeetings = { [weak self] in self?.openSettingsFromMenu(.home, actionID: "recent_meetings") }
         content.utilityActionsView.onOpenSettings = { [weak self] in self?.openSettingsFromMenu(.home) }
         content.utilityActionsView.onCheckForUpdates = { [weak self] in self?.performUpdateActionFromMenu() }
         content.utilityActionsView.onOpenConnectAgent = { [weak self] in self?.openSettingsFromMenu(.connectAgent) }
@@ -245,8 +245,8 @@ final class MenuBarPanelController: NSViewController {
         _ = textPaster.paste(latestText)
     }
 
-    private func openSettingsFromMenu(_ page: TranscriptedSettingsPage) {
-        trackMenuAction(page == .home ? "home" : "open_\(page.analyticsValue)")
+    private func openSettingsFromMenu(_ page: TranscriptedSettingsPage, actionID: String? = nil) {
+        trackMenuAction(actionID ?? (page == .home ? "home" : "open_\(page.analyticsValue)"))
         dismissPopover()
         openSettingsWindow(page)
     }

@@ -36,8 +36,8 @@ It uses a native macOS sidebar with these pages:
 
 - `Home`
 - `Recording`
-  - `Meetings`
   - `Dictation`
+  - `People`
   - `Shortcuts`
 - `Setup`
   - `General`
@@ -110,18 +110,6 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
-Primary action rows can be hidden from switches on the matching Settings
-`Home` action tiles:
-
-- `Start Dictation`
-- `Start Meeting`
-- `Paste Last Dictation`
-- `Recent Meetings`
-
-These switches default on. Hovering a switch explains that it shows or hides the
-matching row in the menu bar popover. The action arrow on each tile should read
-as an explicit icon button and expose a short hover description for the action.
-
 Utility rows such as `Connect Agent`, `Submit Feedback`, updates, `Settings`,
 and `Quit` remain visible in this version.
 
@@ -134,16 +122,12 @@ Show the simplest ways to use Transcripted and surface high-value status.
 
 Contents:
 
-- large action buttons for:
-  - `Start Dictation`
-  - `Start Meeting`
-  - `Transcribe Audio File…`
-  - `Connect Agent`
-- setup/status cards for:
-  - local model readiness
-  - permissions health
-  - capture library location
-- quick links into the most important pages
+- top-of-page unfinished meeting warnings, when a meeting needs retry/delete
+- overall dictation and meeting stats
+- recent activity for:
+  - meetings, including retained-audio playback when available
+  - dictations
+- compact setup issues only when something needs attention
 
 ### Shortcuts
 
@@ -180,19 +164,19 @@ Contents:
 - model file status
 - optional model picker
 
-### Meetings
+### People
 
 Purpose:
-Own meeting-specific capture and meeting-speaker behavior.
+Own meeting speaker cleanup.
 
 Contents:
 
-- `Start Meeting`
-- `Transcribe Audio File…`
+- deferred speaker names
+- speaker sample playback
+- duplicate cleanup
 - local speaker split toggle
-- speaker people management
 
-Imported audio transcription lives here because it uses the meeting transcription pipeline.
+Meeting start, audio import, recent meeting transcripts, and unfinished meeting repair live on `Home`.
 
 ### Dictation
 
@@ -251,6 +235,7 @@ Contents:
   - accessibility
   - system audio recording
   - calendar
+- meeting microphone processing toggle
 - `Send crash and error reports`
 - `Send anonymous usage statistics`
 - `Send Test Sentry Event`
@@ -281,7 +266,6 @@ Optional supporting text can explain local-first behavior in one short paragraph
 ### Transcribe Audio File
 
 - appears on `Home`
-- appears on `Meetings`
 - does not appear in the menubar popover in this version
 
 ### Update Status
