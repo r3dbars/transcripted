@@ -390,7 +390,7 @@ extension TranscriptionTaskManager {
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,
                     micAudioURL: micURL,
-                    shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio,
+                    shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio && sourceFailedTranscriptionId == nil,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                     onComplete: { [weak self] updates in
                         self?.handleNamingComplete(

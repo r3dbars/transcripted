@@ -461,6 +461,10 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(didRetry)
         let request = try XCTUnwrap(manager.speakerNamingRequest)
         XCTAssertEqual(request.sourceFailedTranscriptionId, failedId)
+        XCTAssertFalse(
+            request.shouldRemoveTemporaryAudioOnCleanup,
+            "failed-retry speaker review must not own cleanup for audio that keeps the failed row retryable"
+        )
         XCTAssertEqual(
             manager.failedTranscriptionManager.failedTranscriptions.map(\.id),
             [failedId],
