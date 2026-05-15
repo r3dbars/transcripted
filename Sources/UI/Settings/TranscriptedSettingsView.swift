@@ -645,14 +645,6 @@ struct TranscriptedSettingsView: View {
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
 
-        if item.speakerStatus.needsReview {
-            items.append(
-                HomeRowMenuItem(title: "Review speakers", symbolName: "person.crop.circle.badge.questionmark") {
-                    openHomeSpeakerReview(actionName: "review_meeting_speakers_menu")
-                }
-            )
-        }
-
         items.append(contentsOf: [
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_meeting", page: .home)

@@ -1366,10 +1366,12 @@ struct HomeMeetingRow: View {
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: item.speakerStatus.needsReview ? "person.crop.circle.badge.questionmark" : "doc.text")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(status.foregroundStyle)
-                    .padding(.top, 2)
+                if !item.speakerStatus.needsReview {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(status.foregroundStyle)
+                        .padding(.top, 2)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
@@ -1377,10 +1379,14 @@ struct HomeMeetingRow: View {
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
-                    Text(status.text)
-                        .font(.caption2)
-                        .foregroundStyle(status.foregroundStyle)
-                        .lineLimit(1)
+                    if item.speakerStatus.needsReview {
+                        speakerReviewLabel
+                    } else {
+                        Text(status.text)
+                            .font(.caption2)
+                            .foregroundStyle(status.foregroundStyle)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1394,11 +1400,30 @@ struct HomeMeetingRow: View {
     private var reviewSpeakersAccessory: AnyView? {
         guard item.speakerStatus.needsReview else { return nil }
         return AnyView(
-            Button("Review", action: onReviewSpeakers)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            HomeAttentionActionButton(
+                title: "Review",
+                isDisabled: false,
+                action: onReviewSpeakers
+            )
                 .help("Review speakers")
         )
+    }
+
+    private var speakerReviewLabel: some View {
+        Text("Needs speaker names")
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(Color.red)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.red.opacity(0.12))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.red.opacity(0.18), lineWidth: 1)
+            )
+            .accessibilityLabel("Needs speaker names")
     }
 }
 
@@ -1449,7 +1474,7 @@ struct HomeFailedMeetingInlineRow: View {
             }
 
             if item.isRetryable || item.isRetrying {
-                HomeRetryButton(
+                HomeAttentionActionButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
                     isDisabled: retryDisabled,
                     action: onRetry
@@ -1512,7 +1537,7 @@ struct HomeFailedMeetingInlineRow: View {
     }
 }
 
-private struct HomeRetryButton: View {
+private struct HomeAttentionActionButton: View {
     let title: String
     let isDisabled: Bool
     let action: () -> Void
