@@ -104,7 +104,7 @@ struct MeetingFailureExplanation: Equatable {
             audioCaptured: hasAudioFiles,
             transcriptionFailed: failureKind == .transcriptionInferenceFailed,
             diarizationFailed: failureKind == .diarizationFailed,
-            saveFailed: failureKind == .saveFailed,
+            saveFailed: failureKind == .saveFailed || failureKind == .speakerNameFinalizationFailed,
             recoverableArtifact: recoverableArtifact,
             retryAvailable: recoverableArtifact && (retryability == .retryable || retryability == .retryableAfterUserAction)
         )
@@ -161,7 +161,8 @@ struct MeetingFailureExplanation: Equatable {
             return .transcription
         case .diarizationFailed:
             return .diarization
-        case .saveFailed:
+        case .saveFailed,
+             .speakerNameFinalizationFailed:
             return .save
         case .unexpectedError:
             return .activeCapture
@@ -212,7 +213,8 @@ struct MeetingFailureExplanation: Equatable {
              .microphonePermission,
              .microphoneMissing,
              .audioDeviceUnavailable,
-             .saveFailed:
+             .saveFailed,
+             .speakerNameFinalizationFailed:
             return .retryableAfterUserAction
         default:
             return .permanent
@@ -252,7 +254,8 @@ struct MeetingFailureExplanation: Equatable {
         }
 
         switch failureKind {
-        case .saveFailed:
+        case .saveFailed,
+             .speakerNameFinalizationFailed:
             return .recoverableFailure
         default:
             return .permanentFailure

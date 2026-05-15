@@ -15,7 +15,8 @@ extension TranscriptionTaskManager {
         taskId: UUID,
         healthInfo: RecordingHealthInfo?,
         splitLocalSpeakers: Bool = false,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        sourceFailedTranscriptionId: UUID? = nil
     ) async throws -> URL {
 
         // Require system audio for multichannel transcription
@@ -30,7 +31,8 @@ extension TranscriptionTaskManager {
             taskId: taskId,
             healthInfo: healthInfo,
             splitLocalSpeakers: splitLocalSpeakers,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            sourceFailedTranscriptionId: sourceFailedTranscriptionId
         )
     }
 
@@ -63,7 +65,8 @@ extension TranscriptionTaskManager {
         taskId: UUID,
         healthInfo: RecordingHealthInfo?,
         splitLocalSpeakers: Bool = false,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        sourceFailedTranscriptionId: UUID? = nil
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -388,6 +391,7 @@ extension TranscriptionTaskManager {
                     systemAudioURL: systemURL,
                     micAudioURL: micURL,
                     shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio,
+                    sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                     onComplete: { [weak self] updates in
                         self?.handleNamingComplete(
                             updates: updates,
@@ -397,6 +401,7 @@ extension TranscriptionTaskManager {
                             micURL: micURL,
                             systemURL: systemURL,
                             shouldRemoveTemporaryAudio: shouldRemoveScratchAudio,
+                            sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                             clips: capturedEntries
                         )
                     }

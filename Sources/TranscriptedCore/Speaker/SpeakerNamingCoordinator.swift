@@ -39,6 +39,7 @@ extension TranscriptionTaskManager {
         micURL: URL?,
         systemURL: URL,
         shouldRemoveTemporaryAudio: Bool = true,
+        sourceFailedTranscriptionId: UUID? = nil,
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
@@ -68,7 +69,7 @@ extension TranscriptionTaskManager {
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio && sourceFailedTranscriptionId == nil
                 )
 
                 Task { @MainActor in
@@ -76,7 +77,8 @@ extension TranscriptionTaskManager {
                         didFinalizeTranscript: false,
                         updatesCount: updates.count,
                         transcriptId: transcriptId,
-                        resolvedURL: transcriptURL
+                        resolvedURL: transcriptURL,
+                        sourceFailedTranscriptionId: sourceFailedTranscriptionId
                     )
                 }
                 return
@@ -91,7 +93,7 @@ extension TranscriptionTaskManager {
                     clips: clips,
                     micURL: micURL,
                     systemURL: systemURL,
-                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                    shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio && sourceFailedTranscriptionId == nil
                 )
 
                 Task { @MainActor in
@@ -99,7 +101,8 @@ extension TranscriptionTaskManager {
                         didFinalizeTranscript: false,
                         updatesCount: updates.count,
                         transcriptId: transcriptId,
-                        resolvedURL: resolvedURL
+                        resolvedURL: resolvedURL,
+                        sourceFailedTranscriptionId: sourceFailedTranscriptionId
                     )
                 }
                 return
@@ -174,11 +177,12 @@ extension TranscriptionTaskManager {
                 )
             }
 
+            let shouldKeepAudioForFailedRetry = !didFinalizeTranscript && sourceFailedTranscriptionId != nil
             self?.cleanupNamingArtifacts(
                 clips: clips,
                 micURL: micURL,
                 systemURL: systemURL,
-                shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio
+                shouldRemoveTemporaryAudio: shouldRemoveTemporaryAudio && !shouldKeepAudioForFailedRetry
             )
 
             Task { @MainActor in
@@ -186,7 +190,8 @@ extension TranscriptionTaskManager {
                     didFinalizeTranscript: didFinalizeTranscript,
                     updatesCount: updates.count,
                     transcriptId: transcriptId,
-                    resolvedURL: resolvedURL
+                    resolvedURL: resolvedURL,
+                    sourceFailedTranscriptionId: sourceFailedTranscriptionId
                 )
             }
         }
@@ -582,13 +587,17 @@ extension TranscriptionTaskManager {
         didFinalizeTranscript: Bool,
         updatesCount: Int,
         transcriptId: UUID,
-        resolvedURL: URL
+        resolvedURL: URL,
+        sourceFailedTranscriptionId: UUID? = nil
     ) {
         if didFinalizeTranscript {
             AppLogger.pipeline.info("Speaker naming complete", [
                 "named": "\(updatesCount)",
                 "transcript": resolvedURL.lastPathComponent
             ])
+            if let sourceFailedTranscriptionId {
+                failedTranscriptionManager.removeFailedTranscription(id: sourceFailedTranscriptionId)
+            }
             let didAlreadyPublishSavedTranscript = lastSavedTranscriptId == transcriptId
                 || lastSavedTranscriptURL == resolvedURL
             populateSavedMetadata(from: resolvedURL)
@@ -601,6 +610,12 @@ extension TranscriptionTaskManager {
                 "transcriptId": transcriptId.uuidString,
                 "transcript": resolvedURL.lastPathComponent
             ])
+            if let sourceFailedTranscriptionId {
+                failedTranscriptionManager.updateFailedTranscriptionError(
+                    id: sourceFailedTranscriptionId,
+                    errorMessage: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed."
+                )
+            }
             displayStatus = .failed(message: "Failed to finalize speaker names")
             scheduleStatusReset(delay: 8)
         }
