@@ -380,6 +380,22 @@ func testRepoCommandContract() {
             "runner should keep unauthorized active issue detection explicit"
         )
     }
+
+    runSuite("Repo command contract - onboarding agent copy remains measurable") {
+        let contents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        assertTrue(
+            contents.contains("AnalyticsReporter.track(\n            \"onboarding_agent_cta_clicked\""),
+            "copying onboarding agent setup should emit the existing first-value activation event"
+        )
+        assertTrue(
+            contents.contains("\"agent_cta\": agentCTA") && contents.contains("\"step_id\": \"connect_agent\""),
+            "onboarding agent setup telemetry should stay limited to coarse CTA and step ids"
+        )
+        assertFalse(
+            contents.contains("AgentConnectionGuide.starterPrompt(filename: nil)\n        AnalyticsReporter.track"),
+            "onboarding telemetry should not send copied prompt text"
+        )
+    }
 }
 
 private func repoRootURL() -> URL {
