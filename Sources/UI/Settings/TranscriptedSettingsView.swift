@@ -276,6 +276,44 @@ struct TranscriptedSettingsView: View {
         let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
 
         return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 20) {
+                HomeWelcomeHeader(
+                    name: homeViewModel.welcomeName,
+                    summary: homeWelcomeSummary
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HomeStatsBadge(stats: stats, streak: homeStreak)
+            }
+
+            if !needsAttention.isEmpty {
+                HomeNeedsAttentionCard(
+                    issues: needsAttention,
+                    onReview: {
+                        reviewHomeNeedsAttention()
+                    }
+                )
+            }
+
+            if let activity = homeTranscriptionActivity {
+                SettingsActivityCard(
+                    symbolName: activity.symbolName,
+                    title: activity.title,
+                    status: activity.status,
+                    detail: activity.detail,
+                    tone: activity.tone,
+                    progress: activity.progress,
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    action: activity.transcriptURL.map { transcriptURL in
+                        {
+                            trackSettingsAction("open_current_activity", page: .home)
+                            NSWorkspace.shared.open(transcriptURL)
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             if !failedMeetings.isEmpty {
                 HomeFailedMeetingsCard(
                     items: failedMeetings,
@@ -299,16 +337,6 @@ struct TranscriptedSettingsView: View {
                         homeActivityTab = .meetings
                     }
                 )
-            }
-
-            HStack(alignment: .top, spacing: 20) {
-                HomeWelcomeHeader(
-                    name: homeViewModel.welcomeName,
-                    summary: homeWelcomeSummary
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                HomeStatsTopCard(stats: stats, streak: homeStreak)
             }
 
             HomeHeroCard(
@@ -357,35 +385,6 @@ struct TranscriptedSettingsView: View {
                     onLoadMoreMeetings: {
                         trackSettingsAction("load_more_meetings", page: .home)
                         homeViewModel.loadMoreMeetings()
-                    }
-                )
-            }
-
-            if let activity = homeTranscriptionActivity {
-                SettingsActivityCard(
-                    symbolName: activity.symbolName,
-                    title: activity.title,
-                    status: activity.status,
-                    detail: activity.detail,
-                    tone: activity.tone,
-                    progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
-                    action: activity.transcriptURL.map { transcriptURL in
-                        {
-                            trackSettingsAction("open_current_activity", page: .home)
-                            NSWorkspace.shared.open(transcriptURL)
-                        }
-                    }
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            if !needsAttention.isEmpty {
-                HomeNeedsAttentionCard(
-                    issues: needsAttention,
-                    onOpenPrivacy: {
-                        trackSettingsAction("open_needs_attention", page: .home)
-                        navigation.selectedPage = .privacy
                     }
                 )
             }
@@ -472,6 +471,29 @@ struct TranscriptedSettingsView: View {
                 homeActivityTab = newMode.activityTab
             }
         )
+    }
+
+    private func reviewHomeNeedsAttention() {
+        trackSettingsAction("open_needs_attention", page: .home)
+
+        if !meetingSession.failedMeetings.isEmpty || homeTranscriptionActivity != nil {
+            homeActivityTab = .meetings
+            homeHeroMode = .meeting
+            return
+        }
+
+        if speakerPeopleModel.needsReviewCount > 0 {
+            speakerPeopleModel.profileFilter = .needsReview
+            navigation.selectedPage = .people
+            return
+        }
+
+        if !missingRequiredPermissions.isEmpty {
+            navigation.selectedPage = .privacy
+            return
+        }
+
+        navigation.selectedPage = .models
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -589,6 +611,10 @@ struct TranscriptedSettingsView: View {
 
     private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         [
+            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
+                trackSettingsAction("flag_dictation", page: .home)
+                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
+            },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([entry.url])
@@ -616,6 +642,25 @@ struct TranscriptedSettingsView: View {
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = [
+            HomeRowMenuItem(title: "Open transcript preview", symbolName: "doc.text.magnifyingglass") {
+                presentHomeMeetingPreview(item)
+            },
+            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
+                trackSettingsAction("flag_meeting", page: .home)
+                homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
+            },
+            HomeRowMenuItem(title: "Copy agent prompt", symbolName: "sparkles") {
+                trackSettingsAction("copy_meeting_agent_prompt", page: .home)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(
+                    AgentConnectionGuide.starterPrompt(
+                        filename: item.transcriptURL.deletingPathExtension().lastPathComponent
+                    ),
+                    forType: .string
+                )
+                flashCopied(rowID: item.id)
+            },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
@@ -781,9 +826,42 @@ struct TranscriptedSettingsView: View {
     private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {
         var issues: [HomeNeedsAttentionCard.Issue] = []
 
+        let failedCount = meetingSession.failedMeetings.count
+        if failedCount > 0 {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    symbolName: "arrow.clockwise.circle.fill",
+                    title: failedCount == 1 ? "1 meeting can be recovered" : "\(failedCount) meetings can be recovered",
+                    detail: "Audio was saved. Retry when no meeting or dictation work is running."
+                )
+            )
+        }
+
+        let speakerReviewCount = speakerPeopleModel.needsReviewCount
+        if speakerReviewCount > 0 {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    symbolName: "person.crop.circle.badge.questionmark",
+                    title: speakerReviewCount == 1 ? "1 speaker needs a name" : "\(speakerReviewCount) speakers need names",
+                    detail: "Review later items are waiting in People."
+                )
+            )
+        }
+
+        if let activity = homeTranscriptionActivity, activity.tone == .working {
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    symbolName: activity.symbolName,
+                    title: activity.title,
+                    detail: activity.status
+                )
+            )
+        }
+
         if !missingRequiredPermissions.isEmpty {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    symbolName: "lock.trianglebadge.exclamationmark",
                     title: "Permissions",
                     detail: permissionsDetailLine
                 )
@@ -797,6 +875,7 @@ struct TranscriptedSettingsView: View {
         if modelCard.tone == .failed {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
                     detail: modelCard.detail
                 )
@@ -804,6 +883,7 @@ struct TranscriptedSettingsView: View {
         } else if preferredTranscriptionModel != effectiveTranscriptionModel {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
                     detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used."
                 )
@@ -818,6 +898,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private var failedMeetingRetryUnavailableReason: String? {
+        if sttRouter.isRecording || sttRouter.isTranscribing {
+            return "Wait for the current dictation to finish before retrying a failed meeting."
+        }
         if meetingSession.isRecording {
             return "Stop the current recording before retrying a failed meeting."
         }

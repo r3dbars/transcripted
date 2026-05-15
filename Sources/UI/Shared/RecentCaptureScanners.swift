@@ -5,8 +5,55 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let date: Date
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
+    let speakerStatus: RecentMeetingSpeakerStatus
 
     var id: String { transcriptURL.path }
+}
+
+enum RecentMeetingSpeakerStatus: Equatable, Sendable {
+    case ready
+    case needsReview(Int)
+
+    var summary: String {
+        switch self {
+        case .ready:
+            return "Speakers ready"
+        case .needsReview(let count):
+            return count == 1 ? "1 speaker needs review" : "\(count) speakers need review"
+        }
+    }
+
+    var needsReview: Bool {
+        if case .needsReview = self { return true }
+        return false
+    }
+
+    static func detect(in markdown: String) -> RecentMeetingSpeakerStatus {
+        let genericSpeakers = genericSpeakerLabels(in: markdown)
+        guard !genericSpeakers.isEmpty else { return .ready }
+        return .needsReview(genericSpeakers.count)
+    }
+
+    private static func genericSpeakerLabels(in markdown: String) -> Set<String> {
+        var labels = Set<String>()
+        let patterns = [
+            #"(?i)(?:^|[/\[\s])Speaker\s+\d+\b"#,
+            #"(?i)\bUnknown speaker\b"#,
+            #"(?i)\bReview later\b"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let nsRange = NSRange(markdown.startIndex..<markdown.endIndex, in: markdown)
+            regex.enumerateMatches(in: markdown, range: nsRange) { match, _, _ in
+                guard let matchRange = match?.range,
+                      let range = Range(matchRange, in: markdown) else { return }
+                labels.insert(String(markdown[range]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            }
+        }
+
+        return labels
+    }
 }
 
 struct RecentCaptureSnapshot: Sendable {
@@ -117,12 +164,14 @@ enum RecentMeetingsScanner {
             guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
                 continue
             }
+            let markdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
                     date: entry.date,
                     transcriptURL: styled.url,
-                    audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url)
+                    audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
+                    speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown)
                 )
             )
             if recentItems.count >= limit {

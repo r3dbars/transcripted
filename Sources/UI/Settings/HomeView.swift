@@ -316,9 +316,9 @@ struct HomeWelcomeHeader: View {
     let summary: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Welcome back, \(name)")
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: 22, weight: .semibold))
             Text(summary)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -711,6 +711,113 @@ struct HomeStatsTopCard: View {
     }
 }
 
+struct HomeStatsBadge: View {
+    let stats: [HomeStatItem]
+    let streak: Int?
+
+    var body: some View {
+        Menu {
+            ForEach(stats) { stat in
+                Label("\(stat.value) \(stat.label)", systemImage: stat.symbolName)
+            }
+
+            if let streak, streak > 0 {
+                Divider()
+                Label("\(streak)d streak", systemImage: "flame.fill")
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(primarySummary)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                    Text("Overall")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.74))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Show overall stats")
+    }
+
+    private var primarySummary: String {
+        let dictations = stats.first(where: { $0.id == "dictations" })
+        let meetings = stats.first(where: { $0.id == "meetings" })
+
+        switch (meetings, dictations) {
+        case let (meeting?, dictation?):
+            return "\(meeting.value) meetings · \(dictation.value) dictations"
+        case let (meeting?, nil):
+            return "\(meeting.value) \(meeting.label)"
+        case let (nil, dictation?):
+            return "\(dictation.value) \(dictation.label)"
+        default:
+            return "Stats"
+        }
+    }
+}
+
+enum HomeArtifactStatusTone: Equatable {
+    case ready
+    case warning
+    case failure
+}
+
+struct HomeArtifactStatus: Equatable {
+    let text: String
+    let tone: HomeArtifactStatusTone
+
+    static func meeting(_ item: RecentMeetingItem) -> HomeArtifactStatus {
+        if item.speakerStatus.needsReview {
+            return HomeArtifactStatus(text: item.speakerStatus.summary, tone: .warning)
+        }
+        if item.audio != nil {
+            return HomeArtifactStatus(text: "Saved with audio", tone: .ready)
+        }
+        return HomeArtifactStatus(text: "Transcript saved", tone: .ready)
+    }
+
+    static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus {
+        switch entry.delivery {
+        case .pasted:
+            return HomeArtifactStatus(text: "Saved and pasted", tone: .ready)
+        case .copied:
+            return HomeArtifactStatus(text: "Saved to clipboard", tone: .ready)
+        case .failed:
+            return HomeArtifactStatus(text: "Saved only", tone: .warning)
+        }
+    }
+
+    var foregroundStyle: Color {
+        switch tone {
+        case .ready:
+            return .secondary
+        case .warning:
+            return .orange
+        case .failure:
+            return .red
+        }
+    }
+}
+
 // MARK: - Row action buttons
 
 struct HomeRowMenuItem: Identifiable {
@@ -743,14 +850,8 @@ struct HomeRowActionButtons: View {
 
             iconButton(
                 systemName: isCopied ? "checkmark" : "square.on.square",
-                help: isCopied ? "Copied" : "Copy",
+                help: isCopied ? "Copied" : "Copy for agent",
                 action: onCopy
-            )
-
-            iconButton(
-                systemName: "flag",
-                help: "Report issue",
-                action: onFlag
             )
 
             if !menuItems.isEmpty {
@@ -931,8 +1032,17 @@ struct HomeDictationRow: View {
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .multilineTextAlignment(.leading)
+
+                Text(status.text)
+                    .font(.caption2)
+                    .foregroundStyle(status.foregroundStyle)
+                    .lineLimit(1)
             }
         }
+    }
+
+    private var status: HomeArtifactStatus {
+        HomeArtifactStatus.dictation(entry)
     }
 
     private var preview: String {
@@ -949,7 +1059,6 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HomeActivityRowShell(
@@ -959,14 +1068,12 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
-            leadingAccessory: audioAccessory,
-            bottomAccessory: audioScrubber,
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "person.2.wave.2.fill")
+                Image(systemName: item.speakerStatus.needsReview ? "person.crop.circle.badge.questionmark" : "doc.text")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(status.foregroundStyle)
                     .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -975,9 +1082,9 @@ struct HomeMeetingRow: View {
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
-                    Text(audioStatusText)
+                    Text(status.text)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(status.foregroundStyle)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -985,29 +1092,8 @@ struct HomeMeetingRow: View {
         }
     }
 
-    private var audioAccessory: AnyView? {
-        guard let audio = item.audio else { return nil }
-        return AnyView(
-            HomeAudioIconButton(
-                title: playback.buttonTitle(for: audio),
-                symbolName: playback.symbolName(for: audio),
-                isActive: playback.isActive(audio),
-                isPlaying: playback.isPlaying && playback.isActive(audio)
-            ) {
-                playback.toggle(audio)
-            }
-            .help("\(playback.buttonTitle(for: audio)) meeting audio")
-        )
-    }
-
-    private var audioScrubber: AnyView? {
-        guard let audio = item.audio, playback.isActive(audio) else { return nil }
-        return AnyView(MeetingAudioScrubber(attachment: audio, width: 170, showsTime: false))
-    }
-
-    private var audioStatusText: String {
-        guard let audio = item.audio else { return "Transcript only" }
-        return audio.isCompositePlayback ? "Mic + system audio kept" : "Audio kept"
+    private var status: HomeArtifactStatus {
+        HomeArtifactStatus.meeting(item)
     }
 }
 
@@ -1190,7 +1276,7 @@ struct HomeActivityTabsCard: View {
                         sections: dictationSections,
                         emptyMessage: "No recent dictations.",
                         canLoadMore: canLoadMoreDictations,
-                        loadMoreTitle: "Load more dictations",
+                        loadMoreTitle: "Load more",
                         loadMoreAction: onLoadMoreDictations,
                         getID: { AnyHashable($0.id) }
                     ) { entry in
@@ -1208,7 +1294,7 @@ struct HomeActivityTabsCard: View {
                         sections: meetingSections,
                         emptyMessage: "No recent meetings.",
                         canLoadMore: canLoadMoreMeetings,
-                        loadMoreTitle: "Load more meetings",
+                        loadMoreTitle: "Load more",
                         loadMoreAction: onLoadMoreMeetings,
                         getID: { AnyHashable($0.id) }
                     ) { item in
@@ -1618,56 +1704,57 @@ struct HomeLoadMoreButton: View {
 struct HomeNeedsAttentionCard: View {
     struct Issue: Identifiable {
         let id = UUID()
+        let symbolName: String
         let title: String
         let detail: String
     }
 
     let issues: [Issue]
-    let onOpenPrivacy: () -> Void
+    let onReview: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
+        if let first = issues.first {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: first.symbolName)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.orange)
-                    .font(.system(size: 14, weight: .semibold))
-                Text("Needs attention")
-                    .font(.headline)
-                Spacer()
-                Button("Review", action: onOpenPrivacy)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(first.title)
+                            .font(.subheadline.weight(.semibold))
+                        if issues.count > 1 {
+                            Text("+\(issues.count - 1)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(first.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 12)
+
+                Button("Review", action: onReview)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(issues) { issue in
-                    HStack(alignment: .top, spacing: 8) {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 5, height: 5)
-                            .padding(.top, 7)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(issue.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text(issue.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.orange.opacity(0.07))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.orange.opacity(0.28), lineWidth: 1)
+            )
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.orange.opacity(0.07))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.orange.opacity(0.32), lineWidth: 1)
-        )
     }
 }
 
