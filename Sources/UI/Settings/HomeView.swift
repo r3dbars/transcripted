@@ -1419,24 +1419,18 @@ struct HomeFailedMeetingInlineRow: View {
             onFlag: {},
             menuItems: [],
             trailingAccessory: AnyView(actions),
-            rowTone: .warning,
             compact: true,
             opensOnRowClick: false
         ) {
-            HStack(alignment: .top, spacing: 10) {
-                retryIndicator
-                    .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-
-                    statusLine
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                statusLine
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .help(item.detail)
         }
     }
@@ -1457,7 +1451,6 @@ struct HomeFailedMeetingInlineRow: View {
             if item.isRetryable || item.isRetrying {
                 HomeRetryButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
-                    systemImage: item.isRetrying ? "arrow.triangle.2.circlepath" : "arrow.clockwise",
                     isDisabled: retryDisabled,
                     action: onRetry
                 )
@@ -1477,62 +1470,25 @@ struct HomeFailedMeetingInlineRow: View {
         }
     }
 
-    private var retryIndicator: some View {
-        ZStack {
-            Circle()
-                .fill(Color.orange.opacity(item.isRetrying ? 0.16 : 0.12))
-                .frame(width: 18, height: 18)
-                .overlay(
-                    Circle()
-                        .stroke(Color.orange.opacity(0.32), lineWidth: 1)
-                )
-
-            Image(systemName: item.isRetrying ? "arrow.triangle.2.circlepath" : retryIndicatorSymbol)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(Color.orange)
-        }
-        .accessibilityLabel(item.isRetrying ? "Retrying transcript" : "Retry needed")
-    }
-
     private var statusLine: some View {
-        HStack(spacing: 6) {
-            Text(statusPillText)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Color.orange)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.orange.opacity(0.12))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.orange.opacity(0.18), lineWidth: 1)
-                )
-
-            Text(statusDetailText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private var retryIndicatorSymbol: String {
-        item.failureKind == .recordingTooShort ? "timer" : "arrow.clockwise"
+        Text(statusPillText)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(Color.red)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.red.opacity(0.12))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.red.opacity(0.18), lineWidth: 1)
+            )
+            .accessibilityLabel(statusPillText)
     }
 
     private var statusPillText: String {
         item.isRetrying ? "Retrying" : "Needs retry"
-    }
-
-    private var statusDetailText: String {
-        if item.isRetrying {
-            return "Transcript is running again"
-        }
-        if item.hasAudioFiles {
-            return "Audio saved"
-        }
-        return "Transcript failed"
     }
 
     private var retryDisabled: Bool {
@@ -1558,7 +1514,6 @@ struct HomeFailedMeetingInlineRow: View {
 
 private struct HomeRetryButton: View {
     let title: String
-    let systemImage: String
     let isDisabled: Bool
     let action: () -> Void
 
@@ -1566,16 +1521,12 @@ private struct HomeRetryButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 10.5, weight: .bold))
-
-                Text(title)
-                    .font(.system(size: 11.5, weight: .semibold))
-            }
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
             .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 10)
-            .frame(height: 24)
+            .padding(.horizontal, 14)
+            .frame(height: 26)
             .background(
                 Capsule(style: .continuous)
                     .fill(backgroundColor)
@@ -1592,22 +1543,22 @@ private struct HomeRetryButton: View {
     }
 
     private var foregroundColor: Color {
-        isDisabled ? Color.orange.opacity(0.55) : Color.white
+        isDisabled ? Color.red.opacity(0.55) : Color.white
     }
 
     private var backgroundColor: Color {
         if isDisabled {
-            return Color.orange.opacity(0.12)
+            return Color.red.opacity(0.12)
         }
-        return Color.orange.opacity(isHovering ? 0.94 : 0.82)
+        return Color.red.opacity(isHovering ? 0.9 : 0.78)
     }
 
     private var borderColor: Color {
-        isDisabled ? Color.orange.opacity(0.16) : Color.white.opacity(0.14)
+        isDisabled ? Color.red.opacity(0.16) : Color.white.opacity(0.14)
     }
 
     private var shadowColor: Color {
-        isDisabled ? Color.clear : Color.orange.opacity(0.18)
+        isDisabled ? Color.clear : Color.red.opacity(0.16)
     }
 }
 
