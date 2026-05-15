@@ -1219,7 +1219,7 @@ private struct HomeActivityRowShell<Content: View>: View {
         case .ready:
             return isHovering ? Color.primary.opacity(0.035) : Color.clear
         case .warning:
-            return Color.orange.opacity(isHovering ? 0.09 : 0.055)
+            return Color.orange.opacity(isHovering ? 0.075 : 0.04)
         case .failure:
             return Color.red.opacity(isHovering ? 0.08 : 0.045)
         }
@@ -1228,7 +1228,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     private var rowBorder: Color {
         switch rowTone {
         case .warning:
-            return Color.orange.opacity(0.18)
+            return Color.orange.opacity(0.16)
         case .failure:
             return Color.red.opacity(0.18)
         case .ready, .none:
@@ -1239,7 +1239,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     private var rowAccent: Color? {
         switch rowTone {
         case .warning:
-            return .orange
+            return Color.orange.opacity(0.9)
         case .failure:
             return .red
         case .ready, .none:
@@ -1424,10 +1424,8 @@ struct HomeFailedMeetingInlineRow: View {
             opensOnRowClick: false
         ) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: item.failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(item.failureKind == .recordingTooShort ? Color.secondary : Color.orange)
-                    .padding(.top, 2)
+                retryIndicator
+                    .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
@@ -1435,10 +1433,7 @@ struct HomeFailedMeetingInlineRow: View {
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
 
-                    Text(statusText)
-                        .font(.caption2)
-                        .foregroundStyle(Color.orange)
-                        .lineLimit(1)
+                    statusLine
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1460,14 +1455,12 @@ struct HomeFailedMeetingInlineRow: View {
             }
 
             if item.isRetryable || item.isRetrying {
-                Button {
-                    onRetry()
-                } label: {
-                    Label(item.isRetrying ? "Retrying..." : "Retry", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(retryDisabled)
+                HomeRetryButton(
+                    title: item.isRetrying ? "Retrying" : "Try again",
+                    systemImage: item.isRetrying ? "arrow.triangle.2.circlepath" : "arrow.clockwise",
+                    isDisabled: retryDisabled,
+                    action: onRetry
+                )
                 .help(retryHelp)
             }
 
@@ -1484,12 +1477,60 @@ struct HomeFailedMeetingInlineRow: View {
         }
     }
 
-    private var statusText: String {
+    private var retryIndicator: some View {
+        ZStack {
+            Circle()
+                .fill(Color.orange.opacity(item.isRetrying ? 0.16 : 0.12))
+                .frame(width: 18, height: 18)
+                .overlay(
+                    Circle()
+                        .stroke(Color.orange.opacity(0.32), lineWidth: 1)
+                )
+
+            Image(systemName: item.isRetrying ? "arrow.triangle.2.circlepath" : retryIndicatorSymbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.orange)
+        }
+        .accessibilityLabel(item.isRetrying ? "Retrying transcript" : "Retry needed")
+    }
+
+    private var statusLine: some View {
+        HStack(spacing: 6) {
+            Text(statusPillText)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.orange.opacity(0.12))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+                )
+
+            Text(statusDetailText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var retryIndicatorSymbol: String {
+        item.failureKind == .recordingTooShort ? "timer" : "arrow.clockwise"
+    }
+
+    private var statusPillText: String {
+        item.isRetrying ? "Retrying" : "Needs retry"
+    }
+
+    private var statusDetailText: String {
         if item.isRetrying {
-            return "Retrying transcript..."
+            return "Transcript is running again"
         }
         if item.hasAudioFiles {
-            return "Transcript failed · Audio saved"
+            return "Audio saved"
         }
         return "Transcript failed"
     }
@@ -1512,6 +1553,61 @@ struct HomeFailedMeetingInlineRow: View {
             return "Wait for the current meeting work to finish before retrying."
         }
         return "Transcribe this saved audio again."
+    }
+}
+
+private struct HomeRetryButton: View {
+    let title: String
+    let systemImage: String
+    let isDisabled: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .bold))
+
+                Text(title)
+                    .font(.system(size: 11.5, weight: .semibold))
+            }
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+            .shadow(color: shadowColor, radius: isHovering && !isDisabled ? 5 : 2, y: 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .onHover { isHovering = $0 }
+    }
+
+    private var foregroundColor: Color {
+        isDisabled ? Color.orange.opacity(0.55) : Color.white
+    }
+
+    private var backgroundColor: Color {
+        if isDisabled {
+            return Color.orange.opacity(0.12)
+        }
+        return Color.orange.opacity(isHovering ? 0.94 : 0.82)
+    }
+
+    private var borderColor: Color {
+        isDisabled ? Color.orange.opacity(0.16) : Color.white.opacity(0.14)
+    }
+
+    private var shadowColor: Color {
+        isDisabled ? Color.clear : Color.orange.opacity(0.18)
     }
 }
 
