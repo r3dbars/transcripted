@@ -60,7 +60,6 @@ struct TranscriptedSettingsView: View {
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
     @State private var lastHomeDashboardRefreshStartedAt: Date?
-    @State private var menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
     @State private var showSupportFolders = false
     @State private var modelCacheSnapshot: ModelCacheSnapshot?
     @State private var modelCacheLoading = false
@@ -168,9 +167,6 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptionModelPreferenceDidChange)) { _ in
             preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .menuBarVisibilityPreferencesDidChange)) { _ in
-            refreshMenuBarVisibility()
         }
         .onReceive(NotificationCenter.default.publisher(for: .dockVisibilityPreferencesDidChange)) { _ in
             refreshDockVisibility()
@@ -292,8 +288,6 @@ struct TranscriptedSettingsView: View {
 
                 HomeStatsTopCard(stats: stats, streak: homeStreak)
             }
-
-            homeQuickActions
 
             HomeHeroCard(
                 selectedMode: homeHeroModeSelection
@@ -487,60 +481,6 @@ struct TranscriptedSettingsView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.orange.opacity(0.42), lineWidth: 1)
         )
-    }
-
-    private var homeQuickActions: some View {
-        let columns = [
-            GridItem(.flexible(minimum: 240), spacing: 12),
-            GridItem(.flexible(minimum: 240), spacing: 12)
-        ]
-
-        return LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-            SettingsActionTile(
-                symbolName: "record.circle.fill",
-                title: "Start Meeting",
-                detail: "Capture your mic and computer audio.",
-                tone: .accent,
-                menuBarVisibility: menuBarVisibilityBinding(for: .startMeeting),
-                actionHelp: "Start a meeting recording.",
-                menuBarVisibilityHelp: "Show or hide Start Meeting in the menu bar popover."
-            ) {
-                trackSettingsAction("start_meeting", page: .home)
-                actions.startMeeting()
-            }
-
-            SettingsActionTile(
-                symbolName: "waveform",
-                title: "Transcribe Audio File",
-                detail: "Turn an audio file into meeting notes.",
-                actionHelp: "Choose an audio file to transcribe."
-            ) {
-                trackSettingsAction("import_recording", page: .home)
-                actions.importAudioFile()
-            }
-
-            SettingsActionTile(
-                symbolName: "mic.fill",
-                title: "Start Dictation",
-                detail: "Say something and paste it back.",
-                menuBarVisibility: menuBarVisibilityBinding(for: .startDictation),
-                actionHelp: "Start dictation.",
-                menuBarVisibilityHelp: "Show or hide Start Dictation in the menu bar popover."
-            ) {
-                trackSettingsAction("start_dictation", page: .home)
-                actions.startDictation()
-            }
-
-            SettingsActionTile(
-                symbolName: "sparkles",
-                title: "Connect Agent",
-                detail: "Copy a prompt or install direct local tools.",
-                actionHelp: "Open agent setup."
-            ) {
-                trackSettingsAction("open_agent", page: .home)
-                navigation.selectedPage = .connectAgent
-            }
-        }
     }
 
     private var settingsContentTopPadding: CGFloat {
@@ -2106,7 +2046,6 @@ struct TranscriptedSettingsView: View {
         refreshStoragePaths()
         refreshRecentCaptures(force: true)
         refreshShortcutState()
-        refreshMenuBarVisibility()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
         customDictionaryText = CustomDictionaryPreferences.rawText()
@@ -2347,10 +2286,6 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func refreshMenuBarVisibility() {
-        menuBarItemVisibility = MenuBarVisibilityPreferences.snapshot()
-    }
-
     private func refreshDockVisibility() {
         showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     }
@@ -2458,17 +2393,6 @@ struct TranscriptedSettingsView: View {
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
         }
-    }
-
-    private func menuBarVisibilityBinding(for item: MenuBarOptionalItem) -> Binding<Bool> {
-        Binding(
-            get: { menuBarItemVisibility[item] ?? true },
-            set: { newValue in
-                menuBarItemVisibility[item] = newValue
-                trackSettingsToggle("menu_bar_\(item.analyticsValue)", enabled: newValue, page: .home)
-                MenuBarVisibilityPreferences.setVisible(item, newValue)
-            }
-        )
     }
 
     private func sendTestSentryEvent() {

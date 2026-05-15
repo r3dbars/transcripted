@@ -110,16 +110,6 @@ When an update is found, the row also shows the available version as supporting 
 
 - `Version 1.1.10 ready`
 
-Primary action rows can be hidden from switches on the matching Settings
-`Home` action tiles where the control is surfaced:
-
-- `Start Dictation`
-- `Start Meeting`
-
-These switches default on. Hovering a switch explains that it shows or hides the
-matching row in the menu bar popover. The action arrow on each tile should read
-as an explicit icon button and expose a short hover description for the action.
-
 Utility rows such as `Connect Agent`, `Submit Feedback`, updates, `Settings`,
 and `Quit` remain visible in this version.
 
@@ -133,19 +123,11 @@ Show the simplest ways to use Transcripted and surface high-value status.
 Contents:
 
 - top-of-page unfinished meeting warnings, when a meeting needs retry/delete
-- large action buttons for:
-  - `Start Dictation`
-  - `Start Meeting`
-  - `Transcribe Audio File…`
-  - `Connect Agent`
+- overall dictation and meeting stats
 - recent activity for:
   - meetings, including retained-audio playback when available
   - dictations
-- setup/status cards for:
-  - local model readiness
-  - permissions health
-  - capture library location
-- quick links into the most important pages
+- compact setup issues only when something needs attention
 
 ### Shortcuts
 
