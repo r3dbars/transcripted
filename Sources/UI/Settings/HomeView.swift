@@ -1403,6 +1403,7 @@ struct HomeMeetingRow: View {
             HomeAttentionActionButton(
                 title: "Review",
                 isDisabled: false,
+                tint: .orange,
                 action: onReviewSpeakers
             )
                 .help("Review speakers")
@@ -1412,16 +1413,16 @@ struct HomeMeetingRow: View {
     private var speakerReviewLabel: some View {
         Text("Needs speaker names")
             .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(Color.red)
+            .foregroundStyle(Color.orange)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color.red.opacity(0.12))
+                    .fill(Color.orange.opacity(0.12))
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                    .stroke(Color.orange.opacity(0.18), lineWidth: 1)
             )
             .accessibilityLabel("Needs speaker names")
     }
@@ -1540,6 +1541,7 @@ struct HomeFailedMeetingInlineRow: View {
 private struct HomeAttentionActionButton: View {
     let title: String
     let isDisabled: Bool
+    var tint: Color = .red
     let action: () -> Void
 
     @State private var isHovering = false
@@ -1568,22 +1570,22 @@ private struct HomeAttentionActionButton: View {
     }
 
     private var foregroundColor: Color {
-        isDisabled ? Color.red.opacity(0.55) : Color.white
+        isDisabled ? tint.opacity(0.55) : Color.white
     }
 
     private var backgroundColor: Color {
         if isDisabled {
-            return Color.red.opacity(0.12)
+            return tint.opacity(0.12)
         }
-        return Color.red.opacity(isHovering ? 0.9 : 0.78)
+        return tint.opacity(isHovering ? 0.9 : 0.78)
     }
 
     private var borderColor: Color {
-        isDisabled ? Color.red.opacity(0.16) : Color.white.opacity(0.14)
+        isDisabled ? tint.opacity(0.16) : Color.white.opacity(0.14)
     }
 
     private var shadowColor: Color {
-        isDisabled ? Color.clear : Color.red.opacity(0.16)
+        isDisabled ? Color.clear : tint.opacity(0.16)
     }
 }
 
