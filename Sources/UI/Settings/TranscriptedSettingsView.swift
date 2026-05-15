@@ -281,6 +281,7 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
+        let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 20) {
@@ -339,6 +340,31 @@ struct TranscriptedSettingsView: View {
                     onLoadMoreMeetings: {
                         trackSettingsAction("load_more_meetings", page: .home)
                         homeViewModel.loadMoreMeetings()
+                    }
+                )
+            }
+
+            if !failedMeetings.isEmpty {
+                HomeFailedMeetingsCard(
+                    items: failedMeetings,
+                    canRetry: canRetryFailedMeetings,
+                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
+                    onRetry: { item in
+                        trackSettingsAction("home_retry_failed_meeting", page: .home)
+                        meetingSession.retryFailedMeeting(id: item.id)
+                    },
+                    onRevealAudio: { item in
+                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                        revealFailedMeetingAudio(item)
+                    },
+                    onClear: { item in
+                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
+                        clearFailedMeeting(item)
+                    },
+                    onOpenMeetings: {
+                        trackSettingsAction("home_open_failed_meetings", page: .home)
+                        navigation.selectedPage = .meetings
                     }
                 )
             }
@@ -631,6 +657,9 @@ struct TranscriptedSettingsView: View {
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
         do {
+            if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
+                MeetingAudioPlayback.shared.stop()
+            }
             try removeItemIfPresent(at: item.transcriptURL)
             if let audio = item.audio {
                 try removeItemIfPresent(at: audio.directoryURL)
@@ -641,6 +670,37 @@ struct TranscriptedSettingsView: View {
                 title: "Could not delete meeting",
                 error: error
             )
+        }
+    }
+
+    private func failedMeetingAudioAttachment(
+        for item: MeetingSessionController.FailedMeetingItem
+    ) -> MeetingAudioAttachment? {
+        guard let firstAudioURL = item.audioURLs.first else { return nil }
+        return MeetingAudioAttachment(
+            directoryURL: firstAudioURL.deletingLastPathComponent(),
+            urls: item.audioURLs
+        )
+    }
+
+    private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
+        guard let firstAudioURL = item.audioURLs.first else {
+            NSSound.beep()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([firstAudioURL])
+    }
+
+    private func clearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
+        if let audio = failedMeetingAudioAttachment(for: item),
+           MeetingAudioPlayback.shared.isActive(audio) {
+            MeetingAudioPlayback.shared.stop()
+        }
+
+        if item.hasAudioFiles {
+            meetingSession.deleteFailedMeeting(id: item.id)
+        } else {
+            meetingSession.dismissFailedMeeting(id: item.id)
         }
     }
 
@@ -759,6 +819,20 @@ struct TranscriptedSettingsView: View {
         }
 
         return issues
+    }
+
+    private var canRetryFailedMeetings: Bool {
+        failedMeetingRetryUnavailableReason == nil
+    }
+
+    private var failedMeetingRetryUnavailableReason: String? {
+        if meetingSession.isRecording {
+            return "Stop the current recording before retrying a failed meeting."
+        }
+        if meetingSession.hasRuntimeDiagnosticsWork {
+            return "Wait for the current meeting to finish saving or transcribing before retrying."
+        }
+        return nil
     }
 
     private var shortcutsPage: some View {
@@ -1230,17 +1304,20 @@ struct TranscriptedSettingsView: View {
                     ForEach(meetingSession.failedMeetings) { item in
                         SettingsFailedMeetingRow(
                             item: item,
+                            canRetry: canRetryFailedMeetings,
+                            retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                            audio: failedMeetingAudioAttachment(for: item),
                             retryAction: {
                                 trackSettingsAction("retry_failed_meeting", page: .meetings)
                                 meetingSession.retryFailedMeeting(id: item.id)
                             },
+                            revealAudioAction: {
+                                trackSettingsAction("reveal_failed_meeting_audio", page: .meetings)
+                                revealFailedMeetingAudio(item)
+                            },
                             secondaryAction: {
                                 trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .meetings)
-                                if item.hasAudioFiles {
-                                    meetingSession.deleteFailedMeeting(id: item.id)
-                                } else {
-                                    meetingSession.dismissFailedMeeting(id: item.id)
-                                }
+                                clearFailedMeeting(item)
                             }
                         )
                     }
@@ -2938,7 +3015,10 @@ private struct SettingsRecentMeetingRow: View {
                         title: playback.buttonTitle(for: audio),
                         symbolName: playback.symbolName(for: audio),
                         isActive: playback.isActive(audio),
-                        isPlaying: playback.isPlaying && playback.isActive(audio)
+                        isPlaying: playback.isPlaying && playback.isActive(audio),
+                        scrubber: playback.isActive(audio)
+                            ? AnyView(MeetingAudioScrubber(attachment: audio, width: 210))
+                            : nil
                     ) {
                         playback.toggle(audio)
                     }
@@ -2962,49 +3042,72 @@ private struct SettingsRecentMeetingAudioControl: View {
     let symbolName: String
     let isActive: Bool
     let isPlaying: Bool
+    let scrubber: AnyView?
     let action: () -> Void
 
+    init(
+        title: String,
+        symbolName: String,
+        isActive: Bool,
+        isPlaying: Bool,
+        scrubber: AnyView? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.symbolName = symbolName
+        self.isActive = isActive
+        self.isPlaying = isPlaying
+        self.scrubber = scrubber
+        self.action = action
+    }
+
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbolName)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(iconForeground)
-                    .frame(width: 20, height: 20)
-                    .background(Circle().fill(iconBackground))
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(iconForeground)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(iconBackground))
 
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.secondary.opacity(0.22))
-                        .frame(width: 44, height: 4)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.22))
+                            .frame(width: 44, height: 4)
 
-                    Capsule()
-                        .fill(playheadColor)
-                        .frame(width: isPlaying ? 28 : 8, height: 4)
+                        Capsule()
+                            .fill(playheadColor)
+                            .frame(width: isPlaying ? 28 : 8, height: 4)
 
-                    Circle()
-                        .fill(playheadColor)
-                        .frame(width: 8, height: 8)
-                        .offset(x: isPlaying ? 24 : 4)
+                        Circle()
+                            .fill(playheadColor)
+                            .frame(width: 8, height: 8)
+                            .offset(x: isPlaying ? 24 : 4)
+                    }
+                    .frame(width: 44, height: 12)
+
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
                 }
-                .frame(width: 44, height: 12)
-
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(background)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(stroke, lineWidth: 1)
+                )
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(background)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(stroke, lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+
+            if let scrubber {
+                scrubber
+            }
         }
-        .buttonStyle(.plain)
     }
 
     private var background: Color {
@@ -3030,8 +3133,13 @@ private struct SettingsRecentMeetingAudioControl: View {
 
 private struct SettingsFailedMeetingRow: View {
     let item: MeetingSessionController.FailedMeetingItem
+    let canRetry: Bool
+    let retryUnavailableReason: String?
+    let audio: MeetingAudioAttachment?
     let retryAction: () -> Void
+    let revealAudioAction: () -> Void
     let secondaryAction: () -> Void
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -3063,15 +3171,39 @@ private struct SettingsFailedMeetingRow: View {
 
             Spacer(minLength: 12)
 
+            if let audio {
+                SettingsRecentMeetingAudioControl(
+                    title: playback.buttonTitle(for: audio),
+                    symbolName: playback.symbolName(for: audio),
+                    isActive: playback.isActive(audio),
+                    isPlaying: playback.isPlaying && playback.isActive(audio),
+                    scrubber: playback.isActive(audio)
+                        ? AnyView(MeetingAudioScrubber(attachment: audio, width: 190))
+                        : nil
+                ) {
+                    playback.toggle(audio)
+                }
+                .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+
+                Button {
+                    revealAudioAction()
+                } label: {
+                    Label("Show Audio", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
             if item.isRetryable || item.isRetrying {
                 Button {
                     retryAction()
                 } label: {
-                    Label(item.isRetrying ? "Retrying..." : "Retry", systemImage: "arrow.clockwise")
+                    Label(item.isRetrying ? "Retrying..." : "Try Again", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(!item.isRetryable || item.isRetrying)
+                .disabled(retryDisabled)
+                .help(retryHelp)
             }
 
             Button(role: item.hasAudioFiles ? .destructive : nil) {
@@ -3082,6 +3214,26 @@ private struct SettingsFailedMeetingRow: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
+    }
+
+    private var retryDisabled: Bool {
+        !canRetry || !item.isRetryable || item.isRetrying
+    }
+
+    private var retryHelp: String {
+        if item.isRetrying {
+            return "Retry is already running."
+        }
+        if !item.isRetryable {
+            return "This meeting does not have enough saved audio to retry."
+        }
+        if let retryUnavailableReason {
+            return retryUnavailableReason
+        }
+        if !canRetry {
+            return "Wait for the current meeting work to finish before retrying."
+        }
+        return "Transcribe this saved audio again."
     }
 }
 
