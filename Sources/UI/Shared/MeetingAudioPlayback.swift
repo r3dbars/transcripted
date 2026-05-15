@@ -111,7 +111,11 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
 
         for sound in sounds {
             let soundDuration = max(sound.duration, 0)
-            sound.currentTime = min(targetTime, soundDuration)
+            let seekTime = min(targetTime, soundDuration)
+            sound.currentTime = seekTime
+            if isPlaying, !sound.isPlaying, seekTime < soundDuration {
+                sound.play()
+            }
         }
 
         currentTime = targetTime

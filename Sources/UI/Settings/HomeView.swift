@@ -858,37 +858,45 @@ private struct HomeActivityRowShell<Content: View>: View {
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
     var leadingAccessory: AnyView? = nil
+    var bottomAccessory: AnyView? = nil
     var compact: Bool = false
     @ViewBuilder let content: () -> Content
 
     @State private var isHovering = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Button(action: onOpen) {
-                HStack(alignment: .top, spacing: 14) {
-                    Text(timeString)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 64, alignment: .leading)
-                        .padding(.top, 2)
+        VStack(alignment: .leading, spacing: compact ? 4 : 7) {
+            HStack(alignment: .top, spacing: 14) {
+                Button(action: onOpen) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Text(timeString)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 64, alignment: .leading)
+                            .padding(.top, 2)
 
-                    content()
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        content()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            HomeRowActionButtons(
-                isCopied: isCopied,
-                onCopy: onCopy,
-                onFlag: onFlag,
-                menuItems: menuItems,
-                leadingAccessory: leadingAccessory
-            )
-            .opacity(isHovering ? 1 : 0.55)
-            .animation(.easeOut(duration: 0.12), value: isHovering)
+                HomeRowActionButtons(
+                    isCopied: isCopied,
+                    onCopy: onCopy,
+                    onFlag: onFlag,
+                    menuItems: menuItems,
+                    leadingAccessory: leadingAccessory
+                )
+                .opacity(isHovering ? 1 : 0.55)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+            }
+
+            if let bottomAccessory {
+                bottomAccessory
+                    .padding(.leading, 78)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, compact ? 5 : 9)
@@ -952,6 +960,7 @@ struct HomeMeetingRow: View {
             onFlag: onFlag,
             menuItems: menuItems,
             leadingAccessory: audioAccessory,
+            bottomAccessory: audioScrubber,
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
@@ -970,10 +979,6 @@ struct HomeMeetingRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-
-                    if let audio = item.audio, playback.isActive(audio) {
-                        MeetingAudioScrubber(attachment: audio, width: 170, showsTime: false)
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -993,6 +998,11 @@ struct HomeMeetingRow: View {
             }
             .help("\(playback.buttonTitle(for: audio)) meeting audio")
         )
+    }
+
+    private var audioScrubber: AnyView? {
+        guard let audio = item.audio, playback.isActive(audio) else { return nil }
+        return AnyView(MeetingAudioScrubber(attachment: audio, width: 170, showsTime: false))
     }
 
     private var audioStatusText: String {
