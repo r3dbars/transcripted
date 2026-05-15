@@ -100,7 +100,7 @@ final class HomeViewModel: ObservableObject {
 
     // MARK: - Helpers
 
-    private static func groupByDay<Item>(
+    static func groupByDay<Item>(
         _ items: [Item],
         dateForItem: (Item) -> Date
     ) -> [HomeDaySection<Item>] {
@@ -145,6 +145,29 @@ struct HomeDaySection<Item>: Identifiable {
     let items: [Item]
 
     var id: TimeInterval { day.timeIntervalSinceReferenceDate }
+}
+
+enum HomeMeetingListItem: Identifiable {
+    case saved(RecentMeetingItem)
+    case failed(MeetingSessionController.FailedMeetingItem)
+
+    var id: String {
+        switch self {
+        case .saved(let item):
+            return "saved-\(item.id)"
+        case .failed(let item):
+            return "failed-\(item.id.uuidString)"
+        }
+    }
+
+    var date: Date {
+        switch self {
+        case .saved(let item):
+            return item.date
+        case .failed(let item):
+            return item.timestamp
+        }
+    }
 }
 
 struct HomeDeleteConfirmation: Identifiable {
@@ -1121,6 +1144,8 @@ private struct HomeActivityRowShell<Content: View>: View {
     let menuItems: [HomeRowMenuItem]
     var leadingAccessory: AnyView? = nil
     var bottomAccessory: AnyView? = nil
+    var trailingAccessory: AnyView? = nil
+    var rowTone: HomeArtifactStatusTone? = nil
     var compact: Bool = false
     var opensOnRowClick: Bool = true
     @ViewBuilder let content: () -> Content
@@ -1139,13 +1164,7 @@ private struct HomeActivityRowShell<Content: View>: View {
                     mainContent
                 }
 
-                HomeRowActionButtons(
-                    isCopied: isCopied,
-                    onCopy: onCopy,
-                    onFlag: onFlag,
-                    menuItems: menuItems,
-                    leadingAccessory: leadingAccessory
-                )
+                trailingActions
                 .opacity(isHovering ? 1 : 0.55)
                 .animation(.easeOut(duration: 0.12), value: isHovering)
             }
@@ -1159,9 +1178,73 @@ private struct HomeActivityRowShell<Content: View>: View {
         .padding(.vertical, compact ? 5 : 9)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+                .fill(rowBackground)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(rowBorder, lineWidth: rowTone == nil ? 0 : 1)
+        )
+        .overlay(alignment: .leading) {
+            if let accent = rowAccent {
+                Capsule()
+                    .fill(accent)
+                    .frame(width: 2)
+                    .padding(.vertical, compact ? 7 : 9)
+            }
+        }
         .onHover { isHovering = $0 }
+    }
+
+    private var trailingActions: some View {
+        Group {
+            if let trailingAccessory {
+                trailingAccessory
+            } else {
+                HomeRowActionButtons(
+                    isCopied: isCopied,
+                    onCopy: onCopy,
+                    onFlag: onFlag,
+                    menuItems: menuItems,
+                    leadingAccessory: leadingAccessory
+                )
+            }
+        }
+    }
+
+    private var rowBackground: Color {
+        guard let rowTone else {
+            return isHovering ? Color.primary.opacity(0.035) : Color.clear
+        }
+        switch rowTone {
+        case .ready:
+            return isHovering ? Color.primary.opacity(0.035) : Color.clear
+        case .warning:
+            return Color.orange.opacity(isHovering ? 0.09 : 0.055)
+        case .failure:
+            return Color.red.opacity(isHovering ? 0.08 : 0.045)
+        }
+    }
+
+    private var rowBorder: Color {
+        switch rowTone {
+        case .warning:
+            return Color.orange.opacity(0.18)
+        case .failure:
+            return Color.red.opacity(0.18)
+        case .ready, .none:
+            return Color.clear
+        }
+    }
+
+    private var rowAccent: Color? {
+        switch rowTone {
+        case .warning:
+            return .orange
+        case .failure:
+            return .red
+        case .ready, .none:
+            return nil
+        }
     }
 
     private var mainContent: some View {
@@ -1319,6 +1402,119 @@ struct HomeMeetingRow: View {
     }
 }
 
+struct HomeFailedMeetingInlineRow: View {
+    let item: MeetingSessionController.FailedMeetingItem
+    let canRetry: Bool
+    let retryUnavailableReason: String?
+    let onRetry: () -> Void
+    let onRevealAudio: () -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        HomeActivityRowShell(
+            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp),
+            isCopied: false,
+            onOpen: {},
+            onCopy: {},
+            onFlag: {},
+            menuItems: [],
+            trailingAccessory: AnyView(actions),
+            rowTone: .warning,
+            compact: true,
+            opensOnRowClick: false
+        ) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: item.failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(item.failureKind == .recordingTooShort ? Color.secondary : Color.orange)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(Color.orange)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .help(item.detail)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 6) {
+            if item.hasAudioFiles {
+                Button {
+                    onRevealAudio()
+                } label: {
+                    Label("Show Audio", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Show saved audio in Finder")
+            }
+
+            if item.isRetryable || item.isRetrying {
+                Button {
+                    onRetry()
+                } label: {
+                    Label(item.isRetrying ? "Retrying..." : "Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(retryDisabled)
+                .help(retryHelp)
+            }
+
+            HomeRowMoreMenuButton(items: [
+                HomeRowMenuItem(
+                    title: item.hasAudioFiles ? "Delete failed meeting" : "Dismiss",
+                    symbolName: item.hasAudioFiles ? "trash" : "xmark",
+                    isDestructive: item.hasAudioFiles,
+                    action: onClear
+                )
+            ])
+            .frame(width: 26, height: 26)
+            .help("More options")
+        }
+    }
+
+    private var statusText: String {
+        if item.isRetrying {
+            return "Retrying transcript..."
+        }
+        if item.hasAudioFiles {
+            return "Transcript failed · Audio saved"
+        }
+        return "Transcript failed"
+    }
+
+    private var retryDisabled: Bool {
+        !canRetry || !item.isRetryable || item.isRetrying
+    }
+
+    private var retryHelp: String {
+        if item.isRetrying {
+            return "Retry is already running."
+        }
+        if !item.isRetryable {
+            return "This meeting does not have enough saved audio to retry."
+        }
+        if let retryUnavailableReason {
+            return retryUnavailableReason
+        }
+        if !canRetry {
+            return "Wait for the current meeting work to finish before retrying."
+        }
+        return "Transcribe this saved audio again."
+    }
+}
+
 private struct HomeAudioIconButton: View {
     let title: String
     let symbolName: String
@@ -1462,12 +1658,14 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 struct HomeActivityTabsCard: View {
     let selectedTab: HomeActivityTab
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
-    let meetingSections: [HomeDaySection<RecentMeetingItem>]
+    let meetingSections: [HomeDaySection<HomeMeetingListItem>]
     let isLoading: Bool
     let isLoadingMore: Bool
     let canLoadMoreDictations: Bool
     let canLoadMoreMeetings: Bool
     let copiedRowID: String?
+    let canRetryFailedMeetings: Bool
+    let failedMeetingRetryUnavailableReason: String?
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let onFlagDictation: (SavedDictationEntry) -> Void
@@ -1477,6 +1675,9 @@ struct HomeActivityTabsCard: View {
     let onFlagMeeting: (RecentMeetingItem) -> Void
     let onReviewMeetingSpeakers: (RecentMeetingItem) -> Void
     let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
+    let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onLoadMoreDictations: () -> Void
     let onLoadMoreMeetings: () -> Void
 
@@ -1521,15 +1722,27 @@ struct HomeActivityTabsCard: View {
                         loadMoreAction: onLoadMoreMeetings,
                         getID: { AnyHashable($0.id) }
                     ) { item in
-                        HomeMeetingRow(
-                            item: item,
-                            isCopied: copiedRowID == item.id,
-                            onOpen: { onOpenMeeting(item) },
-                            onCopy: { onCopyMeeting(item) },
-                            onFlag: { onFlagMeeting(item) },
-                            onReviewSpeakers: { onReviewMeetingSpeakers(item) },
-                            menuItems: meetingMenuItems(item)
-                        )
+                        switch item {
+                        case .saved(let meeting):
+                            HomeMeetingRow(
+                                item: meeting,
+                                isCopied: copiedRowID == meeting.id,
+                                onOpen: { onOpenMeeting(meeting) },
+                                onCopy: { onCopyMeeting(meeting) },
+                                onFlag: { onFlagMeeting(meeting) },
+                                onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
+                                menuItems: meetingMenuItems(meeting)
+                            )
+                        case .failed(let failedMeeting):
+                            HomeFailedMeetingInlineRow(
+                                item: failedMeeting,
+                                canRetry: canRetryFailedMeetings,
+                                retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                                onRetry: { onRetryFailedMeeting(failedMeeting) },
+                                onRevealAudio: { onRevealFailedMeetingAudio(failedMeeting) },
+                                onClear: { onClearFailedMeeting(failedMeeting) }
+                            )
+                        }
                     }
                 }
             }

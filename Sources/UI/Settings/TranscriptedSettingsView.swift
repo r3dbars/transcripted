@@ -273,7 +273,7 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
-        let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
+        let meetingSections = homeMeetingDaySections
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 20) {
@@ -316,43 +316,20 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if !failedMeetings.isEmpty {
-                HomeFailedMeetingsCard(
-                    items: failedMeetings,
-                    canRetry: canRetryFailedMeetings,
-                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                    onRetry: { item in
-                        trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
-                    },
-                    onRevealAudio: { item in
-                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                        revealFailedMeetingAudio(item)
-                    },
-                    onClear: { item in
-                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
-                        clearFailedMeeting(item)
-                    },
-                    onOpenMeetings: {
-                        trackSettingsAction("home_open_failed_meetings", page: .home)
-                        homeActivityTab = .meetings
-                    }
-                )
-            }
-
             HomeHeroCard(
                 selectedMode: homeHeroModeSelection
             ) {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
                     dictationSections: homeViewModel.dictationDaySections,
-                    meetingSections: homeViewModel.meetingDaySections,
+                    meetingSections: meetingSections,
                     isLoading: homeViewModel.isLoading,
                     isLoadingMore: homeViewModel.isLoadingMore,
                     canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
                     canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
                     copiedRowID: homeCopiedRowID,
+                    canRetryFailedMeetings: canRetryFailedMeetings,
+                    failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
                         NSWorkspace.shared.open(entry.url)
@@ -382,6 +359,18 @@ struct TranscriptedSettingsView: View {
                     },
                     meetingMenuItems: { item in
                         meetingRowMenuItems(for: item)
+                    },
+                    onRetryFailedMeeting: { item in
+                        trackSettingsAction("home_retry_failed_meeting", page: .home)
+                        meetingSession.retryFailedMeeting(id: item.id)
+                    },
+                    onRevealFailedMeetingAudio: { item in
+                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                        revealFailedMeetingAudio(item)
+                    },
+                    onClearFailedMeeting: { item in
+                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
+                        clearFailedMeeting(item)
                     },
                     onLoadMoreDictations: {
                         trackSettingsAction("load_more_dictations", page: .home)
@@ -842,20 +831,6 @@ struct TranscriptedSettingsView: View {
     private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {
         var issues: [HomeNeedsAttentionCard.Issue] = []
 
-        let failedCount = meetingSession.failedMeetings.count
-        if failedCount > 0 {
-            issues.append(
-                HomeNeedsAttentionCard.Issue(
-                    id: "failed-meetings",
-                    symbolName: "arrow.clockwise.circle.fill",
-                    title: failedCount == 1 ? "1 meeting can be recovered" : "\(failedCount) meetings can be recovered",
-                    detail: "Audio was saved. Retry when no meeting or dictation work is running.",
-                    destination: .failedMeetings,
-                    actionTitle: "Recover"
-                )
-            )
-        }
-
         let speakerReviewCount = speakerPeopleModel.needsReviewCount
         if speakerReviewCount > 0 {
             issues.append(
@@ -925,6 +900,17 @@ struct TranscriptedSettingsView: View {
         }
 
         return issues
+    }
+
+    private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
+        let savedMeetings = homeViewModel.meetingDaySections.flatMap { section in
+            section.items.map(HomeMeetingListItem.saved)
+        }
+        let failedMeetings = meetingSession.failedMeetings.map(HomeMeetingListItem.failed)
+        let items = (savedMeetings + failedMeetings)
+            .sorted { $0.date > $1.date }
+
+        return HomeViewModel.groupByDay(items, dateForItem: \.date)
     }
 
     private var canRetryFailedMeetings: Bool {
@@ -2167,7 +2153,10 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeTranscriptionActivity: HomeTranscriptionActivityPresentation? {
-        HomeTranscriptionActivityPresentation.make(
+        if meetingSession.failedMeetings.contains(where: \.isRetrying) {
+            return nil
+        }
+        return HomeTranscriptionActivityPresentation.make(
             sessionState: meetingSession.state,
             displayStatus: meetingSession.displayStatus,
             warmupStatus: meetingSession.warmupStatus,

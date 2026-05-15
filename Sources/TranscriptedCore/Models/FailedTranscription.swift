@@ -7,6 +7,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     public let micAudioURL: URL
     public let systemAudioURL: URL?
     public let errorMessage: String
+    public let meetingTitle: String?
     public var retryCount: Int
     public var lastRetryDate: Date?
 
@@ -16,6 +17,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
+        meetingTitle: String? = nil,
         retryCount: Int = 0,
         lastRetryDate: Date? = nil
     ) {
@@ -24,6 +26,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.micAudioURL = micAudioURL
         self.systemAudioURL = systemAudioURL
         self.errorMessage = errorMessage
+        self.meetingTitle = meetingTitle
         self.retryCount = retryCount
         self.lastRetryDate = lastRetryDate
     }
