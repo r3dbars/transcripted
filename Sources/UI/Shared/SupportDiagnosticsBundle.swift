@@ -18,6 +18,10 @@ struct SupportDiagnosticsSnapshot: Equatable {
     var meetingState: String
     var meetingRecording: Bool
     var meetingDurationBucket: String
+    var meetingDisplayStatus: String = "unknown"
+    var speakerReviewPending: Bool = false
+    var queuedMeetingCount: Int = 0
+    var meetingShortcut: String = "unknown"
     var reliabilityPackets: [String]
     var recentLogLines: [String]
 }
@@ -66,8 +70,12 @@ enum SupportDiagnosticsBundle {
 
         Meeting
         State: \(snapshot.meetingState)
+        Display status: \(snapshot.meetingDisplayStatus)
         Recording: \(bool(snapshot.meetingRecording))
         Duration: \(snapshot.meetingDurationBucket)
+        Speaker review pending: \(bool(snapshot.speakerReviewPending))
+        Queued meetings: \(snapshot.queuedMeetingCount)
+        Meeting shortcut: \(snapshot.meetingShortcut)
 
         Reliability Packets
         \(reliabilityPackets.isEmpty ? "No recent reliability packets." : reliabilityPackets.joined(separator: "\n"))
@@ -89,11 +97,15 @@ enum SupportDiagnosticsBundle {
             "calendar_granted": bool(snapshot.calendarGranted),
             "crash_reporting_available": bool(snapshot.crashReportingAvailable),
             "crash_reporting_enabled": bool(snapshot.crashReportingEnabled),
+            "meeting_display_status": snapshot.meetingDisplayStatus,
             "meeting_duration_bucket": snapshot.meetingDurationBucket,
             "meeting_recording": bool(snapshot.meetingRecording),
+            "meeting_review_pending": bool(snapshot.speakerReviewPending),
+            "meeting_shortcut": snapshot.meetingShortcut,
             "meeting_state": snapshot.meetingState,
             "microphone_status": snapshot.microphoneStatus,
             "pasteback_granted": bool(snapshot.pastebackGranted),
+            "queued_meeting_count": "\(snapshot.queuedMeetingCount)",
             "reliability_packet_count": "\(min(snapshot.reliabilityPackets.count, maxReliabilityPackets))",
             "system_audio_recording_granted": bool(snapshot.systemAudioRecordingGranted),
         ]

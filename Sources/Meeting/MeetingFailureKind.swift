@@ -102,11 +102,12 @@ enum MeetingFailureKind: String {
             return .pipelineBusy
         }
 
-        if normalized.contains("retry failed") {
-            return .pipelineFailed
-        }
-
-        if normalized.contains("model not loaded") {
+        if normalized.contains(anyOf: [
+            "model not loaded",
+            "models were not ready",
+            "model failed to load",
+            "speech model failed to load",
+        ]) {
             return .modelNotLoaded
         }
 
@@ -138,6 +139,15 @@ enum MeetingFailureKind: String {
             "transcription failed",
         ]) {
             return .transcriptionInferenceFailed
+        }
+
+        if normalized.contains(anyOf: [
+            "pipeline failed",
+            "pipeline error",
+            "retry failed",
+            "transcription pipeline",
+        ]) {
+            return .pipelineFailed
         }
 
         return .unexpectedError

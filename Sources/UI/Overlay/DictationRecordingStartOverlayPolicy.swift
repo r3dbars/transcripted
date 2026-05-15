@@ -43,15 +43,20 @@ struct DictationRecordingStartFailureCleanupPlan: Equatable {
     let outcome: String
     let resetRuntimeSessionToIdle: Bool
     let resetSpeechEngine: Bool
+    let hardResetSpeechEngine: Bool
+    let reportBeforeCleanup: Bool
     let reportRuntimeStall: Bool
 }
 
 struct DictationRecordingStartFailurePolicy {
     static func cleanupPlan(for failureKind: String) -> DictationRecordingStartFailureCleanupPlan {
-        DictationRecordingStartFailureCleanupPlan(
+        let isMicStartTimeout = failureKind == "microphone_start_timeout"
+        return DictationRecordingStartFailureCleanupPlan(
             outcome: failureKind,
             resetRuntimeSessionToIdle: true,
             resetSpeechEngine: true,
+            hardResetSpeechEngine: isMicStartTimeout,
+            reportBeforeCleanup: isMicStartTimeout,
             reportRuntimeStall: false
         )
     }

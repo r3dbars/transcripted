@@ -171,6 +171,48 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "route-not-settled should map to the matching start failure")
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy defers stale external-input formats") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "external",
+            outputDeviceClass: "built_in",
+            selectionOverrodeDefault: false
+        )
+
+        assertEqual(readiness, .routeNotSettled, "external mics can see the same stale 24k output bus during route churn")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy allows Bluetooth speech output routes") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "external",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: false
+        )
+
+        assertEqual(readiness, .ready, "Bluetooth output speech buses should not be deferred when that is the active route")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy allows native low-rate external capture") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 24_000,
+            inputChannelCount: 1,
+            selectedInputClass: "external",
+            outputDeviceClass: "built_in",
+            selectionOverrodeDefault: false
+        )
+
+        assertEqual(readiness, .ready, "native 24k external capture should stay usable when input and output agree")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy rejects zero formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 0,

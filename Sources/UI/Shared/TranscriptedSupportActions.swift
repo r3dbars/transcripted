@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import TranscriptedCore
 
 @MainActor
 enum TranscriptedSupportActions {
@@ -70,14 +71,26 @@ enum TranscriptedSupportActions {
         let meetingState: String
         let meetingRecording: Bool
         let meetingDurationBucket: String
+        let meetingDisplayStatus: String
+        let speakerReviewPending: Bool
+        let queuedMeetingCount: Int
+        let meetingShortcut: String
         if #available(macOS 14.0, *) {
             meetingState = meetingStateName(appState.meetingSession.state)
             meetingRecording = appState.meetingSession.isRecording
             meetingDurationBucket = AnalyticsReporter.durationBucket(seconds: appState.meetingSession.recordingDuration)
+            meetingDisplayStatus = displayStatusName(appState.meetingSession.displayStatus)
+            speakerReviewPending = appState.meetingSession.isSpeakerReviewPending
+            queuedMeetingCount = appState.meetingSession.queuedTranscriptionCount
+            meetingShortcut = appState.contextCapture.meetingShortcutDisplay
         } else {
             meetingState = "unavailable"
             meetingRecording = false
             meetingDurationBucket = "lt_10s"
+            meetingDisplayStatus = "unavailable"
+            speakerReviewPending = false
+            queuedMeetingCount = 0
+            meetingShortcut = "unavailable"
         }
 
         return SupportDiagnosticsSnapshot(
@@ -98,6 +111,10 @@ enum TranscriptedSupportActions {
             meetingState: meetingState,
             meetingRecording: meetingRecording,
             meetingDurationBucket: meetingDurationBucket,
+            meetingDisplayStatus: meetingDisplayStatus,
+            speakerReviewPending: speakerReviewPending,
+            queuedMeetingCount: queuedMeetingCount,
+            meetingShortcut: meetingShortcut,
             reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries(),
             recentLogLines: appState.logger.entries
         )
@@ -127,6 +144,23 @@ enum TranscriptedSupportActions {
         case .recording: return "recording"
         case .transcribing: return "transcribing"
         case .error: return "error"
+        }
+    }
+
+    private static func displayStatusName(_ status: DisplayStatus) -> String {
+        switch status {
+        case .idle:
+            return "idle"
+        case .gettingReady:
+            return "getting_ready"
+        case .transcribing:
+            return "transcribing"
+        case .finishing:
+            return "finishing"
+        case .transcriptSaved:
+            return "transcript_saved"
+        case .failed:
+            return "failed"
         }
     }
 }

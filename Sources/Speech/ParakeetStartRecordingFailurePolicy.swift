@@ -69,7 +69,7 @@ enum ParakeetDeviceRecoveryTimeoutPolicy {
 enum ParakeetAudioEngineRetirementPolicy {
     /// CoreAudio can still deliver queued AVAudioIOUnit property-listener blocks
     /// after Transcripted has stopped and replaced an AVAudioEngine during route churn.
-    static let deferredReleaseDelayNanoseconds: UInt64 = 3_000_000_000
+    static let deferredReleaseDelayNanoseconds: UInt64 = 5_000_000_000
 }
 
 enum ParakeetASRManagerCleanupDecision: Equatable {
@@ -122,8 +122,7 @@ enum ParakeetAudioFormatReadinessPolicy {
             return .invalid
         }
 
-        if selectionOverrodeDefault,
-           selectedInputClass != "bluetooth",
+        if selectedInputClass != "bluetooth",
            outputDeviceClass != "bluetooth",
            inputSampleRate >= 44_100,
            likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
