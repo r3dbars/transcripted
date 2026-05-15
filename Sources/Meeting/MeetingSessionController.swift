@@ -641,6 +641,10 @@ final class MeetingSessionController: ObservableObject {
             if preserved {
                 refreshFailedMeetings()
             }
+            Self.runtimeDiagnosticsRecorder?.clearSession(
+                kind: "meeting",
+                outcome: files.systemURL == nil ? "no_audio_captured" : "missing_mic_audio"
+            )
             state = files.systemURL == nil
                 ? .error("No meeting audio was captured.")
                 : .error("Microphone audio was missing. Open Settings → Meetings to retry the system audio.")
