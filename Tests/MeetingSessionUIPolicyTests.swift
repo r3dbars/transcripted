@@ -31,25 +31,23 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
-    runSuite("MeetingSessionUIPolicy.canStartQueuedTranscription — waits while speaker review is pending") {
-        assertFalse(
-            MeetingSessionUIPolicy.canStartQueuedTranscription(
-                activeTranscriptions: 0,
-                isSpeakerReviewPending: true,
-                isPreparingQueuedTranscriptionStart: false
-            ),
-            "speaker review should keep the next queued transcription from starting until the transcript is finalized"
-        )
-    }
-
-    runSuite("MeetingSessionUIPolicy.canStartQueuedTranscription — starts once speaker review clears") {
+    runSuite("MeetingSessionUIPolicy.canStartQueuedTranscription — speaker review does not block next meeting") {
         assertTrue(
             MeetingSessionUIPolicy.canStartQueuedTranscription(
                 activeTranscriptions: 0,
-                isSpeakerReviewPending: false,
                 isPreparingQueuedTranscriptionStart: false
             ),
-            "a queued meeting should start as soon as the old speaker review publishes nil"
+            "speaker review should stay open while the next queued meeting starts"
+        )
+    }
+
+    runSuite("MeetingSessionUIPolicy.canStartQueuedTranscription — starts when no pipeline is active") {
+        assertTrue(
+            MeetingSessionUIPolicy.canStartQueuedTranscription(
+                activeTranscriptions: 0,
+                isPreparingQueuedTranscriptionStart: false
+            ),
+            "a queued meeting should start as soon as prior transcription work clears"
         )
     }
 
@@ -57,7 +55,6 @@ func testMeetingSessionUIPolicy() {
         assertFalse(
             MeetingSessionUIPolicy.canStartQueuedTranscription(
                 activeTranscriptions: 1,
-                isSpeakerReviewPending: false,
                 isPreparingQueuedTranscriptionStart: false
             ),
             "active transcription work should remain single-flight"
@@ -65,26 +62,9 @@ func testMeetingSessionUIPolicy() {
         assertFalse(
             MeetingSessionUIPolicy.canStartQueuedTranscription(
                 activeTranscriptions: 0,
-                isSpeakerReviewPending: false,
                 isPreparingQueuedTranscriptionStart: true
             ),
             "a queued start already being prepared should not be started twice"
-        )
-    }
-
-    runSuite("MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle — keeps trigger through speaker review") {
-        assertFalse(
-            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle(
-                isSpeakerReviewPending: true
-            ),
-            "speaker review can publish the terminal saved or failed status after active transcription work clears"
-        )
-
-        assertTrue(
-            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerWhenIdle(
-                isSpeakerReviewPending: false
-            ),
-            "completed work without speaker review should clear the last start trigger"
         )
     }
 

@@ -380,7 +380,7 @@ extension TranscriptionTaskManager {
 
             let capturedEntries = namingEntries
             await MainActor.run {
-                self.speakerNamingRequest = SpeakerNamingRequest(
+                self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
                     transcriptURL: savedURL,
@@ -400,7 +400,7 @@ extension TranscriptionTaskManager {
                             clips: capturedEntries
                         )
                     }
-                )
+                ))
             }
 
             AppLogger.pipeline.info("Speaker naming requested", [

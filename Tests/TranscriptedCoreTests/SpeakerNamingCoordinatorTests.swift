@@ -198,6 +198,106 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteDoesNotRepublishSavedStatusAfterRenamedTranscriptAlreadyPublished() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        ).id
+        let originalURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-23.md")
+        let renamedURL = harness.paths.transcripts.appendingPathComponent("Customer_Call.md")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker-renamed.wav")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("mic-renamed.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-renamed.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 5, duration: "00:03")
+            ]
+        ).write(to: originalURL, atomically: true, encoding: .utf8)
+        harness.manager.publishTranscriptSaved(from: originalURL)
+        harness.manager.displayStatus = .idle
+        try FileManager.default.moveItem(at: originalURL, to: renamedURL)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: originalURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: nil,
+                    action: .named
+                )
+            ],
+            transcriptURL: originalURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+        }
+
+        XCTAssertEqual(harness.manager.displayStatus, .idle)
+        XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedURL)
+        XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
+        let savedTranscript = try String(contentsOf: renamedURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
+    @MainActor
     func testDeferringSpeakerReviewKeepsUnnamedProfileAndSampleForPeopleSettings() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()

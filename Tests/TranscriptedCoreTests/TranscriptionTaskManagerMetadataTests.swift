@@ -78,6 +78,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
         try """
         ---
+        transcript_id: "00000000-0000-0000-0000-000000000321"
         title: "Customer Call"
         duration: "10:03"
         mic_speakers: 1
@@ -99,6 +100,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         manager.publishTranscriptSaved(from: transcriptURL)
 
         XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(manager.lastSavedTranscriptId, UUID(uuidString: "00000000-0000-0000-0000-000000000321"))
         XCTAssertEqual(manager.lastSavedTitle, "Customer Call")
         XCTAssertEqual(manager.lastSavedDuration, "10:03")
         XCTAssertEqual(manager.lastSavedSpeakerCount, 3)
@@ -115,7 +117,6 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             micAudioURL: nil,
             onComplete: { updates in
                 completedUpdates = updates
-                manager.speakerNamingRequest = nil
             }
         )
 
@@ -123,6 +124,67 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(completedUpdates?.count, 0)
         XCTAssertNil(manager.speakerNamingRequest)
         XCTAssertFalse(manager.deferPendingSpeakerNamingReview(reason: "queued_transcription"))
+    }
+
+    func testQueuedSpeakerNamingRequestDoesNotReplaceActiveReview() {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("first-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, firstId)
+        XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
+    }
+
+    func testStatusResetClearsSavedVisualWhileSpeakerReviewPendingButKeepsMetadata() async throws {
+        let manager = makeManager()
+        let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
+        try """
+        ---
+        transcript_id: "00000000-0000-0000-0000-000000000654"
+        title: "Customer Call"
+        duration: "12:34"
+        mic_speakers: 1
+        system_speakers: 1
+        ---
+
+        # Meeting Recording
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: UUID(),
+            systemAudioURL: tempDirectory.appendingPathComponent("system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        )
+
+        manager.publishTranscriptSaved(from: transcriptURL)
+        manager.scheduleStatusReset(delay: 0)
+
+        try await waitUntil {
+            if case .idle = manager.displayStatus { return true }
+            return false
+        }
+        XCTAssertEqual(manager.lastSavedTranscriptId, UUID(uuidString: "00000000-0000-0000-0000-000000000654"))
+        XCTAssertEqual(manager.lastSavedTitle, "Customer Call")
+        XCTAssertNotNil(manager.speakerNamingRequest)
     }
 
     func testTranscriptionTaskCarriesCalendarMeetingTitle() {
@@ -246,6 +308,59 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archive")
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
+    }
+
+    func testSystemOnlyFailedQueueCreatesPlaceholderAndRetainsSystemAudio() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        let didQueue = manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: nil,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stopped without microphone audio."
+        )
+
+        XCTAssertTrue(didQueue)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.micAudioURL.lastPathComponent.contains("microphone_placeholder"))
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
+    }
+
+    func testUnreadableAudioIsPreservedForRetryInsteadOfDeletedAsTooShort() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try Data("not-a-wav".utf8).write(to: micURL)
+        try Data("also-not-a-wav".utf8).write(to: systemURL)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        try await waitUntil {
+            manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
+        }
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertNotEqual(failed.errorMessage, "Recording too short")
+        XCTAssertTrue(failed.audioFilesExist())
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
     }
 
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
@@ -372,6 +487,20 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         }
 
         try file.write(from: buffer)
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 2.0,
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() {
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTFail("Timed out waiting for condition")
     }
 }
 

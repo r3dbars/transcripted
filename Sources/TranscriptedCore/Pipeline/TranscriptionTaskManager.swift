@@ -19,7 +19,11 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedSpeakerCount: Int? = nil
     @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
 
+    var lastSavedTranscriptId: UUID?
     var activeTasks: [UUID: Task<Void, Never>] = [:]
+    private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?)] = [:]
+    private var preservedTaskIdsForShutdown: Set<UUID> = []
+    var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
     public let transcription: Transcription
 
     public let failedTranscriptionManager: FailedTranscriptionManager
@@ -78,7 +82,7 @@ public class TranscriptionTaskManager: ObservableObject {
         // Guard: reject concurrent pipelines to prevent model contention
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
-            failedTranscriptionManager.addFailedTranscription(
+            addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: "Transcription already in progress"
@@ -94,17 +98,8 @@ public class TranscriptionTaskManager: ObservableObject {
         guard systemURL != nil else {
             let errorMessage = PipelineError.missingSystemAudio.localizedDescription
             AppLogger.pipeline.warning("Rejecting transcription — system audio capture is missing")
-            let retainedAudio = archiveFailedRecordingAudioIfConfigured(
-                micURL: micURL,
-                systemURL: nil,
-                taskId: UUID()
-            )
-            let failedMicURL = retainedAudio?.micURL ?? micURL
-            if retainedAudio?.micURL != nil {
-                removeManagedCleanupFile(micURL, label: "archived failed mic scratch")
-            }
-            failedTranscriptionManager.addFailedTranscription(
-                micAudioURL: failedMicURL,
+            addFailedTranscriptionRetainingAudio(
+                micAudioURL: micURL,
                 systemAudioURL: nil,
                 errorMessage: errorMessage
             )
@@ -124,10 +119,11 @@ public class TranscriptionTaskManager: ObservableObject {
         let minDuration: TimeInterval = 2.0
         let micDuration = audioDuration(url: micURL)
         let systemDuration = systemURL.flatMap { audioDuration(url: $0) }
-        let hasUsableMicAudio = (micDuration ?? 0) >= minDuration
-        let hasUsableSystemAudio = (systemDuration ?? 0) >= minDuration
+        let hasUsableMicAudio = micDuration.map { $0 >= minDuration } ?? false
+        let hasUsableSystemAudio = systemDuration.map { $0 >= minDuration } ?? false
+        let hasUnknownDuration = micDuration == nil || (systemURL != nil && systemDuration == nil)
 
-        guard hasUsableMicAudio || hasUsableSystemAudio else {
+        guard hasUsableMicAudio || hasUsableSystemAudio || hasUnknownDuration else {
             AppLogger.pipeline.info("Recording too short, skipping transcription", [
                 "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? "unknown",
                 "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "none"
@@ -144,6 +140,13 @@ public class TranscriptionTaskManager: ObservableObject {
             )
             self.scheduleStatusReset(delay: 3)
             return
+        }
+
+        if hasUnknownDuration {
+            AppLogger.pipeline.warning("Recording duration could not be verified; preserving retry path instead of treating it as short", [
+                "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? "unknown",
+                "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? (systemURL == nil ? "none" : "unknown")
+            ])
         }
 
         if !hasUsableMicAudio, hasUsableSystemAudio {
@@ -164,6 +167,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
+        activeTaskAudio[task.id] = (micURL: micURL, systemURL: systemURL)
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting transcription task", [
@@ -197,27 +201,20 @@ public class TranscriptionTaskManager: ObservableObject {
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
                 await MainActor.run {
-                    let retainedAudio = self.archiveFailedRecordingAudioIfConfigured(
-                        micURL: micURL,
-                        systemURL: systemURL,
-                        taskId: task.id
-                    )
-                    let failedMicURL = retainedAudio?.micURL ?? micURL
-                    let failedSystemURL = retainedAudio?.systemURL ?? systemURL
-                    if retainedAudio?.micURL != nil {
-                        self.removeManagedCleanupFile(micURL, label: "archived failed mic scratch")
+                    if self.preservedTaskIdsForShutdown.remove(task.id) != nil {
+                        self.handleTaskCompletion(taskId: task.id)
+                        return
                     }
-                    if retainedAudio?.systemURL != nil {
-                        self.removeManagedCleanupFile(systemURL, label: "archived failed system scratch")
-                    }
+
                     self.publishFailure(
                         displayMessage: "Transcription failed",
                         diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
                     )
-                    self.failedTranscriptionManager.addFailedTranscription(
-                        micAudioURL: failedMicURL,
-                        systemAudioURL: failedSystemURL,
-                        errorMessage: error.localizedDescription
+                    self.addFailedTranscriptionRetainingAvailableAudio(
+                        micAudioURL: micURL,
+                        systemAudioURL: systemURL,
+                        errorMessage: error.localizedDescription,
+                        taskId: task.id
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: task.id)
@@ -443,24 +440,129 @@ public class TranscriptionTaskManager: ObservableObject {
         errorMessage: String,
         taskId: UUID = UUID()
     ) {
+        _ = addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            taskId: taskId
+        )
+    }
+
+    @discardableResult
+    public func addFailedTranscriptionRetainingAvailableAudio(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        taskId: UUID = UUID()
+    ) -> Bool {
+        guard micAudioURL != nil || systemAudioURL != nil else {
+            AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
+                "taskId": taskId.uuidString
+            ])
+            return false
+        }
+
         let retainedAudio = archiveFailedRecordingAudioIfConfigured(
             micURL: micAudioURL,
             systemURL: systemAudioURL,
             taskId: taskId
         )
-        let failedMicURL = retainedAudio?.micURL ?? micAudioURL
-        let failedSystemURL = retainedAudio?.systemURL ?? systemAudioURL
-        if retainedAudio?.micURL != nil {
-            removeManagedCleanupFile(micAudioURL, label: "archived failed mic scratch")
+        return enqueueFailedTranscriptionAfterRetainingAudio(
+            retainedAudio: retainedAudio,
+            originalMicURL: micAudioURL,
+            originalSystemURL: systemAudioURL,
+            errorMessage: errorMessage
+        )
+    }
+
+    @discardableResult
+    private func enqueueFailedTranscriptionAfterRetainingAudio(
+        retainedAudio: RetainedRecordingAudio?,
+        originalMicURL: URL?,
+        originalSystemURL: URL?,
+        errorMessage: String
+    ) -> Bool {
+        let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
+        let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
+            retainedAudio: retainedAudio,
+            hasOriginalMic: originalMicURL != nil,
+            failedSystemURL: failedSystemURL
+        )
+        guard let failedMicURL = retainedAudio?.micURL ?? originalMicURL ?? placeholderMicURL else {
+            AppLogger.pipeline.error("Failed transcription was not queued because no microphone track or placeholder is available")
+            return false
         }
-        if retainedAudio?.systemURL != nil {
-            removeManagedCleanupFile(systemAudioURL, label: "archived failed system scratch")
-        }
-        failedTranscriptionManager.addFailedTranscription(
+
+        let didPersist = failedTranscriptionManager.addFailedTranscription(
             micAudioURL: failedMicURL,
             systemAudioURL: failedSystemURL,
             errorMessage: errorMessage
         )
+        guard didPersist else { return false }
+
+        if retainedAudio?.micURL != nil {
+            removeManagedCleanupFile(originalMicURL, label: "archived failed mic scratch")
+        } else if placeholderMicURL != nil {
+            removeManagedCleanupFile(originalMicURL, label: "missing failed mic scratch")
+        }
+        if retainedAudio?.systemURL != nil {
+            removeManagedCleanupFile(originalSystemURL, label: "archived failed system scratch")
+        }
+        return true
+    }
+
+    private func makeSilentMicPlaceholderIfNeeded(
+        retainedAudio: RetainedRecordingAudio?,
+        hasOriginalMic: Bool,
+        failedSystemURL: URL?
+    ) -> URL? {
+        guard !hasOriginalMic,
+              let failedSystemURL else {
+            return nil
+        }
+
+        let placeholderDirectory = retainedAudio?.directory ?? failedSystemURL.deletingLastPathComponent()
+        let placeholderURL = placeholderDirectory
+            .appendingPathComponent("microphone_placeholder")
+            .appendingPathExtension("wav")
+        do {
+            try FileManager.default.createDirectory(
+                at: placeholderDirectory,
+                withIntermediateDirectories: true
+            )
+            try Self.writeSilentWAV(to: placeholderURL, duration: 2.5)
+            FileManager.default.restrictToOwnerOnly(atPath: placeholderURL.path)
+            AppLogger.pipeline.warning("Created silent microphone placeholder for system-only failed meeting audio")
+            return placeholderURL
+        } catch {
+            AppLogger.pipeline.error("Failed to create silent microphone placeholder", [
+                "error": error.localizedDescription
+            ])
+            return nil
+        }
+    }
+
+    private static func writeSilentWAV(to url: URL, duration: TimeInterval) throws {
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw PipelineError.invalidAudioFormat(detail: "Could not create placeholder audio format")
+        }
+        let frameCount = AVAudioFrameCount((duration * format.sampleRate).rounded(.up))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            throw PipelineError.invalidAudioFormat(detail: "Could not create placeholder audio buffer")
+        }
+        buffer.frameLength = frameCount
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        try file.write(from: buffer)
     }
 
     /// Retry a failed transcription by its ID
@@ -551,6 +653,8 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func handleTaskCompletion(taskId: UUID) {
         activeTasks.removeValue(forKey: taskId)
+        activeTaskAudio.removeValue(forKey: taskId)
+        preservedTaskIdsForShutdown.remove(taskId)
         activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
@@ -571,9 +675,47 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
         activeTasks.removeAll()
+        activeTaskAudio.removeAll()
+        preservedTaskIdsForShutdown.removeAll()
         activeCount = 0
         backgroundTaskCount = 0
         publishNonFailureStatus(.idle)
+    }
+
+    @discardableResult
+    public func preserveActiveTranscriptionsForShutdown(errorMessage: String) -> Int {
+        let activeAudio = activeTaskAudio
+        guard !activeAudio.isEmpty else { return 0 }
+
+        for taskId in activeAudio.keys {
+            preservedTaskIdsForShutdown.insert(taskId)
+        }
+
+        for (taskId, task) in activeTasks {
+            task.cancel()
+            AppLogger.pipeline.warning("Preserving active transcription audio during shutdown", [
+                "taskId": taskId.uuidString
+            ])
+        }
+
+        activeTasks.removeAll()
+        activeTaskAudio.removeAll()
+        activeCount = 0
+        backgroundTaskCount = 0
+        publishNonFailureStatus(.idle)
+
+        var preservedCount = 0
+        for (taskId, audio) in activeAudio {
+            if addFailedTranscriptionRetainingAvailableAudio(
+                micAudioURL: audio.micURL,
+                systemAudioURL: audio.systemURL,
+                errorMessage: errorMessage,
+                taskId: taskId
+            ) {
+                preservedCount += 1
+            }
+        }
+        return preservedCount
     }
 
     /// Populate saved transcript metadata from the file's YAML frontmatter.
@@ -581,10 +723,14 @@ public class TranscriptionTaskManager: ObservableObject {
     /// (many speakers, gap events, etc.) still parse without reading the whole file.
     func populateSavedMetadata(from url: URL) {
         lastSavedTranscriptURL = url
+        lastSavedTranscriptId = nil
         let name = url.deletingPathExtension().lastPathComponent
         lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
         guard let values = try? TranscriptFrontmatter.readValues(from: url) else { return }
 
+        if let transcriptId = values["transcript_id"] {
+            lastSavedTranscriptId = UUID(uuidString: transcriptId)
+        }
         if let title = values["title"] {
             lastSavedTitle = title
         }

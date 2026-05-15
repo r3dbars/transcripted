@@ -10,18 +10,10 @@ enum MeetingSessionUIPolicy {
 
     static func canStartQueuedTranscription(
         activeTranscriptions: Int,
-        isSpeakerReviewPending: Bool,
         isPreparingQueuedTranscriptionStart: Bool
     ) -> Bool {
         activeTranscriptions == 0
-            && !isSpeakerReviewPending
             && !isPreparingQueuedTranscriptionStart
-    }
-
-    static func shouldClearTranscriptionTriggerWhenIdle(
-        isSpeakerReviewPending: Bool
-    ) -> Bool {
-        !isSpeakerReviewPending
     }
 }
 

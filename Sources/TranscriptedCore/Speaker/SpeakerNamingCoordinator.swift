@@ -195,20 +195,43 @@ extension TranscriptionTaskManager {
     /// Clean up any tasks stuck in pendingNaming state.
     /// Called from applicationWillTerminate to prevent orphaned audio files.
     public func cleanupPendingNaming() {
-        if let request = speakerNamingRequest {
-            if request.shouldRemoveTemporaryAudioOnCleanup {
-                removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
-                removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
-            }
-            cleanupSpeakerClips(request.speakers)
-            speakerNamingRequest = nil
-            AppLogger.pipeline.info("Cleaned up pending naming on shutdown")
+        let requests = [speakerNamingRequest].compactMap { $0 } + pendingSpeakerNamingRequests
+        guard !requests.isEmpty else { return }
+
+        for request in requests {
+            cleanupSpeakerNamingRequest(request)
         }
+        speakerNamingRequest = nil
+        pendingSpeakerNamingRequests.removeAll()
+        AppLogger.pipeline.info("Cleaned up pending naming on shutdown", [
+            "count": "\(requests.count)"
+        ])
+    }
+
+    func enqueueSpeakerNamingRequest(_ request: SpeakerNamingRequest) {
+        if speakerNamingRequest?.transcriptId == request.transcriptId
+            || pendingSpeakerNamingRequests.contains(where: { $0.transcriptId == request.transcriptId }) {
+            AppLogger.pipeline.warning("Ignoring duplicate speaker naming request", [
+                "transcriptId": request.transcriptId.uuidString
+            ])
+            return
+        }
+
+        guard speakerNamingRequest != nil else {
+            speakerNamingRequest = request
+            return
+        }
+
+        pendingSpeakerNamingRequests.append(request)
+        AppLogger.pipeline.info("Queued speaker naming request behind active review", [
+            "pending": "\(pendingSpeakerNamingRequests.count)"
+        ])
     }
 
     @discardableResult
     public func deferPendingSpeakerNamingReview(reason: String) -> Bool {
         guard let request = speakerNamingRequest else { return false }
+        speakerNamingRequest = nil
 
         AppLogger.pipeline.info("Deferring pending speaker review", [
             "reason": reason,
@@ -216,6 +239,27 @@ extension TranscriptionTaskManager {
         ])
         request.onComplete([])
         return true
+    }
+
+    private func cleanupSpeakerNamingRequest(_ request: SpeakerNamingRequest) {
+        if request.shouldRemoveTemporaryAudioOnCleanup {
+            removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
+            removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
+        }
+        cleanupSpeakerClips(request.speakers)
+    }
+
+    private func clearCompletedSpeakerNamingRequest(transcriptId: UUID) {
+        if speakerNamingRequest?.transcriptId == transcriptId {
+            speakerNamingRequest = nil
+        }
+        pendingSpeakerNamingRequests.removeAll { $0.transcriptId == transcriptId }
+        promoteNextSpeakerNamingRequestIfNeeded()
+    }
+
+    private func promoteNextSpeakerNamingRequestIfNeeded() {
+        guard speakerNamingRequest == nil, !pendingSpeakerNamingRequests.isEmpty else { return }
+        speakerNamingRequest = pendingSpeakerNamingRequests.removeFirst()
     }
 
     nonisolated private func cleanupNamingArtifacts(
@@ -545,7 +589,8 @@ extension TranscriptionTaskManager {
                 "named": "\(updatesCount)",
                 "transcript": resolvedURL.lastPathComponent
             ])
-            let didAlreadyPublishSavedTranscript = lastSavedTranscriptURL == resolvedURL
+            let didAlreadyPublishSavedTranscript = lastSavedTranscriptId == transcriptId
+                || lastSavedTranscriptURL == resolvedURL
             populateSavedMetadata(from: resolvedURL)
             if !didAlreadyPublishSavedTranscript {
                 displayStatus = .transcriptSaved
@@ -560,6 +605,6 @@ extension TranscriptionTaskManager {
             scheduleStatusReset(delay: 8)
         }
 
-        speakerNamingRequest = nil
+        clearCompletedSpeakerNamingRequest(transcriptId: transcriptId)
     }
 }

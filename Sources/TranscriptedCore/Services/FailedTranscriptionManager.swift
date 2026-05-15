@@ -93,23 +93,27 @@ public class FailedTranscriptionManager: ObservableObject {
     }
 
     /// Saves failed transcriptions to disk
-    private func saveFailedTranscriptions() {
+    @discardableResult
+    private func saveFailedTranscriptions() -> Bool {
         do {
             let data = try encoder.encode(failedTranscriptions)
             try data.write(to: storageURL, options: .atomic)
             FileManager.default.restrictToOwnerOnly(atPath: storageURL.path)
             AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(failedTranscriptions.count)"])
+            return true
         } catch {
             AppLogger.pipeline.error("Error saving failed transcriptions", ["error": "\(error)"])
+            return false
         }
     }
 
     /// Adds a new failed transcription to the queue
+    @discardableResult
     public func addFailedTranscription(
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String
-    ) {
+    ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
         // in-memory caller could enqueue an arbitrary file path and trigger deletion before
@@ -119,7 +123,7 @@ public class FailedTranscriptionManager: ObservableObject {
                 "micURL": micAudioURL.path,
                 "systemURL": systemAudioURL?.path ?? "none"
             ])
-            return
+            return false
         }
 
         let failed = FailedTranscription(
@@ -129,9 +133,16 @@ public class FailedTranscriptionManager: ObservableObject {
         )
 
         failedTranscriptions.append(failed)
-        saveFailedTranscriptions()
+        let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions.removeAll { $0.id == failed.id }
+        }
 
-        AppLogger.pipeline.info("Added failed transcription", ["id": "\(failed.id)"])
+        AppLogger.pipeline.info("Added failed transcription", [
+            "id": "\(failed.id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
     }
 
     /// Removes a failed transcription from the queue
