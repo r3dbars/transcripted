@@ -4,6 +4,7 @@ func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
         testResolverFindsLiveMeetingAudioPair()
         testResolverPrefersImportedRecording()
+        testResolverPrefersPlaybackMix()
         testResolverReturnsNilWhenAudioIsMissing()
     }
 }
@@ -59,6 +60,40 @@ private func testResolverPrefersImportedRecording() {
         "Imported recordings should play the original retained recording"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single imported recording is not composite playback")
+}
+
+private func testResolverPrefersPlaybackMix() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Weekly Review.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("playback.m4a").path,
+        contents: Data("mix".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("recording.m4a").path,
+        contents: Data("imported".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("system_audio.m4a").path,
+        contents: Data("system".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("microphone.m4a").path,
+        contents: Data("mic".utf8)
+    )
+
+    let attachment = MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)
+
+    assertEqual(
+        attachment?.urls.map(\.lastPathComponent),
+        ["playback.m4a"],
+        "Playback mixes should win over imported and split-stream audio"
+    )
+    assertTrue(attachment?.isCompositePlayback == false, "A single playback mix is not composite playback")
 }
 
 private func testResolverReturnsNilWhenAudioIsMissing() {

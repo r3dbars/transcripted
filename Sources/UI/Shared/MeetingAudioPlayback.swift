@@ -9,6 +9,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     @Published private(set) var activeAttachmentID: String?
     @Published private(set) var isPlaying = false
     @Published private(set) var isPaused = false
+    @Published private(set) var unavailableAttachmentID: String?
 
     private var sounds: [NSSound] = []
 
@@ -34,8 +35,13 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
             NSSound(contentsOf: url, byReference: true)
         }
 
-        guard !loadedSounds.isEmpty else { return }
+        guard !loadedSounds.isEmpty else {
+            unavailableAttachmentID = attachment.id
+            NSSound.beep()
+            return
+        }
 
+        unavailableAttachmentID = nil
         activeAttachmentID = attachment.id
         sounds = loadedSounds
         isPlaying = true
@@ -75,6 +81,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         activeAttachmentID = nil
         isPlaying = false
         isPaused = false
+        unavailableAttachmentID = nil
     }
 
     func isActive(_ attachment: MeetingAudioAttachment) -> Bool {
@@ -82,6 +89,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     }
 
     func buttonTitle(for attachment: MeetingAudioAttachment) -> String {
+        if unavailableAttachmentID == attachment.id { return "Unavailable" }
         guard isActive(attachment) else { return "Play" }
         if isPlaying { return "Pause" }
         if isPaused { return "Resume" }
@@ -89,6 +97,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     }
 
     func symbolName(for attachment: MeetingAudioAttachment) -> String {
+        if unavailableAttachmentID == attachment.id { return "exclamationmark.triangle.fill" }
         guard isActive(attachment) else { return "play.fill" }
         if isPlaying { return "pause.fill" }
         return "play.fill"

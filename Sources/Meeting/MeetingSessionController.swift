@@ -69,6 +69,7 @@ final class MeetingSessionController: ObservableObject {
         let isRetryable: Bool
         let isRetrying: Bool
         let hasAudioFiles: Bool
+        let audioURLs: [URL]
     }
 
     private struct QueuedTranscriptionJob {

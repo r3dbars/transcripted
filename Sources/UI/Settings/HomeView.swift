@@ -287,6 +287,7 @@ struct HomeMeetingPreview: Identifiable {
     let title: String
     let date: Date
     let transcriptURL: URL
+    let audio: MeetingAudioAttachment?
     let markdown: String
     let readError: String?
     let feedbackTarget: HomeFeedbackTarget
@@ -296,6 +297,7 @@ struct HomeMeetingPreview: Identifiable {
         title = item.title
         date = item.date
         transcriptURL = item.transcriptURL
+        audio = item.audio
         self.markdown = markdown
         self.readError = readError
         feedbackTarget = HomeFeedbackTarget.meeting(item)
@@ -731,9 +733,14 @@ struct HomeRowActionButtons: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var leadingAccessory: AnyView? = nil
 
     var body: some View {
         HStack(spacing: 4) {
+            if let leadingAccessory {
+                leadingAccessory
+            }
+
             iconButton(
                 systemName: isCopied ? "checkmark" : "square.on.square",
                 help: isCopied ? "Copied" : "Copy",
@@ -850,6 +857,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var leadingAccessory: AnyView? = nil
     var compact: Bool = false
     @ViewBuilder let content: () -> Content
 
@@ -876,7 +884,8 @@ private struct HomeActivityRowShell<Content: View>: View {
                 isCopied: isCopied,
                 onCopy: onCopy,
                 onFlag: onFlag,
-                menuItems: menuItems
+                menuItems: menuItems,
+                leadingAccessory: leadingAccessory
             )
             .opacity(isHovering ? 1 : 0.55)
             .animation(.easeOut(duration: 0.12), value: isHovering)
@@ -932,6 +941,7 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HomeActivityRowShell(
@@ -941,6 +951,7 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
+            leadingAccessory: audioAccessory,
             compact: true
         ) {
             HStack(alignment: .top, spacing: 10) {
@@ -949,13 +960,107 @@ struct HomeMeetingRow: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
 
-                Text(item.title)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+
+                    Text(audioStatusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var audioAccessory: AnyView? {
+        guard let audio = item.audio else { return nil }
+        return AnyView(
+            HomeAudioIconButton(
+                title: playback.buttonTitle(for: audio),
+                symbolName: playback.symbolName(for: audio),
+                isActive: playback.isActive(audio),
+                isPlaying: playback.isPlaying && playback.isActive(audio)
+            ) {
+                playback.toggle(audio)
+            }
+            .help("\(playback.buttonTitle(for: audio)) meeting audio")
+        )
+    }
+
+    private var audioStatusText: String {
+        guard let audio = item.audio else { return "Transcript only" }
+        return audio.isCompositePlayback ? "Mic + system audio kept" : "Audio kept"
+    }
+}
+
+private struct HomeAudioIconButton: View {
+    let title: String
+    let symbolName: String
+    let isActive: Bool
+    let isPlaying: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbolName)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(isActive ? Color.white : Color.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(isActive ? Color.accentColor : Color.primary.opacity(0.08)))
+                .overlay(
+                    Circle()
+                        .stroke(isPlaying ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.06), lineWidth: 1)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct HomeMeetingAudioControl: View {
+    let title: String
+    let symbolName: String
+    let isActive: Bool
+    let isPlaying: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(isActive ? Color.white : Color.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(isActive ? Color.accentColor : Color.primary.opacity(0.10)))
+
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                if isPlaying {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 
@@ -1103,6 +1208,14 @@ struct HomeActivityTabsCard: View {
                 headerSpacing: 1,
                 row: row
             )
+
+            if canLoadMore || isLoadingMore {
+                HomeLoadMoreButton(
+                    title: loadMoreTitle,
+                    isLoading: isLoadingMore,
+                    action: loadMoreAction
+                )
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1265,6 +1378,7 @@ struct HomeMeetingPreviewSheet: View {
     let onReportIssue: () -> Void
     let onDone: () -> Void
     private let readableContent: HomeMeetingPreviewContent
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     init(
         preview: HomeMeetingPreview,
@@ -1297,6 +1411,32 @@ struct HomeMeetingPreviewSheet: View {
 
                 Button("Done", action: onDone)
                     .keyboardShortcut(.defaultAction)
+            }
+
+            HStack(spacing: 10) {
+                if let audio = preview.audio {
+                    HomeMeetingAudioControl(
+                        title: playback.buttonTitle(for: audio),
+                        symbolName: playback.symbolName(for: audio),
+                        isActive: playback.isActive(audio),
+                        isPlaying: playback.isPlaying && playback.isActive(audio)
+                    ) {
+                        playback.toggle(audio)
+                    }
+                    .help("\(playback.buttonTitle(for: audio)) meeting audio")
+                } else {
+                    Label("No retained audio", systemImage: "speaker.slash")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.secondary.opacity(0.08))
+                        )
+                }
+
+                Spacer()
             }
 
             Group {
@@ -1487,5 +1627,146 @@ struct HomeNeedsAttentionCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.orange.opacity(0.32), lineWidth: 1)
         )
+    }
+}
+
+struct HomeFailedMeetingsCard: View {
+    let items: [MeetingSessionController.FailedMeetingItem]
+    let canRetry: Bool
+    let audioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
+    let onRetry: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onRevealAudio: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onClear: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onOpenMeetings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Button("Review all", action: onOpenMeetings)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    HomeFailedMeetingRow(
+                        item: item,
+                        canRetry: canRetry,
+                        audio: audioAttachment(item),
+                        onRetry: { onRetry(item) },
+                        onRevealAudio: { onRevealAudio(item) },
+                        onClear: { onClear(item) }
+                    )
+
+                    if index < items.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.orange.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.orange.opacity(0.32), lineWidth: 1)
+        )
+    }
+
+    private var title: String {
+        items.count == 1 ? "Recover this meeting" : "Recover unfinished meetings"
+    }
+}
+
+private struct HomeFailedMeetingRow: View {
+    let item: MeetingSessionController.FailedMeetingItem
+    let canRetry: Bool
+    let audio: MeetingAudioAttachment?
+    let onRetry: () -> Void
+    let onRevealAudio: () -> Void
+    let onClear: () -> Void
+
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(item.failureKind == .recordingTooShort ? Color.secondary : Color.orange)
+                .frame(width: 24)
+                .padding(.top, 3)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(item.meta)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 8) {
+                    if let audio {
+                        HomeMeetingAudioControl(
+                            title: playback.buttonTitle(for: audio),
+                            symbolName: playback.symbolName(for: audio),
+                            isActive: playback.isActive(audio),
+                            isPlaying: playback.isPlaying && playback.isActive(audio)
+                        ) {
+                            playback.toggle(audio)
+                        }
+                        .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+
+                        Button {
+                            onRevealAudio()
+                        } label: {
+                            Label("Show Audio", systemImage: "folder")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    } else {
+                        Label("No audio kept", systemImage: "speaker.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if item.isRetryable || item.isRetrying {
+                        Button {
+                            onRetry()
+                        } label: {
+                            Label(item.isRetrying ? "Retrying..." : "Try Again", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(!canRetry || !item.isRetryable || item.isRetrying)
+                    }
+
+                    Button(role: item.hasAudioFiles ? .destructive : nil) {
+                        onClear()
+                    } label: {
+                        Label(item.hasAudioFiles ? "Delete" : "Dismiss", systemImage: item.hasAudioFiles ? "trash" : "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 10)
     }
 }

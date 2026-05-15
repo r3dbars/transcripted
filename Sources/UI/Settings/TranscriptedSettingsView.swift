@@ -281,6 +281,7 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
+        let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 20) {
@@ -339,6 +340,30 @@ struct TranscriptedSettingsView: View {
                     onLoadMoreMeetings: {
                         trackSettingsAction("load_more_meetings", page: .home)
                         homeViewModel.loadMoreMeetings()
+                    }
+                )
+            }
+
+            if !failedMeetings.isEmpty {
+                HomeFailedMeetingsCard(
+                    items: failedMeetings,
+                    canRetry: canRetryFailedMeetings,
+                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
+                    onRetry: { item in
+                        trackSettingsAction("home_retry_failed_meeting", page: .home)
+                        meetingSession.retryFailedMeeting(id: item.id)
+                    },
+                    onRevealAudio: { item in
+                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                        revealFailedMeetingAudio(item)
+                    },
+                    onClear: { item in
+                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
+                        clearFailedMeeting(item)
+                    },
+                    onOpenMeetings: {
+                        trackSettingsAction("home_open_failed_meetings", page: .home)
+                        navigation.selectedPage = .meetings
                     }
                 )
             }
@@ -631,6 +656,9 @@ struct TranscriptedSettingsView: View {
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
         do {
+            if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
+                MeetingAudioPlayback.shared.stop()
+            }
             try removeItemIfPresent(at: item.transcriptURL)
             if let audio = item.audio {
                 try removeItemIfPresent(at: audio.directoryURL)
@@ -641,6 +669,37 @@ struct TranscriptedSettingsView: View {
                 title: "Could not delete meeting",
                 error: error
             )
+        }
+    }
+
+    private func failedMeetingAudioAttachment(
+        for item: MeetingSessionController.FailedMeetingItem
+    ) -> MeetingAudioAttachment? {
+        guard let firstAudioURL = item.audioURLs.first else { return nil }
+        return MeetingAudioAttachment(
+            directoryURL: firstAudioURL.deletingLastPathComponent(),
+            urls: item.audioURLs
+        )
+    }
+
+    private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
+        guard let firstAudioURL = item.audioURLs.first else {
+            NSSound.beep()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([firstAudioURL])
+    }
+
+    private func clearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
+        if let audio = failedMeetingAudioAttachment(for: item),
+           MeetingAudioPlayback.shared.isActive(audio) {
+            MeetingAudioPlayback.shared.stop()
+        }
+
+        if item.hasAudioFiles {
+            meetingSession.deleteFailedMeeting(id: item.id)
+        } else {
+            meetingSession.dismissFailedMeeting(id: item.id)
         }
     }
 
@@ -759,6 +818,10 @@ struct TranscriptedSettingsView: View {
         }
 
         return issues
+    }
+
+    private var canRetryFailedMeetings: Bool {
+        !meetingSession.hasRuntimeDiagnosticsWork
     }
 
     private var shortcutsPage: some View {
@@ -1230,17 +1293,19 @@ struct TranscriptedSettingsView: View {
                     ForEach(meetingSession.failedMeetings) { item in
                         SettingsFailedMeetingRow(
                             item: item,
+                            canRetry: canRetryFailedMeetings,
+                            audio: failedMeetingAudioAttachment(for: item),
                             retryAction: {
                                 trackSettingsAction("retry_failed_meeting", page: .meetings)
                                 meetingSession.retryFailedMeeting(id: item.id)
                             },
+                            revealAudioAction: {
+                                trackSettingsAction("reveal_failed_meeting_audio", page: .meetings)
+                                revealFailedMeetingAudio(item)
+                            },
                             secondaryAction: {
                                 trackSettingsAction(item.hasAudioFiles ? "delete_failed_meeting" : "dismiss_failed_meeting", page: .meetings)
-                                if item.hasAudioFiles {
-                                    meetingSession.deleteFailedMeeting(id: item.id)
-                                } else {
-                                    meetingSession.dismissFailedMeeting(id: item.id)
-                                }
+                                clearFailedMeeting(item)
                             }
                         )
                     }
@@ -3030,8 +3095,12 @@ private struct SettingsRecentMeetingAudioControl: View {
 
 private struct SettingsFailedMeetingRow: View {
     let item: MeetingSessionController.FailedMeetingItem
+    let canRetry: Bool
+    let audio: MeetingAudioAttachment?
     let retryAction: () -> Void
+    let revealAudioAction: () -> Void
     let secondaryAction: () -> Void
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -3063,15 +3132,35 @@ private struct SettingsFailedMeetingRow: View {
 
             Spacer(minLength: 12)
 
+            if let audio {
+                SettingsRecentMeetingAudioControl(
+                    title: playback.buttonTitle(for: audio),
+                    symbolName: playback.symbolName(for: audio),
+                    isActive: playback.isActive(audio),
+                    isPlaying: playback.isPlaying && playback.isActive(audio)
+                ) {
+                    playback.toggle(audio)
+                }
+                .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+
+                Button {
+                    revealAudioAction()
+                } label: {
+                    Label("Show Audio", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
             if item.isRetryable || item.isRetrying {
                 Button {
                     retryAction()
                 } label: {
-                    Label(item.isRetrying ? "Retrying..." : "Retry", systemImage: "arrow.clockwise")
+                    Label(item.isRetrying ? "Retrying..." : "Try Again", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(!item.isRetryable || item.isRetrying)
+                .disabled(!canRetry || !item.isRetryable || item.isRetrying)
             }
 
             Button(role: item.hasAudioFiles ? .destructive : nil) {
