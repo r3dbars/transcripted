@@ -960,7 +960,7 @@ struct HomeMeetingRow: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(item.title)
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(Color.primary)
@@ -970,6 +970,10 @@ struct HomeMeetingRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+
+                    if let audio = item.audio, playback.isActive(audio) {
+                        MeetingAudioScrubber(attachment: audio, width: 170, showsTime: false)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1027,40 +1031,63 @@ private struct HomeMeetingAudioControl: View {
     let symbolName: String
     let isActive: Bool
     let isPlaying: Bool
+    let scrubber: AnyView?
     let action: () -> Void
 
+    init(
+        title: String,
+        symbolName: String,
+        isActive: Bool,
+        isPlaying: Bool,
+        scrubber: AnyView? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.symbolName = symbolName
+        self.isActive = isActive
+        self.isPlaying = isPlaying
+        self.scrubber = scrubber
+        self.action = action
+    }
+
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbolName)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(isActive ? Color.white : Color.secondary)
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(isActive ? Color.accentColor : Color.primary.opacity(0.10)))
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(isActive ? Color.white : Color.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(isActive ? Color.accentColor : Color.primary.opacity(0.10)))
 
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
 
-                if isPlaying {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 5, height: 5)
+                    if isPlaying {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 5, height: 5)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10), lineWidth: 1)
+                )
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10), lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+
+            if let scrubber {
+                scrubber
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
     }
 }
 
@@ -1419,7 +1446,10 @@ struct HomeMeetingPreviewSheet: View {
                         title: playback.buttonTitle(for: audio),
                         symbolName: playback.symbolName(for: audio),
                         isActive: playback.isActive(audio),
-                        isPlaying: playback.isPlaying && playback.isActive(audio)
+                        isPlaying: playback.isPlaying && playback.isActive(audio),
+                        scrubber: playback.isActive(audio)
+                            ? AnyView(MeetingAudioScrubber(attachment: audio, width: 230))
+                            : nil
                     ) {
                         playback.toggle(audio)
                     }
@@ -1633,6 +1663,7 @@ struct HomeNeedsAttentionCard: View {
 struct HomeFailedMeetingsCard: View {
     let items: [MeetingSessionController.FailedMeetingItem]
     let canRetry: Bool
+    let retryUnavailableReason: String?
     let audioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
     let onRetry: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealAudio: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -1658,6 +1689,7 @@ struct HomeFailedMeetingsCard: View {
                     HomeFailedMeetingRow(
                         item: item,
                         canRetry: canRetry,
+                        retryUnavailableReason: retryUnavailableReason,
                         audio: audioAttachment(item),
                         onRetry: { onRetry(item) },
                         onRevealAudio: { onRevealAudio(item) },
@@ -1690,6 +1722,7 @@ struct HomeFailedMeetingsCard: View {
 private struct HomeFailedMeetingRow: View {
     let item: MeetingSessionController.FailedMeetingItem
     let canRetry: Bool
+    let retryUnavailableReason: String?
     let audio: MeetingAudioAttachment?
     let onRetry: () -> Void
     let onRevealAudio: () -> Void
@@ -1724,7 +1757,10 @@ private struct HomeFailedMeetingRow: View {
                             title: playback.buttonTitle(for: audio),
                             symbolName: playback.symbolName(for: audio),
                             isActive: playback.isActive(audio),
-                            isPlaying: playback.isPlaying && playback.isActive(audio)
+                            isPlaying: playback.isPlaying && playback.isActive(audio),
+                            scrubber: playback.isActive(audio)
+                                ? AnyView(MeetingAudioScrubber(attachment: audio, width: 190))
+                                : nil
                         ) {
                             playback.toggle(audio)
                         }
@@ -1753,7 +1789,8 @@ private struct HomeFailedMeetingRow: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(!canRetry || !item.isRetryable || item.isRetrying)
+                        .disabled(retryDisabled)
+                        .help(retryHelp)
                     }
 
                     Button(role: item.hasAudioFiles ? .destructive : nil) {
@@ -1768,5 +1805,25 @@ private struct HomeFailedMeetingRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 10)
+    }
+
+    private var retryDisabled: Bool {
+        !canRetry || !item.isRetryable || item.isRetrying
+    }
+
+    private var retryHelp: String {
+        if item.isRetrying {
+            return "Retry is already running."
+        }
+        if !item.isRetryable {
+            return "This meeting does not have enough saved audio to retry."
+        }
+        if let retryUnavailableReason {
+            return retryUnavailableReason
+        }
+        if !canRetry {
+            return "Wait for the current meeting work to finish before retrying."
+        }
+        return "Transcribe this saved audio again."
     }
 }
