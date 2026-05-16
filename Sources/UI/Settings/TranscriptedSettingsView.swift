@@ -237,7 +237,10 @@ struct TranscriptedSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: settingsFooterShowsUpdateBadge ? .accent : .neutral,
+            cornerRadius: 10
+        ))
         .disabled(!settingsFooterActionEnabled)
         .help(settingsFooterHelp)
     }
@@ -906,12 +909,12 @@ struct TranscriptedSettingsView: View {
 
                         Spacer()
 
-                        Button("Refresh") {
+                        SettingsInlineActionButton(title: "Refresh") {
                             trackSettingsAction("refresh_auto_send_apps", page: .shortcuts)
                             refreshAutoEnterAppCandidates()
                         }
 
-                        Button("Add App…") {
+                        SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
                             trackSettingsAction("add_auto_send_app", page: .shortcuts)
                             chooseAutoEnterApp()
                         }
@@ -1064,11 +1067,20 @@ struct TranscriptedSettingsView: View {
                             addCorrectionRow()
                         } label: {
                             Label("Add correction", systemImage: "plus")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
                         }
+                        .buttonStyle(SettingsHoverButtonStyle(
+                            tone: .accent,
+                            cornerRadius: 8,
+                            normalFill: Color.accentColor.opacity(0.08),
+                            normalStroke: Color.accentColor.opacity(0.16)
+                        ))
 
                         Spacer()
 
-                        Button("Clear") {
+                        SettingsInlineActionButton(title: "Clear", tone: .destructive) {
                             trackSettingsAction("clear_corrections", page: .general)
                             clearCorrectionRows()
                         }
@@ -1206,7 +1218,7 @@ struct TranscriptedSettingsView: View {
                         }
 
                         HStack {
-                            Button("Use Parakeet") {
+                            SettingsInlineActionButton(title: "Use Parakeet", tone: .accent) {
                                 updatePreferredTranscriptionModel(.parakeetTDTv3)
                             }
                             .disabled(preferredTranscriptionModel == .parakeetTDTv3)
@@ -1324,12 +1336,12 @@ struct TranscriptedSettingsView: View {
                 StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
 
                 HStack {
-                    Button("Choose Folder") {
+                    SettingsInlineActionButton(title: "Choose Folder", symbolName: "folder") {
                         trackSettingsAction("choose_capture_library", page: .storage)
                         chooseCaptureLibrary()
                     }
 
-                    Button("Reset to Default") {
+                    SettingsInlineActionButton(title: "Reset to Default") {
                         trackSettingsAction("reset_capture_library", page: .storage)
                         TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
                         refreshStoragePaths()
@@ -1413,7 +1425,10 @@ struct TranscriptedSettingsView: View {
                             : "Known stale models. Whisper is preserved while selected."
                     )
                     if reclaimableBytes > 0 {
-                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache", role: .destructive) {
+                        SettingsInlineActionButton(
+                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache",
+                            tone: .destructive
+                        ) {
                             showReclaimableCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
@@ -1429,7 +1444,10 @@ struct TranscriptedSettingsView: View {
                         detail: "Optional Whisper models stored by Transcripted."
                     )
                     if snapshot.whisperModelsBytes > 0 {
-                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache", role: .destructive) {
+                        SettingsInlineActionButton(
+                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
+                            tone: .destructive
+                        ) {
                             showWhisperCacheCleanupConfirmation = true
                         }
                         .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
@@ -1448,7 +1466,10 @@ struct TranscriptedSettingsView: View {
                             detail: snapshot.staleModelSummary
                         )
 
-                        Button(modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models", role: .destructive) {
+                        SettingsInlineActionButton(
+                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
+                            tone: .destructive
+                        ) {
                             showModelCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
@@ -1470,7 +1491,7 @@ struct TranscriptedSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Button(modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
+                SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
                     trackSettingsAction("refresh_model_cache_storage", page: .storage)
                     refreshModelCacheSnapshot()
                 }
@@ -1608,7 +1629,7 @@ struct TranscriptedSettingsView: View {
                 .disabled(!AnalyticsReporter.isAvailable)
 
                 HStack {
-                    Button("Send Test Sentry Event") {
+                    SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
                         trackSettingsAction("send_test_sentry_event", page: .privacy)
                         sendTestSentryEvent()
                     }
@@ -1686,7 +1707,10 @@ struct TranscriptedSettingsView: View {
                 }
 
                 HStack {
-                    Button(aboutUpdateButtonTitle) {
+                    SettingsInlineActionButton(
+                        title: aboutUpdateButtonTitle,
+                        tone: .accent
+                    ) {
                         trackSettingsAction(settingsUpdateActionID, page: .about)
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
@@ -1781,12 +1805,18 @@ struct TranscriptedSettingsView: View {
                         .lineLimit(1)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
-                        .background(buttonBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .foregroundStyle(buttonForeground)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SettingsHoverButtonStyle(
+                    tone: buttonInteractionTone,
+                    cornerRadius: 8,
+                    normalFill: buttonBackground,
+                    normalStroke: buttonStroke,
+                    hoverFill: buttonHoverBackground,
+                    pressedFill: buttonPressedBackground,
+                    hoverStroke: buttonHoverStroke
+                ))
                 .disabled(!isEnabled)
-                .opacity(isEnabled ? 1 : 0.55)
 
                 if let status, !status.isEmpty {
                     HStack(spacing: 8) {
@@ -1854,6 +1884,51 @@ struct TranscriptedSettingsView: View {
                 return Color(nsColor: .systemGreen)
             case .secondary:
                 return Color.secondary.opacity(0.16)
+            }
+        }
+
+        private var buttonInteractionTone: SettingsInteractionTone {
+            switch tone {
+            case .primary:
+                return .accent
+            case .secondary:
+                return .neutral
+            }
+        }
+
+        private var buttonHoverBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.86)
+            case .secondary:
+                return SettingsInteractionPalette.hoverFill(for: .neutral)
+            }
+        }
+
+        private var buttonPressedBackground: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.76)
+            case .secondary:
+                return SettingsInteractionPalette.pressedFill(for: .neutral)
+            }
+        }
+
+        private var buttonStroke: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.24)
+            case .secondary:
+                return Color.primary.opacity(0.08)
+            }
+        }
+
+        private var buttonHoverStroke: Color {
+            switch tone {
+            case .primary:
+                return Color(nsColor: .systemGreen).opacity(0.34)
+            case .secondary:
+                return SettingsInteractionPalette.hoverStroke(for: .neutral)
             }
         }
 
@@ -2738,8 +2813,9 @@ private struct CorrectionEditorRow: View {
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SettingsHoverButtonStyle(tone: .destructive, cornerRadius: 7))
             .help("Remove this correction.")
         }
     }
@@ -2823,7 +2899,11 @@ private struct AutoEnterAllowedAppRow: View {
 
             Spacer(minLength: 12)
 
-            Button("Remove", action: remove)
+            SettingsInlineActionButton(
+                title: "Remove",
+                tone: .destructive,
+                action: remove
+            )
         }
     }
 }
@@ -2884,16 +2964,13 @@ private struct SettingsRecentMeetingAudioControl: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(background)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(stroke, lineWidth: 1)
-                )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: isActive ? .accent : .neutral,
+                cornerRadius: 8,
+                normalFill: background,
+                normalStroke: stroke
+            ))
 
             if let scrubber {
                 scrubber
@@ -2980,9 +3057,15 @@ private struct SettingsFailedMeetingRow: View {
                     revealAudioAction()
                 } label: {
                     Label("Show Audio", systemImage: "folder")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(SettingsHoverButtonStyle(
+                    cornerRadius: 8,
+                    normalFill: Color.primary.opacity(0.025),
+                    normalStroke: Color.primary.opacity(0.06)
+                ))
             }
 
             if item.isRetryable || item.isRetrying {
@@ -2990,9 +3073,16 @@ private struct SettingsFailedMeetingRow: View {
                     retryAction()
                 } label: {
                     Label(item.isRetrying ? "Retrying..." : "Try Again", systemImage: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(SettingsHoverButtonStyle(
+                    tone: .accent,
+                    cornerRadius: 8,
+                    normalFill: Color.accentColor.opacity(0.08),
+                    normalStroke: Color.accentColor.opacity(0.16)
+                ))
                 .disabled(retryDisabled)
                 .help(retryHelp)
             }
@@ -3001,9 +3091,16 @@ private struct SettingsFailedMeetingRow: View {
                 secondaryAction()
             } label: {
                 Label(item.hasAudioFiles ? "Delete" : "Dismiss", systemImage: item.hasAudioFiles ? "trash" : "xmark")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: item.hasAudioFiles ? .destructive : .neutral,
+                cornerRadius: 8,
+                normalFill: item.hasAudioFiles ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
+                normalStroke: item.hasAudioFiles ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
+            ))
         }
     }
 
@@ -3071,22 +3168,19 @@ private struct AgentConnectionSettingsPage: View {
                         ClaudeDesktopStatusRow(status: claudeDesktopStatus)
 
                         HStack(spacing: 10) {
-                            Button {
+                            SettingsInlineActionButton(
+                                title: copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config",
+                                symbolName: "doc.on.doc"
+                            ) {
                                 copyText(
                                     ClaudeDesktopIntegrationInstaller.configSnippet(),
                                     showingCopiedFeedback: $copiedClaudeDesktopConfig
                                 )
-                            } label: {
-                                Label(copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config", systemImage: "doc.on.doc")
                             }
-                            .buttonStyle(.bordered)
 
-                            Button {
+                            SettingsInlineActionButton(title: "Show Config", symbolName: "folder") {
                                 revealClaudeDesktopConfig()
-                            } label: {
-                                Label("Show Config", systemImage: "folder")
                             }
-                            .buttonStyle(.bordered)
                             .disabled(!claudeDesktopStatus.configExists)
                         }
 
@@ -3120,25 +3214,25 @@ private struct AgentConnectionSettingsPage: View {
                                 .fixedSize(horizontal: false, vertical: true)
 
                             HStack(spacing: 10) {
-                                Button {
+                                SettingsInlineActionButton(
+                                    title: copiedFolderPrompt ? "Copied" : "Copy Folder Prompt",
+                                    symbolName: "doc.on.doc"
+                                ) {
                                     copyText(
                                         AgentConnectionGuide.folderAccessPrompt,
                                         showingCopiedFeedback: $copiedFolderPrompt
                                     )
-                                } label: {
-                                    Label(copiedFolderPrompt ? "Copied" : "Copy Folder Prompt", systemImage: "doc.on.doc")
                                 }
-                                .buttonStyle(.bordered)
 
-                                Button {
+                                SettingsInlineActionButton(
+                                    title: copiedFolderPaths ? "Copied" : "Copy Paths",
+                                    symbolName: "folder"
+                                ) {
                                     copyText(
                                         AgentConnectionGuide.folderPathsText,
                                         showingCopiedFeedback: $copiedFolderPaths
                                     )
-                                } label: {
-                                    Label(copiedFolderPaths ? "Copied" : "Copy Paths", systemImage: "folder")
                                 }
-                                .buttonStyle(.bordered)
                             }
                         }
                     }
@@ -3181,13 +3275,9 @@ private struct AgentConnectionSettingsPage: View {
             }
 
             if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
-                Button {
+                SettingsInlineActionButton(title: "Get Claude Desktop", symbolName: "arrow.down.circle", tone: .accent) {
                     openClaudeDesktopDownload()
-                } label: {
-                    Label("Get Claude Desktop", systemImage: "arrow.down.circle")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
         }
     }
@@ -3324,8 +3414,6 @@ private struct AgentConnectActionButton: View {
     let isEnabled: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 14) {
@@ -3369,20 +3457,18 @@ private struct AgentConnectActionButton: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovered && isEnabled ? 0.95 : 0.78))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(tint.opacity(isHovered && isEnabled ? 0.56 : 0.28), lineWidth: 1)
-            )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .opacity(isEnabled ? 1.0 : 0.72)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: .accent,
+            cornerRadius: 8,
+            normalFill: Color(nsColor: .controlBackgroundColor).opacity(0.78),
+            normalStroke: tint.opacity(0.28),
+            hoverFill: Color(nsColor: .controlBackgroundColor).opacity(0.95),
+            pressedFill: Color(nsColor: .controlBackgroundColor).opacity(0.88),
+            hoverStroke: tint.opacity(0.56)
+        ))
         .disabled(!isEnabled)
-        .onHover { isHovered = $0 }
     }
 }
 
@@ -3537,8 +3623,7 @@ private struct AgentFolderRow: View {
 
             Spacer(minLength: 12)
 
-            Button("Reveal", action: action)
-                .buttonStyle(.bordered)
+            SettingsInlineActionButton(title: "Reveal", action: action)
                 .disabled(!isAvailable)
         }
     }
