@@ -11,8 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .people, .shortcuts]),
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .shortcuts, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
 }
@@ -53,9 +52,6 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    @State private var recentDictations: [SavedDictationEntry] = []
-    @State private var recentCapturesLoading = false
-    @State private var recentCaptureRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
@@ -181,8 +177,6 @@ struct TranscriptedSettingsView: View {
             refreshShortcutState()
         }
         .onDisappear {
-            recentCaptureRefreshTask?.cancel()
-            recentCaptureRefreshTask = nil
             homeDashboardRefreshTask?.cancel()
             homeDashboardRefreshTask = nil
             homeDashboardRefreshInFlight = false
@@ -257,8 +251,6 @@ struct TranscriptedSettingsView: View {
             modelsPage
         case .shortcuts:
             shortcutsPage
-        case .dictations:
-            dictationsPage
         case .people:
             peoplePage
         case .storage:
@@ -282,6 +274,7 @@ struct TranscriptedSettingsView: View {
             ? allFailedMeetings
             : Array(allFailedMeetings.prefix(3))
         let hiddenFailedMeetingCount = max(0, allFailedMeetings.count - failedMeetings.count)
+        let meetingSections = homeMeetingDaySections
 
         return VStack(alignment: .leading, spacing: 14) {
             if !failedMeetings.isEmpty {
@@ -316,8 +309,38 @@ struct TranscriptedSettingsView: View {
                     summary: homeWelcomeSummary
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
-                HomeStatsTopCard(stats: stats, streak: homeStreak)
+                HomeStatsBadge(stats: stats, streak: homeStreak)
+                    .layoutPriority(0)
+            }
+
+            if !needsAttention.isEmpty {
+                HomeNeedsAttentionCard(
+                    issues: needsAttention,
+                    onReview: { issue in
+                        reviewHomeNeedsAttention(issue)
+                    }
+                )
+            }
+
+            if let activity = homeTranscriptionActivity {
+                SettingsActivityCard(
+                    symbolName: activity.symbolName,
+                    title: activity.title,
+                    status: activity.status,
+                    detail: activity.detail,
+                    tone: activity.tone,
+                    progress: activity.progress,
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    action: activity.transcriptURL.map { transcriptURL in
+                        {
+                            trackSettingsAction("open_current_activity", page: .home)
+                            NSWorkspace.shared.open(transcriptURL)
+                        }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             HomeHeroCard(
@@ -325,13 +348,16 @@ struct TranscriptedSettingsView: View {
             ) {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
+                    speakerPeopleModel: speakerPeopleModel,
                     dictationSections: homeViewModel.dictationDaySections,
-                    meetingSections: homeViewModel.meetingDaySections,
+                    meetingSections: meetingSections,
                     isLoading: homeViewModel.isLoading,
                     isLoadingMore: homeViewModel.isLoadingMore,
                     canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
                     canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
                     copiedRowID: homeCopiedRowID,
+                    canRetryFailedMeetings: canRetryFailedMeetings,
+                    failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
                         NSWorkspace.shared.open(entry.url)
@@ -356,8 +382,23 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction("flag_meeting", page: .home)
                         homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
                     },
+                    onReviewMeetingSpeakers: { _ in
+                        openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
+                    },
                     meetingMenuItems: { item in
                         meetingRowMenuItems(for: item)
+                    },
+                    onRetryFailedMeeting: { item in
+                        trackSettingsAction("home_retry_failed_meeting", page: .home)
+                        meetingSession.retryFailedMeeting(id: item.id)
+                    },
+                    onRevealFailedMeetingAudio: { item in
+                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                        revealFailedMeetingAudio(item)
+                    },
+                    onClearFailedMeeting: { item in
+                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
+                        clearFailedMeeting(item)
                     },
                     onLoadMoreDictations: {
                         trackSettingsAction("load_more_dictations", page: .home)
@@ -369,35 +410,7 @@ struct TranscriptedSettingsView: View {
                     }
                 )
             }
-
-            if let activity = homeTranscriptionActivity {
-                SettingsActivityCard(
-                    symbolName: activity.symbolName,
-                    title: activity.title,
-                    status: activity.status,
-                    detail: activity.detail,
-                    tone: activity.tone,
-                    progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
-                    action: activity.transcriptURL.map { transcriptURL in
-                        {
-                            trackSettingsAction("open_current_activity", page: .home)
-                            NSWorkspace.shared.open(transcriptURL)
-                        }
-                    }
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            if !needsAttention.isEmpty {
-                HomeNeedsAttentionCard(
-                    issues: needsAttention,
-                    onOpenPrivacy: {
-                        trackSettingsAction("open_needs_attention", page: .home)
-                        navigation.selectedPage = .privacy
-                    }
-                )
-            }
+            .padding(.top, 14)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
         .sheet(item: $homeFeedbackTarget) { target in
@@ -437,7 +450,7 @@ struct TranscriptedSettingsView: View {
             Alert(
                 title: Text(confirmation.title),
                 message: Text(confirmation.message),
-                primaryButton: .destructive(Text("Delete")) {
+                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
                     confirmation.perform()
                 },
                 secondaryButton: .cancel()
@@ -481,6 +494,37 @@ struct TranscriptedSettingsView: View {
                 homeActivityTab = newMode.activityTab
             }
         )
+    }
+
+    private func reviewHomeNeedsAttention(_ issue: HomeNeedsAttentionCard.Issue) {
+        switch issue.destination {
+        case .failedMeetings:
+            trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
+            homeActivityTab = .meetings
+            homeHeroMode = .meeting
+        case .speakers:
+            openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
+        case .activity:
+            trackSettingsAction("open_needs_attention_activity", page: .home)
+            homeActivityTab = .meetings
+            homeHeroMode = .meeting
+        case .privacy:
+            trackSettingsAction("open_needs_attention_privacy", page: .home)
+            navigation.selectedPage = .privacy
+        case .models:
+            trackSettingsAction("open_needs_attention_models", page: .home)
+            navigation.selectedPage = .models
+        }
+    }
+
+    private func openHomeSpeakerReview(actionName: String) {
+        trackSettingsAction(actionName, page: .home)
+        speakerPeopleModel.refresh()
+        speakerPeopleModel.searchText = ""
+        speakerPeopleModel.profileFilter = .needsReview
+        navigation.selectedPage = .home
+        homeActivityTab = .speakers
+        homeHeroMode = .speakers
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -598,6 +642,14 @@ struct TranscriptedSettingsView: View {
 
     private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         [
+            HomeRowMenuItem(title: "Open saved file", symbolName: "doc.text") {
+                trackSettingsAction("open_recent_dictation_file", page: .home)
+                NSWorkspace.shared.open(entry.url)
+            },
+            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
+                trackSettingsAction("flag_dictation", page: .home)
+                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
+            },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([entry.url])
@@ -624,12 +676,18 @@ struct TranscriptedSettingsView: View {
     }
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
-        var items: [HomeRowMenuItem] = [
-            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
+        var items: [HomeRowMenuItem] = []
+
+        items.append(contentsOf: [
+            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
+                trackSettingsAction("flag_meeting", page: .home)
+                homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
+            },
+            HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
-        ]
+        ])
 
         if let audio = item.audio, let firstAudio = audio.urls.first {
             items.append(
@@ -643,9 +701,11 @@ struct TranscriptedSettingsView: View {
         items.append(
             HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
                 trackSettingsAction("delete_meeting_request", page: .home)
+                let presentation = HomeDeleteConfirmationPolicy.meeting
                 homeDeleteConfirmation = HomeDeleteConfirmation(
-                    title: "Delete this meeting?",
-                    message: "This removes the transcript and any retained audio. This cannot be undone."
+                    title: presentation.title,
+                    message: presentation.message,
+                    confirmTitle: presentation.confirmTitle
                 ) {
                     trackSettingsAction("delete_meeting_confirm", page: .home)
                     deleteMeeting(item)
@@ -735,6 +795,12 @@ struct TranscriptedSettingsView: View {
                 label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
             ),
             HomeStatItem(
+                id: "dictation-words",
+                symbolName: "text.alignleft",
+                value: formattedInteger(homeViewModel.totalDictationWordCount),
+                label: "dictated words"
+            ),
+            HomeStatItem(
                 id: "typing-time-saved",
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
@@ -793,8 +859,12 @@ struct TranscriptedSettingsView: View {
         if !missingRequiredPermissions.isEmpty {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "permissions",
+                    symbolName: "lock.trianglebadge.exclamationmark",
                     title: "Permissions",
-                    detail: permissionsDetailLine
+                    detail: permissionsDetailLine,
+                    destination: .privacy,
+                    actionTitle: "Fix"
                 )
             )
         }
@@ -806,15 +876,23 @@ struct TranscriptedSettingsView: View {
         if modelCard.tone == .failed {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "voice-model-failed",
+                    symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
-                    detail: modelCard.detail
+                    detail: modelCard.detail,
+                    destination: .models,
+                    actionTitle: "Fix"
                 )
             )
         } else if preferredTranscriptionModel != effectiveTranscriptionModel {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
+                    id: "voice-model-mismatch",
+                    symbolName: "tray.and.arrow.down.fill",
                     title: "Voice model",
-                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used."
+                    detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used.",
+                    destination: .models,
+                    actionTitle: "Review"
                 )
             )
         }
@@ -822,11 +900,25 @@ struct TranscriptedSettingsView: View {
         return issues
     }
 
+    private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
+        let savedMeetings = homeViewModel.meetingDaySections.flatMap { section in
+            section.items.map(HomeMeetingListItem.saved)
+        }
+        let failedMeetings = meetingSession.failedMeetings.map(HomeMeetingListItem.failed)
+        let items = (savedMeetings + failedMeetings)
+            .sorted { $0.date > $1.date }
+
+        return HomeViewModel.groupByDay(items, dateForItem: \.date)
+    }
+
     private var canRetryFailedMeetings: Bool {
         failedMeetingRetryUnavailableReason == nil
     }
 
     private var failedMeetingRetryUnavailableReason: String? {
+        if sttRouter.isRecording || sttRouter.isTranscribing {
+            return "Wait for the current dictation to finish before retrying a failed meeting."
+        }
         if meetingSession.isRecording {
             return "Stop the current recording before retrying a failed meeting."
         }
@@ -1025,6 +1117,27 @@ struct TranscriptedSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+
+            SettingsSection(
+                title: "Sounds",
+                detail: "Play short cues for dictation state."
+            ) {
+                Toggle("Play dictation feedback sounds", isOn: Binding(
+                    get: { uiSoundsEnabled },
+                    set: { newValue in
+                        uiSoundsEnabled = newValue
+                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
+                        UISoundPreferences.setEnabled(newValue)
+                    }
+                ))
+
+                Text(uiSoundsEnabled
+                    ? "Sounds play when dictation starts, completes, or hears no speech."
+                    : "Dictation sounds are off."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -1247,85 +1360,11 @@ struct TranscriptedSettingsView: View {
     private var peoplePage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
-                title: "People",
+                title: "Speakers",
                 summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
-        }
-    }
-
-    private var dictationsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Dictation",
-                summary: "Paste the latest dictation and set sound cues."
-            )
-
-            SettingsSection(
-                title: "Paste Last",
-                detail: "Use the newest saved dictation again."
-            ) {
-                SettingsQuickLinkRow(
-                    symbolName: "arrow.turn.down.right",
-                    title: "Paste Last Dictation",
-                    detail: "Paste into the app you were using."
-                ) {
-                    trackSettingsAction("paste_last_dictation", page: .dictations)
-                    actions.pasteLastDictation()
-                }
-
-                Text("If paste is unavailable, Transcripted copies the text.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Recent",
-                detail: "The newest saved dictations."
-            ) {
-                if recentCapturesLoading && recentDictations.isEmpty {
-                    Text("Loading recent dictations...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if recentDictations.isEmpty {
-                    Text("No dictations saved yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentDictations) { item in
-                        SettingsQuickLinkRow(
-                            symbolName: "text.bubble",
-                            title: item.title,
-                            detail: "\(formattedRecentDate(item.createdAt)) • \(item.sourceAppName)"
-                        ) {
-                            trackSettingsAction("open_recent_dictation", page: .dictations)
-                            NSWorkspace.shared.open(item.url)
-                        }
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "Sounds",
-                detail: "Play short cues for dictation state."
-            ) {
-                Toggle("Play dictation feedback sounds", isOn: Binding(
-                    get: { uiSoundsEnabled },
-                    set: { newValue in
-                        uiSoundsEnabled = newValue
-                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .dictations)
-                        UISoundPreferences.setEnabled(newValue)
-                    }
-                ))
-
-                Text(uiSoundsEnabled
-                    ? "Sounds play when dictation starts, stops, completes, or hears no speech."
-                    : "Dictation sounds are off."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -2134,7 +2173,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeTranscriptionActivity: HomeTranscriptionActivityPresentation? {
-        HomeTranscriptionActivityPresentation.make(
+        return HomeTranscriptionActivityPresentation.make(
             sessionState: meetingSession.state,
             displayStatus: meetingSession.displayStatus,
             warmupStatus: meetingSession.warmupStatus,
@@ -2335,21 +2374,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshRecentCaptures(force: Bool = false) {
-        recentCaptureRefreshTask?.cancel()
-        recentCaptureRefreshTask = nil
-        recentCapturesLoading = false
-
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
             refreshHomeDashboard(force: force)
-        case .recentLists:
-            recentCapturesLoading = true
-            recentCaptureRefreshTask = Task { @MainActor in
-                let snapshot = await RecentCaptureLoader.load(limit: 5)
-                guard !Task.isCancelled else { return }
-                recentDictations = snapshot.dictations
-                recentCapturesLoading = false
-            }
         case .none:
             break
         }

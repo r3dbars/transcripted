@@ -562,7 +562,7 @@ struct SpeakerPeopleSettingsSection: View {
 
     var body: some View {
         SettingsSection(
-            title: "People in the Room",
+            title: "Local speakers",
             detail: "Split the local mic into separate speakers."
         ) {
             Toggle(
@@ -640,11 +640,11 @@ struct SpeakerPeopleSettingsSection: View {
         }
 
         SettingsSection(
-            title: "People",
+            title: "Speakers",
             detail: "Name deferred reviews, play samples, merge, or delete saved speaker profiles."
         ) {
             HStack(spacing: 12) {
-                TextField("Search people or IDs", text: $model.searchText)
+                TextField("Search speakers or IDs", text: $model.searchText)
                     .textFieldStyle(.roundedBorder)
 
                 Picker("Filter", selection: $model.profileFilter) {
@@ -686,14 +686,14 @@ struct SpeakerPeopleSettingsSection: View {
         if model.profileFilter == .needsReview {
             return "No deferred speaker reviews right now."
         }
-        return "No people match that search."
+        return "No speakers match that search."
     }
 
     private var needsReviewSummary: String {
         let count = model.needsReviewCount
         return count == 1
-            ? "1 person needs a name or review."
-            : "\(count) people need names or review."
+            ? "1 speaker needs a name or review."
+            : "\(count) speakers need names or review."
     }
 }
 

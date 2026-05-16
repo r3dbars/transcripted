@@ -363,6 +363,40 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
     }
 
+    func testRetryFailedTranscriptionSuccessCreatesMarkdownAndClearsFailedQueue() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact.")
+        )
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "temporary").localizedDescription,
+            meetingTitle: "Recovered Customer Call"
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failed.id,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        let markdown = try String(contentsOf: transcriptURL)
+        XCTAssertTrue(markdown.contains("Recovered Customer Call"))
+        XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
         let manager = makeManager()
         let externalURL = tempDirectory.appendingPathComponent("outside.wav")
@@ -727,7 +761,9 @@ private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
         initializeCallCount += 1
         isReady = true
     }
-    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String { transcript }
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        transcript
+    }
     func cleanup() {
         isReady = false
     }

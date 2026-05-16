@@ -9,14 +9,6 @@ func testSettingsRecentCaptureRefreshPolicy() {
         )
     }
 
-    runSuite("SettingsRecentCaptureRefreshPolicy.mode — only loads recent lists for the dictation page") {
-        assertEqual(
-            SettingsRecentCaptureRefreshPolicy.mode(for: .dictations),
-            .recentLists,
-            "dictations should load the small recent list"
-        )
-    }
-
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
         for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about] {
             assertEqual(
