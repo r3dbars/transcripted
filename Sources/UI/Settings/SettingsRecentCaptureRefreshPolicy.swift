@@ -2,7 +2,6 @@ import Foundation
 
 enum SettingsRecentCaptureRefreshMode {
     case homeDashboard
-    case recentLists
     case none
 }
 
@@ -11,8 +10,6 @@ enum SettingsRecentCaptureRefreshPolicy {
         switch page {
         case .home:
             return .homeDashboard
-        case .dictations:
-            return .recentLists
         case .general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about:
             return .none
         }

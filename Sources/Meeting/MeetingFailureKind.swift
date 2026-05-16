@@ -9,10 +9,12 @@ enum MeetingFailureKind: String {
     case emptyAudio = "empty_audio"
     case invalidAudioFormat = "invalid_audio_format"
     case saveFailed = "save_failed"
+    case speakerNameFinalizationFailed = "speaker_name_finalization_failed"
     case modelDownloadFailed = "model_download_failed"
     case modelNotLoaded = "model_not_loaded"
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
+    case speakerFinalizationFailed = "speaker_finalization_failed"
     case pipelineBusy = "pipeline_busy"
     case pipelineFailed = "pipeline_failed"
     case stopTimeout = "stop_timeout"
@@ -90,6 +92,13 @@ enum MeetingFailureKind: String {
         }
 
         if normalized.contains(anyOf: [
+            "speaker names could not be saved",
+            "speaker-name finalization failed",
+        ]) {
+            return .speakerNameFinalizationFailed
+        }
+
+        if normalized.contains(anyOf: [
             "failed to save",
             "could not write transcript",
         ]) {
@@ -122,6 +131,13 @@ enum MeetingFailureKind: String {
             "diarization",
         ]) {
             return .diarizationFailed
+        }
+
+        if normalized.contains(anyOf: [
+            "failed to finalize speaker names",
+            "speaker naming finalization failed",
+        ]) {
+            return .speakerFinalizationFailed
         }
 
         if normalized.contains(anyOf: [
