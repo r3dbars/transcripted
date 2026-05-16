@@ -942,22 +942,20 @@ struct TranscriptedSettingsView: View {
                 title: "Keys",
                 detail: "Set push-to-talk, hands-free, and meeting shortcuts."
             ) {
-                Toggle("Enable dictation shortcuts", isOn: Binding(
-                    get: { dictationShortcutsEnabled },
-                    set: { newValue in
-                        dictationShortcutsEnabled = newValue
-                        trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .shortcuts)
-                        HotkeyPreferences.setDictationShortcutsEnabled(newValue)
-                    }
-                ))
-
-                Text(
-                    dictationShortcutsEnabled
+                SettingsToggleRow(
+                    title: "Enable dictation shortcuts",
+                    detail: dictationShortcutsEnabled
                         ? "Push-to-talk and hands-free keys can start dictation."
-                        : "Off. You can still start dictation from the app, and meeting controls still work."
+                        : "Off. You can still start dictation from the app, and meeting controls still work.",
+                    isOn: Binding(
+                        get: { dictationShortcutsEnabled },
+                        set: { newValue in
+                            dictationShortcutsEnabled = newValue
+                            trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .shortcuts)
+                            HotkeyPreferences.setDictationShortcutsEnabled(newValue)
+                        }
+                    )
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
                 HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
                     .frame(height: 108)
@@ -979,14 +977,20 @@ struct TranscriptedSettingsView: View {
                 title: "Send After Paste",
                 detail: "Press Enter only in the apps you choose."
             ) {
-                Toggle("Send after dictation", isOn: Binding(
-                    get: { autoEnterEnabled },
-                    set: { newValue in
-                        autoEnterEnabled = newValue
-                        trackSettingsToggle("auto_send", enabled: newValue, page: .shortcuts)
-                        DictationAutoSendPreferences.setEnabled(newValue)
-                    }
-                ))
+                SettingsToggleRow(
+                    title: "Send after dictation",
+                    detail: autoEnterEnabled
+                        ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
+                        : "Off. Dictation only pastes text.",
+                    isOn: Binding(
+                        get: { autoEnterEnabled },
+                        set: { newValue in
+                            autoEnterEnabled = newValue
+                            trackSettingsToggle("auto_send", enabled: newValue, page: .shortcuts)
+                            DictationAutoSendPreferences.setEnabled(newValue)
+                        }
+                    )
+                )
 
                 Picker("Send key", selection: Binding(
                     get: { autoEnterKey },
@@ -1044,31 +1048,21 @@ struct TranscriptedSettingsView: View {
                             .font(.subheadline.weight(.semibold))
 
                         ForEach(autoEnterAppCandidates) { app in
-                            Toggle(isOn: Binding(
-                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                                set: { isAllowed in
-                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed)
-                                }
-                            )) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(app.name)
-                                        .font(.subheadline)
-                                    Text(app.bundleID)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+                            SettingsToggleRow(
+                                title: app.name,
+                                detail: app.bundleID,
+                                isOn: Binding(
+                                    get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                                    set: { isAllowed in
+                                        setAutoEnterApp(app.bundleID, isAllowed: isAllowed)
+                                    }
+                                ),
+                                help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
+                            )
                         }
                     }
                     .disabled(!autoEnterEnabled)
                 }
-
-                Text(autoEnterEnabled
-                    ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
-                    : "Off. Dictation only pastes text."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
         }
     }
@@ -1084,60 +1078,56 @@ struct TranscriptedSettingsView: View {
                 title: "Startup",
                 detail: "Open Transcripted when you log in."
             ) {
-                Toggle("Launch Transcripted at login", isOn: Binding(
-                    get: { launchAtLoginEnabled },
-                    set: { newValue in
-                        updateLaunchAtLogin(newValue)
-                    }
-                ))
-
-                Text(launchAtLoginStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                SettingsToggleRow(
+                    title: "Launch Transcripted at login",
+                    detail: launchAtLoginStatus,
+                    isOn: Binding(
+                        get: { launchAtLoginEnabled },
+                        set: { newValue in
+                            updateLaunchAtLogin(newValue)
+                        }
+                    )
+                )
             }
 
             SettingsSection(
                 title: "Dock",
                 detail: "Choose whether Transcripted stays visible in the Dock when idle."
             ) {
-                Toggle("Show Transcripted in Dock", isOn: Binding(
-                    get: { showTranscriptedInDock },
-                    set: { newValue in
-                        showTranscriptedInDock = newValue
-                        trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
-                        DockVisibilityPreferences.setVisible(newValue)
-                    }
-                ))
-
-                Text(
-                    showTranscriptedInDock
+                SettingsToggleRow(
+                    title: "Show Transcripted in Dock",
+                    detail: showTranscriptedInDock
                         ? "Transcripted keeps a normal Dock icon."
-                        : "Transcripted stays menu-bar-only while idle and still becomes visible during active recording if recovery is needed."
+                        : "Transcripted stays menu-bar-only while idle and still becomes visible during active recording if recovery is needed.",
+                    isOn: Binding(
+                        get: { showTranscriptedInDock },
+                        set: { newValue in
+                            showTranscriptedInDock = newValue
+                            trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
+                            DockVisibilityPreferences.setVisible(newValue)
+                        }
+                    )
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             }
 
             SettingsSection(
                 title: "Sounds",
                 detail: "Play short cues for dictation state."
             ) {
-                Toggle("Play dictation feedback sounds", isOn: Binding(
-                    get: { uiSoundsEnabled },
-                    set: { newValue in
-                        uiSoundsEnabled = newValue
-                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
-                        UISoundPreferences.setEnabled(newValue)
-                    }
-                ))
-
-                Text(uiSoundsEnabled
-                    ? "Sounds play when dictation starts, completes, or hears no speech."
-                    : "Dictation sounds are off."
+                SettingsToggleRow(
+                    title: "Play dictation feedback sounds",
+                    detail: uiSoundsEnabled
+                        ? "Sounds play when dictation starts, completes, or hears no speech."
+                        : "Dictation sounds are off.",
+                    isOn: Binding(
+                        get: { uiSoundsEnabled },
+                        set: { newValue in
+                            uiSoundsEnabled = newValue
+                            trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
+                            UISoundPreferences.setEnabled(newValue)
+                        }
+                    )
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             SettingsSection(
@@ -1623,21 +1613,20 @@ struct TranscriptedSettingsView: View {
                 title: "Meeting Audio",
                 detail: "How Transcripted handles your microphone during meetings."
             ) {
-                Toggle("Use Apple voice processing for Safari/Firefox mic attenuation", isOn: Binding(
-                    get: { meetingVoiceProcessingEnabled },
-                    set: { newValue in
-                        meetingVoiceProcessingEnabled = newValue
-                        trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .privacy)
-                        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
-                    }
-                ))
-
-                Text(meetingVoiceProcessingEnabled
-                    ? "May lower other app audio in Zoom/Meet."
-                    : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio."
+                SettingsToggleRow(
+                    title: "Use Apple voice processing for Safari/Firefox mic attenuation",
+                    detail: meetingVoiceProcessingEnabled
+                        ? "May lower other app audio in Zoom/Meet."
+                        : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio.",
+                    isOn: Binding(
+                        get: { meetingVoiceProcessingEnabled },
+                        set: { newValue in
+                            meetingVoiceProcessingEnabled = newValue
+                            trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .privacy)
+                            MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                        }
+                    )
                 )
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
                 Text("Takes effect on the next recording.")
                     .font(.caption)
@@ -1648,33 +1637,41 @@ struct TranscriptedSettingsView: View {
                 title: "Reporting",
                 detail: "Optional. Scrubbed before anything leaves this Mac."
             ) {
-                Toggle("Send crash and error reports", isOn: Binding(
-                    get: { crashReportingEnabled },
-                    set: { newValue in
-                        crashReportingEnabled = newValue
-                        trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
-                        CrashReportingPreferences.setEnabled(newValue)
-                        sentryTestStatus = nil
-                        diagnosticsActionStatus = nil
-                    }
-                ))
-                .disabled(!CrashReporter.isAvailable)
-
-                Toggle("Send anonymous usage stats", isOn: Binding(
-                    get: { anonymousAnalyticsEnabled },
-                    set: { newValue in
-                        anonymousAnalyticsEnabled = newValue
-                        if newValue {
-                            AnalyticsPreferences.setEnabled(true)
-                            trackSettingsToggle("anonymous_analytics", enabled: true, page: .privacy)
-                        } else {
-                            trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
-                            AnalyticsPreferences.setEnabled(false)
+                SettingsToggleRow(
+                    title: "Send crash and error reports",
+                    detail: crashReportingFootnote,
+                    isOn: Binding(
+                        get: { crashReportingEnabled },
+                        set: { newValue in
+                            crashReportingEnabled = newValue
+                            trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
+                            CrashReportingPreferences.setEnabled(newValue)
+                            sentryTestStatus = nil
+                            diagnosticsActionStatus = nil
                         }
-                        diagnosticsActionStatus = nil
-                    }
-                ))
-                .disabled(!AnalyticsReporter.isAvailable)
+                    )
+                )
+                    .disabled(!CrashReporter.isAvailable)
+
+                SettingsToggleRow(
+                    title: "Send anonymous usage stats",
+                    detail: analyticsFootnote,
+                    isOn: Binding(
+                        get: { anonymousAnalyticsEnabled },
+                        set: { newValue in
+                            anonymousAnalyticsEnabled = newValue
+                            if newValue {
+                                AnalyticsPreferences.setEnabled(true)
+                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .privacy)
+                            } else {
+                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
+                                AnalyticsPreferences.setEnabled(false)
+                            }
+                            diagnosticsActionStatus = nil
+                        }
+                    )
+                )
+                    .disabled(!AnalyticsReporter.isAvailable)
 
                 HStack {
                     SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
@@ -1691,14 +1688,6 @@ struct TranscriptedSettingsView: View {
                 }
 
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(crashReportingFootnote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(analyticsFootnote)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1731,22 +1720,34 @@ struct TranscriptedSettingsView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Check automatically", isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                        set: { newValue in
-                            trackSettingsToggle("automatic_update_checks", enabled: newValue, page: .about)
-                            sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
-                        }
-                    ))
+                    SettingsToggleRow(
+                        title: "Check automatically",
+                        detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
+                            ? "Transcripted checks for updates in the background."
+                            : "Transcripted only checks when you ask.",
+                        isOn: Binding(
+                            get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
+                            set: { newValue in
+                                trackSettingsToggle("automatic_update_checks", enabled: newValue, page: .about)
+                                sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
+                            }
+                        )
+                    )
 
-                    Toggle("Download automatically", isOn: Binding(
-                        get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                        set: { newValue in
-                            trackSettingsToggle("automatic_update_downloads", enabled: newValue, page: .about)
-                            sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                        }
-                    ))
-                    .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
+                    SettingsToggleRow(
+                        title: "Download automatically",
+                        detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
+                            ? "Transcripted downloads available updates in the background."
+                            : "Transcripted waits before downloading updates.",
+                        isOn: Binding(
+                            get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
+                            set: { newValue in
+                                trackSettingsToggle("automatic_update_downloads", enabled: newValue, page: .about)
+                                sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
+                            }
+                        )
+                    )
+                        .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
 
                     Text(automaticUpdatesDetail)
                         .font(.caption)

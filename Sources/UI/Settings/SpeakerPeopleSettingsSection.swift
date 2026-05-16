@@ -565,8 +565,9 @@ struct SpeakerPeopleSettingsSection: View {
             title: "Local speakers",
             detail: "Split the local mic into separate speakers."
         ) {
-            Toggle(
-                "Identify multiple local speakers",
+            SettingsToggleRow(
+                title: "Identify multiple local speakers",
+                detail: "After a meeting, name speakers right away or choose Review Later and finish here.",
                 isOn: Binding(
                     get: { splitLocalSpeakersEnabled },
                     set: { newValue in
@@ -575,10 +576,6 @@ struct SpeakerPeopleSettingsSection: View {
                     }
                 )
             )
-
-            Text("After a meeting, name speakers right away or choose Review Later and finish here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
 
         if model.needsReviewCount > 0 {
