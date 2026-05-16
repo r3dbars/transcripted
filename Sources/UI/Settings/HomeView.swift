@@ -969,22 +969,10 @@ struct HomeArtifactStatus: Equatable {
     let text: String
     let tone: HomeArtifactStatusTone
 
-    static func meeting(_ item: RecentMeetingItem) -> HomeArtifactStatus {
-        if item.speakerStatus.needsReview {
-            return HomeArtifactStatus(text: item.speakerStatus.summary, tone: .warning)
-        }
-        if item.audio != nil {
-            return HomeArtifactStatus(text: "Saved with audio", tone: .ready)
-        }
-        return HomeArtifactStatus(text: "Transcript saved", tone: .ready)
-    }
-
-    static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus {
+    static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus? {
         switch entry.delivery {
-        case .pasted:
-            return HomeArtifactStatus(text: "Saved and pasted", tone: .ready)
-        case .copied:
-            return HomeArtifactStatus(text: "Saved to clipboard", tone: .ready)
+        case .pasted, .copied:
+            return nil
         case .failed:
             return HomeArtifactStatus(text: "Saved only", tone: .warning)
         }
@@ -1293,10 +1281,12 @@ struct HomeDictationRow: View {
                     .lineSpacing(2)
                     .multilineTextAlignment(.leading)
 
-                Text(status.text)
-                    .font(.caption2)
-                    .foregroundStyle(status.foregroundStyle)
-                    .lineLimit(1)
+                if let status {
+                    Text(status.text)
+                        .font(.caption2)
+                        .foregroundStyle(status.foregroundStyle)
+                        .lineLimit(1)
+                }
 
                 if canExpand {
                     Button {
@@ -1319,7 +1309,7 @@ struct HomeDictationRow: View {
         }
     }
 
-    private var status: HomeArtifactStatus {
+    private var status: HomeArtifactStatus? {
         HomeArtifactStatus.dictation(entry)
     }
 
@@ -1365,66 +1355,25 @@ struct HomeMeetingRow: View {
             leadingAccessory: reviewSpeakersAccessory,
             compact: true
         ) {
-            HStack(alignment: .top, spacing: 10) {
-                if !item.speakerStatus.needsReview {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(status.foregroundStyle)
-                        .padding(.top, 2)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-
-                    if item.speakerStatus.needsReview {
-                        speakerReviewLabel
-                    } else {
-                        Text(status.text)
-                            .font(.caption2)
-                            .foregroundStyle(status.foregroundStyle)
-                            .lineLimit(1)
-                    }
-                }
+            Text(item.title)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
-    }
-
-    private var status: HomeArtifactStatus {
-        HomeArtifactStatus.meeting(item)
     }
 
     private var reviewSpeakersAccessory: AnyView? {
         guard item.speakerStatus.needsReview else { return nil }
         return AnyView(
             HomeAttentionActionButton(
-                title: "Review",
+                title: "Review speakers",
                 isDisabled: false,
                 tint: .orange,
                 action: onReviewSpeakers
             )
                 .help("Review speakers")
         )
-    }
-
-    private var speakerReviewLabel: some View {
-        Text("Needs speaker names")
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(Color.orange)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.orange.opacity(0.12))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.orange.opacity(0.18), lineWidth: 1)
-            )
-            .accessibilityLabel("Needs speaker names")
     }
 }
 
