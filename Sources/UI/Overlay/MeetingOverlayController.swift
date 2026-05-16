@@ -1055,7 +1055,7 @@ enum MeetingOverlayTokens {
 
     static let panelWidth: CGFloat  = 360
     static let recordingPanelWidth: CGFloat = 292
-    static let minimizedRecordingPanelWidth: CGFloat = 176
+    static let minimizedRecordingPanelWidth: CGFloat = 184
     static let panelHeight: CGFloat = 44
     static let minimizedRecordingPanelHeight: CGFloat = 36
     static let promptHeight: CGFloat = 88
