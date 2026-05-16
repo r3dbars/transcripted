@@ -420,66 +420,66 @@
   </div>
 
   <script>
-    const storageKey = "transcripted-settings-board-simple-v3";
+    const storageKey = "transcripted-settings-board-simple-v5";
 
     const seed = {
       pages: [
-        page("home", "Home", "The main place to use Transcripted. Tabs: Meetings, Dictations, Saved Speakers."),
-        page("shortcuts", "Shortcuts", "Keyboard controls and any future shortcut redesign."),
-        page("app", "App Settings", "Basic app behavior: startup, Dock, save location, updates."),
-        page("privacy", "Privacy", "Mac permissions and data sharing."),
-        page("ai", "AI Tools", "Connect Claude, Codex, or other local agents."),
-        page("support", "Help", "Support, diagnostics, and problem reports."),
-        page("about", "About", "Version and updates."),
-        page("advanced", "Advanced", "Power-user controls, caches, models, folders, and debug-only tools."),
-        page("removed", "Removed", "Stuff to delete, hide, or park.")
+        page("home", "Home", "Use Transcripted here. Meetings, Dictations, and Saved Speakers are one click apart."),
+        page("shortcuts", "Shortcuts", "Choose the keys that start or stop recording."),
+        page("app", "App Settings", "Startup, Dock icon, save folder, and updates."),
+        page("privacy", "Privacy", "Mac permissions and what can leave your Mac."),
+        page("ai", "Connect AI Tools", "Let Claude, Codex, or another local tool read your notes."),
+        page("support", "Help", "Get help or send a safe problem report."),
+        page("about", "About", "Version info."),
+        page("advanced", "Advanced", "Rare settings most users should not need."),
+        page("removed", "Removed", "Things to hide, delete, or save for later.")
       ],
       cards: [
-        card("home-tabs", "home", "Home tabs: Meetings / Dictations / Saved Speakers", "Current: Meetings are in Home, Dictation has its own page, People has its own page.", "Plain: make the three main work areas one click apart inside Home.", false),
-        card("start-actions", "home", "Start actions", "Current: Start Dictation, Start Meeting, and Import Audio mostly live outside Settings Home.", "Plain: first screen should let people start the thing they came to do.", false),
-        card("meetings-tab", "home", "Meetings tab", "Current: recent meetings, failed meetings, preview, audio, copy for agent, report issue.", "Plain: record, recover, read, replay, copy, or delete meeting notes.", false),
-        card("dictations-tab", "home", "Dictations tab", "Current: Paste Last, Recent dictations, sound cues.", "Plain: start or reuse short dictations.", false),
-        card("saved-speakers-tab", "home", "Saved Speakers tab", "Current: People page with speakers to name, duplicates, samples, saved profiles.", "Plain: name meeting speakers and clean up duplicates without leaving Home.", false),
-        card("unfinished-meetings", "home", "Unfinished meetings first", "Current: failed meeting card shows Review all, Show Audio, Try Again, Delete, Dismiss.", "Plain: if a meeting did not finish, put it above everything else.", false),
-        card("current-work", "home", "Current work", "Current: recording, transcribing, saving, model-loading states.", "Plain: tell me what Transcripted is doing right now, in normal words.", true),
-        card("finish-setup", "home", "Finish setup", "Current: missing permissions or model problems appear as Needs attention.", "Plain: show only blockers that stop recording or pasting.", false),
-        card("words-wrong", "home", "Words Transcripted gets wrong", "Current: Corrections lives under General.", "Plain: fix names, acronyms, and phrases for both meetings and dictations.", false),
-        card("meeting-audio-replays", "home", "Meeting audio replays", "Current: Audio Storage has WAV/M4A and delete-after language.", "Plain: choose whether meeting audio can be replayed, and for how long.", true),
-        card("quiet-web-call", "home", "Fix quiet web-call microphone audio", "Current: Use Apple voice processing for Safari/Firefox mic attenuation.", "Plain: turn on only if browser meetings make your microphone sound too quiet.", true),
+        card("home-tabs", "home", "Meetings / Dictations / Saved Speakers", "Replaces separate Meetings, Dictation, and Saved Speakers destinations.", "Put the three main work areas inside Home so users can jump between them fast.", false),
+        card("start-actions", "home", "Start Something", "Buttons: Start Meeting, Start Dictation, Transcribe Audio File.", "Let users begin the main task without hunting through settings.", false),
+        card("meetings-tab", "home", "Meetings", "Replaces Recent meetings plus failed meeting recovery.", "Record, recover, read, replay, copy, or delete meeting notes.", false),
+        card("dictations-tab", "home", "Dictations", "Replaces Paste Last, Recent dictations, and sound cues.", "Start a short dictation, reuse the last one, or see recent dictations.", false),
+        card("saved-speakers-tab", "home", "Saved Speakers", "Replaces the old speaker-management page.", "Name speakers, review unknown voices, and merge duplicates from meeting notes.", false),
+        card("unfinished-meetings", "home", "Finish This Meeting Note", "Replaces Recover unfinished meetings.", "If a meeting did not finish, put this warning above everything else.", false),
+        card("current-work", "home", "Working On It", "Replaces recording/transcribing/saving/model-loading status language.", "Say simple things like Saving your meeting note or Getting your dictation ready.", true),
+        card("finish-setup", "home", "Finish Setup", "Replaces Needs attention.", "Show only real blockers, like missing permission to record or paste.", false),
+        card("words-wrong", "home", "Word Fixes", "Replaces Corrections.", "Fix names, acronyms, and phrases Transcripted often hears wrong.", false),
+        card("meeting-audio-replays", "home", "Saved Meeting Audio", "Replaces Audio Storage, WAV, M4A, and retained replay audio copy.", "Choose whether meetings keep playable audio, and for how long.", true),
+        card("quiet-web-call", "home", "Fix Quiet Web Calls", "Replaces Safari/Firefox mic attenuation.", "Use only if browser meetings make your microphone sound too quiet.", true),
 
-        card("shortcut-redesign", "shortcuts", "Shortcut redesign scratchpad", "Current: one recorder area covers push-to-talk, hands-free, and meeting shortcuts.", "Plain: leave room for Justin's new shortcut idea before we lock the UI.", false),
-        card("meeting-shortcut", "shortcuts", "Meeting shortcut", "Current: meeting shortcut is mixed with dictation shortcut setup.", "Plain: one clear key to start or stop meeting recording.", false),
-        card("dictation-shortcut", "shortcuts", "Dictation shortcut", "Current: push-to-talk and hands-free dictation controls.", "Plain: choose whether dictation is hold-to-talk, tap-to-start, or off.", false),
-        card("disable-dictation-keys", "shortcuts", "Turn off dictation shortcuts", "Current: Enable dictation shortcuts toggle.", "Plain: stop accidental dictation while keeping meeting and app buttons available.", false),
-        card("send-after-paste", "shortcuts", "Press Enter after pasting", "Current: Send After Paste, allowed apps, running apps, bundle IDs.", "Plain: after dictation pastes, press Enter only in selected apps.", true),
+        card("shortcut-redesign", "shortcuts", "New Shortcut Plan", "Placeholder for Justin's new shortcut ideas.", "Keep this flexible until the shortcut behavior is decided.", false),
+        card("meeting-shortcut", "shortcuts", "Meeting Key", "Replaces meeting shortcut setup.", "One clear key to start or stop meeting recording.", false),
+        card("dictation-shortcut", "shortcuts", "Dictation Key", "Replaces push-to-talk and hands-free wording.", "Choose hold-to-talk, tap-to-start, or off.", false),
+        card("disable-dictation-keys", "shortcuts", "Turn Dictation Key Off", "Replaces Enable dictation shortcuts.", "Prevent accidental dictation while keeping meeting recording available.", false),
+        card("send-after-paste", "shortcuts", "Press Enter After Paste", "Replaces Send After Paste, allowed apps, running apps, and bundle IDs.", "After dictation pastes text, press Enter only in apps the user chooses.", true),
 
-        card("startup", "app", "Open at login", "Current: Launch Transcripted at login.", "Plain: start Transcripted automatically.", false),
-        card("dock", "app", "Show in Dock", "Current: Show Transcripted in Dock with menu-bar-only recovery copy.", "Plain: choose Dock app or menu bar app.", true),
-        card("save-location", "app", "Save location", "Current: Capture Library, Meeting captures, Dictation captures, Choose Folder, Reset.", "Plain: choose where Transcripted saves notes.", true),
-        card("updates", "app", "Updates", "Current: check automatically, download automatically, check/install/restart.", "Plain: keep the app up to date.", false),
+        card("startup", "app", "Open at Login", "Replaces Launch Transcripted at login.", "Start Transcripted automatically.", false),
+        card("dock", "app", "Show in Dock", "Replaces Dock plus menu-bar-only recovery copy.", "Choose whether Transcripted appears in the Dock.", false),
+        card("save-location", "app", "Save Folder", "Replaces Capture Library, Meeting captures, and Dictation captures.", "Choose where Transcripted saves notes.", true),
+        card("updates", "app", "Updates", "Replaces automatic update check/download controls.", "Keep Transcripted up to date.", false),
 
-        card("install-claude", "ai", "Connect Claude Desktop", "Current: Install in Claude / Repair Claude Setup.", "Plain: let Claude Desktop read Transcripted notes.", false),
-        card("copy-agent", "ai", "Copy setup prompt", "Current: Copy for Agent, Codex, Claude Code, Cursor.", "Plain: copy instructions for local coding agents.", false),
+        card("install-claude", "ai", "Connect Claude Desktop", "Replaces Install in Claude / Repair Claude Setup.", "Let Claude Desktop read Transcripted notes.", false),
+        card("copy-agent", "ai", "Copy Setup Prompt", "Replaces Copy for Agent.", "Copy simple setup steps for Codex, Claude Code, or Cursor.", false),
 
-        card("permissions", "privacy", "Mac permissions", "Current: microphone, accessibility, system audio recording, calendar.", "Plain: allow recording, paste-back, and meeting prompts.", false),
-        card("data-sharing", "privacy", "Data sharing", "Current: crash reports, anonymous usage stats, Send Test Sentry Event.", "Plain: decide whether safe bug info can leave the Mac.", false),
-        card("privacy-note", "privacy", "Never sent", "Current: never sends transcript text, audio, names, emails, file paths, URLs, or meeting titles.", "Plain: trust note for diagnostics.", false),
+        card("permissions", "privacy", "Mac Permissions", "Replaces microphone, accessibility, system audio recording, and calendar rows.", "Allow Transcripted to record, paste text, and notice meetings.", false),
+        card("data-sharing", "privacy", "Share Safe Bug Info", "Replaces crash reports, anonymous usage stats, and Sentry test language.", "Let Transcripted send scrubbed crash and usage info.", false),
+        card("privacy-note", "privacy", "Never Sent", "Keep this trust note near any diagnostics control.", "Transcript text, audio, names, emails, file paths, URLs, and meeting titles never get sent.", false),
 
-        card("email-support", "support", "Email support", "Current: prefilled email to help@transcripted.app.", "Plain: ask for help.", false),
-        card("send-diagnostics", "support", "Send safe diagnostic report", "Current: One-click send diagnostics.", "Plain: send a scrubbed report so support can investigate.", false),
-        card("report-issue-sheet", "support", "Report transcript issue", "Current: wrong words, missing text, bad formatting, speaker issue, audio issue.", "Plain: report a bad note safely.", false),
+        card("email-support", "support", "Email Help", "Replaces Email support.", "Ask for help or send feedback.", false),
+        card("send-diagnostics", "support", "Send Safe Problem Report", "Replaces One-click send diagnostics.", "Send scrubbed details so support can investigate.", false),
+        card("report-issue-sheet", "support", "Report A Bad Note", "Replaces Report transcript issue.", "Report wrong words, missing text, speaker issues, formatting, or audio problems.", false),
 
-        card("version", "about", "Version", "Current: Transcripted version and local-first description.", "Plain: what version is installed.", false),
+        card("version", "about", "Version", "Keep this tiny.", "Show the installed app version.", false),
 
-        card("model-status", "advanced", "Transcription ready status", "Current: Active transcription engine and Model files.", "Plain: show whether local transcription is ready.", true),
-        card("model-picker", "advanced", "Choose a different transcription model", "Current: Change model, Preferred model, Parakeet, Whisper.", "Plain: advanced quality/speed/language choice.", true),
-        card("model-cache", "advanced", "Downloaded speech files", "Current: FluidAudio models, Whisper cache, stale candidates, remove cache.", "Plain: free up space used by downloaded transcription files.", true),
-        card("support-folders", "advanced", "Troubleshooting folders", "Current: app state, app cache, logs, temporary recordings.", "Plain: folders support may ask for.", true),
-        card("manual-agent", "advanced", "Manual AI setup", "Current: config, paths, folder prompt, web chats fallback.", "Plain: advanced setup if automatic setup does not work.", true),
-        card("onboarding", "advanced", "First-run setup details", "Current: permissions, calendar, diagnostics, use-case choices.", "Plain: get a new user to a working app.", false),
-        card("speaker-sheet", "advanced", "Speaker naming sheet", "Current: Review Later, Keep as You, Split mic speakers.", "Plain: name who spoke, now or later.", true),
-        card("delete-alerts", "advanced", "Delete confirmations", "Current: delete meeting, dictation, old replay audio, caches.", "Plain: confirm before removing notes, audio, or downloads.", false),
-        card("sentry-test", "advanced", "Test crash report button", "Current: Send Test Sentry Event is visible in Privacy.", "Plain: support/debug-only. Hide from normal users.", true)
+        card("model-status", "advanced", "Speech Setup Status", "Replaces Active transcription engine and Model files.", "Only show this if the local speech setup needs attention.", true),
+        card("model-picker", "advanced", "Choose Speech Model", "Replaces Parakeet and Whisper model picker.", "Advanced quality, speed, and language choice.", true),
+        card("model-cache", "advanced", "Free Up Speech Storage", "Replaces FluidAudio models, Whisper cache, stale candidates, remove cache.", "Delete old downloaded speech files safely.", true),
+        card("support-folders", "advanced", "Support Folders", "Replaces app state, cache, logs, and temporary recordings.", "Folders support may ask the user to open.", true),
+        card("manual-agent", "advanced", "Manual AI Setup", "Replaces config, paths, folder prompt, and web chat fallback copy.", "Manual setup if automatic AI setup does not work.", true),
+        card("onboarding", "advanced", "First-Run Setup", "Replaces onboarding internals.", "Get a new user to a working app.", false),
+        card("speaker-sheet", "advanced", "Name Speakers Now Or Later", "Replaces Review Later, Keep as You, Split mic speakers.", "After a meeting, name speakers immediately or save it for Saved Speakers.", true),
+        card("delete-alerts", "advanced", "Delete Confirmations", "Replaces delete meeting, dictation, old replay audio, and cache alerts.", "Confirm before removing notes, audio, or downloads.", false),
+        card("sentry-test", "advanced", "Test Crash Report", "Replaces Send Test Sentry Event.", "Support/debug-only. Hide from normal users.", true)
       ]
     };
 
