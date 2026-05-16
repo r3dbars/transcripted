@@ -1394,6 +1394,7 @@ struct HomeFailedMeetingInlineRow: View {
     let onClear: () -> Void
 
     var body: some View {
+        let presentation = inlinePresentation
         HomeActivityRowShell(
             timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp),
             isCopied: false,
@@ -1411,7 +1412,7 @@ struct HomeFailedMeetingInlineRow: View {
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
 
-                statusLine
+                statusLine(presentation: presentation)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(item.detail)
@@ -1431,7 +1432,7 @@ struct HomeFailedMeetingInlineRow: View {
                 .help("Show saved audio in Finder")
             }
 
-            if item.isRetryable || item.isRetrying {
+            if inlinePresentation.canShowRetryAction {
                 HomeAttentionActionButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
                     isDisabled: retryDisabled,
@@ -1453,29 +1454,44 @@ struct HomeFailedMeetingInlineRow: View {
         }
     }
 
-    private var statusLine: some View {
-        Text(statusPillText)
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(Color.red)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.red.opacity(0.12))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.red.opacity(0.18), lineWidth: 1)
-            )
-            .accessibilityLabel(statusPillText)
+    private var inlinePresentation: HomeFailedMeetingInlinePresentation {
+        HomeFailedMeetingInlinePresentation.make(
+            isRetryable: item.isRetryable,
+            isRetrying: item.isRetrying,
+            hasAudioFiles: item.hasAudioFiles,
+            detail: item.detail
+        )
     }
 
-    private var statusPillText: String {
-        item.isRetrying ? "Retrying" : "Needs retry"
+    private func statusLine(presentation: HomeFailedMeetingInlinePresentation) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(presentation.statusText)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Color.red)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.red.opacity(0.12))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                )
+                .accessibilityLabel(presentation.statusText)
+
+            if let detail = presentation.inlineDetail {
+                Text(detail)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
     }
 
     private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || item.isRetrying
+        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
     }
 
     private var retryHelp: String {
