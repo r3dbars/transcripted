@@ -432,6 +432,7 @@ struct SettingsToggleRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text(isOn ? "On" : "Off"))
+        .accessibilityHint(Text(detail))
     }
 }
 
