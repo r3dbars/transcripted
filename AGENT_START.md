@@ -13,11 +13,12 @@ exist for migration and reference only.
 
 ## Read Order
 
-1. `AGENTS.md` - canonical agent rules
-2. `docs/repo-layout.md` - live directory map
-3. `docs/agent-onboarding.md` - doc trust order
-4. nearest `CLAUDE.md` for the area being edited
-5. `.agents/test-matrix.yml` - path-to-verification map
+1. `README.md` - public product overview and repo truth
+2. `AGENTS.md` - canonical agent rules
+3. `docs/repo-layout.md` - live directory map
+4. `docs/agent-onboarding.md` - doc trust order
+5. nearest `CLAUDE.md` for the area being edited
+6. `.agents/test-matrix.yml` - path-to-verification map
 
 ## Edit Map
 
