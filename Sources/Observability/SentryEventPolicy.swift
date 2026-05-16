@@ -167,6 +167,11 @@ struct SentryEventPolicy: Equatable {
             event: "meeting_transcript_failed",
             summary: "Meeting transcription failed."
         ),
+        "meeting.speaker_finalization_failed": .init(
+            engine: "meeting",
+            event: "speaker_finalization_failed",
+            summary: "Meeting speaker naming finalization failed."
+        ),
         "onboarding.first_dictation_start_failed": .init(
             engine: "onboarding",
             event: "first_dictation_start_failed",

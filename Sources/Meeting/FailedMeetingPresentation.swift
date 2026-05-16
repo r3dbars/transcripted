@@ -17,7 +17,7 @@ enum FailedMeetingPresentation {
         return MeetingSessionController.FailedMeetingItem(
             id: failed.id,
             timestamp: failed.timestamp,
-            title: copy.title,
+            title: title(for: failed, fallback: copy.title),
             detail: copy.detail,
             meta: meta(for: failed, hasAudioFiles: !availableAudioURLs.isEmpty, isRetrying: isRetrying),
             failureKind: failureKind,
@@ -26,6 +26,14 @@ enum FailedMeetingPresentation {
             hasAudioFiles: !availableAudioURLs.isEmpty,
             audioURLs: availableAudioURLs
         )
+    }
+
+    private static func title(for failed: FailedTranscription, fallback: String) -> String {
+        if let title = failed.meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            return title
+        }
+        return fallback == "Transcript needs another pass" ? "Meeting transcript failed" : fallback
     }
 
     private static func audioURLs(for failed: FailedTranscription) -> [URL] {

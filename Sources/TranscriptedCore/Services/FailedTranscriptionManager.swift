@@ -112,7 +112,8 @@ public class FailedTranscriptionManager: ObservableObject {
     public func addFailedTranscription(
         micAudioURL: URL,
         systemAudioURL: URL?,
-        errorMessage: String
+        errorMessage: String,
+        meetingTitle: String? = nil
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -129,7 +130,8 @@ public class FailedTranscriptionManager: ObservableObject {
         let failed = FailedTranscription(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
-            errorMessage: errorMessage
+            errorMessage: errorMessage,
+            meetingTitle: meetingTitle
         )
 
         failedTranscriptions.append(failed)
@@ -155,6 +157,32 @@ public class FailedTranscriptionManager: ObservableObject {
         saveFailedTranscriptions()
 
         AppLogger.pipeline.info("Removed failed transcription", ["id": "\(id)"])
+    }
+
+    @discardableResult
+    public func updateFailedTranscriptionError(id: UUID, errorMessage: String) -> Bool {
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let existing = failedTranscriptions[index]
+        failedTranscriptions[index] = FailedTranscription(
+            id: existing.id,
+            timestamp: existing.timestamp,
+            micAudioURL: existing.micAudioURL,
+            systemAudioURL: existing.systemAudioURL,
+            errorMessage: errorMessage,
+            meetingTitle: existing.meetingTitle,
+            retryCount: existing.retryCount,
+            lastRetryDate: existing.lastRetryDate
+        )
+
+        let didPersist = saveFailedTranscriptions()
+        AppLogger.pipeline.info("Updated failed transcription error", [
+            "id": "\(id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
     }
 
     /// Removes a failed transcription and deletes its audio files

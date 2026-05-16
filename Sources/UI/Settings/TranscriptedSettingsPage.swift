@@ -5,7 +5,6 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case general
     case models
     case shortcuts
-    case dictations
     case people
     case storage
     case connectAgent
@@ -30,8 +29,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .models: return "Models"
         case .shortcuts: return "Shortcuts"
-        case .dictations: return "Dictation"
-        case .people: return "People"
+        case .people: return "Speakers"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
         case .privacy: return "Privacy"
@@ -50,8 +48,6 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
             return "Local transcription model."
         case .shortcuts:
             return "Keys and send-after-paste rules."
-        case .dictations:
-            return "Paste-back and sound cues."
         case .people:
             return "Deferred speaker names and duplicates."
         case .storage:
@@ -73,7 +69,6 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .general: return "gearshape.fill"
         case .models: return "cpu.fill"
         case .shortcuts: return "keyboard"
-        case .dictations: return "quote.bubble.fill"
         case .people: return "person.2.fill"
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"

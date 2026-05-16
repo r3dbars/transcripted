@@ -5,8 +5,116 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let date: Date
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
+    let speakerStatus: RecentMeetingSpeakerStatus
 
     var id: String { transcriptURL.path }
+}
+
+enum RecentMeetingSpeakerStatus: Equatable, Sendable {
+    case ready
+    case needsReview(Int)
+
+    var summary: String {
+        switch self {
+        case .ready:
+            return "Speakers ready"
+        case .needsReview(let count):
+            return count == 1 ? "1 speaker needs review" : "\(count) speakers need review"
+        }
+    }
+
+    var needsReview: Bool {
+        if case .needsReview = self { return true }
+        return false
+    }
+
+    static func detect(in markdown: String) -> RecentMeetingSpeakerStatus {
+        let genericSpeakers = genericSpeakerLabels(in: transcriptSpeakerLabels(in: markdown))
+        guard !genericSpeakers.isEmpty else { return .ready }
+        return .needsReview(genericSpeakers.count)
+    }
+
+    private static func genericSpeakerLabels(in speakerLabels: [String]) -> Set<String> {
+        var labels = Set<String>()
+        let patterns = [
+            #"(?i)(?:^|[/\[\s])Speaker\s+\d+\b"#,
+            #"(?i)\bUnknown speaker\b"#,
+            #"(?i)\bReview later\b"#
+        ]
+
+        let text = speakerLabels.joined(separator: "\n")
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+            regex.enumerateMatches(in: text, range: nsRange) { match, _, _ in
+                guard let matchRange = match?.range,
+                      let range = Range(matchRange, in: text) else { return }
+                labels.insert(String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            }
+        }
+
+        return labels
+    }
+
+    private static func transcriptSpeakerLabels(in markdown: String) -> [String] {
+        markdown
+            .components(separatedBy: .newlines)
+            .compactMap { speakerLabel(fromTranscriptLine: $0) }
+    }
+
+    private static func speakerLabel(fromTranscriptLine rawLine: String) -> String? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return nil }
+
+        if line.hasPrefix("**") {
+            let unbolded = line
+                .dropFirst(2)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "*"))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return speakerLabel(fromBoldTimestampLine: line) ?? speakerLabel(fromBracketTimestampLine: unbolded)
+        }
+
+        if line.hasPrefix("[") {
+            return speakerLabel(fromBracketTimestampLine: line)
+        }
+
+        return nil
+    }
+
+    private static func speakerLabel(fromBoldTimestampLine line: String) -> String? {
+        let timeStart = line.index(line.startIndex, offsetBy: 2)
+        guard let timeEnd = line[timeStart...].range(of: "**")?.lowerBound else { return nil }
+        let time = String(line[timeStart..<timeEnd])
+        guard looksLikeTimestamp(time) else { return nil }
+        let remainderStart = line.index(timeEnd, offsetBy: 2)
+        return leadingBracketLabel(in: String(line[remainderStart...]))
+    }
+
+    private static func speakerLabel(fromBracketTimestampLine line: String) -> String? {
+        guard let timeEnd = line.firstIndex(of: "]") else { return nil }
+        let time = String(line[line.index(after: line.startIndex)..<timeEnd])
+        guard looksLikeTimestamp(time) else { return nil }
+        let remainder = String(line[line.index(after: timeEnd)...])
+        return leadingBracketLabel(in: remainder)
+    }
+
+    private static func leadingBracketLabel(in raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("["),
+              let end = text.firstIndex(of: "]") else { return nil }
+        let rawLabel = String(text[text.index(after: text.startIndex)..<end])
+        let label = rawLabel
+            .replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label
+    }
+
+    private static func looksLikeTimestamp(_ value: String) -> Bool {
+        let parts = value.split(separator: ":")
+        guard parts.count == 2 || parts.count == 3 else { return false }
+        return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+    }
 }
 
 struct RecentCaptureSnapshot: Sendable {
@@ -117,12 +225,14 @@ enum RecentMeetingsScanner {
             guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
                 continue
             }
+            let markdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
                     date: entry.date,
                     transcriptURL: styled.url,
-                    audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url)
+                    audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
+                    speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown)
                 )
             )
             if recentItems.count >= limit {

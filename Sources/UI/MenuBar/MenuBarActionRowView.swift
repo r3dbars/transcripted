@@ -118,16 +118,16 @@ final class MenuBarActionRowView: NSControl {
             trailingColor = MenuTokens.textMutedNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
-            iconTint = .white
-            titleColor = .white
-            detailColor = NSColor.white.withAlphaComponent(0.78)
-            trailingColor = NSColor.white.withAlphaComponent(0.82)
+            iconTint = toneColors().pressed
+            titleColor = MenuTokens.textPrimaryNS
+            detailColor = MenuTokens.textSecondaryNS
+            trailingColor = MenuTokens.textSecondaryNS
         } else if isHovering {
             backgroundColor = MenuTokens.flatRowHoverNS
-            iconTint = .white
-            titleColor = .white
-            detailColor = NSColor.white.withAlphaComponent(0.78)
-            trailingColor = NSColor.white.withAlphaComponent(0.82)
+            iconTint = toneColors().pressed
+            titleColor = MenuTokens.textPrimaryNS
+            detailColor = MenuTokens.textSecondaryNS
+            trailingColor = MenuTokens.textSecondaryNS
         } else {
             backgroundColor = .clear
             iconTint = toneColors().normal

@@ -118,6 +118,35 @@ func testReliabilityPacketRecorder() {
         assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
     }
 
+    runSuite("ReliabilityPacketRecorder maps speaker finalization failures") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-05-03T01:15:11.605Z",
+            level: "error",
+            engine: "meeting",
+            event: "speaker_finalization_failed",
+            message: "Meeting speaker naming finalization failed",
+            context: [
+                "failure_kind": "speaker_finalization_failed",
+                "queue_depth": "2",
+                "speaker_name": "Private Person",
+                "trigger": "hotkey",
+            ],
+            appVersion: "1.1.37",
+            osVersion: "Version 26.4.1"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertNotNil(packet, "speaker finalization failures should produce reliability packets")
+        assertEqual(packet?.feature, "meeting", "packet feature should classify the flow")
+        assertEqual(packet?.stage, "save", "speaker finalization is a post-transcript save-stage failure")
+        assertEqual(packet?.outcome, "failed_retryable", "speaker finalization failures should remain visible as retryable failures")
+        assertEqual(packet?.context["failure_kind"], "speaker_finalization_failed", "failure kind should stay normalized")
+        assertEqual(packet?.context["queue_depth_bucket"], "2_3", "queue depth should stay bucketed")
+        assertEqual(packet?.context["trigger"], "hotkey", "trigger should stay queryable")
+        assertNil(packet?.context["speaker_name"], "speaker names should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder renders recent packet summaries from JSONL") {
         let packets = [
             ReliabilityPacket(
