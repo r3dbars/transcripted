@@ -1705,6 +1705,35 @@ final class MeetingSessionController: ObservableObject {
                 return
             }
 
+            if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
+                let queueDepthBucket = AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)
+                DiagnosticsTrail.record(
+                    level: .error,
+                    engine: "meeting",
+                    event: "speaker_finalization_failed",
+                    message: "Meeting speaker naming finalization failed",
+                    context: baseDiagnosticsContext(
+                        extra: [
+                            "failure_kind": failureKind.rawValue,
+                            "queue_depth": "\(queuedTranscriptionJobs.count)",
+                            "queue_depth_bucket": queueDepthBucket,
+                            "trigger": transcriptionTrigger.rawValue
+                        ]
+                    )
+                )
+                AnalyticsReporter.track(
+                    "meeting_speaker_finalization_failed",
+                    properties: [
+                        "failure_kind": failureKind.rawValue,
+                        "queue_depth_bucket": queueDepthBucket,
+                        "trigger": transcriptionTrigger.rawValue,
+                    ]
+                )
+                Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
+                finalizeBackgroundTranscriptionStateIfNeeded()
+                return
+            }
+
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",

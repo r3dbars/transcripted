@@ -37,7 +37,8 @@ struct MeetingFailureCopy: Equatable {
                 title: "Couldn't save the transcript",
                 detail: shortErrorMessage
             )
-        case .speakerNameFinalizationFailed:
+        case .speakerNameFinalizationFailed,
+             .speakerFinalizationFailed:
             return MeetingFailureCopy(
                 title: "Couldn't save speaker names",
                 detail: "The transcript saved, but the speaker names did not. Try again to rebuild the meeting and save the names."

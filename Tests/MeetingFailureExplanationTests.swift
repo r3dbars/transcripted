@@ -91,6 +91,22 @@ func testMeetingFailureExplanation() async {
         assertEqual(explanation.reportFields["retry_available"], "yes", "retry should stay available while the failed row is retained")
     }
 
+    runSuite("MeetingFailureExplanation keeps split speaker finalization telemetry recoverable") {
+        let explanation = MeetingFailureExplanation.make(
+            failureKind: .speakerFinalizationFailed,
+            hasAudioFiles: true,
+            isRetryable: false,
+            failedQueueEntryRetained: true
+        )
+
+        assertEqual(explanation.stage, .save, "speaker finalization should stay on the save stage")
+        assertEqual(explanation.outcomeKind, .recoverableFailure, "speaker finalization should not become permanent loss")
+        assertEqual(explanation.retryability, .retryableAfterUserAction, "speaker finalization can recover after the save/name issue is repaired")
+        assertEqual(explanation.reportFields["failure_kind"], "speaker_finalization_failed", "split telemetry should keep the dedicated failure kind")
+        assertEqual(explanation.reportFields["save_failed"], "yes", "speaker finalization is a save-stage failure")
+        assertEqual(explanation.reportFields["retry_available"], "yes", "retained audio should preserve a retry path")
+    }
+
     runSuite("MeetingFailureExplanation blocks pre-recording permission failures cleanly") {
         let explanation = MeetingFailureExplanation.make(
             failureKind: .microphonePermission,

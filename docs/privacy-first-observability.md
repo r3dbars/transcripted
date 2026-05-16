@@ -128,6 +128,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_file_imported`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
+- `meeting_speaker_finalization_failed`
 - `meeting_transcript_skipped`
 
 ## Allowed property style

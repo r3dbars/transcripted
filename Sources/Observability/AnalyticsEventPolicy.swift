@@ -513,6 +513,14 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]))
         ),
+        "meeting_speaker_finalization_failed": .init(
+            name: "meeting_speaker_finalization_failed",
+            allowedProperties: [
+                "failure_kind",
+                "queue_depth_bucket",
+                "trigger",
+            ]
+        ),
         "meeting_transcript_skipped": .init(
             name: "meeting_transcript_skipped",
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([

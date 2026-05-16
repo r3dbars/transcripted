@@ -50,6 +50,10 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "meeting_transcript_failed"
         )
+        let speakerFinalizationFailed = SentryEventPolicy.policy(
+            forEngine: "meeting",
+            event: "speaker_finalization_failed"
+        )
         let modelInitFailure = SentryEventPolicy.policy(
             forEngine: "parakeet",
             event: "model_init_failed"
@@ -79,6 +83,7 @@ func testSentryEventPolicy() {
         assertEqual(meetingCaptureDegraded?.summary, "Meeting capture health degraded.", "degraded meeting capture should be visible without raw device names")
         assertEqual(meetingStopTimeout?.summary, "Meeting recording stop timed out.", "stop timeouts should be visible without raw device names")
         assertEqual(meetingTranscriptFailed?.summary, "Meeting transcription failed.", "meeting transcript failures should be visible with sanitized context")
+        assertEqual(speakerFinalizationFailed?.summary, "Meeting speaker naming finalization failed.", "speaker finalization failures should not masquerade as full transcript failures")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
         assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
@@ -139,6 +144,24 @@ func testSentryEventPolicy() {
         assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
         assertEqual(tags["system_status"], "healthy", "system capture status should be queryable")
         assertEqual(tags["trigger"], "hotkey", "trigger should be queryable")
+    }
+
+    runSuite("SentryEventPolicy diagnosticTags keeps speaker finalization failure separate") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "speaker_finalization_failed",
+            context: [
+                "failure_kind": "speaker_finalization_failed",
+                "queue_depth_bucket": "zero",
+                "speaker_name": "Private Person",
+                "trigger": "unknown",
+            ]
+        )
+
+        assertEqual(tags["failure_kind"], "speaker_finalization_failed", "speaker finalization should keep its stable failure kind")
+        assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
+        assertEqual(tags["trigger"], "unknown", "trigger should stay queryable")
+        assertNil(tags["speaker_name"], "speaker names must stay out of Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps issue 500 volume-drop flags searchable") {

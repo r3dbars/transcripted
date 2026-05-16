@@ -214,6 +214,7 @@ func testAnalyticsEventPolicy() {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
+        let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let meetingSkipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
         let unknown = AnalyticsEventPolicy.policy(forEvent: "raw_transcript_uploaded")
 
@@ -222,6 +223,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("failure_kind"), true, "speaker finalization failures should allow normalized failure kinds")
         assertEqual(meetingSkipped?.allowedProperties.contains("failure_kind"), true, "skipped meeting transcripts should allow normalized reasons")
         assertNil(unknown, "unreviewed analytics events should not be allowed")
     }
@@ -350,6 +352,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows meeting outcome trigger attribution") {
         let saved = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")
         let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
+        let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let skipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
 
         assertEqual(saved?.allowedProperties.contains("trigger"), true, "meeting saves should preserve trigger attribution")
@@ -357,6 +360,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(saved?.allowedProperties.contains("word_count_bucket"), true, "meeting saves should preserve coarse word output")
         assertEqual(saved?.allowedProperties.contains("participant_count_bucket"), true, "meeting saves should preserve coarse participant count")
         assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("trigger"), true, "speaker finalization failures should preserve trigger attribution")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("queue_depth_bucket"), true, "speaker finalization failures should preserve bucketed queue depth")
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
