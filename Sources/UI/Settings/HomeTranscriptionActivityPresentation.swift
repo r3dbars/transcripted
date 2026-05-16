@@ -76,8 +76,16 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 progress: 1.0,
                 transcriptURL: transcriptURL
             )
-        case .failed:
-            return nil
+        case .failed(let message):
+            return HomeTranscriptionActivityPresentation(
+                symbolName: "exclamationmark.circle.fill",
+                title: "Couldn't finish transcript",
+                status: "Needs attention",
+                detail: "\(message) If audio was saved, the meeting row below will show Try again.",
+                tone: .caution,
+                progress: nil,
+                transcriptURL: nil
+            )
         case .idle:
             break
         }

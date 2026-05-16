@@ -484,6 +484,7 @@ struct TranscriptedSettingsView: View {
 
     private func openHomeSpeakerReview(actionName: String) {
         trackSettingsAction(actionName, page: .home)
+        speakerPeopleModel.refresh()
         speakerPeopleModel.profileFilter = .needsReview
         navigation.selectedPage = .home
         homeActivityTab = .speakers
