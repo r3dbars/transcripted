@@ -1848,6 +1848,127 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteSucceedsAfterMeetingStylerRemovedRemoteBreakdown() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.36, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Styled_Meeting.md")
+        let clipURL = tempDirectory.appendingPathComponent("speaker-styled.wav")
+        let micURL = tempDirectory.appendingPathComponent("mic-styled.wav")
+        let systemURL = tempDirectory.appendingPathComponent("system-styled.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: persistentSpeakerId,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+        let styledTranscript = """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        title: "Styled Meeting"
+        date: 2026-04-10
+        time: 15:01:23
+        duration: "1:30"
+        processing_time: "3.0s"
+        transcription_engine: parakeet_local
+        diarization_engine: pyannote_offline
+        sources: [mic, system_audio]
+        mic_utterances: 0
+        system_utterances: 1
+        mic_speakers: 0
+        system_speakers: 1
+        total_word_count: 5
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(persistentSpeakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        # Styled Meeting
+
+        Recorded Apr 10, 2026 at 3:01 PM  •  1:30  •  5 words  •  1 turn
+
+        ## Transcript
+
+        **00:01**  [System/Speaker 1]
+        Thanks for joining.
+        """
+
+        try styledTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: clipURL)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: "Speaker 1",
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: persistentSpeakerId,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.36, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains(#"name: "Sarah Graham""#), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Sarah Graham]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("#### Remote Speaker Breakdown"), savedTranscript)
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName, "Sarah Graham")
+    }
+
+    @MainActor
     func testHandleNamingCompleteCorrectionWithoutSessionEmbeddingFailsClosed() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()

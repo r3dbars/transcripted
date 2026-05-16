@@ -72,6 +72,41 @@ func testMeetingFailureExplanation() async {
         assertEqual(explanation.reportFields["retry_available"], "yes", "save failures with retained audio should expose retry after repair")
     }
 
+    runSuite("MeetingFailureExplanation keeps speaker-name finalization failures retryable") {
+        let explanation = MeetingFailureExplanation.make(
+            failureKind: .speakerNameFinalizationFailed,
+            hasAudioFiles: true,
+            isRetryable: true,
+            stage: .save,
+            transcriptSaved: true,
+            failedQueueEntryRetained: true
+        )
+
+        assertEqual(explanation.outcomeKind, .recoverableFailure, "speaker-name save failures should keep a retry path")
+        assertEqual(explanation.retryability, .retryable, "retained audio should make speaker-name finalization retryable")
+        assertEqual(explanation.artifactRetention, .retainedPartialTranscript, "the saved transcript should stay visible as a partial artifact")
+        assertEqual(explanation.userVisibleState, .retryAvailable, "Home should offer retry without claiming the transcript was lost")
+        assertEqual(explanation.reportFields["failure_kind"], "speaker_name_finalization_failed", "support reports should keep the speaker-name failure explicit")
+        assertEqual(explanation.reportFields["save_failed"], "yes", "speaker-name finalization is a save-stage failure")
+        assertEqual(explanation.reportFields["retry_available"], "yes", "retry should stay available while the failed row is retained")
+    }
+
+    runSuite("MeetingFailureExplanation keeps split speaker finalization telemetry recoverable") {
+        let explanation = MeetingFailureExplanation.make(
+            failureKind: .speakerFinalizationFailed,
+            hasAudioFiles: true,
+            isRetryable: false,
+            failedQueueEntryRetained: true
+        )
+
+        assertEqual(explanation.stage, .save, "speaker finalization should stay on the save stage")
+        assertEqual(explanation.outcomeKind, .recoverableFailure, "speaker finalization should not become permanent loss")
+        assertEqual(explanation.retryability, .retryableAfterUserAction, "speaker finalization can recover after the save/name issue is repaired")
+        assertEqual(explanation.reportFields["failure_kind"], "speaker_finalization_failed", "split telemetry should keep the dedicated failure kind")
+        assertEqual(explanation.reportFields["save_failed"], "yes", "speaker finalization is a save-stage failure")
+        assertEqual(explanation.reportFields["retry_available"], "yes", "retained audio should preserve a retry path")
+    }
+
     runSuite("MeetingFailureExplanation blocks pre-recording permission failures cleanly") {
         let explanation = MeetingFailureExplanation.make(
             failureKind: .microphonePermission,

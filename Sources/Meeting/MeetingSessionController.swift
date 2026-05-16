@@ -624,7 +624,8 @@ final class MeetingSessionController: ObservableObject {
             let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
                 micAudioURL: nil,
                 systemAudioURL: files.systemURL,
-                errorMessage: "Recording stopped without microphone audio."
+                errorMessage: "Recording stopped without microphone audio.",
+                meetingTitle: recordingSnapshot.suggestedTitle
             )
             DiagnosticsTrail.record(
                 level: .error,
@@ -670,7 +671,8 @@ final class MeetingSessionController: ObservableObject {
             taskManager.addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
-                errorMessage: "Recording stop timed out before audio files were finalized."
+                errorMessage: "Recording stop timed out before audio files were finalized.",
+                meetingTitle: recordingSnapshot.suggestedTitle
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -925,11 +927,12 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle):
                 taskManager.addFailedTranscriptionRetainingAudio(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
-                    errorMessage: "Transcription cancelled"
+                    errorMessage: "Transcription cancelled",
+                    meetingTitle: meetingTitle
                 )
             case .imported(let audioURL, _):
                 try? FileManager.default.removeItem(at: audioURL)
@@ -962,6 +965,7 @@ final class MeetingSessionController: ObservableObject {
 
             let files = await capture.stopAndAwaitFiles()
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
+            let meetingTitle = activeRecordingSuggestedTitle
             activeRecordingTrigger = .unknown
             activeRecordingSuggestedTitle = nil
 
@@ -969,7 +973,8 @@ final class MeetingSessionController: ObservableObject {
                 didPreserveRecording = taskManager.addFailedTranscriptionRetainingAvailableAudio(
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
-                    errorMessage: "Transcripted quit before this meeting could be transcribed."
+                    errorMessage: "Transcripted quit before this meeting could be transcribed.",
+                    meetingTitle: meetingTitle
                 )
             }
         } else {
@@ -1017,11 +1022,12 @@ final class MeetingSessionController: ObservableObject {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle):
                 if taskManager.addFailedTranscriptionRetainingAvailableAudio(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
-                    errorMessage: errorMessage
+                    errorMessage: errorMessage,
+                    meetingTitle: meetingTitle
                 ) {
                     preservedCount += 1
                 }
@@ -1033,7 +1039,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func retryFailedMeeting(id: UUID) {
-        guard !isRecording, !hasBackgroundTranscriptionWork else { return }
+        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return }
         guard !retryingFailedMeetingIDs.contains(id) else { return }
 
         retryingFailedMeetingIDs.insert(id)
@@ -1538,11 +1544,12 @@ final class MeetingSessionController: ObservableObject {
         displayStatus = .failed(message: message)
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, _):
+        case .recorded(let micURL, let systemURL, _, let meetingTitle):
             taskManager.addFailedTranscriptionRetainingAudio(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
-                errorMessage: message
+                errorMessage: message,
+                meetingTitle: meetingTitle
             )
         case .imported(let audioURL, _):
             try? FileManager.default.removeItem(at: audioURL)
@@ -1698,7 +1705,7 @@ final class MeetingSessionController: ObservableObject {
                 return
             }
 
-            if failureKind == .speakerFinalizationFailed {
+            if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
                 let queueDepthBucket = AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)
                 DiagnosticsTrail.record(
                     level: .error,

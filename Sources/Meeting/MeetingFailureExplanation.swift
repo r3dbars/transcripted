@@ -104,7 +104,7 @@ struct MeetingFailureExplanation: Equatable {
             audioCaptured: hasAudioFiles,
             transcriptionFailed: failureKind == .transcriptionInferenceFailed,
             diarizationFailed: failureKind == .diarizationFailed,
-            saveFailed: failureKind == .saveFailed,
+            saveFailed: isSaveStageFailure(failureKind),
             recoverableArtifact: recoverableArtifact,
             retryAvailable: recoverableArtifact && (retryability == .retryable || retryability == .retryableAfterUserAction)
         )
@@ -162,6 +162,7 @@ struct MeetingFailureExplanation: Equatable {
         case .diarizationFailed:
             return .diarization
         case .saveFailed,
+             .speakerNameFinalizationFailed,
              .speakerFinalizationFailed:
             return .save
         case .unexpectedError:
@@ -213,7 +214,9 @@ struct MeetingFailureExplanation: Equatable {
              .microphonePermission,
              .microphoneMissing,
              .audioDeviceUnavailable,
-             .saveFailed:
+             .saveFailed,
+             .speakerNameFinalizationFailed,
+             .speakerFinalizationFailed:
             return .retryableAfterUserAction
         default:
             return .permanent
@@ -253,7 +256,9 @@ struct MeetingFailureExplanation: Equatable {
         }
 
         switch failureKind {
-        case .saveFailed:
+        case .saveFailed,
+             .speakerNameFinalizationFailed,
+             .speakerFinalizationFailed:
             return .recoverableFailure
         default:
             return .permanentFailure
@@ -287,5 +292,11 @@ struct MeetingFailureExplanation: Equatable {
 
     private static func yesNo(_ value: Bool) -> String {
         value ? "yes" : "no"
+    }
+
+    private static func isSaveStageFailure(_ failureKind: MeetingFailureKind?) -> Bool {
+        failureKind == .saveFailed
+            || failureKind == .speakerNameFinalizationFailed
+            || failureKind == .speakerFinalizationFailed
     }
 }

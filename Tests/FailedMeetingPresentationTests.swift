@@ -67,4 +67,62 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "Couldn't save the transcript", "save failures should keep the save-specific title")
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
+
+    runSuite("HomeFailedMeetingInlinePresentation shows details for non-retryable failures") {
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: false,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "Turn on System Audio Recording in System Settings, then retry the meeting."
+        )
+
+        assertEqual(presentation.statusText, "Needs attention", "non-retryable rows should not ask for a retry")
+        assertEqual(
+            presentation.inlineDetail,
+            "Turn on System Audio Recording in System Settings, then retry the meeting.",
+            "the recovery detail should be visible inline instead of only in a tooltip"
+        )
+        assertFalse(presentation.canShowRetryAction, "non-retryable failures should not show Try again")
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation keeps retryable rows minimal") {
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: true,
+            detail: "Model was not ready."
+        )
+
+        assertEqual(presentation.statusText, "Needs retry", "retryable rows should keep the simple retry label")
+        assertNil(presentation.inlineDetail, "retryable rows do not need extra inline copy")
+        assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation blocks retries when audio is gone") {
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: false,
+            detail: "Model was not ready."
+        )
+
+        assertEqual(presentation.statusText, "Audio missing", "missing audio should not look like a normal retry")
+        assertEqual(
+            presentation.inlineDetail,
+            "Saved audio is missing, so this meeting cannot be retried.",
+            "missing audio should explain why Try again is unavailable"
+        )
+        assertFalse(presentation.canShowRetryAction, "missing audio should suppress Try again")
+    }
+
+    runSuite("FailedMeetingPresentation speaker-name failures stay speaker-specific") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed.",
+            shortErrorMessage: "Speaker names could not be saved.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Couldn't save speaker names", "speaker finalization failures should not look like full transcript failures")
+        assertTrue(copy.detail.contains("transcript saved"), "copy should say the transcript itself was saved")
+    }
 }

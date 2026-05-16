@@ -160,6 +160,60 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptions.count, 1)
     }
 
+    func testAddFailedTranscriptionPersistsMeetingTitle() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let micURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        manager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure",
+            meetingTitle: "Meeting with Linus"
+        )
+
+        XCTAssertEqual(manager.failedTranscriptions.first?.meetingTitle, "Meeting with Linus")
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(persisted.first?.meetingTitle, "Meeting with Linus")
+    }
+
+    func testUpdateFailedTranscriptionErrorPreservesMeetingTitle() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let micURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        manager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure",
+            meetingTitle: "Design review"
+        )
+        let failed = try XCTUnwrap(manager.failedTranscriptions.first)
+
+        XCTAssertTrue(manager.updateFailedTranscriptionError(
+            id: failed.id,
+            errorMessage: "Speaker names could not be saved."
+        ))
+
+        XCTAssertEqual(manager.failedTranscriptions.first?.meetingTitle, "Design review")
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(persisted.first?.meetingTitle, "Design review")
+    }
+
     func testAddFailedTranscriptionRollsBackMemoryWhenPersistenceFails() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
