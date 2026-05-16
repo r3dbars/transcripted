@@ -11,9 +11,9 @@
 	<key>CFBundleIdentifier</key>
 	<string>com.justinbetker.draft</string>
 	<key>CFBundleVersion</key>
-	<string>1.1.37</string>
+	<string>1.1.38</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.37</string>
+	<string>1.1.38</string>
 	<key>TranscriptedSentryDSN</key>
 	<string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
 	<key>TranscriptedSentryEnvironment</key>
