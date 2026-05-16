@@ -191,7 +191,8 @@ extension TranscriptionTaskManager {
                     updatesCount: updates.count,
                     transcriptId: transcriptId,
                     resolvedURL: resolvedURL,
-                    sourceFailedTranscriptionId: sourceFailedTranscriptionId
+                    sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                    shouldDeleteSourceFailedAudio: shouldRemoveTemporaryAudio
                 )
             }
         }
@@ -588,7 +589,8 @@ extension TranscriptionTaskManager {
         updatesCount: Int,
         transcriptId: UUID,
         resolvedURL: URL,
-        sourceFailedTranscriptionId: UUID? = nil
+        sourceFailedTranscriptionId: UUID? = nil,
+        shouldDeleteSourceFailedAudio: Bool = true
     ) {
         if didFinalizeTranscript {
             AppLogger.pipeline.info("Speaker naming complete", [
@@ -596,7 +598,11 @@ extension TranscriptionTaskManager {
                 "transcript": resolvedURL.lastPathComponent
             ])
             if let sourceFailedTranscriptionId {
-                failedTranscriptionManager.removeFailedTranscription(id: sourceFailedTranscriptionId)
+                if shouldDeleteSourceFailedAudio {
+                    failedTranscriptionManager.deleteFailedTranscription(id: sourceFailedTranscriptionId)
+                } else {
+                    failedTranscriptionManager.removeFailedTranscription(id: sourceFailedTranscriptionId)
+                }
             }
             let didAlreadyPublishSavedTranscript = lastSavedTranscriptId == transcriptId
                 || lastSavedTranscriptURL == resolvedURL
