@@ -12,4 +12,10 @@ enum HomeDeleteConfirmationPolicy {
         message: "Do you want to delete all of the audio and the transcript that has to do with this meeting? This cannot be undone.",
         confirmTitle: "Delete Meeting"
     )
+
+    static let failedMeeting = HomeDeleteConfirmationPresentation(
+        title: "Delete this failed meeting?",
+        message: "Do you want to delete the saved retry audio for this failed meeting? This cannot be undone.",
+        confirmTitle: "Delete Failed Meeting"
+    )
 }

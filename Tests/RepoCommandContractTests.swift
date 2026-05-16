@@ -4,6 +4,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - root build and test wrappers stay script-based") {
         let wrappers = [
             "build-deps.sh": "scripts/entrypoints/build-deps.sh",
+            "build-beta.sh": "scripts/entrypoints/build-beta.sh",
             "build.sh": "scripts/entrypoints/build.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
@@ -44,6 +45,30 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("\"parakeet-tdt-0.6b-v3\""),
             "build.sh should not bundle the legacy Parakeet directory as a second 461 MB copy"
+        )
+    }
+
+    runSuite("Repo command contract - build-deps readiness matches the app build") {
+        let buildDepsScript = readRepoTextFile("scripts/entrypoints/build-deps.sh")
+        assertTrue(
+            buildDepsScript.contains("TRANSCRIPTED_CORE_MODULE=\"$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule\""),
+            "build-deps.sh should not skip when the app-required TranscriptedCore module is missing"
+        )
+        assertTrue(
+            buildDepsScript.contains("newest_dependency_input") && buildDepsScript.contains("deps_are_ready"),
+            "build-deps.sh should rebuild stale TranscriptedCore artifacts instead of printing a false ready message"
+        )
+    }
+
+    runSuite("Repo command contract - fast test runner generation is per-process") {
+        let contents = readRepoTextFile("scripts/entrypoints/run-tests.sh")
+        assertTrue(
+            contents.contains("GENERATED_RUNNER=\"$BUILD_DIR/FastTestRunner.$$.swift\""),
+            "parallel run-tests.sh invocations should not overwrite the same generated Swift source"
+        )
+        assertTrue(
+            contents.contains("trap cleanup_generated_runner EXIT"),
+            "temporary generated test runners should be removed on exit"
         )
     }
 

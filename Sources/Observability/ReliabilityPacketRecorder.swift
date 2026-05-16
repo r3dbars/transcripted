@@ -61,8 +61,8 @@ private actor ReliabilityPacketFileWriter {
 
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-            FileManager.default.restrictFileToOwnerOnly(at: fileURL)
         }
+        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
 
         do {
             handle = try FileHandle(forWritingTo: fileURL)

@@ -9,6 +9,7 @@ import Foundation
 enum TextPasteCopyReason: Equatable {
     case accessibilityMissing
     case pasteEventCreationFailed
+    case focusChanged
 }
 
 enum TextPasteOutcome: Equatable {
@@ -46,6 +47,39 @@ enum TextPasteOutcome: Equatable {
     }
 }
 
+struct DictationPasteTarget: Equatable {
+    let processIdentifier: pid_t?
+    let bundleIdentifier: String?
+
+    static func capture(sourceApp: NSRunningApplication?) -> DictationPasteTarget? {
+        guard let sourceApp else { return nil }
+        return DictationPasteTarget(
+            processIdentifier: sourceApp.processIdentifier,
+            bundleIdentifier: sourceApp.bundleIdentifier
+        )
+    }
+
+    func matchesCurrentFrontmostApp() -> Bool {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            return false
+        }
+        return matches(
+            processIdentifier: frontmostApp.processIdentifier,
+            bundleIdentifier: frontmostApp.bundleIdentifier
+        )
+    }
+
+    func matches(processIdentifier currentProcessIdentifier: pid_t?, bundleIdentifier currentBundleIdentifier: String?) -> Bool {
+        if let processIdentifier, let currentProcessIdentifier {
+            return processIdentifier == currentProcessIdentifier
+        }
+        if let bundleIdentifier, let currentBundleIdentifier {
+            return bundleIdentifier == currentBundleIdentifier
+        }
+        return false
+    }
+}
+
 @MainActor
 final class ClipboardRestoringTextPaster {
     typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
@@ -61,8 +95,16 @@ final class ClipboardRestoringTextPaster {
         clipboardRestoreTask = nil
     }
 
-    func paste(_ text: String) -> TextPasteOutcome {
+    func paste(_ text: String, target: DictationPasteTarget? = nil) -> TextPasteOutcome {
         cancelPendingClipboardRestore()
+
+        if let target, !target.matchesCurrentFrontmostApp() {
+            copyTextToClipboard(text)
+            return .copied(
+                "Focus changed before Transcripted could paste, so the text was copied.",
+                reason: .focusChanged
+            )
+        }
 
         guard AXIsProcessTrusted() else {
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

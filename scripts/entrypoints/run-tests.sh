@@ -10,7 +10,12 @@ cd "$REPO_ROOT"
 
 MANIFEST="Tests/FastTests.manifest"
 BUILD_DIR="build"
-GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.swift"
+GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
+
+cleanup_generated_runner() {
+    rm -f "$GENERATED_RUNNER"
+}
+trap cleanup_generated_runner EXIT
 
 if [ ! -f "$MANIFEST" ]; then
     echo "Fast test manifest not found: $MANIFEST"

@@ -397,6 +397,46 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }
 
+    func testRetrySuccessWithoutSpeakerNamingDeletesRetainedFailedAudio() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact."),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-retained-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-retained-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed",
+            meetingTitle: "Recovered Customer Call"
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        let retainedMicURL = failed.micAudioURL
+        let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
+        let retainedDirectory = retainedMicURL.deletingLastPathComponent()
+        XCTAssertTrue(retainedMicURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(retainedSystemURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failed.id,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertNil(manager.speakerNamingRequest)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedMicURL.path), "successful retry should delete retained failed mic audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedSystemURL.path), "successful retry should delete retained failed system audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedDirectory.path), "successful retry should remove the now-empty retained audio directory")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileWhenRejected() throws {
         let manager = makeManager()
         let externalURL = tempDirectory.appendingPathComponent("outside.wav")
@@ -407,6 +447,26 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             audioURL: externalURL,
             outputFolder: tempDirectory.appendingPathComponent("transcripts")
         )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
+    func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact.")
+        )
+        let externalURL = tempDirectory.appendingPathComponent("outside-success.wav")
+        try writeMonoWAV(to: externalURL, duration: 2.5)
+
+        manager.startImportedTranscription(
+            audioURL: externalURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Imported customer call"
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
     }
@@ -659,6 +719,37 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(failed.audioFilesExist(), "failed retry audio should remain available for another pass")
     }
 
+    func testRetryFailureUpdatesPersistedFailedMeetingError() async throws {
+        let speech = MetadataStubSpeechToTextEngine(
+            transcribeError: PipelineError.modelInferenceFailed(model: "Parakeet", underlying: "boom")
+        )
+        let manager = makeManager(speechToText: speech)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Customer call"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertFalse(didRetry)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertEqual(failed.meetingTitle, "Customer call")
+        XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
+    }
+
     private func makeManager(
         speechToText: (any SpeechToTextEngine)? = nil,
         diarization: (any DiarizationEngine)? = nil,
@@ -751,10 +842,12 @@ private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
     var isReady: Bool
     var initializeCallCount = 0
     private let transcript: String
+    private let transcribeError: Error?
 
-    init(isReady: Bool = true, transcript: String = "") {
+    init(isReady: Bool = true, transcript: String = "", transcribeError: Error? = nil) {
         self.isReady = isReady
         self.transcript = transcript
+        self.transcribeError = transcribeError
     }
 
     func initialize() async {
@@ -762,7 +855,10 @@ private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
         isReady = true
     }
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
-        transcript
+        if let transcribeError {
+            throw transcribeError
+        }
+        return transcript
     }
     func cleanup() {
         isReady = false

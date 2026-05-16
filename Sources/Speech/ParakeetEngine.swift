@@ -413,6 +413,8 @@ class ParakeetEngine: ObservableObject {
     private var audioStartInProgress = false
     private var inputTapInstalled = false
     private var sampleBuffer: [Float] = []
+    private var recoveredRecordingTimeline = RecordedAudioTimeline()
+    private var preservingRecordingAcrossRecovery = false
     private nonisolated(unsafe) var nativeSampleRate: Double = 48000
     private let pendingSamplesLock = NSLock()
     private var pendingSamples: [Float] = []
@@ -1225,9 +1227,7 @@ class ParakeetEngine: ObservableObject {
         prewarmRetryTask = nil
 
         if isRecording {
-            pendingSamplesLock.withLock {
-                pendingSamples.removeAll(keepingCapacity: true)
-            }
+            preserveCurrentRecordingBuffersForRecovery()
             streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
             Task { await eouManager?.reset() }
             await removeRecordingTap()
@@ -2235,6 +2235,9 @@ class ParakeetEngine: ObservableObject {
         recordingInterrupted = false
         didReceiveAudioSamples = false
         cancelAudioWatchdog()
+        if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
+            recoveredRecordingTimeline.removeAll(keepingCapacity: true)
+        }
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
@@ -2602,6 +2605,8 @@ class ParakeetEngine: ObservableObject {
         guard isRecording else {
             if audioStartInProgress {
                 audioGraphGeneration += 1
+            } else {
+                clearRecoveredRecordingTimeline(keepingCapacity: true)
             }
             return
         }
@@ -2648,6 +2653,61 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    private func preserveCurrentRecordingBuffersForRecovery() {
+        drainPendingSamplesIntoSampleBuffer()
+        if !sampleBuffer.isEmpty {
+            recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())
+            sampleBuffer.removeAll(keepingCapacity: true)
+        }
+        preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
+    }
+
+    private func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true) {
+        recoveredRecordingTimeline.removeAll(keepingCapacity: keepingCapacity)
+        preservingRecordingAcrossRecovery = false
+    }
+
+    private func drainRecordedSamplesForInference() async -> (nativeSampleCount: Int, samples16k: [Float])? {
+        drainPendingSamplesIntoSampleBuffer()
+
+        if !recoveredRecordingTimeline.isEmpty {
+            recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())
+            sampleBuffer.removeAll(keepingCapacity: true)
+            let segments = recoveredRecordingTimeline.drain()
+            preservingRecordingAcrossRecovery = false
+            let nativeSampleCount = segments.reduce(0) { $0 + $1.samples.count }
+            guard nativeSampleCount > 0 else { return nil }
+            let resampled = await Task.detached(priority: .userInitiated) {
+                var combined: [Float] = []
+                for segment in segments {
+                    combined.append(contentsOf: AudioResampler.resample(
+                        segment.samples,
+                        from: segment.sampleRate,
+                        to: TranscriptedConstants.parakeetSampleRate
+                    ))
+                }
+                return combined
+            }.value
+            return (nativeSampleCount, resampled)
+        }
+
+        guard !sampleBuffer.isEmpty else { return nil }
+        var samples: [Float] = []
+        swap(&samples, &sampleBuffer)
+        let inputRate = safeNativeSampleRate()
+        let nativeSampleCount = samples.count
+        let samplesForResampling = samples
+        samples.removeAll(keepingCapacity: false)
+        let resampled = await Task.detached(priority: .userInitiated) {
+            AudioResampler.resample(
+                samplesForResampling,
+                from: inputRate,
+                to: TranscriptedConstants.parakeetSampleRate
+            )
+        }.value
+        return (nativeSampleCount, resampled)
+    }
+
     /// Convert [Float] samples to AVAudioPCMBuffer for StreamingEouAsrManager.
     private func makePCMBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
         guard let format = eouPCMFormat,
@@ -2677,7 +2737,7 @@ class ParakeetEngine: ObservableObject {
 
         drainPendingSamplesIntoSampleBuffer()
 
-        guard !sampleBuffer.isEmpty else {
+        guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
             EventReporter.shared.capture(
                 level: .warning,
                 engine: engineName,
@@ -2688,15 +2748,12 @@ class ParakeetEngine: ObservableObject {
         }
 
         isTranscribing = true
-        var samples: [Float] = []
-        swap(&samples, &sampleBuffer)
-        let inputRate = safeNativeSampleRate()
-        let nativeCount = samples.count
-        let samplesForResampling = samples
-        samples.removeAll(keepingCapacity: false)
-        let resampled = await Task.detached(priority: .userInitiated) {
-            AudioResampler.resample(samplesForResampling, from: inputRate, to: 16000)
-        }.value
+        guard let recorded = await drainRecordedSamplesForInference() else {
+            finishExternalTranscription()
+            return nil
+        }
+        let nativeCount = recorded.nativeSampleCount
+        let resampled = recorded.samples16k
         print("🔄 \(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
@@ -2727,6 +2784,7 @@ class ParakeetEngine: ObservableObject {
     private func finishTranscription() {
         isTranscribing = false
         sampleBuffer.removeAll(keepingCapacity: true)
+        clearRecoveredRecordingTimeline(keepingCapacity: true)
     }
 
     func transcribe() async -> String? {
@@ -2736,7 +2794,7 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
         drainPendingSamplesIntoSampleBuffer()
-        guard !sampleBuffer.isEmpty else {
+        guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
             return nil
@@ -2749,22 +2807,14 @@ class ParakeetEngine: ObservableObject {
         }
 
         isTranscribing = true
-        // Swap instead of copy — moves data out of sampleBuffer without allocating a duplicate.
-        // sampleBuffer is cleared immediately, freeing capacity before resampling.
-        var samples: [Float] = []
-        swap(&samples, &sampleBuffer)
-        let inputRate = safeNativeSampleRate()
-
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Resample to 16kHz for Parakeet inference, then free the native-rate buffer
-        // before inference — avoids holding both the raw and resampled arrays simultaneously.
-        let nativeCount = samples.count
-        let samplesForResampling = samples
-        samples.removeAll(keepingCapacity: false)
-        let resampled = await Task.detached(priority: .userInitiated) {
-            AudioResampler.resample(samplesForResampling, from: inputRate, to: 16000)
-        }.value
+        guard let recorded = await drainRecordedSamplesForInference() else {
+            finishTranscription()
+            return nil
+        }
+        let nativeCount = recorded.nativeSampleCount
+        let resampled = recorded.samples16k
         print("🔄 PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
@@ -3016,6 +3066,7 @@ class ParakeetEngine: ObservableObject {
         audioLevel = 0
         didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)
+        clearRecoveredRecordingTimeline(keepingCapacity: true)
         liveTranscript = ""
         committedStreamText = ""
         audioGraphGeneration += 1
@@ -3049,6 +3100,7 @@ class ParakeetEngine: ObservableObject {
         audioLevel = 0
         didReceiveAudioSamples = false
         sampleBuffer.removeAll(keepingCapacity: true)
+        clearRecoveredRecordingTimeline(keepingCapacity: true)
         liveTranscript = ""
         committedStreamText = ""
         abandonBlockedAudioEngine(reason: reason)
@@ -3085,6 +3137,7 @@ class ParakeetEngine: ObservableObject {
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }
         sampleBuffer.removeAll()
+        clearRecoveredRecordingTimeline(keepingCapacity: false)
         isTranscribing = false
         liveTranscript = ""
         committedStreamText = ""
