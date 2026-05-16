@@ -649,14 +649,14 @@ final class MeetingSessionController: ObservableObject {
             )
             state = files.systemURL == nil
                 ? .error("No meeting audio was captured.")
-                : .error("Microphone audio was missing. Open Settings → Meetings to retry the system audio.")
+                : .error("Microphone audio was missing. Open Transcripted Home to retry the system audio.")
             return
         }
 
         // Stop timeout means Audio.onRecordingComplete never fired. The WAV
         // header may not be fully patched, so route the audio to the failed
         // queue rather than enqueuing for transcription. The user can retry
-        // from Settings → Meetings, where the pipeline will either succeed
+        // from Transcripted Home, where the pipeline will either succeed
         // on a now-finalized file or fail cleanly.
         if stopResult.didTimeOut {
             Self.runtimeDiagnosticsRecorder?.recordStall(
@@ -681,7 +681,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting routed to failed queue due to stop timeout",
                 context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
             )
-            state = .error("Recording didn't close cleanly. Open Settings → Meetings to retry.")
+            state = .error("Recording didn't close cleanly. Open Transcripted Home to retry.")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
             return
         }

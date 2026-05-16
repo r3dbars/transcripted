@@ -45,6 +45,20 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("Observability file writers tighten pre-existing logs before appending") {
+        let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+        let reliabilityRecorder = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
+
+        assertTrue(
+            eventReporter.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
+            "events.jsonl should be chmodded even when it already exists"
+        )
+        assertTrue(
+            reliabilityRecorder.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
+            "reliability packets should be chmodded even when the JSONL already exists"
+        )
+    }
+
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogWriterTests-\(UUID().uuidString)", isDirectory: true)

@@ -50,6 +50,26 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains(#"[System/Dana "D" Smith]"#))
     }
 
+    func testRetroactivelyUpdateSpeakerRestrictsRewrittenTranscript() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("permissions.md")
+
+        try markdown(
+            speakerId: speakerId,
+            speakerName: "Speaker 1"
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: transcriptURL.path)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Jamie",
+            in: temporaryDirectory
+        )
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)
+        XCTAssertEqual(attributes[.posixPermissions] as? NSNumber, NSNumber(value: 0o600))
+    }
+
     func testRetroactivelyUpdateSpeakerRenamesEscapedBackslashes() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("backslash.md")

@@ -78,6 +78,33 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(transcript?.utterances.first?.text, "Still works.")
     }
 
+    func testMalformedDurationFallsBackToZero() throws {
+        for (filename, duration) in [
+            ("Call_bad_text_duration", "1:bad"),
+            ("Call_negative_duration", "-1:02"),
+        ] {
+            let markdown = """
+            ---
+            capture_type: meeting
+            date: 2026-04-18
+            time: 09:15:00
+            duration: "\(duration)"
+            ---
+
+            # Parser fixture
+
+            ## Full Transcript
+
+            [00:03] [Mic/You] Still works.
+            """
+            try markdown.write(to: tempDir.appendingPathComponent("\(filename).md"), atomically: true, encoding: .utf8)
+
+            let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("\(filename).md"))
+
+            XCTAssertEqual(transcript?.recording.durationSeconds, 0)
+        }
+    }
+
     func testLoadMissingFileReturnsNil() {
         let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.md"))
         XCTAssertNil(transcript)

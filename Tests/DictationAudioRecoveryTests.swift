@@ -79,4 +79,40 @@ func testDictationAudioRecovery() {
             )
         }
     }
+
+    runSuite("ParakeetEngine — preserves dictation audio across route recovery") {
+        let engineSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
+            encoding: .utf8
+        )) ?? ""
+        let sessionSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Overlay/DictationSessionController.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            engineSource.contains("private var recoveredRecordingTimeline = RecordedAudioTimeline()"),
+            "engine should keep a multi-segment audio timeline for route-change recovery"
+        )
+        assertTrue(
+            engineSource.contains("preserveCurrentRecordingBuffersForRecovery()"),
+            "config changes during recording should preserve buffered audio before tearing down the tap"
+        )
+        assertTrue(
+            engineSource.contains("recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())"),
+            "current-device audio should be retained with its native sample rate"
+        )
+        assertTrue(
+            engineSource.contains("private func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true)"),
+            "recovery preservation should have a single cleanup path"
+        )
+        assertTrue(
+            sessionSource.contains("appState.sttRouter.cancel()\n            let failureKind"),
+            "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
+        )
+        assertTrue(
+            engineSource.contains("drainRecordedSamplesForInference()"),
+            "transcription should drain preserved segments instead of resampling all audio as one rate"
+        )
+    }
 }

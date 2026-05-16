@@ -687,12 +687,11 @@ struct SettingsToggleRow: View {
                 .controlSize(.regular)
                 .tint(.accentColor)
                 .help(help ?? title)
+                .accessibilityLabel(Text(title))
+                .accessibilityValue(Text(isOn ? "On" : "Off"))
+                .accessibilityHint(Text(detail))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(title))
-        .accessibilityValue(Text(isOn ? "On" : "Off"))
-        .accessibilityHint(Text(detail))
     }
 }
 

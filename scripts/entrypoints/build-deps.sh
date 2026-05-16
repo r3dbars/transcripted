@@ -21,6 +21,9 @@ DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
 DEPS_FRAMEWORKS="$DRAFT_DIR/deps-frameworks"
 DEPS_TOOLS="$DRAFT_DIR/deps-tools"
+TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
@@ -30,6 +33,67 @@ SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
 SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
 SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f11279531900173fb638d7d541320a7cbc00ed06bc}"
+
+dependency_input_listing() {
+    {
+        printf '%s\n' "Package.swift"
+        printf '%s\n' "scripts/entrypoints/build-deps.sh"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+    } | while IFS= read -r path; do
+        [ -e "$path" ] || continue
+        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
+    done
+}
+
+newest_dependency_input() {
+    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
+}
+
+deps_build_stamp_info() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
+    fi
+}
+
+deps_are_ready() {
+    local newest_input
+    local build_stamp
+    local newest_input_mtime
+    local newest_input_path
+    local build_stamp_mtime
+    local build_stamp_path
+
+    if [ ! -f "$DEPS_LIBS/libDraftDeps.a" ] \
+        || [ ! -f "$DEPS_LIBS/libExternalDeps.a" ] \
+        || [ ! -f "$DEPS_BUILD_STAMP" ] \
+        || [ ! -d "$DEPS_MODULES" ] \
+        || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] \
+        || [ ! -f "$ARGMAX_CORE_MODULE" ] \
+        || [ ! -f "$WHISPERKIT_MODULE" ] \
+        || [ ! -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] \
+        || [ ! -d "$DEPS_FRAMEWORKS/Sentry.framework" ] \
+        || [ ! -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] \
+        || [ ! -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ]; then
+        return 1
+    fi
+
+    newest_input="$(newest_dependency_input)"
+    build_stamp="$(deps_build_stamp_info)"
+
+    IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
+    IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
+
+    if [ -n "$newest_input_mtime" ] && [ -n "$build_stamp_mtime" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
+        echo "[build-deps] Dependencies are stale for TranscriptedCore."
+        echo "[build-deps] Newest input:"
+        echo "[build-deps]   $newest_input_path"
+        echo "[build-deps] Built deps stamp:"
+        echo "[build-deps]   $build_stamp_path"
+        return 1
+    fi
+
+    return 0
+}
 
 verify_download_sha256() {
     local downloaded_file="$1"
@@ -188,15 +252,17 @@ resolve_transcripted_core_root() {
 resolve_transcripted_core_root
 echo "[build-deps] Using TranscriptedCore from: $TRANSCRIPTED_ROOT"
 
-# Skip if already built (use --force to rebuild).
-# libExternalDeps.a was added later for SPM-based `swift test`, so require it too;
-# otherwise legacy worktrees would keep skipping while missing the archive.
-if [ -f "$DEPS_LIBS/libDraftDeps.a" ] && [ -f "$DEPS_LIBS/libExternalDeps.a" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULES" ] && [ -f "$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule" ] && [ -f "$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule" ] && [ -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sentry.framework" ] && [ -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] && [ -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ] && [ "${1:-}" != "--force" ]; then
+# Skip if already built (use --force to rebuild). Keep this in lockstep with
+# build.sh's required artifacts so a "ready" deps pass always means the app can build.
+if [ "${1:-}" != "--force" ] && deps_are_ready; then
     echo "Dependencies already built. Use --force to rebuild."
     echo "  libs:    $DEPS_LIBS/libDraftDeps.a"
     echo "           $DEPS_LIBS/libExternalDeps.a"
     echo "  stamp:   $DEPS_BUILD_STAMP"
     echo "  modules: $DEPS_MODULES/"
+    echo "           $TRANSCRIPTED_CORE_MODULE"
+    echo "           $ARGMAX_CORE_MODULE"
+    echo "           $WHISPERKIT_MODULE"
     echo "  frameworks: $DEPS_FRAMEWORKS/ESpeakNG.framework"
     echo "              $DEPS_FRAMEWORKS/Sentry.framework"
     echo "              $DEPS_FRAMEWORKS/Sparkle.framework"

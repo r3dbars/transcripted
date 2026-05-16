@@ -641,7 +641,7 @@ public class TranscriptionTaskManager: ObservableObject {
                         "failedId": failedId.uuidString
                     ])
                 } else {
-                    failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                    failedTranscriptionManager.deleteFailedTranscription(id: failedId)
                 }
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
@@ -653,13 +653,18 @@ public class TranscriptionTaskManager: ObservableObject {
 
         } catch {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
+            let diagnosticMessage = "Retry failed: \(Self.safeFailureDiagnosticMessage(for: error))"
             await MainActor.run {
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
+                failedTranscriptionManager.updateFailedTranscriptionError(
+                    id: failedId,
+                    errorMessage: diagnosticMessage
+                )
                 self.publishFailure(
                     displayMessage: "Retry failed",
-                    diagnosticMessage: "Retry failed: \(Self.safeFailureDiagnosticMessage(for: error))"
+                    diagnosticMessage: diagnosticMessage
                 )
                 self.scheduleStatusReset(delay: 8)
             }

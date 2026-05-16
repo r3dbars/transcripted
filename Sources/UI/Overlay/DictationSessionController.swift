@@ -59,6 +59,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private var sessionSourceApp: NSRunningApplication?
+    private var sessionPasteTarget: DictationPasteTarget?
     private var sessionAnchorRect: NSRect?
     private var startupTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
@@ -130,6 +131,7 @@ class DictationSessionController: ObservableObject {
         isDictating = true
         currentDictationSessionID = UUID()
         sessionSourceApp = sourceApp
+        sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
         sessionStartTime = CFAbsoluteTimeGetCurrent()
         currentDictationTrigger = trigger
@@ -774,6 +776,7 @@ class DictationSessionController: ObservableObject {
         guard appState.sttRouter.isRecording else {
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = nil
+            appState.sttRouter.cancel()
             let failureKind = appState.sttRouter.inputFormatReady
                 ? "microphone_start_failed"
                 : "microphone_route_not_ready"
@@ -1327,7 +1330,7 @@ class DictationSessionController: ObservableObject {
     }
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        let outcome = textPaster.paste(text)
+        let outcome = textPaster.paste(text, target: sessionPasteTarget)
 
         switch outcome.copyReason {
         case .accessibilityMissing:
@@ -1336,6 +1339,10 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
                 message: "CGEvent creation returned nil — paste will not work")
             appState?.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
+        case .focusChanged:
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_target_changed",
+                message: "Focus changed before dictation paste")
+            appState?.logger.log("DICTATION | focus changed, copying text instead")
         case nil:
             break
         }

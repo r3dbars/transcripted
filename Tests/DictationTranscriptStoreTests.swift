@@ -212,6 +212,7 @@ func testDictationTranscriptStore() {
         second text
         """
         try? markdown.write(to: dayFile, atomically: true, encoding: .utf8)
+        try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dayFile.path)
 
         let entries = DictationTranscriptStore.recentSavedDictations(limit: 2, directory: outputDir)
         guard let second = entries.first(where: { $0.entryID == "dictation-second" }) else {
@@ -230,6 +231,11 @@ func testDictationTranscriptStore() {
         assertTrue(remainingContent.contains("first text"), "first entry body remains")
         assertFalse(remainingContent.contains("dictation-second"), "second entry ID removed")
         assertFalse(remainingContent.contains("second text"), "second entry body removed")
+        assertEqual(
+            dictationStoreFilePermissions(of: dayFile),
+            NSNumber(value: 0o600),
+            "deleteEntry rewrites should restore owner-only permissions"
+        )
     }
 
     runSuite("DictationTranscriptStore.deleteEntry — same-timestamp saved entries keep distinct IDs") {
@@ -282,6 +288,11 @@ private func temporaryDictationStoreTestRoot(fileManager: FileManager) -> URL {
         "TranscriptedDictationStoreTests-\(UUID().uuidString)",
         isDirectory: true
     )
+}
+
+private func dictationStoreFilePermissions(of url: URL) -> NSNumber? {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return attributes?[.posixPermissions] as? NSNumber
 }
 
 private func isoDate(_ string: String) -> Date {

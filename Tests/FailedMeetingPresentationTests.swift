@@ -125,4 +125,24 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.title, "Couldn't save speaker names", "speaker finalization failures should not look like full transcript failures")
         assertTrue(copy.detail.contains("transcript saved"), "copy should say the transcript itself was saved")
     }
+
+    runSuite("FailedMeetingPresentation separates retained audio from retry-ready audio") {
+        let source = (try? String(
+            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            source.contains("let availableAudioURLs = audioURLs(for: failed)"),
+            "available retained audio should stay separate from retry readiness"
+        )
+        assertTrue(
+            source.contains("let hasRetryableAudioFiles = failed.audioFilesExist()"),
+            "retry readiness should require all failed-transcription audio files"
+        )
+        assertTrue(
+            source.contains("hasAudioFiles: hasRetryableAudioFiles"),
+            "partial retained audio should not enable the retry action"
+        )
+    }
 }

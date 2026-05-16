@@ -1091,8 +1091,16 @@ enum CLIContextStore {
     }
 
     private static func parseDurationSeconds(_ rawDuration: String?) -> Int {
-        let components = (rawDuration ?? "").split(separator: ":").compactMap { Int($0) }
+        guard let rawDuration else { return 0 }
+        let rawComponents = rawDuration.split(separator: ":", omittingEmptySubsequences: false)
+        let components = rawComponents.compactMap { Int($0) }
+        guard components.count == rawComponents.count,
+              !components.contains(where: { $0 < 0 }) else {
+            return 0
+        }
         switch components.count {
+        case 1:
+            return components[0]
         case 2:
             return components[0] * 60 + components[1]
         case 3:

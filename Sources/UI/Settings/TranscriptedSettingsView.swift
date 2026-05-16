@@ -293,8 +293,7 @@ struct TranscriptedSettingsView: View {
                         revealFailedMeetingAudio(item)
                     },
                     onClear: { item in
-                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
-                        clearFailedMeeting(item)
+                        requestClearFailedMeeting(item)
                     },
                     onShowAll: {
                         trackSettingsAction("home_show_all_failed_meetings", page: .home)
@@ -397,8 +396,7 @@ struct TranscriptedSettingsView: View {
                         revealFailedMeetingAudio(item)
                     },
                     onClearFailedMeeting: { item in
-                        trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
-                        clearFailedMeeting(item)
+                        requestClearFailedMeeting(item)
                     },
                     onLoadMoreDictations: {
                         trackSettingsAction("load_more_dictations", page: .home)
@@ -436,7 +434,10 @@ struct TranscriptedSettingsView: View {
                 },
                 onReportIssue: {
                     homeMeetingPreview = nil
-                    homeFeedbackTarget = preview.feedbackTarget
+                    Task { @MainActor in
+                        await Task.yield()
+                        homeFeedbackTarget = preview.feedbackTarget
+                    }
                 },
                 onDone: {
                     homeMeetingPreview = nil
@@ -752,13 +753,32 @@ struct TranscriptedSettingsView: View {
         NSWorkspace.shared.activateFileViewerSelecting([firstAudioURL])
     }
 
+    private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
+        if !item.audioURLs.isEmpty {
+            trackSettingsAction("home_delete_failed_meeting_request", page: .home)
+            let presentation = HomeDeleteConfirmationPolicy.failedMeeting
+            homeDeleteConfirmation = HomeDeleteConfirmation(
+                title: presentation.title,
+                message: presentation.message,
+                confirmTitle: presentation.confirmTitle
+            ) {
+                trackSettingsAction("home_delete_failed_meeting_confirm", page: .home)
+                clearFailedMeeting(item)
+            }
+            return
+        }
+
+        trackSettingsAction("home_dismiss_failed_meeting", page: .home)
+        clearFailedMeeting(item)
+    }
+
     private func clearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
         if let audio = failedMeetingAudioAttachment(for: item),
            MeetingAudioPlayback.shared.isActive(audio) {
             MeetingAudioPlayback.shared.stop()
         }
 
-        if item.hasAudioFiles {
+        if !item.audioURLs.isEmpty {
             meetingSession.deleteFailedMeeting(id: item.id)
         } else {
             meetingSession.dismissFailedMeeting(id: item.id)
@@ -3124,30 +3144,33 @@ private struct SettingsFailedMeetingRow: View {
                 .help(retryHelp)
             }
 
-            Button(role: item.hasAudioFiles ? .destructive : nil) {
+            Button(role: hasRetainedAudioFiles ? .destructive : nil) {
                 secondaryAction()
             } label: {
-                Label(item.hasAudioFiles ? "Delete" : "Dismiss", systemImage: item.hasAudioFiles ? "trash" : "xmark")
+                Label(hasRetainedAudioFiles ? "Delete" : "Dismiss", systemImage: hasRetainedAudioFiles ? "trash" : "xmark")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
             .buttonStyle(SettingsHoverButtonStyle(
-                tone: item.hasAudioFiles ? .destructive : .neutral,
+                tone: hasRetainedAudioFiles ? .destructive : .neutral,
                 cornerRadius: 8,
-                normalFill: item.hasAudioFiles ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
-                normalStroke: item.hasAudioFiles ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
+                normalFill: hasRetainedAudioFiles ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
+                normalStroke: hasRetainedAudioFiles ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
             ))
         }
     }
 
     private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || item.isRetrying
+        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
     }
 
     private var retryHelp: String {
         if item.isRetrying {
             return "Retry is already running."
+        }
+        if !item.hasAudioFiles {
+            return "This meeting does not have enough saved audio to retry."
         }
         if !item.isRetryable {
             return "This meeting does not have enough saved audio to retry."
@@ -3159,6 +3182,10 @@ private struct SettingsFailedMeetingRow: View {
             return "Wait for the current meeting work to finish before retrying."
         }
         return "Transcribe this saved audio again."
+    }
+
+    private var hasRetainedAudioFiles: Bool {
+        !item.audioURLs.isEmpty
     }
 }
 

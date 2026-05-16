@@ -1494,7 +1494,7 @@ struct HomeFailedMeetingInlineRow: View {
 
     private var actions: some View {
         HStack(spacing: 6) {
-            if item.hasAudioFiles {
+            if hasRetainedAudioFiles {
                 Button {
                     onRevealAudio()
                 } label: {
@@ -1516,9 +1516,9 @@ struct HomeFailedMeetingInlineRow: View {
 
             HomeRowMoreMenuButton(items: [
                 HomeRowMenuItem(
-                    title: item.hasAudioFiles ? "Delete failed meeting" : "Dismiss",
-                    symbolName: item.hasAudioFiles ? "trash" : "xmark",
-                    isDestructive: item.hasAudioFiles,
+                    title: hasRetainedAudioFiles ? "Delete failed meeting" : "Dismiss",
+                    symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
+                    isDestructive: hasRetainedAudioFiles,
                     action: onClear
                 )
             ])
@@ -1571,6 +1571,9 @@ struct HomeFailedMeetingInlineRow: View {
         if item.isRetrying {
             return "Retry is already running."
         }
+        if !item.hasAudioFiles {
+            return "This meeting does not have enough saved audio to retry."
+        }
         if !item.isRetryable {
             return "This meeting does not have enough saved audio to retry."
         }
@@ -1581,6 +1584,10 @@ struct HomeFailedMeetingInlineRow: View {
             return "Wait for the current meeting work to finish before retrying."
         }
         return "Transcribe this saved audio again."
+    }
+
+    private var hasRetainedAudioFiles: Bool {
+        !item.audioURLs.isEmpty
     }
 }
 
@@ -2678,9 +2685,9 @@ private struct HomeFailedMeetingRow: View {
                     }
 
                     SettingsInlineActionButton(
-                        title: item.hasAudioFiles ? "Delete" : "Dismiss",
-                        symbolName: item.hasAudioFiles ? "trash" : "xmark",
-                        tone: item.hasAudioFiles ? .destructive : .neutral
+                        title: hasRetainedAudioFiles ? "Delete" : "Dismiss",
+                        symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
+                        tone: hasRetainedAudioFiles ? .destructive : .neutral
                     ) {
                         onClear()
                     }
@@ -2692,12 +2699,15 @@ private struct HomeFailedMeetingRow: View {
     }
 
     private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || item.isRetrying
+        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
     }
 
     private var retryHelp: String {
         if item.isRetrying {
             return "Retry is already running."
+        }
+        if !item.hasAudioFiles {
+            return "This meeting does not have enough saved audio to retry."
         }
         if !item.isRetryable {
             return "This meeting does not have enough saved audio to retry."
@@ -2709,5 +2719,9 @@ private struct HomeFailedMeetingRow: View {
             return "Wait for the current meeting work to finish before retrying."
         }
         return "Transcribe this saved audio again."
+    }
+
+    private var hasRetainedAudioFiles: Bool {
+        !item.audioURLs.isEmpty
     }
 }

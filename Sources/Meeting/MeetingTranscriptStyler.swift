@@ -99,6 +99,7 @@ enum MeetingTranscriptStyler {
         if updated != raw {
             do {
                 try updated.write(to: finalURL, atomically: true, encoding: .utf8)
+                FileManager.default.restrictFileToOwnerOnly(at: finalURL)
             } catch {
                 logFailure(
                     event: "meeting_transcript_write_failed",

@@ -2,14 +2,14 @@
 import PackageDescription
 import Foundation
 
-// TranscriptedCore — shared library target co-hosted with Draft.
+// TranscriptedCore — shared library target used by Transcripted's meeting pipeline.
 //
 // Consumed by:
-//   1. Draft's meeting integration via build-deps.sh
+//   1. Transcripted's app build through build-deps.sh
 //   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   deps-libs/libDraftDeps.a          — prebuilt mega-library (FluidAudio 0.7.9 + MLX + deps + TranscriptedCore)
+//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio 0.7.9 + MLX + deps + TranscriptedCore)
 //   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
 //   deps-frameworks/ESpeakNG.framework — FluidAudio binary dependency for package recompiles
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.

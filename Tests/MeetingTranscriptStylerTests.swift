@@ -12,6 +12,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
+        testMeetingTranscriptStylerRestrictsRewrittenTranscript()
     }
 }
 
@@ -196,6 +197,23 @@ private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {
     assertTrue(updatedMarkdown?.contains("Linked speaker text should stay intact.") == true, "Styler should keep the transcript text attached to the right speaker")
 }
 
+private func testMeetingTranscriptStylerRestrictsRewrittenTranscript() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: transcriptURL.path)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertEqual(
+        meetingTranscriptStylerFilePermissions(of: styled.url),
+        NSNumber(value: 0o600),
+        "rewriting a transcript should restore owner-only permissions"
+    )
+}
+
 private func sampleMeetingTranscript() -> String {
     """
     ---
@@ -261,4 +279,9 @@ private func makeTemporaryTestDirectory() -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("MeetingTranscriptStylerTests-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
+}
+
+private func meetingTranscriptStylerFilePermissions(of url: URL) -> NSNumber? {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return attributes?[.posixPermissions] as? NSNumber
 }

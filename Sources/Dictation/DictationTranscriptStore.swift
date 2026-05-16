@@ -176,6 +176,7 @@ enum DictationTranscriptStore {
             let header = headerPreface(in: content)
             let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
             try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+            FileManager.default.restrictFileToOwnerOnly(at: url)
         }
 
         NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: url)

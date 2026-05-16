@@ -417,11 +417,11 @@ extension TranscriptionTaskManager {
         }
 
         // No naming needed — clean up scratch audio once retained copies exist.
-        if shouldRemoveScratchAudio, let micURL {
-            try? FileManager.default.removeItem(at: micURL)
-        }
-        if shouldRemoveScratchAudio {
-            try? FileManager.default.removeItem(at: systemURL)
+        // Failed-queue source audio is deleted by retry completion, since it may
+        // live outside the normal scratch cleanup roots.
+        if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
+            removeManagedCleanupFile(micURL, label: "completed mic scratch")
+            removeManagedCleanupFile(systemURL, label: "completed system scratch")
         }
 
         return savedURL
