@@ -2300,35 +2300,29 @@ struct HomeLoadMoreButton: View {
     @State private var isHovering = false
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                }
+        HStack {
+            Spacer(minLength: 0)
 
-                Text(isLoading ? "Loading" : title)
-                    .font(.subheadline.weight(.medium))
+            Button(action: action) {
+                Text(isLoading ? "Loading..." : title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isLoading ? Color.secondary : Color.secondary.opacity(isHovering ? 1 : 0.82))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+                    )
+                    .contentShape(Capsule(style: .continuous))
             }
-            .foregroundStyle(isLoading ? Color.secondary : Color.primary)
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.92 : 0.78))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.primary.opacity(isHovering ? 0.16 : 0.1), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(isHovering ? 0.1 : 0.04), radius: isHovering ? 8 : 4, x: 0, y: isHovering ? 4 : 2)
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
-        .disabled(isLoading)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.14), value: isHovering)
+        .padding(.top, 4)
     }
 }
 
