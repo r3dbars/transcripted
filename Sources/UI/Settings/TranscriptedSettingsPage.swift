@@ -31,7 +31,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .models: return "Models"
         case .shortcuts: return "Shortcuts"
         case .dictations: return "Dictation"
-        case .people: return "People"
+        case .people: return "Speakers"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
         case .privacy: return "Privacy"

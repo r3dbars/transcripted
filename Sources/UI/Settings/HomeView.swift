@@ -199,6 +199,7 @@ struct HomeDeleteFailure: Identifiable {
 enum HomeActivityTab: String, CaseIterable, Identifiable {
     case dictations
     case meetings
+    case speakers
 
     var id: String { rawValue }
 
@@ -206,6 +207,7 @@ enum HomeActivityTab: String, CaseIterable, Identifiable {
         switch self {
         case .dictations: return "Dictations"
         case .meetings: return "Meetings"
+        case .speakers: return "Speakers"
         }
     }
 }
@@ -213,15 +215,17 @@ enum HomeActivityTab: String, CaseIterable, Identifiable {
 enum HomeHeroMode: String, CaseIterable, Identifiable {
     case meeting
     case dictation
+    case speakers
 
     var id: String { rawValue }
 
-    static let tabOrder: [HomeHeroMode] = [.meeting, .dictation]
+    static let tabOrder: [HomeHeroMode] = [.meeting, .dictation, .speakers]
 
     var switchTitle: String {
         switch self {
         case .dictation: return "Dictation"
         case .meeting: return "Meetings"
+        case .speakers: return "Speakers"
         }
     }
 
@@ -229,6 +233,7 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         switch self {
         case .dictation: return "mic.fill"
         case .meeting: return "waveform"
+        case .speakers: return "person.2.fill"
         }
     }
 
@@ -236,6 +241,7 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         switch self {
         case .dictation: return .dictations
         case .meeting: return .meetings
+        case .speakers: return .speakers
         }
     }
 }
@@ -442,6 +448,8 @@ struct HomeHeroCard<ActivityContent: View>: View {
             return 0
         case .dictation:
             return HomeHeroTabMetrics.width + HomeHeroTabMetrics.spacing
+        case .speakers:
+            return (HomeHeroTabMetrics.width * 2) + (HomeHeroTabMetrics.spacing * 2)
         }
     }
 
@@ -1680,6 +1688,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
 struct HomeActivityTabsCard: View {
     let selectedTab: HomeActivityTab
+    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<HomeMeetingListItem>]
     let isLoading: Bool
@@ -1767,6 +1776,8 @@ struct HomeActivityTabsCard: View {
                             )
                         }
                     }
+                case .speakers:
+                    HomeSpeakersTab(model: speakerPeopleModel)
                 }
             }
         }
@@ -1800,6 +1811,36 @@ struct HomeActivityTabsCard: View {
                     action: loadMoreAction
                 )
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct HomeSpeakersTab: View {
+    @ObservedObject var model: SpeakerPeopleSettingsViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Speakers")
+                        .font(.headline)
+
+                    Text("Name deferred speakers, play samples, merge duplicates, or delete saved profiles.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Button("Refresh") {
+                    model.refresh()
+                }
+                .controlSize(.small)
+            }
+
+            SpeakerPeopleSettingsSection(model: model)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

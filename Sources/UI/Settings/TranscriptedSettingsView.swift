@@ -11,7 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .people, .shortcuts]),
+        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .shortcuts]),
         SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
@@ -321,6 +321,7 @@ struct TranscriptedSettingsView: View {
             ) {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
+                    speakerPeopleModel: speakerPeopleModel,
                     dictationSections: homeViewModel.dictationDaySections,
                     meetingSections: meetingSections,
                     isLoading: homeViewModel.isLoading,
@@ -382,6 +383,7 @@ struct TranscriptedSettingsView: View {
                     }
                 )
             }
+            .padding(.top, 14)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
         .sheet(item: $homeFeedbackTarget) { target in
@@ -491,7 +493,9 @@ struct TranscriptedSettingsView: View {
     private func openHomeSpeakerReview(actionName: String) {
         trackSettingsAction(actionName, page: .home)
         speakerPeopleModel.profileFilter = .needsReview
-        navigation.selectedPage = .people
+        navigation.selectedPage = .home
+        homeActivityTab = .speakers
+        homeHeroMode = .speakers
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -1294,7 +1298,7 @@ struct TranscriptedSettingsView: View {
     private var peoplePage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
-                title: "People",
+                title: "Speakers",
                 summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
             )
 
