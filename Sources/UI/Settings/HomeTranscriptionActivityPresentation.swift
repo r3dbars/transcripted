@@ -27,9 +27,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .gettingReady:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "tray.and.arrow.down.fill",
-                title: "Preparing audio file",
+                title: "Preparing local transcription",
                 status: "Preparing...",
-                detail: "Transcripted is copying the audio into the meeting pipeline and getting everything ready to transcribe.",
+                detail: "Transcripted is loading the saved audio and getting the local model ready to transcribe.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -37,9 +37,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .transcribing:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "waveform.badge.magnifyingglass",
-                title: "Transcribing audio",
+                title: "Local model transcribing",
                 status: displayStatus.statusText,
-                detail: "Transcripted is working through the recording now. Longer files can take a bit, and speaker review can be done now or later in People.",
+                detail: "Transcripted is running the local model on this audio. Longer files can take a bit.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil

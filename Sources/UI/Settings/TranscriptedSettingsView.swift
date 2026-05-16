@@ -823,33 +823,6 @@ struct TranscriptedSettingsView: View {
     private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {
         var issues: [HomeNeedsAttentionCard.Issue] = []
 
-        let speakerReviewCount = speakerPeopleModel.needsReviewCount
-        if speakerReviewCount > 0 {
-            issues.append(
-                HomeNeedsAttentionCard.Issue(
-                    id: "speakers",
-                    symbolName: "person.crop.circle.badge.questionmark",
-                    title: speakerReviewCount == 1 ? "1 speaker needs a name" : "\(speakerReviewCount) speakers need names",
-                    detail: "Review later items are waiting in People.",
-                    destination: .speakers,
-                    actionTitle: "Review"
-                )
-            )
-        }
-
-        if let activity = homeTranscriptionActivity, activity.tone == .working {
-            issues.append(
-                HomeNeedsAttentionCard.Issue(
-                    id: "activity",
-                    symbolName: activity.symbolName,
-                    title: activity.title,
-                    detail: activity.status,
-                    destination: .activity,
-                    actionTitle: "Open"
-                )
-            )
-        }
-
         if !missingRequiredPermissions.isEmpty {
             issues.append(
                 HomeNeedsAttentionCard.Issue(
@@ -2145,9 +2118,6 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeTranscriptionActivity: HomeTranscriptionActivityPresentation? {
-        if meetingSession.failedMeetings.contains(where: \.isRetrying) {
-            return nil
-        }
         return HomeTranscriptionActivityPresentation.make(
             sessionState: meetingSession.state,
             displayStatus: meetingSession.displayStatus,
