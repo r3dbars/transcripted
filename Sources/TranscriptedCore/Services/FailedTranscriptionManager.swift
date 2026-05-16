@@ -172,6 +172,7 @@ public class FailedTranscriptionManager: ObservableObject {
             micAudioURL: existing.micAudioURL,
             systemAudioURL: existing.systemAudioURL,
             errorMessage: errorMessage,
+            meetingTitle: existing.meetingTitle,
             retryCount: existing.retryCount,
             lastRetryDate: existing.lastRetryDate
         )
