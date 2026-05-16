@@ -318,13 +318,13 @@ final class MeetingOverlayRootView: NSView {
         addSubview(closeButton)
 
         chevronButton.imageScaling = .scaleProportionallyDown
-        chevronButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        chevronButton.contentTintColor = MeetingOverlayTokens.chevronActionTint
         chevronButton.isBordered = false
         chevronButton.wantsLayer = true
-        chevronButton.layer?.cornerRadius = MeetingOverlayTokens.toggleHeight / 2
-        chevronButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        chevronButton.layer?.borderWidth = 0.5
-        chevronButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        chevronButton.layer?.cornerRadius = 0
+        chevronButton.layer?.backgroundColor = NSColor.clear.cgColor
+        chevronButton.layer?.borderWidth = 0
+        chevronButton.layer?.borderColor = nil
         chevronButton.target = self
         chevronButton.action = #selector(handleToggleMinimized)
         chevronButton.isHidden = true
@@ -541,17 +541,17 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.toggleHeight
         )
 
-        let titleX = statusDot.frame.maxX + tokens.minimizedGap
-        let titleWidth = max(0, chevronButton.frame.minX - titleX - tokens.minimizedGap)
-        let titleSize = titleLabel.fittingSize
-        titleLabel.frame = NSRect(
-            x: titleX,
-            y: midY - titleSize.height / 2,
-            width: min(titleWidth, titleSize.width),
-            height: titleSize.height
+        let timerX = statusDot.frame.maxX + tokens.minimizedGap
+        let timerWidth = max(0, chevronButton.frame.minX - timerX - tokens.minimizedGap)
+        let timerSize = timerLabel.fittingSize
+        timerLabel.frame = NSRect(
+            x: timerX,
+            y: midY - timerSize.height / 2,
+            width: min(timerWidth, timerSize.width),
+            height: timerSize.height
         )
 
-        timerLabel.frame = .zero
+        titleLabel.frame = .zero
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
@@ -695,8 +695,8 @@ final class MeetingOverlayRootView: NSView {
             isErrorState = false
         }
         statusDot.isHidden = isPreparing
-        titleLabel.isHidden = isPreparing || (state == .recording && !self.isRecordingMinimized)
-        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting) || self.isRecordingMinimized
+        titleLabel.isHidden = isPreparing || state == .recording
+        timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
@@ -752,7 +752,7 @@ final class MeetingOverlayRootView: NSView {
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
-            titleLabel.stringValue = self.isRecordingMinimized ? "Rec" : "Recording meeting"
+            titleLabel.stringValue = "Recording meeting"
             updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary
@@ -848,12 +848,12 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.layer?.borderWidth = 0.5
         cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
         chevronButton.imagePosition = .imageOnly
-        chevronButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        chevronButton.contentTintColor = MeetingOverlayTokens.chevronActionTint
         chevronButton.toolTip = nil
-        chevronButton.layer?.cornerRadius = MeetingOverlayTokens.toggleHeight / 2
-        chevronButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        chevronButton.layer?.borderWidth = 0.5
-        chevronButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        chevronButton.layer?.cornerRadius = 0
+        chevronButton.layer?.backgroundColor = NSColor.clear.cgColor
+        chevronButton.layer?.borderWidth = 0
+        chevronButton.layer?.borderColor = nil
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -904,7 +904,7 @@ final class MeetingOverlayRootView: NSView {
 
     private func chevronButtonImage() -> NSImage? {
         let symbolName = isRecordingMinimized ? "chevron.right" : "chevron.left"
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
         return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
     }
@@ -1048,13 +1048,14 @@ enum MeetingOverlayTokens {
     static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
     static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
     static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
+    static let chevronActionTint = NSColor.white.withAlphaComponent(0.58)
     static let finishActionColor = NSColor.white.withAlphaComponent(0.16)
     static let finishActionBorder = NSColor.white.withAlphaComponent(0.24)
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.92)
 
     static let panelWidth: CGFloat  = 360
     static let recordingPanelWidth: CGFloat = 292
-    static let minimizedRecordingPanelWidth: CGFloat = 152
+    static let minimizedRecordingPanelWidth: CGFloat = 176
     static let panelHeight: CGFloat = 44
     static let minimizedRecordingPanelHeight: CGFloat = 36
     static let promptHeight: CGFloat = 88
