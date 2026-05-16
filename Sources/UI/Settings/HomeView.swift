@@ -1738,13 +1738,14 @@ struct HomeNeedsAttentionCard: View {
 
 struct HomeFailedMeetingsCard: View {
     let items: [MeetingSessionController.FailedMeetingItem]
+    let hiddenCount: Int
     let canRetry: Bool
     let retryUnavailableReason: String?
     let audioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
     let onRetry: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealAudio: (MeetingSessionController.FailedMeetingItem) -> Void
     let onClear: (MeetingSessionController.FailedMeetingItem) -> Void
-    let onOpenMeetings: () -> Void
+    let onShowAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1755,7 +1756,9 @@ struct HomeFailedMeetingsCard: View {
                 Text(title)
                     .font(.headline)
                 Spacer()
-                SettingsInlineActionButton(title: "Review all", tone: .warning, action: onOpenMeetings)
+                if hiddenCount > 0 {
+                    SettingsInlineActionButton(title: showAllTitle, tone: .warning, action: onShowAll)
+                }
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -1790,6 +1793,10 @@ struct HomeFailedMeetingsCard: View {
 
     private var title: String {
         items.count == 1 ? "Recover this meeting" : "Recover unfinished meetings"
+    }
+
+    private var showAllTitle: String {
+        hiddenCount == 1 ? "Show 1 more" : "Show \(hiddenCount) more"
     }
 }
 

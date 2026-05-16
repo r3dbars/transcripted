@@ -78,6 +78,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
+    @State private var homeShowsAllFailedMeetings = false
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
@@ -276,12 +277,17 @@ struct TranscriptedSettingsView: View {
     private var homePage: some View {
         let stats = homeStatItems
         let needsAttention = homeNeedsAttentionIssues
-        let failedMeetings = Array(meetingSession.failedMeetings.prefix(3))
+        let allFailedMeetings = meetingSession.failedMeetings
+        let failedMeetings = homeShowsAllFailedMeetings
+            ? allFailedMeetings
+            : Array(allFailedMeetings.prefix(3))
+        let hiddenFailedMeetingCount = max(0, allFailedMeetings.count - failedMeetings.count)
 
         return VStack(alignment: .leading, spacing: 14) {
             if !failedMeetings.isEmpty {
                 HomeFailedMeetingsCard(
                     items: failedMeetings,
+                    hiddenCount: hiddenFailedMeetingCount,
                     canRetry: canRetryFailedMeetings,
                     retryUnavailableReason: failedMeetingRetryUnavailableReason,
                     audioAttachment: { failedMeetingAudioAttachment(for: $0) },
@@ -297,9 +303,9 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction(item.hasAudioFiles ? "home_delete_failed_meeting" : "home_dismiss_failed_meeting", page: .home)
                         clearFailedMeeting(item)
                     },
-                    onOpenMeetings: {
-                        trackSettingsAction("home_open_failed_meetings", page: .home)
-                        homeActivityTab = .meetings
+                    onShowAll: {
+                        trackSettingsAction("home_show_all_failed_meetings", page: .home)
+                        homeShowsAllFailedMeetings = true
                     }
                 )
             }
@@ -826,6 +832,9 @@ struct TranscriptedSettingsView: View {
         }
         if meetingSession.hasRuntimeDiagnosticsWork {
             return "Wait for the current meeting to finish saving or transcribing before retrying."
+        }
+        if meetingSession.isSpeakerReviewPending {
+            return "Finish the speaker review window before retrying a failed meeting."
         }
         return nil
     }

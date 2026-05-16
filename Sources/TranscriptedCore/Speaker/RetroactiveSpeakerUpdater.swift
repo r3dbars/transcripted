@@ -918,6 +918,7 @@ extension TranscriptSaver {
         updatesByChannelKey: [String: (oldName: String, newName: String)]
     ) -> Bool {
         guard !result.systemUtterances.isEmpty else { return true }
+        guard content.contains("#### Remote Speaker Breakdown\n\n") else { return true }
 
         return rewriteSpeakerBreakdown(
             in: &content,

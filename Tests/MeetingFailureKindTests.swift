@@ -49,6 +49,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .saveFailed, "save failures should keep their own analytics bucket")
     }
 
+    runSuite("MeetingFailureKind classifies speaker-name finalization failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed."
+        )
+
+        assertEqual(kind, .speakerNameFinalizationFailed, "speaker-name save failures should stay out of generic transcript save failures")
+    }
+
     runSuite("MeetingFailureKind classifies pipeline-busy errors") {
         let kind = MeetingFailureKind.classify(
             message: "Transcription already in progress"
