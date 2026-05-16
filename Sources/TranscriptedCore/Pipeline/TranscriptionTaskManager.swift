@@ -627,7 +627,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 outputFolder: outputFolder,
                 taskId: failedId,
                 healthInfo: nil,
-                splitLocalSpeakers: false
+                splitLocalSpeakers: false,
+                meetingTitle: failed.meetingTitle
             )
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])

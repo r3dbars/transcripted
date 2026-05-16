@@ -27,9 +27,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .gettingReady:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "tray.and.arrow.down.fill",
-                title: "Preparing local transcription",
-                status: "Preparing...",
-                detail: "Transcripted is loading the saved audio and getting the local model ready to transcribe.",
+                title: "Preparing transcript",
+                status: "Preparing",
+                detail: "Your meeting audio is saved. Transcripted is loading it and starting the local model.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -37,9 +37,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .transcribing:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "waveform.badge.magnifyingglass",
-                title: "Local model transcribing",
-                status: displayStatus.statusText,
-                detail: "Transcripted is running the local model on this audio. Longer files can take a bit.",
+                title: "Transcribing with local model",
+                status: "Transcribing",
+                detail: "Transcripted is turning the saved audio into a Markdown transcript. Other retries pause until this finishes.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -47,9 +47,9 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .finishing:
             return HomeTranscriptionActivityPresentation(
                 symbolName: "square.and.arrow.down.fill",
-                title: "Saving transcript",
-                status: displayStatus.statusText,
-                detail: "Transcripted is writing the transcript now. If speaker review appears next, you can save names or choose Review Later.",
+                title: "Saving Markdown transcript",
+                status: "Saving",
+                detail: "Transcripted is writing the Markdown file. When this finishes, the meeting returns to the normal list.",
                 tone: .working,
                 progress: displayStatus.progress,
                 transcriptURL: nil
@@ -62,35 +62,22 @@ struct HomeTranscriptionActivityPresentation: Equatable {
             )
             let detail: String
             if let transcriptName {
-                detail = "\"\(transcriptName)\" is ready. Open it now, or finish any deferred speaker names later in People."
+                detail = "\"\(transcriptName)\" is ready. This meeting is back in your list like normal; speaker names can be reviewed later if needed."
             } else {
-                detail = "Your transcript is ready. Open it now, or finish any deferred speaker names later in People."
+                detail = "Your Markdown transcript is ready. This meeting is back in your list like normal; speaker names can be reviewed later if needed."
             }
 
             return HomeTranscriptionActivityPresentation(
                 symbolName: "checkmark.circle.fill",
-                title: "Transcript saved",
-                status: "Ready to review",
+                title: "Markdown transcript saved",
+                status: "Ready",
                 detail: detail,
                 tone: .success,
                 progress: 1.0,
                 transcriptURL: transcriptURL
             )
-        case .failed(let message):
-            let copy = MeetingFailureCopy.make(
-                forMessage: message,
-                shortErrorMessage: message,
-                isRetryable: true
-            )
-            return HomeTranscriptionActivityPresentation(
-                symbolName: "exclamationmark.triangle.fill",
-                title: copy.title,
-                status: "Needs attention",
-                detail: copy.detail,
-                tone: .caution,
-                progress: nil,
-                transcriptURL: nil
-            )
+        case .failed:
+            return nil
         case .idle:
             break
         }
@@ -119,7 +106,17 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 progress: nil,
                 transcriptURL: nil
             )
-        case .idle, .ready, .recording, .transcribing:
+        case .recording:
+            return HomeTranscriptionActivityPresentation(
+                symbolName: "record.circle.fill",
+                title: "Recording meeting audio",
+                status: "Recording",
+                detail: "Audio is being saved locally. When you stop, Transcripted will create the Markdown transcript with the local model.",
+                tone: .working,
+                progress: nil,
+                transcriptURL: nil
+            )
+        case .idle, .ready, .transcribing:
             return nil
         }
     }
