@@ -824,6 +824,9 @@ struct TranscriptedSettingsView: View {
         if meetingSession.hasRuntimeDiagnosticsWork {
             return "Wait for the current meeting to finish saving or transcribing before retrying."
         }
+        if meetingSession.isSpeakerReviewPending {
+            return "Finish the speaker review window before retrying a failed meeting."
+        }
         return nil
     }
 
