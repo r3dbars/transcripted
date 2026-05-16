@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meeting recording overlay redesigns</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0c0e;
+      --panel: rgba(28, 29, 34, 0.94);
+      --panel-2: rgba(37, 38, 44, 0.96);
+      --line: rgba(255, 255, 255, 0.16);
+      --line-soft: rgba(255, 255, 255, 0.08);
+      --text: rgba(255, 255, 255, 0.96);
+      --muted: rgba(255, 255, 255, 0.58);
+      --soft: rgba(255, 255, 255, 0.10);
+      --red: #ff5a52;
+      --sand: #b39973;
+      --blue: #8798c7;
+      --green: #9bd17a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.07), transparent 28%),
+        linear-gradient(145deg, #090a0c 0%, #111217 48%, #08090b 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      color: var(--text);
+    }
+
+    .sheet {
+      width: 1600px;
+      min-height: 1050px;
+      padding: 64px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 28px;
+    }
+
+    .title {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    .note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .card {
+      min-height: 250px;
+      padding: 28px;
+      border: 1px solid var(--line-soft);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.035);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    .label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .label strong {
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 720;
+    }
+
+    .stage {
+      height: 154px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.018)),
+        #101115;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .pill {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      box-shadow:
+        0 18px 42px rgba(0, 0, 0, 0.38),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .mini-pill {
+      height: 44px;
+      gap: 10px;
+      padding: 0 12px;
+    }
+
+    .icon-circle {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--soft);
+      color: rgba(255, 255, 255, 0.74);
+      font-size: 17px;
+      font-weight: 640;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 0 4px rgba(255, 90, 82, 0.10);
+      flex: 0 0 auto;
+    }
+
+    .timer {
+      min-width: 54px;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+      font-size: 21px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    .timer.small {
+      min-width: 45px;
+      font-size: 15px;
+      font-weight: 680;
+    }
+
+    .chev {
+      width: 18px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      color: rgba(255, 255, 255, 0.56);
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .stop {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .stop::before {
+      content: "";
+      width: 11px;
+      height: 11px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .wave {
+      width: 164px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      overflow: hidden;
+    }
+
+    .bar {
+      width: 4px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--sand), var(--blue));
+      opacity: 0.88;
+    }
+
+    .v2 .pill {
+      height: 64px;
+      padding: 0 18px 0 14px;
+      background: linear-gradient(180deg, rgba(44, 45, 52, 0.98), rgba(20, 21, 25, 0.98));
+    }
+
+    .v2 .timer {
+      font-size: 24px;
+    }
+
+    .v2 .wave {
+      width: 190px;
+    }
+
+    .v3 .stack {
+      width: 178px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(25, 26, 31, 0.96);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+    }
+
+    .v3 .stack-top,
+    .v3 .stack-bottom {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+    }
+
+    .v3 .stack-top {
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .v3 .meter-row {
+      height: 18px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 0 12px 9px;
+    }
+
+    .v4 .dock {
+      width: 360px;
+      height: 86px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(36, 38, 45, 0.98), rgba(17, 18, 22, 0.98));
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+    }
+
+    .v4 .line1,
+    .v4 .line2 {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .v4 .line2 {
+      margin-top: 8px;
+    }
+
+    .badge {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      color: rgba(255, 255, 255, 0.68);
+      background: rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .v5 .rail {
+      width: 310px;
+      height: 50px;
+      display: grid;
+      grid-template-columns: 48px 1fr 48px;
+      border-radius: 15px;
+      border: 1px solid var(--line);
+      background: rgba(24, 25, 29, 0.96);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+    }
+
+    .v5 .rail-cell {
+      display: grid;
+      place-items: center;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .v5 .rail-cell:last-child {
+      border-right: 0;
+      border-left: 1px solid var(--line-soft);
+    }
+
+    .v5 .rail-main {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+    }
+
+    .bars-1 .bar:nth-child(1), .bars-2 .bar:nth-child(1), .bars-3 .bar:nth-child(1) { height: 10px; }
+    .bars-1 .bar:nth-child(2), .bars-2 .bar:nth-child(2), .bars-3 .bar:nth-child(2) { height: 14px; }
+    .bars-1 .bar:nth-child(3), .bars-2 .bar:nth-child(3), .bars-3 .bar:nth-child(3) { height: 18px; }
+    .bars-1 .bar:nth-child(4), .bars-2 .bar:nth-child(4), .bars-3 .bar:nth-child(4) { height: 24px; }
+    .bars-1 .bar:nth-child(5), .bars-2 .bar:nth-child(5), .bars-3 .bar:nth-child(5) { height: 29px; }
+    .bars-1 .bar:nth-child(6), .bars-2 .bar:nth-child(6), .bars-3 .bar:nth-child(6) { height: 24px; }
+    .bars-1 .bar:nth-child(7), .bars-2 .bar:nth-child(7), .bars-3 .bar:nth-child(7) { height: 18px; }
+    .bars-1 .bar:nth-child(8), .bars-2 .bar:nth-child(8), .bars-3 .bar:nth-child(8) { height: 14px; }
+    .bars-1 .bar:nth-child(9), .bars-2 .bar:nth-child(9), .bars-3 .bar:nth-child(9) { height: 21px; }
+    .bars-1 .bar:nth-child(10), .bars-2 .bar:nth-child(10), .bars-3 .bar:nth-child(10) { height: 27px; }
+    .bars-1 .bar:nth-child(11), .bars-2 .bar:nth-child(11), .bars-3 .bar:nth-child(11) { height: 16px; }
+    .bars-1 .bar:nth-child(12), .bars-2 .bar:nth-child(12), .bars-3 .bar:nth-child(12) { height: 11px; }
+    .bars-2 .bar { opacity: 0.72; }
+    .bars-3 .bar { width: 3px; opacity: 0.76; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <section class="title">
+      <h1>Meeting overlay directions</h1>
+      <p class="note">Five quick recording HUD concepts using red dot + elapsed time.</p>
+    </section>
+
+    <section class="card v1">
+      <div class="label"><strong>1. Tiny timer pill</strong><span>closest to the shipped tweak</span></div>
+      <div class="stage">
+        <div class="pill mini-pill">
+          <div class="icon-circle">×</div>
+          <div class="dot"></div>
+          <div class="timer small">00:26</div>
+          <div class="chev">›</div>
+          <div class="stop"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card v2">
+      <div class="label"><strong>2. Live strip</strong><span>timer first, waveform second</span></div>
+      <div class="stage">
+        <div class="pill">
+          <div class="icon-circle">×</div>
+          <div class="dot"></div>
+          <div class="timer">00:26</div>
+          <div class="wave bars-1">
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+          </div>
+          <div class="chev">‹</div>
+          <div class="stop"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card v3">
+      <div class="label"><strong>3. Compact stack</strong><span>more status, still small</span></div>
+      <div class="stage">
+        <div class="stack">
+          <div class="stack-top">
+            <div class="dot"></div>
+            <div class="timer">00:26</div>
+            <div class="chev">›</div>
+          </div>
+          <div class="stack-bottom">
+            <div class="icon-circle">×</div>
+            <div class="badge">Meeting</div>
+            <div class="stop"></div>
+          </div>
+          <div class="meter-row bars-3">
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+            <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card v4">
+      <div class="label"><strong>4. Meeting dock</strong><span>clearer for longer calls</span></div>
+      <div class="stage">
+        <div class="dock">
+          <div>
+            <div class="line1">
+              <div class="dot"></div>
+              <div class="timer">00:26</div>
+              <div class="badge">Mic</div>
+              <div class="badge">System</div>
+            </div>
+            <div class="line2">
+              <div class="wave bars-2">
+                <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+                <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+                <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+              </div>
+            </div>
+          </div>
+          <div class="line1">
+            <div class="chev">‹</div>
+            <div class="stop"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card v5">
+      <div class="label"><strong>5. Segmented rail</strong><span>control-center style</span></div>
+      <div class="stage">
+        <div class="rail">
+          <div class="rail-cell"><div class="icon-circle">×</div></div>
+          <div class="rail-main">
+            <div class="dot"></div>
+            <div class="timer">00:26</div>
+            <div class="wave bars-3">
+              <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+              <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+              <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
+            </div>
+          </div>
+          <div class="rail-cell"><div class="stop"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
