@@ -161,7 +161,8 @@ struct MeetingFailureExplanation: Equatable {
             return .transcription
         case .diarizationFailed:
             return .diarization
-        case .saveFailed:
+        case .saveFailed,
+             .speakerFinalizationFailed:
             return .save
         case .unexpectedError:
             return .activeCapture

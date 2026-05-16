@@ -33,6 +33,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .diarizationFailed, "diarization-specific failures should be preserved for analytics")
     }
 
+    runSuite("MeetingFailureKind classifies speaker finalization failures") {
+        let kind = MeetingFailureKind.classify(
+            message: "Failed to finalize speaker names"
+        )
+
+        assertEqual(kind, .speakerFinalizationFailed, "post-save speaker naming errors should stay out of transcript-failed telemetry")
+    }
+
     runSuite("MeetingFailureKind classifies broader microphone-access wording") {
         let kind = MeetingFailureKind.classify(
             message: "Turn on Microphone access in System Settings before recording a meeting."

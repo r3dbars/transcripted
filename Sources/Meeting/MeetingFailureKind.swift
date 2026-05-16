@@ -13,6 +13,7 @@ enum MeetingFailureKind: String {
     case modelNotLoaded = "model_not_loaded"
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
+    case speakerFinalizationFailed = "speaker_finalization_failed"
     case pipelineBusy = "pipeline_busy"
     case pipelineFailed = "pipeline_failed"
     case stopTimeout = "stop_timeout"
@@ -122,6 +123,13 @@ enum MeetingFailureKind: String {
             "diarization",
         ]) {
             return .diarizationFailed
+        }
+
+        if normalized.contains(anyOf: [
+            "failed to finalize speaker names",
+            "speaker naming finalization failed",
+        ]) {
+            return .speakerFinalizationFailed
         }
 
         if normalized.contains(anyOf: [
