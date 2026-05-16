@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transcripted Settings Board</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f6f2;
+      --panel: #ffffff;
+      --soft: #f0f3ed;
+      --text: #20241f;
+      --muted: #626b5f;
+      --faint: #8a9387;
+      --border: #dfe4da;
+      --accent: #28745f;
+      --accent-soft: #e4f2ec;
+      --danger: #a33b35;
+      --danger-soft: #fdeceb;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 8px 11px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: #b8c3b4;
+      background: #fbfcfa;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    button.danger {
+      background: var(--danger-soft);
+      border-color: #efc7c3;
+      color: var(--danger);
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(18px);
+    }
+
+    h1 {
+      margin: 0 0 5px;
+      font-size: 24px;
+      letter-spacing: 0;
+      line-height: 1.1;
+    }
+
+    .subhead {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+      max-width: 760px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .quick-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 22px;
+      border-bottom: 1px solid var(--border);
+      background: #fafbf8;
+    }
+
+    .quick-bar input {
+      flex: 1;
+      min-width: 180px;
+      height: 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 11px;
+      background: var(--panel);
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    main {
+      padding: 18px 22px 28px;
+    }
+
+    .board {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(285px, 340px);
+      gap: 14px;
+      align-items: start;
+      overflow-x: auto;
+      padding-bottom: 18px;
+    }
+
+    .page {
+      min-height: 190px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .page.drop {
+      outline: 3px solid rgba(40, 116, 95, 0.22);
+      border-color: var(--accent);
+    }
+
+    .page-head {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--soft);
+      border-radius: 10px 10px 0 0;
+    }
+
+    .page input {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      padding: 2px 4px;
+      margin-left: -4px;
+      color: var(--text);
+    }
+
+    .page input:focus {
+      background: var(--panel);
+      border-color: var(--border);
+      outline: none;
+    }
+
+    .page-title {
+      font-size: 16px;
+      font-weight: 750;
+    }
+
+    .page-purpose {
+      margin-top: 4px;
+      color: var(--muted) !important;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .cards {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      min-height: 120px;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel);
+      padding: 10px;
+      cursor: grab;
+    }
+
+    .card:active {
+      cursor: grabbing;
+    }
+
+    .card.editing {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(40, 116, 95, 0.14);
+    }
+
+    .card-title {
+      font-weight: 750;
+      font-size: 14px;
+      line-height: 1.25;
+    }
+
+    .card-now {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .card-plain {
+      margin-top: 8px;
+      padding-left: 8px;
+      border-left: 3px solid var(--accent);
+      color: #2d5044;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .tag {
+      display: inline-flex;
+      margin-top: 8px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .tag.tech {
+      background: #fff1df;
+      color: #9a5a1e;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 9px;
+    }
+
+    .card-actions button {
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+
+    .edit-area {
+      display: none;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .card.editing .edit-area {
+      display: grid;
+    }
+
+    .edit-area label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .edit-area input,
+    .edit-area textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #fff;
+      padding: 7px 8px;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .edit-area textarea {
+      min-height: 58px;
+      resize: vertical;
+      line-height: 1.35;
+    }
+
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      color: var(--faint);
+      padding: 14px;
+      text-align: center;
+      font-size: 13px;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      background: rgba(30, 35, 29, 0.38);
+      z-index: 50;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(860px, 100%);
+      max-height: min(760px, 92vh);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      overflow: hidden;
+      box-shadow: 0 18px 44px rgba(29, 36, 29, 0.18);
+    }
+
+    .modal-head,
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-actions {
+      justify-content: flex-end;
+      border-top: 1px solid var(--border);
+      border-bottom: 0;
+    }
+
+    #exportText {
+      width: 100%;
+      min-height: 430px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 760px) {
+      header {
+        grid-template-columns: 1fr;
+      }
+
+      .actions,
+      .quick-bar {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .hint {
+        white-space: normal;
+      }
+
+      main {
+        padding: 12px;
+      }
+
+      .board {
+        grid-auto-columns: minmax(270px, 90vw);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Transcripted Settings Board</h1>
+      <p class="subhead">Opinionated simple version. Home is the hub: Meetings, Dictations, and Saved Speakers live there as tabs. Everything else is only here if a normal user would know why they need it.</p>
+    </div>
+    <div class="actions">
+      <button id="addPage">Add page</button>
+      <button id="addItem">Add card</button>
+      <button id="export" class="primary">Export</button>
+      <button id="reset" class="danger">Reset</button>
+    </div>
+  </header>
+
+  <div class="quick-bar">
+    <input id="search" type="search" placeholder="Search cards">
+    <span class="hint">Tip: rename pages directly at the top of each column.</span>
+  </div>
+
+  <main>
+    <section id="board" class="board" aria-label="Settings board"></section>
+  </main>
+
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-label="Export plan">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong>Export plan</strong>
+        <button id="closeTop">Close</button>
+      </div>
+      <textarea id="exportText" spellcheck="false"></textarea>
+      <div class="modal-actions">
+        <button id="copyExport">Copy</button>
+        <button id="downloadExport">Download JSON</button>
+        <button id="closeBottom" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const storageKey = "transcripted-settings-board-simple-v3";
+
+    const seed = {
+      pages: [
+        page("home", "Home", "The main place to use Transcripted. Tabs: Meetings, Dictations, Saved Speakers."),
+        page("shortcuts", "Shortcuts", "Keyboard controls and any future shortcut redesign."),
+        page("app", "App Settings", "Basic app behavior: startup, Dock, save location, updates."),
+        page("privacy", "Privacy", "Mac permissions and data sharing."),
+        page("ai", "AI Tools", "Connect Claude, Codex, or other local agents."),
+        page("support", "Help", "Support, diagnostics, and problem reports."),
+        page("about", "About", "Version and updates."),
+        page("advanced", "Advanced", "Power-user controls, caches, models, folders, and debug-only tools."),
+        page("removed", "Removed", "Stuff to delete, hide, or park.")
+      ],
+      cards: [
+        card("home-tabs", "home", "Home tabs: Meetings / Dictations / Saved Speakers", "Current: Meetings are in Home, Dictation has its own page, People has its own page.", "Plain: make the three main work areas one click apart inside Home.", false),
+        card("start-actions", "home", "Start actions", "Current: Start Dictation, Start Meeting, and Import Audio mostly live outside Settings Home.", "Plain: first screen should let people start the thing they came to do.", false),
+        card("meetings-tab", "home", "Meetings tab", "Current: recent meetings, failed meetings, preview, audio, copy for agent, report issue.", "Plain: record, recover, read, replay, copy, or delete meeting notes.", false),
+        card("dictations-tab", "home", "Dictations tab", "Current: Paste Last, Recent dictations, sound cues.", "Plain: start or reuse short dictations.", false),
+        card("saved-speakers-tab", "home", "Saved Speakers tab", "Current: People page with speakers to name, duplicates, samples, saved profiles.", "Plain: name meeting speakers and clean up duplicates without leaving Home.", false),
+        card("unfinished-meetings", "home", "Unfinished meetings first", "Current: failed meeting card shows Review all, Show Audio, Try Again, Delete, Dismiss.", "Plain: if a meeting did not finish, put it above everything else.", false),
+        card("current-work", "home", "Current work", "Current: recording, transcribing, saving, model-loading states.", "Plain: tell me what Transcripted is doing right now, in normal words.", true),
+        card("finish-setup", "home", "Finish setup", "Current: missing permissions or model problems appear as Needs attention.", "Plain: show only blockers that stop recording or pasting.", false),
+        card("words-wrong", "home", "Words Transcripted gets wrong", "Current: Corrections lives under General.", "Plain: fix names, acronyms, and phrases for both meetings and dictations.", false),
+        card("meeting-audio-replays", "home", "Meeting audio replays", "Current: Audio Storage has WAV/M4A and delete-after language.", "Plain: choose whether meeting audio can be replayed, and for how long.", true),
+        card("quiet-web-call", "home", "Fix quiet web-call microphone audio", "Current: Use Apple voice processing for Safari/Firefox mic attenuation.", "Plain: turn on only if browser meetings make your microphone sound too quiet.", true),
+
+        card("shortcut-redesign", "shortcuts", "Shortcut redesign scratchpad", "Current: one recorder area covers push-to-talk, hands-free, and meeting shortcuts.", "Plain: leave room for Justin's new shortcut idea before we lock the UI.", false),
+        card("meeting-shortcut", "shortcuts", "Meeting shortcut", "Current: meeting shortcut is mixed with dictation shortcut setup.", "Plain: one clear key to start or stop meeting recording.", false),
+        card("dictation-shortcut", "shortcuts", "Dictation shortcut", "Current: push-to-talk and hands-free dictation controls.", "Plain: choose whether dictation is hold-to-talk, tap-to-start, or off.", false),
+        card("disable-dictation-keys", "shortcuts", "Turn off dictation shortcuts", "Current: Enable dictation shortcuts toggle.", "Plain: stop accidental dictation while keeping meeting and app buttons available.", false),
+        card("send-after-paste", "shortcuts", "Press Enter after pasting", "Current: Send After Paste, allowed apps, running apps, bundle IDs.", "Plain: after dictation pastes, press Enter only in selected apps.", true),
+
+        card("startup", "app", "Open at login", "Current: Launch Transcripted at login.", "Plain: start Transcripted automatically.", false),
+        card("dock", "app", "Show in Dock", "Current: Show Transcripted in Dock with menu-bar-only recovery copy.", "Plain: choose Dock app or menu bar app.", true),
+        card("save-location", "app", "Save location", "Current: Capture Library, Meeting captures, Dictation captures, Choose Folder, Reset.", "Plain: choose where Transcripted saves notes.", true),
+        card("updates", "app", "Updates", "Current: check automatically, download automatically, check/install/restart.", "Plain: keep the app up to date.", false),
+
+        card("install-claude", "ai", "Connect Claude Desktop", "Current: Install in Claude / Repair Claude Setup.", "Plain: let Claude Desktop read Transcripted notes.", false),
+        card("copy-agent", "ai", "Copy setup prompt", "Current: Copy for Agent, Codex, Claude Code, Cursor.", "Plain: copy instructions for local coding agents.", false),
+
+        card("permissions", "privacy", "Mac permissions", "Current: microphone, accessibility, system audio recording, calendar.", "Plain: allow recording, paste-back, and meeting prompts.", false),
+        card("data-sharing", "privacy", "Data sharing", "Current: crash reports, anonymous usage stats, Send Test Sentry Event.", "Plain: decide whether safe bug info can leave the Mac.", false),
+        card("privacy-note", "privacy", "Never sent", "Current: never sends transcript text, audio, names, emails, file paths, URLs, or meeting titles.", "Plain: trust note for diagnostics.", false),
+
+        card("email-support", "support", "Email support", "Current: prefilled email to help@transcripted.app.", "Plain: ask for help.", false),
+        card("send-diagnostics", "support", "Send safe diagnostic report", "Current: One-click send diagnostics.", "Plain: send a scrubbed report so support can investigate.", false),
+        card("report-issue-sheet", "support", "Report transcript issue", "Current: wrong words, missing text, bad formatting, speaker issue, audio issue.", "Plain: report a bad note safely.", false),
+
+        card("version", "about", "Version", "Current: Transcripted version and local-first description.", "Plain: what version is installed.", false),
+
+        card("model-status", "advanced", "Transcription ready status", "Current: Active transcription engine and Model files.", "Plain: show whether local transcription is ready.", true),
+        card("model-picker", "advanced", "Choose a different transcription model", "Current: Change model, Preferred model, Parakeet, Whisper.", "Plain: advanced quality/speed/language choice.", true),
+        card("model-cache", "advanced", "Downloaded speech files", "Current: FluidAudio models, Whisper cache, stale candidates, remove cache.", "Plain: free up space used by downloaded transcription files.", true),
+        card("support-folders", "advanced", "Troubleshooting folders", "Current: app state, app cache, logs, temporary recordings.", "Plain: folders support may ask for.", true),
+        card("manual-agent", "advanced", "Manual AI setup", "Current: config, paths, folder prompt, web chats fallback.", "Plain: advanced setup if automatic setup does not work.", true),
+        card("onboarding", "advanced", "First-run setup details", "Current: permissions, calendar, diagnostics, use-case choices.", "Plain: get a new user to a working app.", false),
+        card("speaker-sheet", "advanced", "Speaker naming sheet", "Current: Review Later, Keep as You, Split mic speakers.", "Plain: name who spoke, now or later.", true),
+        card("delete-alerts", "advanced", "Delete confirmations", "Current: delete meeting, dictation, old replay audio, caches.", "Plain: confirm before removing notes, audio, or downloads.", false),
+        card("sentry-test", "advanced", "Test crash report button", "Current: Send Test Sentry Event is visible in Privacy.", "Plain: support/debug-only. Hide from normal users.", true)
+      ]
+    };
+
+    function page(id, title, purpose) {
+      return { id, title, purpose };
+    }
+
+    function card(id, page, title, current, plain, tech) {
+      return { id, page, title, current, plain, tech };
+    }
+
+    let state = load();
+    let editing = null;
+
+    const board = document.getElementById("board");
+    const search = document.getElementById("search");
+    const modal = document.getElementById("modal");
+    const exportText = document.getElementById("exportText");
+
+    function load() {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) return JSON.parse(saved);
+      } catch (_) {}
+      return JSON.parse(JSON.stringify(seed));
+    }
+
+    function save() {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    }
+
+    function render() {
+      save();
+      const q = search.value.trim().toLowerCase();
+      board.innerHTML = "";
+      state.pages.forEach((p) => board.appendChild(renderPage(p, q)));
+    }
+
+    function renderPage(p, q) {
+      const el = document.createElement("section");
+      el.className = "page";
+      el.dataset.page = p.id;
+      el.innerHTML = `
+        <div class="page-head">
+          <input class="page-title" value="${esc(p.title)}" aria-label="Page title">
+          <input class="page-purpose" value="${esc(p.purpose)}" aria-label="Page purpose">
+        </div>
+        <div class="cards"></div>
+      `;
+
+      el.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        el.classList.add("drop");
+      });
+      el.addEventListener("dragleave", () => el.classList.remove("drop"));
+      el.addEventListener("drop", (event) => {
+        event.preventDefault();
+        el.classList.remove("drop");
+        const id = event.dataTransfer.getData("text/plain");
+        const c = state.cards.find((item) => item.id === id);
+        if (c) c.page = p.id;
+        render();
+      });
+
+      el.querySelector(".page-title").addEventListener("change", (event) => {
+        p.title = event.target.value.trim() || "Untitled";
+        render();
+      });
+      el.querySelector(".page-purpose").addEventListener("change", (event) => {
+        p.purpose = event.target.value.trim() || "What this page is for.";
+        render();
+      });
+
+      const cards = state.cards.filter((c) => {
+        if (c.page !== p.id) return false;
+        if (!q) return true;
+        return `${c.title} ${c.current} ${c.plain}`.toLowerCase().includes(q);
+      });
+
+      const list = el.querySelector(".cards");
+      if (!cards.length) {
+        list.innerHTML = `<div class="empty">Drop cards here.</div>`;
+      } else {
+        cards.forEach((c) => list.appendChild(renderCard(c)));
+      }
+      return el;
+    }
+
+    function renderCard(c) {
+      const el = document.createElement("article");
+      el.className = `card ${editing === c.id ? "editing" : ""}`;
+      el.draggable = true;
+      el.dataset.card = c.id;
+      el.innerHTML = `
+        <div class="card-title">${esc(c.title)}</div>
+        <div class="card-now">${esc(c.current)}</div>
+        <div class="card-plain">${esc(c.plain)}</div>
+        <span class="tag ${c.tech ? "tech" : ""}">${c.tech ? "needs simpler copy" : "plain enough"}</span>
+        <div class="card-actions">
+          <button data-edit>${editing === c.id ? "Close" : "Edit"}</button>
+          <button data-copy>Copy</button>
+          <button data-remove class="danger">Remove</button>
+        </div>
+        <div class="edit-area">
+          <label>Label</label>
+          <input data-title value="${esc(c.title)}">
+          <label>Current app copy</label>
+          <textarea data-current>${esc(c.current)}</textarea>
+          <label>Plain user meaning</label>
+          <textarea data-plain>${esc(c.plain)}</textarea>
+          <label><input data-tech type="checkbox" ${c.tech ? "checked" : ""}> Needs simpler copy</label>
+          <button data-save class="primary">Save card</button>
+        </div>
+      `;
+
+      el.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("text/plain", c.id);
+      });
+      el.querySelector("[data-edit]").addEventListener("click", () => {
+        editing = editing === c.id ? null : c.id;
+        render();
+      });
+      el.querySelector("[data-copy]").addEventListener("click", () => {
+        const clone = JSON.parse(JSON.stringify(c));
+        clone.id = `${c.id}-${Date.now()}`;
+        clone.title = `${c.title} copy`;
+        state.cards.push(clone);
+        editing = clone.id;
+        render();
+      });
+      el.querySelector("[data-remove]").addEventListener("click", () => {
+        c.page = "removed";
+        editing = null;
+        render();
+      });
+      el.querySelector("[data-save]").addEventListener("click", () => {
+        c.title = el.querySelector("[data-title]").value.trim() || "Untitled";
+        c.current = el.querySelector("[data-current]").value.trim();
+        c.plain = el.querySelector("[data-plain]").value.trim();
+        c.tech = el.querySelector("[data-tech]").checked;
+        editing = null;
+        render();
+      });
+      return el;
+    }
+
+    function addPage() {
+      state.pages.splice(state.pages.length - 1, 0, page(`page-${Date.now()}`, "New page", "What this page is for."));
+      render();
+    }
+
+    function addItem() {
+      state.cards.push(card(`card-${Date.now()}`, "home", "New setting", "Current app copy.", "Plain user meaning.", false));
+      editing = state.cards[state.cards.length - 1].id;
+      render();
+    }
+
+    function exportPlan() {
+      const lines = ["# Transcripted Settings Plan", ""];
+      state.pages.forEach((p) => {
+        const cards = state.cards.filter((c) => c.page === p.id);
+        if (!cards.length) return;
+        lines.push(`## ${p.title}`);
+        lines.push(p.purpose);
+        lines.push("");
+        cards.forEach((c) => {
+          lines.push(`- ${c.title}`);
+          lines.push(`  - Plain meaning: ${c.plain}`);
+          lines.push(`  - Current copy: ${c.current}`);
+          if (c.tech) lines.push("  - Rewrite flag: too technical");
+        });
+        lines.push("");
+      });
+      exportText.value = lines.join("\n");
+      modal.classList.add("open");
+      exportText.focus();
+      exportText.select();
+    }
+
+    function downloadJson() {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "transcripted-settings-plan.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function reset() {
+      if (!confirm("Reset the board?")) return;
+      localStorage.removeItem(storageKey);
+      state = JSON.parse(JSON.stringify(seed));
+      editing = null;
+      search.value = "";
+      render();
+    }
+
+    function esc(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    document.getElementById("addPage").addEventListener("click", addPage);
+    document.getElementById("addItem").addEventListener("click", addItem);
+    document.getElementById("export").addEventListener("click", exportPlan);
+    document.getElementById("reset").addEventListener("click", reset);
+    document.getElementById("copyExport").addEventListener("click", () => {
+      exportText.select();
+      document.execCommand("copy");
+    });
+    document.getElementById("downloadExport").addEventListener("click", downloadJson);
+    document.getElementById("closeTop").addEventListener("click", () => modal.classList.remove("open"));
+    document.getElementById("closeBottom").addEventListener("click", () => modal.classList.remove("open"));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) modal.classList.remove("open");
+    });
+    search.addEventListener("input", render);
+
+    render();
+  </script>
+</body>
+</html>
