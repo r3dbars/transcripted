@@ -11,8 +11,7 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "recording", title: "Recording", pages: [.dictations, .shortcuts]),
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .storage, .connectAgent]),
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .shortcuts, .storage, .connectAgent]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
     ]
 }
@@ -53,9 +52,6 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
-    @State private var recentDictations: [SavedDictationEntry] = []
-    @State private var recentCapturesLoading = false
-    @State private var recentCaptureRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
@@ -180,8 +176,6 @@ struct TranscriptedSettingsView: View {
             refreshShortcutState()
         }
         .onDisappear {
-            recentCaptureRefreshTask?.cancel()
-            recentCaptureRefreshTask = nil
             homeDashboardRefreshTask?.cancel()
             homeDashboardRefreshTask = nil
             homeDashboardRefreshInFlight = false
@@ -253,8 +247,6 @@ struct TranscriptedSettingsView: View {
             modelsPage
         case .shortcuts:
             shortcutsPage
-        case .dictations:
-            dictationsPage
         case .people:
             peoplePage
         case .storage:
@@ -1088,6 +1080,27 @@ struct TranscriptedSettingsView: View {
             }
 
             SettingsSection(
+                title: "Sounds",
+                detail: "Play short cues for dictation state."
+            ) {
+                Toggle("Play dictation feedback sounds", isOn: Binding(
+                    get: { uiSoundsEnabled },
+                    set: { newValue in
+                        uiSoundsEnabled = newValue
+                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
+                        UISoundPreferences.setEnabled(newValue)
+                    }
+                ))
+
+                Text(uiSoundsEnabled
+                    ? "Sounds play when dictation starts, completes, or hears no speech."
+                    : "Dictation sounds are off."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            SettingsSection(
                 title: "Corrections",
                 detail: "Fix the words Transcripted usually gets wrong."
             ) {
@@ -1303,80 +1316,6 @@ struct TranscriptedSettingsView: View {
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
-        }
-    }
-
-    private var dictationsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Dictation",
-                summary: "Paste the latest dictation and set sound cues."
-            )
-
-            SettingsSection(
-                title: "Paste Last",
-                detail: "Use the newest saved dictation again."
-            ) {
-                SettingsQuickLinkRow(
-                    symbolName: "arrow.turn.down.right",
-                    title: "Paste Last Dictation",
-                    detail: "Paste into the app you were using."
-                ) {
-                    trackSettingsAction("paste_last_dictation", page: .dictations)
-                    actions.pasteLastDictation()
-                }
-
-                Text("If paste is unavailable, Transcripted copies the text.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Recent",
-                detail: "The newest saved dictations."
-            ) {
-                if recentCapturesLoading && recentDictations.isEmpty {
-                    Text("Loading recent dictations...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if recentDictations.isEmpty {
-                    Text("No dictations saved yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentDictations) { item in
-                        SettingsQuickLinkRow(
-                            symbolName: "text.bubble",
-                            title: item.title,
-                            detail: "\(formattedRecentDate(item.createdAt)) • \(item.sourceAppName)"
-                        ) {
-                            trackSettingsAction("open_recent_dictation", page: .dictations)
-                            NSWorkspace.shared.open(item.url)
-                        }
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "Sounds",
-                detail: "Play short cues for dictation state."
-            ) {
-                Toggle("Play dictation feedback sounds", isOn: Binding(
-                    get: { uiSoundsEnabled },
-                    set: { newValue in
-                        uiSoundsEnabled = newValue
-                        trackSettingsToggle("dictation_sounds", enabled: newValue, page: .dictations)
-                        UISoundPreferences.setEnabled(newValue)
-                    }
-                ))
-
-                Text(uiSoundsEnabled
-                    ? "Sounds play when dictation starts, stops, completes, or hears no speech."
-                    : "Dictation sounds are off."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -2323,21 +2262,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func refreshRecentCaptures(force: Bool = false) {
-        recentCaptureRefreshTask?.cancel()
-        recentCaptureRefreshTask = nil
-        recentCapturesLoading = false
-
         switch SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) {
         case .homeDashboard:
             refreshHomeDashboard(force: force)
-        case .recentLists:
-            recentCapturesLoading = true
-            recentCaptureRefreshTask = Task { @MainActor in
-                let snapshot = await RecentCaptureLoader.load(limit: 5)
-                guard !Task.isCancelled else { return }
-                recentDictations = snapshot.dictations
-                recentCapturesLoading = false
-            }
         case .none:
             break
         }
