@@ -603,7 +603,7 @@ struct SpeakerPeopleSettingsSection: View {
 
                     Spacer(minLength: 12)
 
-                    Button("Show Needs Review") {
+                    SettingsInlineActionButton(title: "Show Needs Review", tone: .warning) {
                         model.profileFilter = .needsReview
                     }
                 }
@@ -655,7 +655,7 @@ struct SpeakerPeopleSettingsSection: View {
                 .pickerStyle(.segmented)
                 .frame(width: 190)
 
-                Button("Refresh") {
+                SettingsInlineActionButton(title: "Refresh") {
                     model.refresh()
                 }
             }
@@ -767,8 +767,16 @@ private struct DuplicatePersonSummary: View {
                 model.playSample(for: profile.id)
             } label: {
                 Label(hasClip ? "Sample" : "No Sample", systemImage: hasClip ? "play.circle.fill" : "play.slash")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
             }
-            .font(.caption)
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: hasClip ? .accent : .neutral,
+                cornerRadius: 8,
+                normalFill: hasClip ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.025),
+                normalStroke: hasClip ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06)
+            ))
             .disabled(!hasClip)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -823,15 +831,25 @@ private struct SpeakerPersonRow: View {
                         model.playSample(for: profile.id)
                     } label: {
                         Label(hasClip ? "Sample" : "No Sample", systemImage: hasClip ? "play.circle.fill" : "play.slash")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
                     }
+                    .buttonStyle(SettingsHoverButtonStyle(
+                        tone: hasClip ? .accent : .neutral,
+                        cornerRadius: 8,
+                        normalFill: hasClip ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.025),
+                        normalStroke: hasClip ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06)
+                    ))
                     .disabled(!hasClip)
 
                     if !isEditing {
-                        Button {
+                        SettingsInlineActionButton(
+                            title: profile.displayName == nil ? "Name" : "Rename",
+                            symbolName: "pencil"
+                        ) {
                             renameDraft = profile.displayName ?? ""
                             isEditing = true
-                        } label: {
-                            Label(profile.displayName == nil ? "Name" : "Rename", systemImage: "pencil")
                         }
                     }
 
@@ -847,10 +865,8 @@ private struct SpeakerPersonRow: View {
                         }
                     }
 
-                    Button(role: .destructive) {
+                    SettingsInlineActionButton(title: "Delete", symbolName: "trash", tone: .destructive) {
                         showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
                     }
                 }
             }
@@ -860,13 +876,13 @@ private struct SpeakerPersonRow: View {
                     TextField("Enter a name", text: $renameDraft)
                         .textFieldStyle(.roundedBorder)
 
-                    Button("Save") {
+                    SettingsInlineActionButton(title: "Save", tone: .accent) {
                         model.rename(profile: profile, to: renameDraft)
                         isEditing = false
                     }
                     .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    Button("Cancel") {
+                    SettingsInlineActionButton(title: "Cancel") {
                         renameDraft = ""
                         isEditing = false
                     }

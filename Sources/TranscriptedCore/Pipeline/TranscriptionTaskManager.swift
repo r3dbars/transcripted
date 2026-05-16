@@ -628,13 +628,21 @@ public class TranscriptionTaskManager: ObservableObject {
                 taskId: failedId,
                 healthInfo: nil,
                 splitLocalSpeakers: false,
-                meetingTitle: failed.meetingTitle
+                meetingTitle: failed.meetingTitle,
+                sourceFailedTranscriptionId: failedId
             )
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
 
             await MainActor.run {
-                failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                let waitingForSpeakerNames = self.hasPendingSpeakerNamingRequest(sourceFailedTranscriptionId: failedId)
+                if waitingForSpeakerNames {
+                    AppLogger.pipeline.info("Retry transcript saved; keeping failed meeting until speaker names finalize", [
+                        "failedId": failedId.uuidString
+                    ])
+                } else {
+                    failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                }
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
@@ -657,6 +665,13 @@ public class TranscriptionTaskManager: ObservableObject {
             }
             return false
         }
+    }
+
+    private func hasPendingSpeakerNamingRequest(sourceFailedTranscriptionId: UUID) -> Bool {
+        speakerNamingRequest?.sourceFailedTranscriptionId == sourceFailedTranscriptionId
+            || pendingSpeakerNamingRequests.contains {
+                $0.sourceFailedTranscriptionId == sourceFailedTranscriptionId
+            }
     }
 
     // MARK: - Task Completion & Cleanup

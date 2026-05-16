@@ -1050,7 +1050,7 @@ struct HomeRowActionButtons: View {
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
         .help(help)
     }
 }
@@ -1063,7 +1063,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSButton {
-        let button = NSButton()
+        let button = HoverMenuButton()
         button.isBordered = false
         button.imagePosition = .imageOnly
         button.image = NSImage(
@@ -1075,6 +1075,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         button.action = #selector(Coordinator.showMenu(_:))
         button.setButtonType(.momentaryChange)
         button.setAccessibilityLabel("More options")
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 7
         return button
     }
 
@@ -1100,6 +1102,18 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 )
                 menuItem.target = self
                 menuItem.representedObject = item.id
+                if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
+                    image.isTemplate = true
+                    menuItem.image = image.withSymbolConfiguration(
+                        NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+                    )
+                }
+                if item.isDestructive {
+                    menuItem.attributedTitle = NSAttributedString(
+                        string: item.title,
+                        attributes: [.foregroundColor: NSColor.systemRed]
+                    )
+                }
                 menu.addItem(menuItem)
             }
 
@@ -1116,6 +1130,64 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 return
             }
             item.action()
+        }
+    }
+
+    final class HoverMenuButton: NSButton {
+        private var trackingAreaRef: NSTrackingArea?
+        private var isHovering = false {
+            didSet { updateAppearance() }
+        }
+
+        override var isHighlighted: Bool {
+            didSet { updateAppearance() }
+        }
+
+        override var isEnabled: Bool {
+            didSet { updateAppearance() }
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingAreaRef {
+                removeTrackingArea(trackingAreaRef)
+            }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingAreaRef = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            guard isEnabled else { return }
+            isHovering = true
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            isHovering = false
+        }
+
+        private func updateAppearance() {
+            guard isEnabled else {
+                layer?.backgroundColor = NSColor.clear.cgColor
+                alphaValue = 0.55
+                return
+            }
+
+            alphaValue = 1
+            let color: NSColor
+            if isHighlighted {
+                color = NSColor.labelColor.withAlphaComponent(0.07)
+            } else if isHovering {
+                color = NSColor.labelColor.withAlphaComponent(0.04)
+            } else {
+                color = .clear
+            }
+            layer?.backgroundColor = color.cgColor
         }
     }
 }
@@ -1189,6 +1261,7 @@ private struct HomeActivityRowShell<Content: View>: View {
             }
         }
         .onHover { isHovering = $0 }
+        .animation(SettingsInteractionPalette.animation, value: isHovering)
     }
 
     private var trailingActions: some View {
@@ -1582,7 +1655,10 @@ private struct HomeAudioIconButton: View {
                 )
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: isActive ? .accent : .neutral,
+            cornerRadius: 7
+        ))
         .accessibilityLabel(title)
     }
 }
@@ -1633,16 +1709,13 @@ private struct HomeMeetingAudioControl: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10), lineWidth: 1)
-                )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: isActive ? .accent : .neutral,
+                cornerRadius: 8,
+                normalFill: isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08),
+                normalStroke: isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
+            ))
             .accessibilityLabel(title)
 
             if let scrubber {
@@ -1925,9 +1998,9 @@ struct HomeFeedbackSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
-                Button("Cancel", action: onCancel)
+                SettingsInlineActionButton(title: "Cancel", action: onCancel)
                 Spacer()
-                Button("Review report") {
+                SettingsInlineActionButton(title: "Review report", tone: .accent) {
                     onSubmit(HomeFeedbackSubmission(
                         target: target,
                         issueKind: issueKind,
@@ -1935,7 +2008,6 @@ struct HomeFeedbackSheet: View {
                         includeDiagnostics: includeDiagnostics
                     ))
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(24)
@@ -1988,17 +2060,14 @@ private struct HomeIssueKindButton: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(background)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(stroke, lineWidth: 1)
-            )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: isSelected ? .accent : .neutral,
+            cornerRadius: 8,
+            normalFill: background,
+            normalStroke: stroke
+        ))
     }
 
     private var background: Color {
@@ -2049,7 +2118,7 @@ struct HomeMeetingPreviewSheet: View {
 
                 Spacer()
 
-                Button("Done", action: onDone)
+                SettingsInlineActionButton(title: "Done", tone: .accent, action: onDone)
                     .keyboardShortcut(.defaultAction)
             }
 
@@ -2115,22 +2184,16 @@ struct HomeMeetingPreviewSheet: View {
             }
 
             HStack {
-                Button {
+                SettingsInlineActionButton(title: "Open Markdown", symbolName: "doc.text") {
                     onOpenMarkdown()
-                } label: {
-                    Label("Open Markdown", systemImage: "doc.text")
                 }
 
-                Button {
+                SettingsInlineActionButton(title: "Copy for agent", symbolName: "square.on.square") {
                     onCopyForAgent()
-                } label: {
-                    Label("Copy for agent", systemImage: "square.on.square")
                 }
 
-                Button {
+                SettingsInlineActionButton(title: "Report issue", symbolName: "flag", tone: .warning) {
                     onReportIssue()
-                } label: {
-                    Label("Report issue", systemImage: "flag")
                 }
 
                 Spacer()
@@ -2482,13 +2545,14 @@ struct HomeNeedsAttentionCard: View {
 
 struct HomeFailedMeetingsCard: View {
     let items: [MeetingSessionController.FailedMeetingItem]
+    let hiddenCount: Int
     let canRetry: Bool
     let retryUnavailableReason: String?
     let audioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
     let onRetry: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealAudio: (MeetingSessionController.FailedMeetingItem) -> Void
     let onClear: (MeetingSessionController.FailedMeetingItem) -> Void
-    let onOpenMeetings: () -> Void
+    let onShowAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2499,9 +2563,9 @@ struct HomeFailedMeetingsCard: View {
                 Text(title)
                     .font(.headline)
                 Spacer()
-                Button("Review all", action: onOpenMeetings)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                if hiddenCount > 0 {
+                    SettingsInlineActionButton(title: showAllTitle, tone: .warning, action: onShowAll)
+                }
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -2536,6 +2600,10 @@ struct HomeFailedMeetingsCard: View {
 
     private var title: String {
         items.count == 1 ? "Recover this meeting" : "Recover unfinished meetings"
+    }
+
+    private var showAllTitle: String {
+        hiddenCount == 1 ? "Show 1 more" : "Show \(hiddenCount) more"
     }
 }
 
@@ -2586,13 +2654,9 @@ private struct HomeFailedMeetingRow: View {
                         }
                         .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
 
-                        Button {
+                        SettingsInlineActionButton(title: "Show Audio", symbolName: "folder") {
                             onRevealAudio()
-                        } label: {
-                            Label("Show Audio", systemImage: "folder")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     } else {
                         Label("No audio kept", systemImage: "speaker.slash")
                             .font(.caption)
@@ -2602,24 +2666,24 @@ private struct HomeFailedMeetingRow: View {
                     Spacer(minLength: 8)
 
                     if item.isRetryable || item.isRetrying {
-                        Button {
+                        SettingsInlineActionButton(
+                            title: item.isRetrying ? "Retrying..." : "Try Again",
+                            symbolName: "arrow.clockwise",
+                            tone: .accent
+                        ) {
                             onRetry()
-                        } label: {
-                            Label(item.isRetrying ? "Retrying..." : "Try Again", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
                         .disabled(retryDisabled)
                         .help(retryHelp)
                     }
 
-                    Button(role: item.hasAudioFiles ? .destructive : nil) {
+                    SettingsInlineActionButton(
+                        title: item.hasAudioFiles ? "Delete" : "Dismiss",
+                        symbolName: item.hasAudioFiles ? "trash" : "xmark",
+                        tone: item.hasAudioFiles ? .destructive : .neutral
+                    ) {
                         onClear()
-                    } label: {
-                        Label(item.hasAudioFiles ? "Delete" : "Dismiss", systemImage: item.hasAudioFiles ? "trash" : "xmark")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

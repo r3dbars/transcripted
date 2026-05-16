@@ -114,4 +114,15 @@ func testFailedMeetingPresentation() {
         )
         assertFalse(presentation.canShowRetryAction, "missing audio should suppress Try again")
     }
+
+    runSuite("FailedMeetingPresentation speaker-name failures stay speaker-specific") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Speaker names could not be saved. The transcript saved, but speaker-name finalization failed.",
+            shortErrorMessage: "Speaker names could not be saved.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Couldn't save speaker names", "speaker finalization failures should not look like full transcript failures")
+        assertTrue(copy.detail.contains("transcript saved"), "copy should say the transcript itself was saved")
+    }
 }

@@ -455,6 +455,210 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         )
     }
 
+    func testRetryDeletesRetainedFailedAudioWhenSpeakerNameFinalizationSucceeds() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed"
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        let failedId = failed.id
+        let retainedMicURL = failed.micAudioURL
+        let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
+        let retainedDirectory = retainedMicURL.deletingLastPathComponent()
+        XCTAssertTrue(retainedMicURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(retainedSystemURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should move into the retained failed-audio archive")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should move into the retained failed-audio archive")
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertTrue(didRetry)
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        let speaker = try XCTUnwrap(request.speakers.first)
+        request.onComplete([
+            SpeakerNameUpdate(
+                persistentSpeakerId: speaker.id,
+                diarizerSpeakerId: speaker.diarizerSpeakerId,
+                channel: speaker.channel,
+                newName: "Sarah Graham",
+                previousName: speaker.currentName,
+                action: .named
+            )
+        ])
+
+        try await waitUntil {
+            manager.failedTranscriptionManager.failedTranscriptions.isEmpty
+                && manager.speakerNamingRequest == nil
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedMicURL.path), "successful failed-meeting retry should delete retained mic audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedSystemURL.path), "successful failed-meeting retry should delete retained system audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedDirectory.path), "successful failed-meeting retry should remove the now-empty retained audio directory")
+    }
+
+    func testRetryKeepsFailedAudioWhenSpeakerNameFinalizationSucceedsAfterArchiveFailure() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let archiveBlockerURL = tempDirectory.appendingPathComponent("audio-archive-blocker")
+        try Data("not a directory".utf8).write(to: archiveBlockerURL)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectoryProvider: { archiveBlockerURL }
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertTrue(didRetry)
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        let speaker = try XCTUnwrap(request.speakers.first)
+        request.onComplete([
+            SpeakerNameUpdate(
+                persistentSpeakerId: speaker.id,
+                diarizerSpeakerId: speaker.diarizerSpeakerId,
+                channel: speaker.channel,
+                newName: "Sarah Graham",
+                previousName: speaker.currentName,
+                action: .named
+            )
+        ])
+
+        try await waitUntil {
+            manager.failedTranscriptionManager.failedTranscriptions.isEmpty
+                && manager.speakerNamingRequest == nil
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "archive failure should leave the failed mic audio on disk")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "archive failure should leave the failed system audio on disk")
+    }
+
+    func testRetryKeepsFailedMeetingWhenSpeakerNameFinalizationFails() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("retry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("retry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertTrue(didRetry)
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        XCTAssertEqual(request.sourceFailedTranscriptionId, failedId)
+        XCTAssertFalse(
+            request.shouldRemoveTemporaryAudioOnCleanup,
+            "failed-retry speaker review must not own cleanup for audio that keeps the failed row retryable"
+        )
+        XCTAssertEqual(
+            manager.failedTranscriptionManager.failedTranscriptions.map(\.id),
+            [failedId],
+            "retry should stay visible until speaker-name finalization succeeds"
+        )
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions[0].audioFilesExist())
+
+        try FileManager.default.removeItem(at: request.transcriptURL)
+        let speaker = try XCTUnwrap(request.speakers.first)
+        request.onComplete([
+            SpeakerNameUpdate(
+                persistentSpeakerId: speaker.id,
+                diarizerSpeakerId: speaker.diarizerSpeakerId,
+                channel: speaker.channel,
+                newName: "Sarah Graham",
+                previousName: speaker.currentName,
+                action: .named
+            )
+        ])
+
+        try await waitUntil {
+            if case .failed(message: "Failed to finalize speaker names") = manager.displayStatus,
+               manager.speakerNamingRequest == nil {
+                return true
+            }
+            return false
+        }
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertTrue(failed.errorMessage.contains("Speaker names could not be saved"))
+        XCTAssertTrue(failed.audioFilesExist(), "failed retry audio should remain available for another pass")
+    }
+
     private func makeManager(
         speechToText: (any SpeechToTextEngine)? = nil,
         diarization: (any DiarizationEngine)? = nil,
@@ -473,6 +677,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
         try? FileManager.default.createDirectory(at: paths.transcripts, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: paths.speakerClips, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: paths.logs, withIntermediateDirectories: true)
 
         let resolvedSpeechToText = speechToText ?? MetadataStubSpeechToTextEngine()
@@ -483,6 +688,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             speechToText: resolvedSpeechToText,
             diarization: resolvedDiarization,
             speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
+            speakerClipsDirectory: paths.speakerClips,
             cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
             retainedAudioDirectory: retainedAudioDirectory,
             retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
@@ -569,17 +775,19 @@ private final class MetadataStubDiarizationEngine: DiarizationEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
     var isReady: Bool
     var initializeCallCount = 0
+    private let segments: [SpeakerSegment]
 
-    init(isReady: Bool = true) {
+    init(isReady: Bool = true, segments: [SpeakerSegment] = []) {
         self.isReady = isReady
+        self.segments = segments
     }
 
     func initialize() async {
         initializeCallCount += 1
         isReady = true
     }
-    func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] { [] }
-    func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] { [] }
+    func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] { segments }
+    func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] { segments }
     func cleanup() {
         isReady = false
     }

@@ -1039,7 +1039,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func retryFailedMeeting(id: UUID) {
-        guard !isRecording, !hasBackgroundTranscriptionWork else { return }
+        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return }
         guard !retryingFailedMeetingIDs.contains(id) else { return }
 
         retryingFailedMeetingIDs.insert(id)
