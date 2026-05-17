@@ -88,6 +88,7 @@ struct TranscriptedSettingsView: View {
     @State private var showWhisperCacheCleanupConfirmation = false
     @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+    @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -193,6 +194,9 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .hotkeysDidChange)) { _ in
             refreshShortcutState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
+            splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
@@ -1674,7 +1678,22 @@ struct TranscriptedSettingsView: View {
                     )
                 )
 
-                Text("Takes effect on the next recording.")
+                SettingsToggleRow(
+                    title: "Identify multiple people on this Mac",
+                    detail: splitLocalSpeakersEnabled
+                        ? "On. After shared-room meetings, Transcripted asks you to name the people captured by your mic."
+                        : "Off. The local mic stays as You, which is simpler when you are the only person near this Mac.",
+                    isOn: Binding(
+                        get: { splitLocalSpeakersEnabled },
+                        set: { newValue in
+                            splitLocalSpeakersEnabled = newValue
+                            trackSettingsToggle("local_speaker_split", enabled: newValue, page: .privacy)
+                            LocalSpeakerPreferences.setEnabled(newValue)
+                        }
+                    )
+                )
+
+                Text("Meeting audio changes apply to the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -2241,6 +2260,8 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
+        meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+        splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: navigation.selectedPage == .shortcuts)
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
