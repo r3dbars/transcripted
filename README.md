@@ -10,7 +10,7 @@ Claude, Codex, and any agent can understand what happened and help you use it
 later.
 Transcripted saves local Markdown your agents can review later.
 
-[Download for macOS](https://github.com/r3dbars/transcripted/releases/latest)
+[Download for macOS](https://transcripted.app/download/)
 · [Visit transcripted.app](https://transcripted.app)
 
 ## Demo
@@ -197,7 +197,7 @@ For the full storage map, see [docs/storage-paths.md](docs/storage-paths.md).
 
 Download the latest `.dmg`:
 
-[github.com/r3dbars/transcripted/releases/latest](https://github.com/r3dbars/transcripted/releases/latest)
+[transcripted.app/download](https://transcripted.app/download/)
 
 Requirements:
 
