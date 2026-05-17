@@ -170,6 +170,99 @@ enum HomeMeetingListItem: Identifiable {
     }
 }
 
+enum HomeRecentWorkItem: Identifiable, Equatable {
+    case dictation(SavedDictationEntry)
+    case meeting(RecentMeetingItem)
+
+    var id: String {
+        switch self {
+        case .dictation(let entry):
+            return "dictation-\(entry.id)"
+        case .meeting(let item):
+            return "meeting-\(item.id)"
+        }
+    }
+
+    var date: Date {
+        switch self {
+        case .dictation(let entry):
+            return entry.createdAt
+        case .meeting(let item):
+            return item.date
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .dictation(let entry):
+            return entry.title
+        case .meeting(let item):
+            return item.title
+        }
+    }
+
+    var typeLabel: String {
+        switch self {
+        case .dictation:
+            return "Dictation"
+        case .meeting:
+            return "Meeting"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dictation:
+            return "mic"
+        case .meeting:
+            return "video"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .dictation(let entry):
+            let trimmed = entry.text
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? entry.sourceAppName : trimmed
+        case .meeting(let item):
+            return item.speakerStatus.summary
+        }
+    }
+
+    var fileURL: URL {
+        switch self {
+        case .dictation(let entry):
+            return entry.url
+        case .meeting(let item):
+            return item.transcriptURL
+        }
+    }
+
+    var statusText: String {
+        switch self {
+        case .dictation(let entry):
+            return HomeArtifactStatus.dictation(entry)?.text ?? "Saved"
+        case .meeting(let item):
+            return item.speakerStatus.needsReview ? "Review" : "Saved"
+        }
+    }
+
+    var statusTone: HomeArtifactStatusTone {
+        switch self {
+        case .dictation(let entry):
+            return HomeArtifactStatus.dictation(entry)?.tone ?? .ready
+        case .meeting(let item):
+            return item.speakerStatus.needsReview ? .warning : .ready
+        }
+    }
+
+    static func == (lhs: HomeRecentWorkItem, rhs: HomeRecentWorkItem) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 struct HomeDeleteConfirmation: Identifiable {
     let id = UUID()
     let title: String
@@ -365,6 +458,826 @@ struct HomeWelcomeHeader: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+enum HomeReadinessTone {
+    case ready
+    case working
+    case needsReview
+
+    var color: Color {
+        switch self {
+        case .ready:
+            return .green
+        case .working:
+            return .blue
+        case .needsReview:
+            return .orange
+        }
+    }
+}
+
+struct HomeReadinessHeader: View {
+    let title: String
+    let status: String
+    let detail: String
+    let tone: HomeReadinessTone
+    let modelName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Color.primary)
+
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(tone.color)
+                    .frame(width: 9, height: 9)
+
+                Text(status)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text(modelName)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text("·")
+                    .foregroundStyle(.tertiary)
+
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct HomeCommandStrip: View {
+    let onStartMeeting: () -> Void
+    let onStartDictation: () -> Void
+    let onImportAudio: () -> Void
+    let onPasteLast: () -> Void
+
+    private let columns = [
+        GridItem(.flexible(minimum: 180), spacing: 12),
+        GridItem(.flexible(minimum: 180), spacing: 12)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            HomeCommandButton(
+                title: "Record Meeting",
+                detail: "Mic and system audio",
+                symbolName: "video",
+                tone: .accent,
+                shortcut: "⌘M",
+                action: onStartMeeting
+            )
+
+            HomeCommandButton(
+                title: "Dictate",
+                detail: "Paste into the current app",
+                symbolName: "mic",
+                tone: .accent,
+                shortcut: "⌘D",
+                action: onStartDictation
+            )
+
+            HomeCommandButton(
+                title: "Import Audio",
+                detail: "Transcribe a saved file",
+                symbolName: "square.and.arrow.down",
+                tone: .neutral,
+                shortcut: "⌘I",
+                action: onImportAudio
+            )
+
+            HomeCommandButton(
+                title: "Paste Last",
+                detail: "Reuse the latest dictation",
+                symbolName: "text.insert",
+                tone: .neutral,
+                shortcut: nil,
+                action: onPasteLast
+            )
+        }
+    }
+}
+
+private struct HomeCommandButton: View {
+    enum Tone {
+        case accent
+        case neutral
+    }
+
+    let title: String
+    let detail: String
+    let symbolName: String
+    let tone: Tone
+    let shortcut: String?
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(iconForeground)
+                    .frame(width: 34, height: 34)
+                    .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let shortcut {
+                    Text(shortcut)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .frame(height: 24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: interactionTone,
+            cornerRadius: 8,
+            normalFill: background,
+            normalStroke: border,
+            hoverFill: hoverBackground,
+            hoverStroke: hoverBorder
+        ))
+        .onHover { isHovering = $0 }
+        .help(detail)
+    }
+
+    private var interactionTone: SettingsInteractionTone {
+        tone == .accent ? .accent : .neutral
+    }
+
+    private var background: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.07)
+        case .neutral:
+            return Color(nsColor: .controlBackgroundColor).opacity(0.76)
+        }
+    }
+
+    private var hoverBackground: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.11)
+        case .neutral:
+            return Color(nsColor: .controlBackgroundColor).opacity(0.96)
+        }
+    }
+
+    private var border: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.17)
+        case .neutral:
+            return Color.primary.opacity(0.08)
+        }
+    }
+
+    private var hoverBorder: Color {
+        switch tone {
+        case .accent:
+            return Color.accentColor.opacity(0.28)
+        case .neutral:
+            return Color.primary.opacity(0.13)
+        }
+    }
+
+    private var iconForeground: Color {
+        tone == .accent ? Color.accentColor : Color.secondary
+    }
+
+    private var iconBackground: Color {
+        tone == .accent ? Color.accentColor.opacity(isHovering ? 0.18 : 0.13) : Color.primary.opacity(0.055)
+    }
+}
+
+struct HomeCurrentActivityBanner: View {
+    let symbolName: String
+    let title: String
+    let status: String
+    let detail: String
+    let tone: HomeTranscriptionActivityPresentation.Tone
+    let progress: Double?
+    let actionTitle: String?
+    let action: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tintColor)
+                .frame(width: 28, height: 28)
+                .background(tintColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+
+                    Text(status)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tintColor)
+                        .lineLimit(1)
+                }
+
+                if let progress {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                        .frame(maxWidth: 240)
+                } else {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if let actionTitle, let action {
+                SettingsInlineActionButton(title: actionTitle, symbolName: "doc.text", tone: .accent, action: action)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(tintColor.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(tintColor.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private var tintColor: Color {
+        switch tone {
+        case .working:
+            return .blue
+        case .success:
+            return .green
+        case .caution:
+            return .orange
+        }
+    }
+}
+
+struct HomeNeedsReviewSection: View {
+    let issues: [HomeNeedsAttentionCard.Issue]
+    let failedMeetings: [MeetingSessionController.FailedMeetingItem]
+    let hiddenFailedMeetingCount: Int
+    let canRetryFailedMeetings: Bool
+    let failedMeetingRetryUnavailableReason: String?
+    let onReviewIssue: (HomeNeedsAttentionCard.Issue) -> Void
+    let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
+    let onShowAllFailedMeetings: () -> Void
+
+    var body: some View {
+        if !issues.isEmpty || !failedMeetings.isEmpty {
+            HomePremiumSection(title: "Needs Review", count: issues.count + failedMeetings.count) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(issues) { issue in
+                        HomeIssueReviewRow(issue: issue) {
+                            onReviewIssue(issue)
+                        }
+
+                        if issue.id != issues.last?.id || !failedMeetings.isEmpty {
+                            Divider()
+                        }
+                    }
+
+                    ForEach(Array(failedMeetings.enumerated()), id: \.element.id) { index, item in
+                        HomeFailedMeetingInlineRow(
+                            item: item,
+                            canRetry: canRetryFailedMeetings,
+                            retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                            onRetry: { onRetryFailedMeeting(item) },
+                            onRevealAudio: { onRevealFailedMeetingAudio(item) },
+                            onClear: { onClearFailedMeeting(item) }
+                        )
+
+                        if index < failedMeetings.count - 1 {
+                            Divider()
+                        }
+                    }
+
+                    if hiddenFailedMeetingCount > 0 {
+                        Divider()
+                        HStack {
+                            Spacer()
+                            SettingsInlineActionButton(
+                                title: hiddenFailedMeetingCount == 1 ? "Show 1 more" : "Show \(hiddenFailedMeetingCount) more",
+                                tone: .warning,
+                                action: onShowAllFailedMeetings
+                            )
+                            Spacer()
+                        }
+                        .padding(.top, 10)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HomeIssueReviewRow: View {
+    let issue: HomeNeedsAttentionCard.Issue
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 8, height: 8)
+
+                Image(systemName: issue.symbolName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(issue.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+
+                    Text(issue.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 10)
+
+                Text(issue.actionTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct HomeRecentWorkSection: View {
+    let sections: [HomeDaySection<HomeRecentWorkItem>]
+    let isLoading: Bool
+    let isLoadingMore: Bool
+    let canLoadMore: Bool
+    let copiedRowID: String?
+    let onOpen: (HomeRecentWorkItem) -> Void
+    let onCopy: (HomeRecentWorkItem) -> Void
+    let onFlag: (HomeRecentWorkItem) -> Void
+    let onReviewSpeakers: (RecentMeetingItem) -> Void
+    let menuItems: (HomeRecentWorkItem) -> [HomeRowMenuItem]
+    let onLoadMore: () -> Void
+
+    var body: some View {
+        HomePremiumSection(title: "Recent Work", count: recentCount) {
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 28)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HomeDayGroupedList(
+                        sections: sections,
+                        emptyMessage: "No saved captures yet.",
+                        getID: { AnyHashable($0.id) },
+                        sectionSpacing: 12,
+                        headerSpacing: 4
+                    ) { item in
+                        HomeRecentWorkRow(
+                            item: item,
+                            isCopied: copiedRowID == item.id,
+                            onOpen: { onOpen(item) },
+                            onCopy: { onCopy(item) },
+                            onFlag: { onFlag(item) },
+                            onReviewSpeakers: reviewSpeakersAction(for: item),
+                            menuItems: menuItems(item)
+                        )
+                    }
+
+                    if canLoadMore || isLoadingMore {
+                        HomeLoadMoreButton(
+                            title: "Load more",
+                            isLoading: isLoadingMore,
+                            action: onLoadMore
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var recentCount: Int? {
+        let count = sections.reduce(0) { $0 + $1.items.count }
+        return count > 0 ? count : nil
+    }
+
+    private func reviewSpeakersAction(for item: HomeRecentWorkItem) -> (() -> Void)? {
+        guard case .meeting(let meeting) = item, meeting.speakerStatus.needsReview else {
+            return nil
+        }
+        return { onReviewSpeakers(meeting) }
+    }
+}
+
+struct HomeRecentWorkRow: View {
+    let item: HomeRecentWorkItem
+    let isCopied: Bool
+    let onOpen: () -> Void
+    let onCopy: () -> Void
+    let onFlag: () -> Void
+    let onReviewSpeakers: (() -> Void)?
+    let menuItems: [HomeRowMenuItem]
+
+    var body: some View {
+        HomeActivityRowShell(
+            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            isCopied: isCopied,
+            onOpen: onOpen,
+            onCopy: onCopy,
+            onFlag: onFlag,
+            menuItems: menuItems,
+            leadingAccessory: reviewSpeakersAccessory,
+            compact: true
+        ) {
+            HStack(alignment: .center, spacing: 11) {
+                Image(systemName: item.systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(item.title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+
+                        Text(item.typeLabel)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.primary.opacity(0.045))
+                            )
+                    }
+
+                    Text(item.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HomeStatusPill(text: item.statusText, tone: item.statusTone)
+            }
+        }
+    }
+
+    private var iconColor: Color {
+        switch item {
+        case .dictation:
+            return Color.secondary
+        case .meeting:
+            return Color.accentColor
+        }
+    }
+
+    private var reviewSpeakersAccessory: AnyView? {
+        guard let onReviewSpeakers else { return nil }
+        return AnyView(
+            HomeAttentionActionButton(
+                title: "Review",
+                isDisabled: false,
+                tint: .orange,
+                action: onReviewSpeakers
+            )
+        )
+    }
+}
+
+private struct HomeStatusPill: View {
+    let text: String
+    let tone: HomeArtifactStatusTone
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(color.opacity(0.10))
+        )
+    }
+
+    private var color: Color {
+        switch tone {
+        case .ready:
+            return .green
+        case .warning:
+            return .orange
+        case .failure:
+            return .red
+        }
+    }
+}
+
+struct HomeLatestCapturePanel: View {
+    let item: HomeRecentWorkItem?
+    let stats: [HomeStatItem]
+    let streak: Int?
+    let onOpen: (HomeRecentWorkItem) -> Void
+    let onReveal: (HomeRecentWorkItem) -> Void
+    let onCopy: (HomeRecentWorkItem) -> Void
+    let onAskAgent: () -> Void
+    let onFlag: (HomeRecentWorkItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            latestSection
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Overall")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(stats.prefix(4)) { stat in
+                        HomeStatsStripMetric(stat: stat)
+                    }
+
+                    if let streak, streak > 0 {
+                        HomeStatsStripMetric(
+                            stat: HomeStatItem(
+                                id: "streak",
+                                symbolName: "flame.fill",
+                                value: "\(streak)d",
+                                label: "streak"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 286, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var latestSection: some View {
+        if let item {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: item.systemImage)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 34, height: 34)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Latest Capture")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+
+                        Text(item.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .lineLimit(2)
+
+                        Text(latestMeta(for: item))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                VStack(spacing: 0) {
+                    HomeInspectorActionRow(title: "Open Markdown", symbolName: "doc.text") {
+                        onOpen(item)
+                    }
+                    Divider()
+                    HomeInspectorActionRow(title: "Reveal in Finder", symbolName: "folder") {
+                        onReveal(item)
+                    }
+                    Divider()
+                    HomeInspectorActionRow(title: "Copy for Agent", symbolName: "square.on.square") {
+                        onCopy(item)
+                    }
+                    Divider()
+                    HomeInspectorActionRow(title: "Ask Agent", symbolName: "sparkles") {
+                        onAskAgent()
+                    }
+                    Divider()
+                    HomeInspectorActionRow(title: "Report Issue", symbolName: "flag") {
+                        onFlag(item)
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.025))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Latest Capture")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Text("Nothing saved yet")
+                    .font(.system(size: 15, weight: .semibold))
+
+                Text("Record a meeting, dictate, or import audio to create the first Markdown file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func latestMeta(for item: HomeRecentWorkItem) -> String {
+        "\(HomeLatestCapturePanel.dateFormatter.string(from: item.date)) · \(item.typeLabel)"
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private struct HomeInspectorActionRow: View {
+    let title: String
+    let symbolName: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 38)
+            .background(Color.primary.opacity(isHovering ? 0.04 : 0))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+}
+
+struct HomePremiumSection<Content: View>: View {
+    let title: String
+    let count: Int?
+    @ViewBuilder let content: Content
+
+    init(title: String, count: Int? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.count = count
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                if let count {
+                    Text("\(count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.055))
+                        )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
         }
     }
 }
@@ -1757,6 +2670,10 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
+                        let identifiedItems = section.items.map {
+                            HomeIdentifiedValue(id: getID($0), value: $0)
+                        }
+
                         Text(section.label)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
@@ -1765,10 +2682,10 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                             .padding(.bottom, 2)
 
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
-                                row(item)
-                                    .id(getID(item))
-                                if index < section.items.count - 1 {
+                            ForEach(Array(identifiedItems.enumerated()), id: \.element.id) { index, identified in
+                                row(identified.value)
+                                    .id(identified.id)
+                                if index < identifiedItems.count - 1 {
                                     Divider()
                                 }
                             }
@@ -1778,6 +2695,11 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             }
         }
     }
+}
+
+private struct HomeIdentifiedValue<Item>: Identifiable {
+    let id: AnyHashable
+    let value: Item
 }
 
 // MARK: - Activity tabs container
