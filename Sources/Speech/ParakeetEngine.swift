@@ -1350,7 +1350,7 @@ class ParakeetEngine: ObservableObject {
                         try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
                     }
                     if !restarted {
-                        self.recordingInterrupted = true
+                        self.interruptRecordingAndClearRecoveredTimeline()
                         EventReporter.shared.capture(level: .error, engine: "parakeet",
                             event: "recording_interrupted",
                             message: "Recording could not restart after device change within retry budget",
@@ -1384,7 +1384,7 @@ class ParakeetEngine: ObservableObject {
                     )
                 )
                 if failureAction.markRecordingInterrupted {
-                    self.recordingInterrupted = true
+                    self.interruptRecordingAndClearRecoveredTimeline()
                     EventReporter.shared.capture(level: .error, engine: "parakeet",
                         event: "recording_interrupted",
                         message: "Recording interrupted — engine rewarm failed after device change",
@@ -1479,7 +1479,7 @@ class ParakeetEngine: ObservableObject {
                 )
             )
             if failureAction.markRecordingInterrupted {
-                self.recordingInterrupted = true
+                self.interruptRecordingAndClearRecoveredTimeline()
                 EventReporter.shared.capture(
                     level: .error,
                     engine: "parakeet",
@@ -1994,7 +1994,7 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
 
         if wasRecording {
-            recordingInterrupted = true
+            interruptRecordingAndClearRecoveredTimeline()
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
                 message: "Recording interrupted by system sleep/wake")
         }
@@ -2596,7 +2596,7 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
                     message: "Audio engine could not recover after reset",
                     context: ["audio_device": self.inputDeviceName])
-                self.recordingInterrupted = true
+                self.interruptRecordingAndClearRecoveredTimeline()
             }
         }
     }
@@ -2665,6 +2665,11 @@ class ParakeetEngine: ObservableObject {
     private func clearRecoveredRecordingTimeline(keepingCapacity: Bool = true) {
         recoveredRecordingTimeline.removeAll(keepingCapacity: keepingCapacity)
         preservingRecordingAcrossRecovery = false
+    }
+
+    private func interruptRecordingAndClearRecoveredTimeline() {
+        clearRecoveredRecordingTimeline(keepingCapacity: true)
+        recordingInterrupted = true
     }
 
     private func drainRecordedSamplesForInference() async -> (nativeSampleCount: Int, samples16k: [Float])? {

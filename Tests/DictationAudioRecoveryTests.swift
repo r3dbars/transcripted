@@ -107,6 +107,16 @@ func testDictationAudioRecovery() {
             "recovery preservation should have a single cleanup path"
         )
         assertTrue(
+            engineSource.contains("private func interruptRecordingAndClearRecoveredTimeline()"),
+            "interrupted recovery should clear preserved audio before publishing interruption"
+        )
+        let directInterruptAssignments = engineSource.components(separatedBy: "recordingInterrupted = true").count - 1
+        assertEqual(
+            directInterruptAssignments,
+            1,
+            "all recording interruption paths should go through the cleanup helper"
+        )
+        assertTrue(
             sessionSource.contains("appState.sttRouter.cancel()\n            let failureKind"),
             "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
         )
