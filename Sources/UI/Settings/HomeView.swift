@@ -491,6 +491,7 @@ private struct HomeHeroModeTab: View {
     let action: () -> Void
 
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var body: some View {
@@ -508,6 +509,7 @@ private struct HomeHeroModeTab: View {
             .background(
                 HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
                     .fill(tabFill)
+                    .shadow(color: tabGlow, radius: tabGlowRadius, x: 0, y: 0)
             )
             .overlay(
                 HomeHeroTabBorderShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
@@ -519,6 +521,7 @@ private struct HomeHeroModeTab: View {
         .help("Show \(mode.switchTitle.lowercased())")
         .zIndex(isSelected ? 1 : 0)
         .onHover { isHovering = $0 }
+        .animation(reduceMotion ? nil : SettingsInteractionPalette.animation, value: isHovering)
         .accessibilityLabel(mode.switchTitle)
         .accessibilityValue(isSelected ? "Selected" : "")
     }
@@ -528,13 +531,24 @@ private struct HomeHeroModeTab: View {
             return surfaceFill
         }
         if isHovering {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.66)
+            return Color(nsColor: .controlBackgroundColor).opacity(0.72)
         }
         return HomeHeroTabMetrics.inactiveFill
     }
 
     private var tabStroke: Color {
-        isSelected ? Color.primary.opacity(0.11) : Color.primary.opacity(0.06)
+        if isSelected {
+            return Color.primary.opacity(0.11)
+        }
+        return isHovering ? Color.accentColor.opacity(0.20) : Color.primary.opacity(0.06)
+    }
+
+    private var tabGlow: Color {
+        isHovering && !isSelected && !reduceMotion ? Color.accentColor.opacity(0.11) : Color.clear
+    }
+
+    private var tabGlowRadius: CGFloat {
+        isHovering && !isSelected && !reduceMotion ? 8 : 0
     }
 
     private var surfaceFill: Color {

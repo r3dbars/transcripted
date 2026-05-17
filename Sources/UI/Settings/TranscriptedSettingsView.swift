@@ -16,6 +16,29 @@ private struct SettingsSidebarSection: Identifiable {
     ]
 }
 
+private struct SettingsSidebarRow: View {
+    let page: TranscriptedSettingsPage
+    let isSelected: Bool
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Label(page.title, systemImage: page.systemImage)
+            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+            .padding(.horizontal, 9)
+            .contentShape(Rectangle())
+            .settingsHoverGlow(
+                isActive: isHovering && !isSelected,
+                cornerRadius: 8,
+                fill: Color.primary.opacity(0.032),
+                stroke: Color.accentColor.opacity(0.14),
+                shadow: Color.accentColor.opacity(0.08),
+                shadowRadius: 7
+            )
+            .onHover { isHovering = $0 }
+    }
+}
+
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -189,7 +212,10 @@ struct TranscriptedSettingsView: View {
     @ViewBuilder
     private func sidebarRows(for pages: [TranscriptedSettingsPage]) -> some View {
         ForEach(pages) { page in
-            Label(page.title, systemImage: page.systemImage)
+            SettingsSidebarRow(
+                page: page,
+                isSelected: navigation.selectedPage == page
+            )
                 .tag(page)
         }
     }
