@@ -1917,23 +1917,14 @@ struct HomeSpeakersTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Speakers")
-                        .font(.headline)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Speakers")
+                    .font(.headline)
 
-                    Text("Name deferred speakers, play samples, merge duplicates, or delete saved profiles.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                Button("Refresh") {
-                    model.refresh()
-                }
-                .controlSize(.small)
+                Text("Fix names that need attention, then browse everyone by meeting count.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             SpeakerPeopleSettingsSection(model: model)
