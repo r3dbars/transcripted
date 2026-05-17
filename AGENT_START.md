@@ -17,8 +17,10 @@ exist for migration and reference only.
 2. `AGENTS.md` - canonical agent rules
 3. `docs/repo-layout.md` - live directory map
 4. `docs/agent-onboarding.md` - doc trust order
-5. nearest `CLAUDE.md` for the area being edited
-6. `.agents/test-matrix.yml` - path-to-verification map
+5. `CLAUDE.md` - Claude-oriented repo orientation
+6. `Sources/CLAUDE.md` - app target orientation
+7. nearest `CLAUDE.md` for the area being edited
+8. `.agents/test-matrix.yml` - path-to-verification map
 
 ## Edit Map
 
