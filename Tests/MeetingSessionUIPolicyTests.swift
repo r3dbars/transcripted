@@ -68,6 +68,21 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
+    runSuite("MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork — waits for terminal status") {
+        assertFalse(
+            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
+                hasTerminalOutcome: false
+            ),
+            "the trigger should survive if active work clears before the saved/failed status arrives"
+        )
+        assertTrue(
+            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
+                hasTerminalOutcome: true
+            ),
+            "the trigger can clear once terminal telemetry has a status to report"
+        )
+    }
+
     runSuite("MeetingRecordingTitlePolicy — explicit prompt title wins over calendar fallback") {
         assertEqual(
             MeetingRecordingTitlePolicy.resolve(

@@ -15,6 +15,12 @@ enum MeetingSessionUIPolicy {
         activeTranscriptions == 0
             && !isPreparingQueuedTranscriptionStart
     }
+
+    static func shouldClearTranscriptionTriggerAfterBackgroundWork(
+        hasTerminalOutcome: Bool
+    ) -> Bool {
+        hasTerminalOutcome
+    }
 }
 
 enum MeetingRecordingTitlePolicy {

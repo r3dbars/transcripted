@@ -1615,7 +1615,11 @@ final class MeetingSessionController: ObservableObject {
     ) {
         guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
         guard !isCaptureSessionActive else { return }
-        activeTranscriptionTrigger = .unknown
+        if MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
+            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil
+        ) {
+            activeTranscriptionTrigger = .unknown
+        }
 
         switch lastTerminalTranscriptionOutcome {
         case .failed(let message):
