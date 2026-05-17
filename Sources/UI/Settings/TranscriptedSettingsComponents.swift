@@ -198,6 +198,62 @@ struct SettingsHoverButtonStyle: ButtonStyle {
     }
 }
 
+private struct SettingsHoverGlowModifier: ViewModifier {
+    let isActive: Bool
+    let cornerRadius: CGFloat
+    let fill: Color
+    let stroke: Color
+    let shadow: Color
+    let lineWidth: CGFloat
+    let shadowRadius: CGFloat
+    let shadowYOffset: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isActive ? fill : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(isActive ? stroke : Color.clear, lineWidth: lineWidth)
+            )
+            .shadow(
+                color: isActive && !reduceMotion ? shadow : Color.clear,
+                radius: isActive && !reduceMotion ? shadowRadius : 0,
+                x: 0,
+                y: shadowYOffset
+            )
+            .animation(reduceMotion ? nil : SettingsInteractionPalette.animation, value: isActive)
+    }
+}
+
+extension View {
+    func settingsHoverGlow(
+        isActive: Bool,
+        cornerRadius: CGFloat,
+        fill: Color = Color.primary.opacity(0.035),
+        stroke: Color = Color.accentColor.opacity(0.16),
+        shadow: Color = Color.accentColor.opacity(0.10),
+        lineWidth: CGFloat = 1,
+        shadowRadius: CGFloat = 8,
+        shadowYOffset: CGFloat = 0
+    ) -> some View {
+        modifier(SettingsHoverGlowModifier(
+            isActive: isActive,
+            cornerRadius: cornerRadius,
+            fill: fill,
+            stroke: stroke,
+            shadow: shadow,
+            lineWidth: lineWidth,
+            shadowRadius: shadowRadius,
+            shadowYOffset: shadowYOffset
+        ))
+    }
+}
+
 struct SettingsInlineActionButton: View {
     let title: String
     var symbolName: String? = nil
