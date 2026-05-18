@@ -81,10 +81,11 @@ final class RuntimeDiagnostics {
             start()
         }
         guard marker != nil else { return }
+        let shouldResetToIdle = resetToIdle || !(activeWorkProvider?() ?? false)
         updateMarker { marker in
             marker.sessionActive = false
             marker.lastEvent = "\(kind)_\(outcome)"
-            if resetToIdle {
+            if shouldResetToIdle {
                 marker.sessionKind = "none"
                 marker.sessionStage = "idle"
             } else {

@@ -210,6 +210,52 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(shouldReport, true, "active meeting shutdowns should stay visible")
     }
 
+    runSuite("RuntimeDiagnosticsStore suppresses completed dictation before heartbeat cleanup") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "completed-dictation",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "dictation_completed",
+            sessionKind: "dictation",
+            sessionStage: "completed",
+            sessionActive: false
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_260)
+        )
+
+        assertEqual(shouldReport, false, "completed dictation should not be reported as an unclean shutdown")
+    }
+
+    runSuite("RuntimeDiagnosticsStore suppresses idle terminal session events") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "idle-terminal",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "dictation_microphone_start_timeout",
+            sessionKind: "none",
+            sessionStage: "idle",
+            sessionActive: false
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_260)
+        )
+
+        assertEqual(shouldReport, false, "terminal idle outcomes should not report after the heartbeat window")
+    }
+
     runSuite("RuntimeDiagnosticsStore clears inactive session context on heartbeat") {
         var marker = RuntimeDiagnosticsMarker(
             launchID: "completed-dictation",
