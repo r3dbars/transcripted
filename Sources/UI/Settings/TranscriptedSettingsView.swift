@@ -180,8 +180,11 @@ struct TranscriptedSettingsView: View {
             }
             trackSettingsPageViewed(page, source: "navigation")
         }
-        .onChange(of: meetingSession.lastSavedTranscriptURL) { _, _ in
+        .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(force: true)
+            if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
+                speakerPeopleModel.refresh()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures(force: true)
