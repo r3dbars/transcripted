@@ -42,7 +42,7 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
             "trigger": trigger.rawValue,
             "source_app_name": sourceApp?.localizedName ?? "",
             "source_app_bundle_id": sourceApp?.bundleIdentifier ?? "",
-            "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+            "session_state": dictationSessionStateName(session),
             "overlay_state": overlayStateName(session.overlayController?.state)
         ]
     )
@@ -54,6 +54,14 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
     } else {
         session.startDictation(sourceApp: sourceApp, trigger: trigger)
     }
+}
+
+@MainActor
+private func dictationSessionStateName(_ session: DictationSessionController?) -> String {
+    guard let session else { return "idle" }
+    if session.isDictating { return "dictating" }
+    if session.isInSession { return "drafting" }
+    return "idle"
 }
 
 @MainActor
@@ -616,7 +624,7 @@ class ContextCaptureEngine: ObservableObject {
                 message: "Ignored rapid repeat hands-free dictation trigger",
                 context: [
                     "hotkey_id": "dictation_hands_free",
-                    "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
+                    "session_state": dictationSessionStateName(sessionController),
                     "overlay_state": overlayStateName(sessionController?.overlayController?.state)
                 ]
             )
@@ -637,7 +645,7 @@ class ContextCaptureEngine: ObservableObject {
                 message: "Ignored rapid repeat push-to-talk dictation trigger",
                 context: [
                     "hotkey_id": "dictation_push_to_talk",
-                    "session_state": sessionController?.isDictating == true ? "dictating" : (sessionController?.isInSession == true ? "drafting" : "idle"),
+                    "session_state": dictationSessionStateName(sessionController),
                     "overlay_state": overlayStateName(sessionController?.overlayController?.state)
                 ]
             )
@@ -655,7 +663,7 @@ class ContextCaptureEngine: ObservableObject {
                 "trigger": "physical_key",
                 "source_app_name": frontApp?.localizedName ?? "",
                 "source_app_bundle_id": frontApp?.bundleIdentifier ?? "",
-                "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                "session_state": dictationSessionStateName(session),
                 "overlay_state": overlayStateName(session.overlayController?.state)
             ]
         )
@@ -677,7 +685,7 @@ class ContextCaptureEngine: ObservableObject {
             message: "Dictation push-to-talk trigger released",
             context: [
                 "trigger": "physical_key",
-                "session_state": session.isDictating ? "dictating" : (session.isInSession ? "drafting" : "idle"),
+                "session_state": dictationSessionStateName(session),
                 "overlay_state": overlayStateName(session.overlayController?.state)
             ]
         )
