@@ -1808,6 +1808,7 @@ struct HomeActivityTabsCard: View {
     let copiedRowID: String?
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
+    let onImportAudio: () -> Void
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let onFlagDictation: (SavedDictationEntry) -> Void
@@ -1825,6 +1826,10 @@ struct HomeActivityTabsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if selectedTab == .meetings {
+                HomeMeetingImportActionRow(onImportAudio: onImportAudio)
+            }
+
             if isLoading {
                 HStack {
                     ProgressView()
@@ -1923,6 +1928,33 @@ struct HomeActivityTabsCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct HomeMeetingImportActionRow: View {
+    let onImportAudio: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Transcribe Audio File")
+                    .font(.subheadline.weight(.semibold))
+                Text("Turn a saved audio file into meeting notes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            SettingsInlineActionButton(
+                title: "Choose File",
+                symbolName: "waveform",
+                tone: .accent,
+                action: onImportAudio
+            )
+            .help("Choose an audio file to transcribe")
+        }
+        .padding(.bottom, 6)
     }
 }
 
