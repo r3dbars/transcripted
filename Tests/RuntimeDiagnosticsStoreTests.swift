@@ -233,6 +233,30 @@ func testRuntimeDiagnosticsStore() {
         assertEqual(shouldReport, false, "completed dictation should not be reported as an unclean shutdown")
     }
 
+    runSuite("RuntimeDiagnosticsStore reports terminal dictation retained during active work") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "dictation-with-background-work",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "dictation_completed",
+            sessionKind: "dictation",
+            sessionStage: "completed",
+            sessionActive: false,
+            retainedForActiveWork: true
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_260)
+        )
+
+        assertEqual(shouldReport, true, "terminal dictation should still report when retained because other work was active")
+    }
+
     runSuite("RuntimeDiagnosticsStore suppresses idle terminal session events") {
         let marker = RuntimeDiagnosticsMarker(
             launchID: "idle-terminal",

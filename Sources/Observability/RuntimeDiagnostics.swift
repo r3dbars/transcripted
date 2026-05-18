@@ -72,6 +72,7 @@ final class RuntimeDiagnostics {
             marker.sessionStage = stage
             marker.sessionActive = active
             marker.lastEvent = "\(kind)_\(stage)"
+            marker.retainedForActiveWork = nil
         }
     }
 
@@ -88,9 +89,11 @@ final class RuntimeDiagnostics {
             if shouldResetToIdle {
                 marker.sessionKind = "none"
                 marker.sessionStage = "idle"
+                marker.retainedForActiveWork = nil
             } else {
                 marker.sessionKind = kind
                 marker.sessionStage = outcome
+                marker.retainedForActiveWork = true
             }
         }
     }

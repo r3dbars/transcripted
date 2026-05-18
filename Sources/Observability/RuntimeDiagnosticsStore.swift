@@ -12,6 +12,7 @@ struct RuntimeDiagnosticsMarker: Codable, Equatable {
     var sessionKind: String
     var sessionStage: String
     var sessionActive: Bool
+    var retainedForActiveWork: Bool? = nil
 }
 
 enum RuntimeDiagnosticsStore {
@@ -164,6 +165,7 @@ enum RuntimeDiagnosticsStore {
         }
 
         if marker.sessionKind == "dictation" {
+            guard marker.retainedForActiveWork != true else { return false }
             return terminalDictationStages.contains(marker.sessionStage)
         }
 
@@ -221,5 +223,6 @@ enum RuntimeDiagnosticsStore {
 
         marker.sessionKind = "none"
         marker.sessionStage = "idle"
+        marker.retainedForActiveWork = nil
     }
 }
