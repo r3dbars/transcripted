@@ -1,7 +1,7 @@
 import Foundation
 
 func testHomeImportAudioAction() {
-    runSuite("Home meetings tab exposes imported-audio transcription") {
+    runSuite("General settings exposes imported-audio transcription") {
         let settingsSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
             encoding: .utf8
@@ -12,21 +12,22 @@ func testHomeImportAudioAction() {
         )) ?? ""
 
         assertTrue(
-            settingsSource.contains("onImportAudio: {"),
-            "settings home should pass an import-audio action into the meetings tab"
+            settingsSource.contains("SettingsSection(\n                title: \"Audio Files\""),
+            "general settings should include an audio-file section"
         )
         assertTrue(
             settingsSource.contains("actions.importAudioFile()"),
-            "settings home import action should call the existing audio import flow"
+            "general settings import action should call the existing audio import flow"
         )
         assertTrue(
-            homeSource.contains("Transcribe Audio File"),
-            "meetings tab should show a visible audio import affordance"
+            settingsSource.contains("Transcribe Audio File")
+                && settingsSource.contains("title: \"Choose File\""),
+            "general settings should expose a visible choose-file control"
         )
         assertTrue(
-            homeSource.contains("SettingsInlineActionButton(")
-                && homeSource.contains("title: \"Choose File\""),
-            "meetings tab should expose a clickable choose-file control"
+            !homeSource.contains("HomeMeetingImportActionRow")
+                && !homeSource.contains("onImportAudio"),
+            "meetings tab should not carry the imported-audio action"
         )
     }
 }
