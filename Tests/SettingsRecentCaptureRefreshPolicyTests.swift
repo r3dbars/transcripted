@@ -78,4 +78,18 @@ func testSettingsRecentCaptureRefreshPolicy() {
             "new/deleted captures should refresh even when passive refreshes would be skipped"
         )
     }
+
+    runSuite("SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave — refreshes on concrete saves") {
+        assertTrue(
+            SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(
+                URL(fileURLWithPath: "/tmp/Transcripted/captures/meetings/example.md")
+            ),
+            "a newly saved meeting can add speaker review work, so the speaker queue should refresh"
+        )
+
+        assertFalse(
+            SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(nil),
+            "nil reset events should not trigger extra speaker queue work"
+        )
+    }
 }

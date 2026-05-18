@@ -16,6 +16,12 @@ enum SettingsRecentCaptureRefreshPolicy {
     }
 }
 
+enum SettingsSpeakerQueueRefreshPolicy {
+    static func shouldRefreshAfterMeetingTranscriptSave(_ url: URL?) -> Bool {
+        url != nil
+    }
+}
+
 enum SettingsDashboardRefreshPolicy {
     static let passiveRefreshMinimumInterval: TimeInterval = 1.5
 
