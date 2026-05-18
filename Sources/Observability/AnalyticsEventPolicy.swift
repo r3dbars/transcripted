@@ -226,7 +226,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "anonymous_usage_enabled",
                 "calendar_status",
-                "completion_path",
+                "completion_flow",
                 "crash_reporting_enabled",
                 "first_dictation_saved",
                 "flow_elapsed_bucket",

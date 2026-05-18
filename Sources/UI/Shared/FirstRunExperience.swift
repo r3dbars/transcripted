@@ -253,7 +253,7 @@ enum FirstRunExperience {
                 calendarGranted: calendarGranted,
                 meetingPromptsEnabled: meetingPromptsEnabled
             ),
-            "completion_path": completionPath.rawValue,
+            "completion_flow": completionPath.rawValue,
             "crash_reporting_enabled": booleanString(crashReportingEnabled),
             "meeting_recording_ready": booleanString(systemAudioGranted),
             "step_id": "done",

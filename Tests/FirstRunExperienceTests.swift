@@ -98,7 +98,7 @@ func testFirstRunExperience() {
             elapsedSeconds: 75
         )
 
-        assertEqual(properties["completion_path"], "meetings", "completion path should stay a coarse enum")
+        assertEqual(properties["completion_flow"], "meetings", "completion flow should stay a coarse enum")
         assertEqual(properties["meeting_recording_ready"], "true", "completion should preserve meeting readiness")
         assertEqual(properties["calendar_status"], "not_granted", "calendar status should avoid raw event details")
         assertEqual(properties["anonymous_usage_enabled"], "true", "completion should preserve analytics preference state")
@@ -108,6 +108,12 @@ func testFirstRunExperience() {
         assertNil(properties["transcript"], "completion analytics should not include spoken content")
         assertNil(properties["audio_path"], "completion analytics should not include local paths")
         assertNil(properties["meeting_title"], "completion analytics should not include titles")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            properties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["completion_flow"], "meetings", "completion flow should survive analytics sanitization")
     }
 
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
