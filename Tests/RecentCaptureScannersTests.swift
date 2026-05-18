@@ -79,6 +79,39 @@ func testRecentCaptureScanners() {
         )
     }
 
+    runSuite("RecentMeetingSpeakerStatus.detect deduplicates repeated generic labels") {
+        let markdown = """
+        # Repeated generic labels
+
+        ## Transcript
+
+        **00:01** [Mic/Speaker 1]
+        First line.
+
+        **00:02** [System/Speaker 1]
+        Same generic label again.
+
+        **00:03** [System/Unknown speaker]
+        Another generic label.
+        """
+
+        assertEqual(
+            RecentMeetingSpeakerStatus.detect(in: markdown),
+            .needsReview(2),
+            "speaker review badges should count unique generic labels, not every line"
+        )
+        assertEqual(
+            RecentMeetingSpeakerStatus.needsReview(1).summary,
+            "1 speaker needs review",
+            "singular speaker summary should read naturally"
+        )
+        assertEqual(
+            RecentMeetingSpeakerStatus.ready.summary,
+            "Speakers ready",
+            "ready speaker status should stay terse"
+        )
+    }
+
     runSuite("RecentMeetingSpeakerReviewActionPolicy hides stale meeting review buttons when people queue is clean") {
         assertFalse(
             RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(

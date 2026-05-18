@@ -66,7 +66,9 @@ class TranscriptedAppState: ObservableObject {
                 message: error.localizedDescription)
         }
 
-        sparkleUpdater.performStartupUpdateCheckIfNeeded()
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+            sparkleUpdater.performStartupUpdateCheckIfNeeded()
+        }
         AppSoundPlayer.shared.setWarningReporter { cue in
             Task { @MainActor in
                 EventReporter.shared.capture(

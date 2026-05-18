@@ -754,6 +754,149 @@ final class ContextStoreTests: XCTestCase {
         ))
     }
 
+    func testReadMeetingRejectsSymlinkEscape() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meetingsDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = root.appendingPathComponent("dictations", isDirectory: true)
+        let outsideDir = root.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+
+        let outsideFile = outsideDir.appendingPathComponent("Escaped.md")
+        try makeMeetingMarkdown(title: "Escaped", date: "2026-04-18", body: "[00:03] [Mic/You] escaped content")
+            .write(to: outsideFile, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: meetingsDir.appendingPathComponent("Escaped.md"),
+            withDestinationURL: outsideFile
+        )
+
+        XCTAssertThrowsError(try CLIContextStore.readMeeting(
+            filename: "Escaped.md",
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        ))
+    }
+
+    func testRecentAllIncludesMeetingsAndDictationsInOneFeed() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Roadmap meeting", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Roadmap meeting.md"), atomically: true, encoding: .utf8)
+        try makeDictationMarkdown(text: "Roadmap dictation note.")
+            .write(to: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .all,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.map(\.kind.rawValue), ["dictation", "meeting"])
+        XCTAssertEqual(items.map(\.title), ["Morning note", "Roadmap meeting"])
+    }
+
+    func testSearchAllIncludesMeetingsAndDictations() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+        try makeDictationMarkdown(text: "Roadmap dictation note.")
+            .write(to: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.search(
+            query: "roadmap",
+            speaker: nil,
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .all,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.map(\.kind.rawValue).sorted(), ["dictation", "meeting"])
+    }
+
+    func testSearchWithSpeakerFilterDoesNotReturnDictations() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+        try makeDictationMarkdown(text: "Roadmap dictation note.")
+            .write(to: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.search(
+            query: "roadmap",
+            speaker: "You",
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .all,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.kind, .meeting)
+    }
+
+    func testRecentSkipsMalformedMeetingMarkdown() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try "not markdown at all".write(
+            to: meetingsDir.appendingPathComponent("Broken.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try makeMeetingMarkdown(title: "Good meeting", date: "2026-04-18", body: "[00:03] [Mic/You] Good note.")
+            .write(to: meetingsDir.appendingPathComponent("Good meeting.md"), atomically: true, encoding: .utf8)
+
+        let items = CLIContextStore.recent(
+            in: CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir),
+            kind: .meeting,
+            count: 5,
+            dateFrom: nil,
+            dateTo: nil
+        )
+
+        XCTAssertEqual(items.map(\.title), ["Good meeting"])
+    }
+
+    func testContextItemEncodesStableJSONKeys() throws {
+        let item = CLIContextItem(
+            kind: .dictation,
+            title: "Morning note",
+            filename: "Dictations_2026-04-07",
+            entryId: "dictation-20260407-091500-000",
+            date: "2026-04-07",
+            datetime: "2026-04-07T09:15:00-0500",
+            preview: "Ship the note.",
+            wordCount: 3,
+            speakers: nil,
+            sourceAppName: "Slack",
+            delivery: "copied"
+        )
+
+        let json = String(data: try JSONEncoder.contextPretty.encode(item), encoding: .utf8)
+
+        XCTAssertTrue(json?.contains("\"entry_id\" : \"dictation-20260407-091500-000\"") == true)
+        XCTAssertTrue(json?.contains("\"source_app_name\" : \"Slack\"") == true)
+        XCTAssertTrue(json?.contains("\"word_count\" : 3") == true)
+        XCTAssertTrue(json?.contains("\"kind\" : \"dictation\"") == true)
+    }
+
     private func makeTempDir() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

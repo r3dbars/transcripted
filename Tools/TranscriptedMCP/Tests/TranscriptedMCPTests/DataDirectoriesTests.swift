@@ -321,6 +321,38 @@ final class DataDirectoriesTests: XCTestCase {
         ])
     }
 
+    func testResolveUsesCurrentTranscriptedPreferenceDomain() throws {
+        let customRoot = tempHome.appendingPathComponent("current-preference-captures", isDirectory: true)
+        let customMeetings = customRoot.appendingPathComponent("meetings", isDirectory: true)
+        let customDictations = customRoot.appendingPathComponent("dictations", isDirectory: true)
+        let preferencesURL = tempHome
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Preferences", isDirectory: true)
+            .appendingPathComponent("app.transcripted.Transcripted.plist", isDirectory: false)
+        try FileManager.default.createDirectory(at: customMeetings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: customDictations, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: preferencesURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: ["transcriptSaveLocation": customRoot.path],
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: preferencesURL)
+
+        let directories = TranscriptedDataDirectories.resolve(
+            environment: [:],
+            fileManager: .default,
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(directories.meetingDirs.map(\.standardizedFileURL.path), [
+            customMeetings.standardizedFileURL.path,
+        ])
+        XCTAssertEqual(directories.dictationDirs.map(\.standardizedFileURL.path), [
+            customDictations.standardizedFileURL.path,
+        ])
+    }
+
     func testResolveExplicitOverridesWinOverAppDirectoryManifest() throws {
         let manifestRoot = tempHome.appendingPathComponent("manifest-captures", isDirectory: true)
         let overrideMeetings = tempHome.appendingPathComponent("override-meetings", isDirectory: true)

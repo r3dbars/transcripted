@@ -131,6 +131,18 @@ final class TranscriptLoaderTests: XCTestCase {
         XCTAssertEqual(day?.entries.first?.title, "Morning note")
     }
 
+    func testLoadMalformedDictationMarkdownReturnsNil() throws {
+        try "# Dictations with no frontmatter".write(
+            to: tempDir.appendingPathComponent("Dictations_2026-04-07.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let day = TranscriptLoader.loadDictationDay(tempDir.appendingPathComponent("Dictations_2026-04-07.md"))
+
+        XCTAssertNil(day)
+    }
+
     func testEnumerateArtifactsSkipsSymlinkedFiles() throws {
         let outsideDir = makeTempDir()
         defer { removeTempDir(outsideDir) }
@@ -175,6 +187,22 @@ final class TranscriptLoaderTests: XCTestCase {
         let result = PathSecurity.resolveReadableFile(named: "Dictations_2026-04-07.md", in: tempDir)
         guard case .invalid = result else {
             return XCTFail("Expected symlink escape to be rejected")
+        }
+    }
+
+    func testResolveReadableFileRejectsParentTraversal() throws {
+        let outsideDir = tempDir.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try "# Secret".write(
+            to: outsideDir.appendingPathComponent("Call_secret.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let result = PathSecurity.resolveReadableFile(named: "../outside/Call_secret.md", in: tempDir)
+
+        guard case .invalid = result else {
+            return XCTFail("Expected parent traversal to be rejected")
         }
     }
 

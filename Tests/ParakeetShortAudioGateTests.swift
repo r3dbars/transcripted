@@ -1,6 +1,17 @@
 import Foundation
 
 func testParakeetShortAudioGate() {
+    runSuite("ParakeetShortAudioGate.dictation — threshold-length audio transcribes") {
+        let decision = ParakeetShortAudioGate.dictation(
+            nativeSampleCount: 48_000,
+            resampledSampleCount: TranscriptedConstants.parakeetMinimumInferenceSamples
+        )
+
+        assertTrue(decision.shouldTranscribe, "one second of Parakeet audio should still transcribe")
+        assertNil(decision.event, "transcribable dictation should not emit a skip event")
+        assertEqual(decision.context, [:], "transcribable dictation should not attach skip diagnostics")
+    }
+
     runSuite("ParakeetShortAudioGate.dictation — short audio skips without transcription failure semantics") {
         let decision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: 24_000,

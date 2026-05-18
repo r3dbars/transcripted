@@ -79,7 +79,7 @@ matches_any() {
 
 if [ -n "$changed_paths" ]; then
     while IFS= read -r path; do
-        if matches_any "$path" "Sources/*.swift" "Sources/*/*.swift" "Tests/*.swift" "Tests/FastTests.manifest"; then
+        if matches_any "$path" "Sources/*.swift" "Sources/*/*.swift" "Sources/*/*/*.swift" "Sources/*/*/*/*.swift" "Tests/*.swift" "Tests/*/*.swift" "Tests/*/*/*.swift" "Tests/FastTests.manifest"; then
             add_command "bash build.sh"
             add_command "bash run-tests.sh"
         fi
@@ -93,6 +93,14 @@ if [ -n "$changed_paths" ]; then
             add_command "bash build.sh"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
+        fi
+
+        if matches_any "$path" "Tests/E2E/*" "run-e2e-smoke.sh" "scripts/entrypoints/run-e2e-smoke.sh"; then
+            add_command "bash run-e2e-smoke.sh"
+        fi
+
+        if matches_any "$path" "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift" "run-live-capture-smoke.sh" "scripts/entrypoints/run-live-capture-smoke.sh"; then
+            add_command "bash run-live-capture-smoke.sh --skip-build"
         fi
 
         if matches_any "$path" "Package.swift" "Sources/TranscriptedCore/*" "Tests/TranscriptedCoreTests/*"; then

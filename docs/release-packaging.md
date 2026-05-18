@@ -83,6 +83,12 @@ If you deliberately want a thin local test artifact, make both opt-outs explicit
 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
+For a thin packaging smoke that also skips notarization, keep every opt-out visible:
+
+```bash
+SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+```
+
 ## Release Flow
 
 ```bash

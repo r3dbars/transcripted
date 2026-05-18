@@ -37,4 +37,19 @@ func testParakeetPrewarmPolicy() {
             "missing microphone access should stop prewarm from surfacing as a startup failure"
         )
     }
+
+    runSuite("ParakeetPrewarmPolicy.decision — restricted permission reports the concrete status") {
+        let decision = ParakeetPrewarmPolicy.decision(for: .restricted)
+
+        assertEqual(
+            decision,
+            .skip(
+                level: .warning,
+                event: "prewarm_permission_unavailable",
+                message: "Skipping speech engine prewarm because microphone permission is unavailable",
+                context: ["mic_status": "restricted"]
+            ),
+            "restricted microphone access should be warning-level but privacy-safe"
+        )
+    }
 }

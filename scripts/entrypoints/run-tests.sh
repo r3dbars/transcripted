@@ -11,6 +11,33 @@ cd "$REPO_ROOT"
 MANIFEST="Tests/FastTests.manifest"
 BUILD_DIR="build"
 GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
+COVERAGE_DIR="$BUILD_DIR/coverage/fast-tests"
+COVERAGE_PROFDATA="$COVERAGE_DIR/coverage.profdata"
+COVERAGE_SUMMARY="$COVERAGE_DIR/summary.txt"
+COVERAGE_LCOV="$COVERAGE_DIR/report.lcov"
+COVERAGE_IGNORE_REGEX='(^|/)Tests/|(^|/)build/'
+
+coverage_requested=false
+coverage_env="${FAST_TEST_COVERAGE:-${TRANSCRIPTED_FAST_TEST_COVERAGE:-0}}"
+case "$coverage_env" in
+    1|true|TRUE|yes|YES)
+        coverage_requested=true
+        ;;
+esac
+
+for arg in "$@"; do
+    case "$arg" in
+        --coverage)
+            coverage_requested=true
+            ;;
+        -h|--help)
+            echo "Usage: bash run-tests.sh [--coverage]"
+            echo ""
+            echo "Set FAST_TEST_COVERAGE=1 or pass --coverage to write LLVM coverage artifacts to $COVERAGE_DIR."
+            exit 0
+            ;;
+    esac
+done
 
 cleanup_generated_runner() {
     rm -f "$GENERATED_RUNNER"
@@ -212,21 +239,79 @@ APP_SOURCES=(
     "Sources/UI/Shared/RecentCaptureScanners.swift"
 )
 
+TEST_BINARY="$BUILD_DIR/tests"
+
+if [ "$coverage_requested" = true ]; then
+    mkdir -p "$COVERAGE_DIR"
+    rm -f "$COVERAGE_DIR"/*.profraw "$COVERAGE_PROFDATA" "$COVERAGE_SUMMARY" "$COVERAGE_LCOV"
+    TEST_BINARY="$COVERAGE_DIR/tests"
+fi
+
 echo "Compiling tests..."
-swiftc \
-    "${FAST_TEST_SOURCES[@]}" \
-    "${APP_SOURCES[@]}" \
-    -framework AppKit \
-    -framework AVFoundation \
-    -framework ApplicationServices \
-    -framework Carbon \
-    -framework CoreMedia \
-    -framework EventKit \
-    -framework ScreenCaptureKit \
-    -parse-as-library \
-    -o build/tests \
-    2>&1
+SWIFTC_ARGS=(
+    swiftc
+)
+
+if [ "$coverage_requested" = true ]; then
+    SWIFTC_ARGS+=(
+        -profile-generate
+        -profile-coverage-mapping
+    )
+fi
+
+SWIFTC_ARGS+=(
+    "${FAST_TEST_SOURCES[@]}"
+    "${APP_SOURCES[@]}"
+    -framework AppKit
+    -framework AVFoundation
+    -framework ApplicationServices
+    -framework Carbon
+    -framework CoreMedia
+    -framework EventKit
+    -framework ScreenCaptureKit
+    -parse-as-library
+    -o "$TEST_BINARY"
+)
+
+"${SWIFTC_ARGS[@]}" 2>&1
 
 echo "Running tests..."
 echo ""
-TRANSCRIPTED_DISABLE_FILE_LOGGER=1 ./build/tests
+
+if [ "$coverage_requested" = true ]; then
+    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY"
+
+    profraw_files=("$COVERAGE_DIR"/*.profraw)
+    if [ ! -e "${profraw_files[0]}" ]; then
+        echo "No LLVM profile data was written under $COVERAGE_DIR"
+        exit 1
+    fi
+
+    llvm_profdata="${LLVM_PROFDATA:-}"
+    if [ -z "$llvm_profdata" ]; then
+        llvm_profdata="$(xcrun --find llvm-profdata)"
+    fi
+
+    llvm_cov="${LLVM_COV:-}"
+    if [ -z "$llvm_cov" ]; then
+        llvm_cov="$(xcrun --find llvm-cov)"
+    fi
+
+    echo ""
+    echo "Writing coverage artifacts..."
+    "$llvm_profdata" merge -sparse "${profraw_files[@]}" -o "$COVERAGE_PROFDATA"
+    "$llvm_cov" report "$TEST_BINARY" \
+        -instr-profile="$COVERAGE_PROFDATA" \
+        -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \
+        > "$COVERAGE_SUMMARY"
+    "$llvm_cov" export "$TEST_BINARY" \
+        -instr-profile="$COVERAGE_PROFDATA" \
+        -format=lcov \
+        -ignore-filename-regex="$COVERAGE_IGNORE_REGEX" \
+        > "$COVERAGE_LCOV"
+
+    echo "Coverage summary: $COVERAGE_SUMMARY"
+    echo "Coverage LCOV: $COVERAGE_LCOV"
+else
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY"
+fi

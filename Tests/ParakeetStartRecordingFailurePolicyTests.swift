@@ -228,6 +228,21 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .invalidAudioFormat, "invalid format should map to invalidAudioFormat")
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy rejects zero channel counts") {
+        let zeroOutputChannels = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 0,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            outputDeviceClass: "built_in",
+            selectionOverrodeDefault: true
+        )
+
+        assertEqual(zeroOutputChannels, .invalid, "zero output channels should be invalid")
+        assertEqual(zeroOutputChannels.startFailureReason, .invalidAudioFormat, "zero output channels should map to invalidAudioFormat")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy rejects invalid input-side formats") {
         let zeroInputRate = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,
@@ -270,6 +285,22 @@ func testParakeetStartRecordingFailurePolicy() {
         }
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts exact sample-rate bounds") {
+        assertTrue(
+            ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(8_000),
+            "the lower supported capture rate should remain usable"
+        )
+        assertTrue(
+            ParakeetAudioFormatReadinessPolicy.isUsableCaptureSampleRate(384_000),
+            "the upper supported capture rate should remain usable"
+        )
+        assertEqual(
+            ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(7_999),
+            ParakeetAudioFormatReadinessPolicy.fallbackCaptureSampleRate,
+            "below-range capture rates should use the fallback"
+        )
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy rejects implausible capture sample rates") {
         for sampleRate in [-1.0, 1.0, 7_999.0, 384_001.0] {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
@@ -308,6 +339,20 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(fallbackCapacity, 480_000, "invalid rates should fall back to 48k for buffer math")
         assertEqual(cappedCapacity, 960_000, "high valid rates should be capped for memory sizing")
         assertEqual(normalCapacity, 480_000, "normal rates should size buffers normally")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy handles invalid buffer windows safely") {
+        let zeroSeconds = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: 48_000,
+            seconds: 0
+        )
+        let negativeSeconds = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: 48_000,
+            seconds: -5
+        )
+
+        assertEqual(zeroSeconds, 48_000, "zero-second buffers should still allocate one safe fallback second")
+        assertEqual(negativeSeconds, 48_000, "negative buffer windows should still allocate one safe fallback second")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy maps CoreAudio format-not-supported") {

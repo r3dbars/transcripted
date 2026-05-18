@@ -42,6 +42,18 @@ func testMeetingPromptHeuristics() {
         assertNil(prompt, "stale app activity should not keep prompting forever")
     }
 
+    runSuite("MeetingPromptHeuristics.runtimePresentation — ignores future last-active timestamps") {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let prompt = MeetingPromptHeuristics.runtimePresentation(
+            providerName: "Zoom",
+            isFrontmost: false,
+            lastActiveAt: now.addingTimeInterval(10),
+            now: now
+        )
+
+        assertNil(prompt, "clock-skewed future activity should not create a prompt")
+    }
+
     runSuite("MeetingPromptProvider.supportsRuntimeOnlyPrompt — Teams must rely on stronger evidence") {
         assertFalse(
             MeetingPromptProvider.teams.supportsRuntimeOnlyPrompt,
@@ -119,6 +131,22 @@ func testMeetingPromptHeuristics() {
         assertEqual(interval, 30 * 60, "calendar prompts should preserve the longer snooze")
     }
 
+    runSuite("MeetingPromptHeuristics.snoozeInterval — explicit operator interval wins") {
+        let runtime = MeetingPromptHeuristics.snoozeInterval(
+            for: .runtimeApp,
+            explicit: 5 * 60,
+            defaultInterval: 30 * 60
+        )
+        let calendar = MeetingPromptHeuristics.snoozeInterval(
+            for: .calendarEvent,
+            explicit: 10 * 60,
+            defaultInterval: 30 * 60
+        )
+
+        assertEqual(runtime, 5 * 60, "runtime prompts should honor an explicit reminder interval")
+        assertEqual(calendar, 10 * 60, "calendar prompts should honor an explicit reminder interval")
+    }
+
     runSuite("MeetingPromptHeuristics.remindSoonBackoffKind — short reminders stay distinct from dismissal") {
         assertEqual(
             MeetingPromptHeuristics.remindSoonInterval,
@@ -134,6 +162,29 @@ func testMeetingPromptHeuristics() {
             MeetingPromptHeuristics.remindSoonBackoffKind(for: .runtimeApp),
             .runtimeShortReminder,
             "runtime remind-soon should not look like a full dismissal"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.backoffKind — keeps runtime resume and Teams dismissal buckets distinct") {
+        assertEqual(
+            MeetingPromptHeuristics.backoffKind(for: .zoom, source: .calendarEvent),
+            .calendarDefault,
+            "normal calendar dismissals should use the calendar default bucket"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.backoffKind(for: .teams, source: .calendarEvent),
+            .calendarTeamsExtended,
+            "Teams calendar dismissals should use the extended bucket"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.backoffKind(for: .zoom, source: .runtimeApp, hasResumeDate: true),
+            .runtimeUntilNextCalendar,
+            "runtime prompts with a known next calendar window should be grouped separately"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.backoffKind(for: .teams, source: .runtimeApp),
+            .runtimeTeamsExtended,
+            "Teams runtime dismissals should stay sticky"
         )
     }
 

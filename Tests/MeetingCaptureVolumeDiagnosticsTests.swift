@@ -45,4 +45,25 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["default_system_output_volume_changed"], "true", "during values should be used when after values are absent")
         assertEqual(context["default_system_output_volume_dropped"], "true", "during-only drops should still be visible")
     }
+
+    runSuite("MeetingCaptureVolumeDiagnostics distinguishes increases from drops") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.200",
+                "default_output_volume_before": "0.500",
+                "default_system_output_volume_before": "NaN",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.260",
+                "default_output_volume_after": "0.530",
+                "default_system_output_volume_after": "0.500",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_changed"], "true", "large input volume increases should be visible")
+        assertEqual(context["default_input_volume_dropped"], "false", "volume increases should not look like drops")
+        assertEqual(context["default_output_volume_changed"], "true", "large output volume increases should be visible")
+        assertEqual(context["default_output_volume_dropped"], "false", "output increases should not look like drops")
+        assertEqual(context["default_system_output_volume_changed"], "unavailable", "non-finite before values should stay unavailable")
+    }
 }

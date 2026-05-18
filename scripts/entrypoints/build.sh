@@ -159,12 +159,31 @@ verify_signature() {
 
 verify_launch_smoke() {
     local smoke_log="$BUILD_DIR/launch-smoke.log"
+    local smoke_home="$BUILD_DIR/launch-smoke-home"
+    local ui_report="$BUILD_DIR/launch-ui-smoke.json"
     rm -f "$smoke_log"
+    rm -rf "$smoke_home"
+    rm -f "$ui_report"
+    mkdir -p "$smoke_home"
 
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 "$APP_BINARY" >"$smoke_log" 2>&1 &
+    CFFIXED_USER_HOME="$smoke_home" \
+    HOME="$smoke_home" \
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
+    TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 \
+    TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 \
+    TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT="$ui_report" \
+    "$APP_BINARY" >"$smoke_log" 2>&1 &
     local app_pid=$!
 
-    sleep 5
+    for _ in $(seq 1 50); do
+        if [ -s "$ui_report" ]; then
+            break
+        fi
+        if ! kill -0 "$app_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
 
     if ! kill -0 "$app_pid" 2>/dev/null; then
         wait "$app_pid" || true
@@ -173,6 +192,72 @@ verify_launch_smoke() {
         cat "$smoke_log"
         exit 1
     fi
+
+    if [ ! -s "$ui_report" ]; then
+        echo "Transcripted launch UI smoke report was not written."
+        echo "Smoke log:"
+        cat "$smoke_log"
+        kill "$app_pid" 2>/dev/null || true
+        wait "$app_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    if ! /usr/bin/python3 - "$ui_report" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    report = json.load(handle)
+
+errors = []
+if not report.get("appLaunched"):
+    errors.append("appLaunched was false")
+if not report.get("statusItemExists"):
+    errors.append("status item was missing")
+if not report.get("popoverConfigured"):
+    errors.append("popover was not configured")
+if not report.get("onboardingCompleted"):
+    errors.append("onboarding was not completed for smoke")
+
+actions = report.get("content", {}).get("primaryActions", {})
+for key, expected_title in {
+    "startDictation": "Start Dictation",
+    "startMeeting": "Start Meeting",
+}.items():
+    row = actions.get(key) or {}
+    if row.get("title") != expected_title:
+        errors.append(f"{key} title was {row.get('title')!r}")
+    if not row.get("isVisible"):
+        errors.append(f"{key} row was hidden")
+    if not row.get("isEnabled"):
+        errors.append(f"{key} row was disabled")
+
+header = report.get("content", {}).get("header", {})
+if header.get("statusText") not in ("Ready", "On demand", "Cached"):
+    errors.append(f"unexpected header status {header.get('statusText')!r}")
+
+if errors:
+    print("Launch UI smoke failed:")
+    for error in errors:
+        print(f"- {error}")
+    sys.exit(1)
+PY
+    then
+        kill "$app_pid" 2>/dev/null || true
+        wait "$app_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    for _ in $(seq 1 50); do
+        if ! kill -0 "$app_pid" 2>/dev/null; then
+            wait "$app_pid" || true
+            echo "Transcripted exited during launch smoke."
+            echo "Smoke log:"
+            cat "$smoke_log"
+            exit 1
+        fi
+        sleep 0.1
+    done
 
     kill "$app_pid" 2>/dev/null || true
     wait "$app_pid" 2>/dev/null || true

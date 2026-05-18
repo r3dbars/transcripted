@@ -184,6 +184,50 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
+    runSuite("PhysicalDictationTriggerPreferences records Caps Lock without treating it as a held modifier") {
+        let capsLock = PhysicalDictationTriggerPreferences.bindingForFlagsChanged(
+            keyCode: UInt32(kVK_CapsLock),
+            modifierFlags: [.capsLock]
+        )
+
+        assertEqual(capsLock, PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock)), "Caps Lock should record as a physical key")
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress(
+                PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock)),
+                keyCode: UInt32(kVK_CapsLock),
+                modifiers: PhysicalDictationTriggerModifiers.capsLock
+            ),
+            "Caps Lock should match on the press flagsChanged event"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(
+                PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock)),
+                keyCode: UInt32(kVK_CapsLock),
+                modifiers: 0
+            ),
+            "Caps Lock release should not double-fire a modifier-only action"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences converts event modifier masks consistently") {
+        assertEqual(
+            PhysicalDictationTriggerPreferences.modifiers(from: CGEventFlags([.maskCommand, .maskSecondaryFn, .maskAlphaShift])),
+            PhysicalDictationTriggerModifiers.command
+                | PhysicalDictationTriggerModifiers.function
+                | PhysicalDictationTriggerModifiers.capsLock,
+            "CGEvent flags should map into the physical-trigger mask"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.modifiers(
+                fromCarbon: UInt32(cmdKey) | UInt32(optionKey) | UInt32(kEventKeyModifierFnMask)
+            ),
+            PhysicalDictationTriggerModifiers.command
+                | PhysicalDictationTriggerModifiers.option
+                | PhysicalDictationTriggerModifiers.function,
+            "Carbon flags should map into the same physical-trigger mask"
+        )
+    }
+
     runSuite("PhysicalDictationTriggerPreferences matches keyDown and flagsChanged triggers") {
         let bareA = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_A))
         let fnSpace = PhysicalDictationTriggerBinding(
@@ -252,6 +296,42 @@ func testPhysicalDictationTriggerPreferences() {
                 modifiers: PhysicalDictationTriggerModifiers.command
             ),
             "modifier chords should reset when a secondary modifier is released"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences reset writes all three modern bindings") {
+        let (defaults, suiteName) = makePhysicalTriggerDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PhysicalDictationTriggerPreferences.savePushToTalk(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_A)),
+            userDefaults: defaults
+        )
+        PhysicalDictationTriggerPreferences.saveHandsFree(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_B)),
+            userDefaults: defaults
+        )
+        PhysicalDictationTriggerPreferences.saveMeeting(
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_ANSI_C)),
+            userDefaults: defaults
+        )
+
+        PhysicalDictationTriggerPreferences.resetToDefaults(userDefaults: defaults)
+
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
+            "reset should restore push-to-talk"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultHandsFreeBinding,
+            "reset should restore hands-free"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            "reset should restore meeting shortcut"
         )
     }
 }

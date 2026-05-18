@@ -39,6 +39,30 @@ func testMeetingWarmupStatusPolicy() {
         assertEqual(status.meetingsStatus, "Loading", "meeting status should track visible loading")
     }
 
+    runSuite("MeetingWarmupStatusPolicy.status — stale meeting loading does not block ready UI") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .ready,
+            meetingState: .loading,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status, .ready, "a stale loading flag without active warmup should not leave the menu stuck")
+    }
+
+    runSuite("MeetingWarmupStatusPolicy.status — visible meeting startup begins before the model state flips") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .ready,
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: true,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status.subtitle, "Preparing meeting transcription", "user-started meeting setup should show startup copy immediately")
+        assertEqual(status.meetingsStatus, "Starting", "not-loaded but in-flight meeting warmup should not look idle")
+        assertFalse(status.isReadyForMenuHeader, "active meeting warmup should not claim full readiness")
+    }
+
     runSuite("MeetingWarmupStatusPolicy.status — explains lazy meeting loading") {
         let status = MeetingWarmupStatusPolicy.status(
             dictationState: .ready,

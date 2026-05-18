@@ -73,14 +73,19 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var didTrackCurrentUpdateCycleFailure = false
     private var observedUpdateCheckTimeoutTask: Task<Void, Never>?
     private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
+    private static var isLaunchUISmoke: Bool {
+        ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+    }
 
     override init() {
         super.init()
+        guard !Self.isLaunchUISmoke else { return }
         observeUpdaterReadiness()
         observeUpdaterSettings()
     }
 
     func performStartupUpdateCheckIfNeeded() {
+        guard !Self.isLaunchUISmoke else { return }
         guard !hasPerformedStartupCheck else { return }
         hasPerformedStartupCheck = true
 
@@ -111,6 +116,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     }
 
     func refreshUpdateStatus() {
+        guard !Self.isLaunchUISmoke else { return }
         guard hasConfiguredFeedURL else {
             setUpdateStatus(.unknown, canCheckForUpdates: false)
             return

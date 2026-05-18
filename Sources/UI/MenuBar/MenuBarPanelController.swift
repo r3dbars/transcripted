@@ -4,6 +4,14 @@
 import AppKit
 import Combine
 
+struct MenuBarLaunchUISmokeReport: Codable, Equatable {
+    let appLaunched: Bool
+    let statusItemExists: Bool
+    let popoverConfigured: Bool
+    let onboardingCompleted: Bool
+    let content: MenuBarContentSmokeSnapshot
+}
+
 @MainActor
 final class MenuBarPanelController: NSViewController {
     private let appState: TranscriptedAppState
@@ -61,7 +69,10 @@ final class MenuBarPanelController: NSViewController {
         setupSubscriptions()
     }
 
-    func refresh() {
+    func refresh(
+        menuVisibilityOverride: [MenuBarOptionalItem: Bool]? = nil,
+        allowUpdateRefresh: Bool = true
+    ) {
         scheduledRefreshTask?.cancel()
         scheduledRefreshTask = nil
 
@@ -81,7 +92,7 @@ final class MenuBarPanelController: NSViewController {
             for: appState.sparkleUpdater.updateStatus,
             automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
         )
-        let menuVisibility = MenuBarVisibilityPreferences.snapshot()
+        let menuVisibility = menuVisibilityOverride ?? MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -121,7 +132,7 @@ final class MenuBarPanelController: NSViewController {
             showUpdateRow: !updatePresentation.isProminent
         )
 
-        if case .unknown = appState.sparkleUpdater.updateStatus.state {
+        if allowUpdateRefresh, case .unknown = appState.sparkleUpdater.updateStatus.state {
             appState.sparkleUpdater.refreshUpdateStatus()
         }
 
@@ -129,6 +140,31 @@ final class MenuBarPanelController: NSViewController {
         content.layoutSubtreeIfNeeded()
         preferredContentSize = content.preferredPanelSize
         refreshLatestDictationIfNeeded()
+    }
+
+    func launchUISmokeReport(
+        statusItemExists: Bool,
+        popoverConfigured: Bool,
+        onboardingCompleted: Bool,
+        menuVisibilityOverride: [MenuBarOptionalItem: Bool]
+    ) -> MenuBarLaunchUISmokeReport {
+        loadViewIfNeeded()
+        refresh(menuVisibilityOverride: menuVisibilityOverride, allowUpdateRefresh: false)
+        return MenuBarLaunchUISmokeReport(
+            appLaunched: true,
+            statusItemExists: statusItemExists,
+            popoverConfigured: popoverConfigured,
+            onboardingCompleted: onboardingCompleted,
+            content: contentView?.smokeSnapshot ?? MenuBarContentSmokeSnapshot(
+                header: MenuBarHeaderSmokeSnapshot(
+                    statusText: "",
+                    detailText: "",
+                    warningText: "",
+                    isReady: false
+                ),
+                primaryActions: [:]
+            )
+        )
     }
 
     private func setupSubscriptions() {
