@@ -580,7 +580,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.audio]
         panel.prompt = "Transcribe"
-        panel.message = "Choose an audio file Transcripted should transcribe."
+        panel.message = "Choose a WAV, MP3, M4A, AAC, AIFF, or other macOS-readable audio file."
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 

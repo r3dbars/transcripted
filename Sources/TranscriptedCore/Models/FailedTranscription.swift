@@ -59,6 +59,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         let permanent = [
             "Empty audio file",
             "no samples recorded",
+            "No speech detected",
             "at least 1 second",
             "Invalid audio data",
             "Recording too short",
@@ -76,6 +77,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
 
         if normalized.contains("no samples recorded") || normalized.contains("empty audio file") {
             return .emptyAudioFile
+        }
+        if normalized.contains("no speech detected") || normalized.contains("no speech was found") {
+            return .noSpeechDetected
         }
         if Self.isRecordingTooShortMessage(normalized) {
             return .recordingTooShort(duration: 0)

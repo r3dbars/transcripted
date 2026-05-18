@@ -126,6 +126,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
+- `meeting_file_import_failed`
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`

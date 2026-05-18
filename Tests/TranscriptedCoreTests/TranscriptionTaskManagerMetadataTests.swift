@@ -453,7 +453,16 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
         let manager = makeManager(
-            speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact.")
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),
+            diarization: MetadataStubDiarizationEngine(segments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 0,
+                    endTime: 2,
+                    embedding: [Float](repeating: 0.42, count: 256),
+                    qualityScore: 0.95
+                )
+            ])
         )
         let externalURL = tempDirectory.appendingPathComponent("outside-success.wav")
         try writeMonoWAV(to: externalURL, duration: 2.5)
@@ -469,6 +478,32 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
+    func testStartImportedTranscriptionSurfacesNoSpeechWhenNoUtterances() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored")
+        )
+        let externalURL = tempDirectory.appendingPathComponent("outside-no-speech.wav")
+        try writeMonoWAV(to: externalURL, duration: 2.5)
+
+        manager.startImportedTranscription(
+            audioURL: externalURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Quiet recording"
+        )
+
+        try await waitUntil {
+            if case .failed(let message) = manager.displayStatus,
+               manager.activeTasks.isEmpty {
+                return message.contains("No speech was found")
+            }
+            return false
+        }
+
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "No speech detected")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+        XCTAssertNil(manager.lastSavedTranscriptURL)
     }
 
     func testPipelineModelReadinessReloadsModelsAfterCleanup() async throws {
@@ -512,6 +547,18 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                 for: PipelineError.unknown(underlying: "PyAnnote failed while reading /Users/redbars/audio.wav")
             ),
             "Diarization failed"
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(
+                for: PipelineError.unknown(underlying: "The operation couldn’t be completed. (com.apple.coreaudio.avfaudio error 2003334207.)")
+            ),
+            "Invalid audio format"
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(
+                for: PipelineError.noSpeechDetected
+            ),
+            "No speech detected"
         )
     }
 

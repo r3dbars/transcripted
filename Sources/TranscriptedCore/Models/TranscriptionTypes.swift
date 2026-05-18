@@ -119,6 +119,7 @@ public struct TranscriptionResult: Sendable {
 public enum PipelineError: LocalizedError {
     // Audio errors (permanent — bad data won't improve on retry)
     case emptyAudioFile
+    case noSpeechDetected
     case recordingTooShort(duration: TimeInterval)
     case invalidAudioFormat(detail: String)
 
@@ -139,6 +140,8 @@ public enum PipelineError: LocalizedError {
         switch self {
         case .emptyAudioFile:
             return "Empty audio file — no samples recorded."
+        case .noSpeechDetected:
+            return "No speech detected in the audio."
         case .recordingTooShort(let duration):
             return "Recording too short (\(String(format: "%.1f", duration))s). At least 2 seconds required."
         case .invalidAudioFormat(let detail):
@@ -160,7 +163,7 @@ public enum PipelineError: LocalizedError {
     /// Audio data errors are permanent. Model/storage errors may be transient.
     public var isRetryable: Bool {
         switch self {
-        case .emptyAudioFile, .recordingTooShort, .invalidAudioFormat, .missingSystemAudio:
+        case .emptyAudioFile, .noSpeechDetected, .recordingTooShort, .invalidAudioFormat, .missingSystemAudio:
             return false
         case .modelNotLoaded, .modelInferenceFailed, .saveFailed, .unknown:
             return true

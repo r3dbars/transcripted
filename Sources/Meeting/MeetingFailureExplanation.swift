@@ -146,6 +146,10 @@ struct MeetingFailureExplanation: Equatable {
         case .systemAudioPermission,
              .microphonePermission,
              .microphoneMissing,
+             .importFileMissing,
+             .importFileUnreadable,
+             .importUnsupportedFile,
+             .importCopyFailed,
              .pipelineBusy:
             return .preflight
         case .audioDeviceUnavailable,
@@ -156,6 +160,7 @@ struct MeetingFailureExplanation: Equatable {
              .pipelineFailed,
              .transcriptionInferenceFailed,
              .emptyAudio,
+             .noSpeechDetected,
              .invalidAudioFormat,
              .recordingTooShort:
             return .transcription
@@ -179,6 +184,10 @@ struct MeetingFailureExplanation: Equatable {
              .microphonePermission,
              .microphoneMissing,
              .audioDeviceUnavailable,
+             .importFileMissing,
+             .importFileUnreadable,
+             .importUnsupportedFile,
+             .importCopyFailed,
              .modelDownloadFailed,
              .modelNotLoaded,
              .pipelineBusy:
@@ -200,7 +209,11 @@ struct MeetingFailureExplanation: Equatable {
             case .systemAudioPermission,
                  .microphonePermission,
                  .microphoneMissing,
-                 .audioDeviceUnavailable:
+                 .audioDeviceUnavailable,
+                 .importFileMissing,
+                 .importFileUnreadable,
+                 .importUnsupportedFile,
+                 .importCopyFailed:
                 return .retryableAfterUserAction
             default:
                 return .impossibleNoArtifact

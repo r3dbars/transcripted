@@ -70,6 +70,10 @@ func testSentryEventPolicy() {
             forEngine: "dictation",
             event: "dictation_export_failed"
         )
+        let importFailed = SentryEventPolicy.policy(
+            forEngine: "meeting",
+            event: "meeting_file_import_failed"
+        )
 
         assertEqual(transcriptionFailure?.summary, "Speech transcription failed.", "transcription failure should use the normalized summary")
         assertNil(uncleanShutdown, "unclean shutdown markers should stay local and analytics-only")
@@ -88,6 +92,7 @@ func testSentryEventPolicy() {
         assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
         assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
         assertNil(unknown, "unknown events should stay local-only by default")
+        assertNil(importFailed, "file import preparation failures should stay local/analytics-only unless explicitly allowlisted")
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps timeout triage searchable and safe") {

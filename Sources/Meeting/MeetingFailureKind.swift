@@ -7,6 +7,7 @@ enum MeetingFailureKind: String {
     case audioDeviceUnavailable = "audio_device_unavailable"
     case recordingTooShort = "recording_too_short"
     case emptyAudio = "empty_audio"
+    case noSpeechDetected = "no_speech_detected"
     case invalidAudioFormat = "invalid_audio_format"
     case saveFailed = "save_failed"
     case speakerNameFinalizationFailed = "speaker_name_finalization_failed"
@@ -15,6 +16,10 @@ enum MeetingFailureKind: String {
     case transcriptionInferenceFailed = "transcription_inference_failed"
     case diarizationFailed = "diarization_failed"
     case speakerFinalizationFailed = "speaker_finalization_failed"
+    case importFileMissing = "import_file_missing"
+    case importFileUnreadable = "import_file_unreadable"
+    case importUnsupportedFile = "import_unsupported_file"
+    case importCopyFailed = "import_copy_failed"
     case pipelineBusy = "pipeline_busy"
     case pipelineFailed = "pipeline_failed"
     case stopTimeout = "stop_timeout"
@@ -77,6 +82,40 @@ enum MeetingFailureKind: String {
         }
 
         if normalized.contains(anyOf: [
+            "selected audio file could not be found",
+            "file could not be found",
+            "moved or deleted",
+        ]) {
+            return .importFileMissing
+        }
+
+        if normalized.contains(anyOf: [
+            "couldn't inspect that audio file",
+            "couldn't read that audio file",
+            "cannot read that audio file",
+            "could not read that audio file",
+        ]) {
+            return .importFileUnreadable
+        }
+
+        if normalized.contains(anyOf: [
+            "does not look like audio",
+            "choose an audio file",
+            "not an audio file",
+            "unsupported audio",
+        ]) {
+            return .importUnsupportedFile
+        }
+
+        if normalized.contains(anyOf: [
+            "couldn't copy that audio file",
+            "could not copy that audio file",
+            "working area",
+        ]) {
+            return .importCopyFailed
+        }
+
+        if normalized.contains(anyOf: [
             "invalid audio format",
             "invalid audio data",
         ]) {
@@ -89,6 +128,13 @@ enum MeetingFailureKind: String {
             "empty audio",
         ]) {
             return .emptyAudio
+        }
+
+        if normalized.contains(anyOf: [
+            "no speech detected",
+            "no speech was found",
+        ]) {
+            return .noSpeechDetected
         }
 
         if normalized.contains(anyOf: [
