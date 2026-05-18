@@ -92,25 +92,29 @@ final class LiveCaptureSmokeTests: XCTestCase {
     }
 
     private func assertMicrophoneIsReadyForNonInteractiveSmoke() throws {
-        XCTAssertNotNil(AVCaptureDevice.default(for: .audio), "No default microphone is available for the live capture smoke.")
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            throw LiveCaptureSmokePreflightError("No default microphone is available for the live capture smoke.")
+        }
 
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized:
             return
         case .notDetermined:
-            XCTFail("Microphone permission is not determined for this test runner. Open Transcripted/Terminal once and grant microphone access before running the live smoke.")
+            throw LiveCaptureSmokePreflightError(
+                "Microphone permission is not determined for this test runner. Open Transcripted/Terminal once and grant microphone access before running the live smoke."
+            )
         case .denied, .restricted:
-            XCTFail("Microphone permission is \(status). Enable microphone access before running the live smoke.")
+            throw LiveCaptureSmokePreflightError("Microphone permission is \(status). Enable microphone access before running the live smoke.")
         @unknown default:
-            XCTFail("Unknown microphone permission status: \(status.rawValue).")
+            throw LiveCaptureSmokePreflightError("Unknown microphone permission status: \(status.rawValue).")
         }
     }
 
     private func assertRecordingValidatorAcceptsLiveSmokePaths(_ paths: CoreStoragePaths) throws {
         let validation = RecordingValidator.validateRecordingConditions(paths: paths)
         if case .failure(let message) = validation {
-            XCTFail("RecordingValidator rejected live smoke preflight: \(message)")
+            throw LiveCaptureSmokePreflightError("RecordingValidator rejected live smoke preflight: \(message)")
         }
     }
 
@@ -146,6 +150,18 @@ final class LiveCaptureSmokeTests: XCTestCase {
             return size.uint64Value
         }
         throw XCTSkip("Could not read file size for \(url.path)")
+    }
+}
+
+private struct LiveCaptureSmokePreflightError: LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? {
+        message
     }
 }
 
