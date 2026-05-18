@@ -76,6 +76,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
     @Published var profileFilter: SpeakerPeopleProfileFilter = .all
+    @Published private(set) var hasLoadedProfiles = false
 
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
@@ -285,6 +286,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
         mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
         clipURLsByProfileID = snapshot.clipURLsByProfileID
+        hasLoadedProfiles = true
         profiles = snapshot.profiles
     }
 
