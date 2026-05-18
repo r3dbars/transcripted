@@ -177,8 +177,8 @@ private struct LiveCaptureSmokeConfig {
         let environment = ProcessInfo.processInfo.environment
         let configuredRoot = environment["TRANSCRIPTED_LIVE_CAPTURE_ROOT"]
             .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
-        let root = configuredRoot ?? FileManager.default.temporaryDirectory
-            .appendingPathComponent("TranscriptedLiveCaptureSmoke-\(UUID().uuidString)", isDirectory: true)
+        let rootParent = configuredRoot ?? FileManager.default.temporaryDirectory
+        let root = rootParent.appendingPathComponent("TranscriptedLiveCaptureSmoke-\(UUID().uuidString)", isDirectory: true)
 
         return LiveCaptureSmokeConfig(
             enabled: environment["TRANSCRIPTED_LIVE_CAPTURE_SMOKE"] == "1",

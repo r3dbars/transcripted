@@ -11,17 +11,16 @@ BUILD_DIR="$REPO_ROOT/build/e2e-smoke"
 SMOKE_BIN="$BUILD_DIR/transcripted-e2e-smoke"
 mkdir -p "$BUILD_DIR"
 
-created_run_root=false
 if [ -n "${TRANSCRIPTED_E2E_ROOT:-}" ]; then
-    RUN_ROOT="$TRANSCRIPTED_E2E_ROOT"
-    mkdir -p "$RUN_ROOT"
+    RUN_ROOT_PARENT="$TRANSCRIPTED_E2E_ROOT"
 else
-    RUN_ROOT="$(mktemp -d "$BUILD_DIR/run.XXXXXX")"
-    created_run_root=true
+    RUN_ROOT_PARENT="$BUILD_DIR"
 fi
+mkdir -p "$RUN_ROOT_PARENT"
+RUN_ROOT="$(mktemp -d "$RUN_ROOT_PARENT/run.XXXXXX")"
 
 cleanup() {
-    if [ "${TRANSCRIPTED_E2E_KEEP:-0}" != "1" ] && [ "$created_run_root" = true ]; then
+    if [ "${TRANSCRIPTED_E2E_KEEP:-0}" != "1" ]; then
         rm -rf "$RUN_ROOT"
     fi
 }
