@@ -202,7 +202,7 @@ verify_launch_smoke() {
         exit 1
     fi
 
-    /usr/bin/python3 - "$ui_report" <<'PY'
+    if ! /usr/bin/python3 - "$ui_report" <<'PY'
 import json
 import sys
 
@@ -242,6 +242,22 @@ if errors:
         print(f"- {error}")
     sys.exit(1)
 PY
+    then
+        kill "$app_pid" 2>/dev/null || true
+        wait "$app_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    for _ in $(seq 1 50); do
+        if ! kill -0 "$app_pid" 2>/dev/null; then
+            wait "$app_pid" || true
+            echo "Transcripted exited during launch smoke."
+            echo "Smoke log:"
+            cat "$smoke_log"
+            exit 1
+        fi
+        sleep 0.1
+    done
 
     kill "$app_pid" 2>/dev/null || true
     wait "$app_pid" 2>/dev/null || true
