@@ -387,6 +387,10 @@ struct TranscriptedSettingsView: View {
                     copiedRowID: homeCopiedRowID,
                     canRetryFailedMeetings: canRetryFailedMeetings,
                     failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
+                    onImportAudio: {
+                        trackSettingsAction("import_recording", page: .home)
+                        actions.importAudioFile()
+                    },
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
                         NSWorkspace.shared.open(entry.url)
