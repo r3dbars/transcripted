@@ -105,22 +105,34 @@ func testRepoCommandContract() {
         let caskVersion = rubyStringAssignment("version", in: cask)
         let caskSHA = rubyStringAssignment("sha256", in: cask)
         let latestAppcastItem = firstAppcastItem(in: appcast)
+        let minimumSystemVersion = plistStringValue("LSMinimumSystemVersion", in: infoPlist)
+        let appcastTitle = xmlText("title", in: latestAppcastItem)
         let appcastVersion = xmlText("sparkle:version", in: latestAppcastItem)
         let appcastShortVersion = xmlText("sparkle:shortVersionString", in: latestAppcastItem)
+        let appcastMinimumSystemVersion = xmlText("sparkle:minimumSystemVersion", in: latestAppcastItem)
+        let appcastHardwareRequirements = xmlText("sparkle:hardwareRequirements", in: latestAppcastItem)
         let appcastEnclosureURL = xmlAttribute("url", inFirstTagNamed: "enclosure", text: latestAppcastItem)
         let appcastLength = xmlAttribute("length", inFirstTagNamed: "enclosure", text: latestAppcastItem)
         let appcastSignature = xmlAttribute("sparkle:edSignature", inFirstTagNamed: "enclosure", text: latestAppcastItem)
+        let appcastLink = xmlText("link", in: latestAppcastItem)
+        let appcastReleaseNotesLink = xmlText("sparkle:releaseNotesLink", in: latestAppcastItem)
+        let expectedReleaseURL = appVersion.map { "https://github.com/r3dbars/transcripted/releases/tag/v\($0)" }
 
         assertNotNil(appVersion, "Info.plist should expose CFBundleShortVersionString")
         assertEqual(buildVersion, appVersion, "marketing and build versions should move together for Sparkle")
         assertEqual(caskVersion, appVersion, "Homebrew cask version should match the app bundle version")
+        assertEqual(appcastTitle, appVersion, "latest appcast title should name the release version")
         assertEqual(appcastVersion, appVersion, "latest appcast item should match the app bundle version")
         assertEqual(appcastShortVersion, appVersion, "Sparkle shortVersionString should match the app bundle version")
+        assertEqual(appcastMinimumSystemVersion, minimumSystemVersion, "Sparkle minimum macOS version should match Info.plist")
+        assertEqual(appcastHardwareRequirements, "arm64", "Sparkle appcast should keep the release hardware requirement explicit")
         assertEqual(
             appcastEnclosureURL,
             appVersion.map { "https://github.com/r3dbars/transcripted/releases/download/v\($0)/Transcripted-\($0).dmg" },
             "latest appcast enclosure should point at the matching GitHub DMG"
         )
+        assertEqual(appcastLink, expectedReleaseURL, "latest appcast link should point at the matching GitHub release")
+        assertEqual(appcastReleaseNotesLink, expectedReleaseURL, "latest appcast notes should point at the matching GitHub release")
         assertTrue(
             isPositiveInteger(appcastLength),
             "latest appcast enclosure should include a positive asset length"
@@ -136,6 +148,147 @@ func testRepoCommandContract() {
         assertTrue(
             cask.contains("releases/download/v#{version}/Transcripted-#{version}.dmg"),
             "Homebrew cask URL should keep tracking the matching GitHub release asset"
+        )
+        assertTrue(cask.contains("depends_on arch: :arm64"), "Homebrew cask should keep the arm64 release contract")
+        assertTrue(cask.contains("depends_on macos: \">= :tahoe\""), "Homebrew cask should stay aligned with the macOS 26+ release floor")
+    }
+
+    runSuite("Repo command contract - Sparkle app settings point at the committed appcast") {
+        let infoPlist = readRepoTextFile("Info.plist")
+        let appcast = readRepoTextFile("docs/appcast.xml")
+        let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")
+
+        let feedURL = plistStringValue("SUFeedURL", in: infoPlist)
+        let appcastSelfURL = xmlAttribute("href", inFirstTagNamed: "atom:link", text: appcast)
+        let publicKey = plistStringValue("SUPublicEDKey", in: infoPlist)
+
+        assertEqual(
+            feedURL,
+            "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
+            "Info.plist should use the committed main-branch appcast feed"
+        )
+        assertEqual(appcastSelfURL, feedURL, "appcast self link should match Info.plist SUFeedURL")
+        assertTrue(plistBooleanValue("SUEnableAutomaticChecks", in: infoPlist) == true, "Sparkle automatic checks should stay enabled")
+        assertTrue(plistBooleanValue("SUAllowsAutomaticUpdates", in: infoPlist) == true, "Sparkle automatic downloads should stay available")
+        assertEqual(plistIntegerValue("SUScheduledCheckInterval", in: infoPlist), 14_400, "Sparkle check interval should stay at 4 hours")
+        assertNotNil(publicKey, "Info.plist should include the Sparkle EdDSA public key")
+        if let publicKey {
+            assertTrue(
+                sparkleDocs.contains("<string>\(publicKey)</string>"),
+                "docs/sparkle-updates.md should document the committed Sparkle public key"
+            )
+        }
+    }
+
+    runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+        let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+
+        assertTrue(
+            releaseDocs.contains("docs/sparkle-updates.md") && releaseDocs.contains("docs/appcast.xml"),
+            "release packaging docs should keep Sparkle in the release contract"
+        )
+        assertTrue(
+            releaseDocs.contains("existing installs will not discover the new build in-app yet"),
+            "release packaging docs should warn when Sparkle metadata is stale"
+        )
+        assertTrue(
+            releaseDocs.contains("bash scripts/release/update-cask.sh <version>"),
+            "release packaging docs should include the Homebrew cask update command"
+        )
+        assertTrue(
+            releaseDocs.contains("Homebrew users will still") && releaseDocs.contains("install or upgrade to the older version"),
+            "release packaging docs should warn when the cask is stale"
+        )
+        assertTrue(
+            releaseDocs.contains("SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"),
+            "release packaging docs should include a local thin packaging smoke command"
+        )
+        assertTrue(
+            sparkleDocs.contains("release is not done until `docs/appcast.xml` has been updated and pushed"),
+            "Sparkle docs should make the pushed appcast a required gate"
+        )
+        assertTrue(
+            sparkleDocs.contains("bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder"),
+            "Sparkle docs should include the appcast generation command"
+        )
+        assertTrue(
+            sparkleDocs.contains("bash scripts/release/verify-sparkle-release.sh <version>"),
+            "Sparkle docs should include the release verification command"
+        )
+        assertTrue(
+            sparkleDocs.contains("Commit and push the updated `docs/appcast.xml`."),
+            "Sparkle docs should keep the final push gate explicit"
+        )
+        assertTrue(
+            scriptsReadme.contains("scripts/release/generate-sparkle-appcast.sh")
+                && scriptsReadme.contains("scripts/release/verify-sparkle-release.sh")
+                && scriptsReadme.contains("scripts/release/update-cask.sh"),
+            "scripts README should list the active release helper scripts"
+        )
+    }
+
+    runSuite("Repo command contract - release helper scripts keep local release checks available") {
+        let expectedScripts = [
+            "scripts/release/generate-sparkle-appcast.sh",
+            "scripts/release/verify-sparkle-release.sh",
+            "scripts/release/update-cask.sh"
+        ]
+
+        for script in expectedScripts {
+            assertTrue(fileExists(script), "\(script) should stay in the repo")
+            assertTrue(readRepoTextFile(script).hasPrefix("#!/bin/bash"), "\(script) should remain a bash entrypoint")
+        }
+
+        let generateAppcast = readRepoTextFile("scripts/release/generate-sparkle-appcast.sh")
+        assertTrue(
+            generateAppcast.contains("deps-tools/sparkle/bin/generate_appcast")
+                && generateAppcast.contains("REPO_APPCAST_PATH=\"${REPO_APPCAST_PATH:-docs/appcast.xml}\""),
+            "generate-sparkle-appcast should use the pinned Sparkle tool and committed appcast"
+        )
+        assertTrue(
+            generateAppcast.contains("INFO_PLIST_PATH=\"${INFO_PLIST_PATH:-Info.plist}\"")
+                && generateAppcast.contains("minimumSystemVersion")
+                && generateAppcast.contains("hardwareRequirements"),
+            "generate-sparkle-appcast should align feed metadata with Info.plist"
+        )
+        assertTrue(
+            generateAppcast.contains("sparkle:edSignature")
+                && generateAppcast.contains("releases/download/v{version}/Transcripted-{version}.dmg"),
+            "generate-sparkle-appcast should require signed Sparkle updates and GitHub release asset URLs"
+        )
+
+        let verifySparkle = readRepoTextFile("scripts/release/verify-sparkle-release.sh")
+        assertTrue(
+            verifySparkle.contains("gh release view")
+                && verifySparkle.contains("curl -fsSIL")
+                && verifySparkle.contains("EXPECTED_URL=\"https://github.com/r3dbars/transcripted/releases/download/${TAG}/${DMG_NAME}\""),
+            "verify-sparkle-release should check the published GitHub release and DMG URL"
+        )
+        assertTrue(
+            verifySparkle.contains("Print :SUFeedURL")
+                && verifySparkle.contains("Print :SUPublicEDKey")
+                && verifySparkle.contains("Print :SUEnableAutomaticChecks"),
+            "verify-sparkle-release should check app updater settings"
+        )
+        assertTrue(
+            verifySparkle.contains("latest appcast item is missing enclosure")
+                && verifySparkle.contains("sparkle:edSignature")
+                && verifySparkle.contains("latest appcast item has invalid length"),
+            "verify-sparkle-release should check the local appcast entry before release closeout"
+        )
+
+        let updateCask = readRepoTextFile("scripts/release/update-cask.sh")
+        assertTrue(
+            updateCask.contains("CASK_PATH=\"$REPO_ROOT/Casks/transcripted.rb\"")
+                && updateCask.contains("DMG_URL=\"https://github.com/r3dbars/transcripted/releases/download/v${VERSION}/Transcripted-${VERSION}.dmg\""),
+            "update-cask should update the committed cask from the matching GitHub DMG"
+        )
+        assertTrue(
+            updateCask.contains("shasum -a 256")
+                && updateCask.contains("sha256"),
+            "update-cask should compute the published artifact digest locally"
         )
     }
 
@@ -432,6 +585,11 @@ private func readRepoTextFile(_ relativePath: String) -> String {
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
 
+private func fileExists(_ relativePath: String) -> Bool {
+    let url = repoRootURL().appendingPathComponent(relativePath)
+    return FileManager.default.fileExists(atPath: url.path)
+}
+
 private func plistStringValue(_ key: String, in contents: String) -> String? {
     guard let keyRange = contents.range(of: "<key>\(key)</key>"),
           let stringStart = contents.range(of: "<string>", range: keyRange.upperBound..<contents.endIndex),
@@ -441,6 +599,31 @@ private func plistStringValue(_ key: String, in contents: String) -> String? {
     }
 
     return String(contents[stringStart.upperBound..<stringEnd.lowerBound])
+}
+
+private func plistBooleanValue(_ key: String, in contents: String) -> Bool? {
+    guard let keyRange = contents.range(of: "<key>\(key)</key>"),
+          let valueStart = contents.range(of: "<", range: keyRange.upperBound..<contents.endIndex),
+          let valueEnd = contents.range(of: ">", range: valueStart.upperBound..<contents.endIndex)
+    else {
+        return nil
+    }
+
+    let tag = String(contents[valueStart.lowerBound...valueEnd.lowerBound])
+    if tag == "<true/>" { return true }
+    if tag == "<false/>" { return false }
+    return nil
+}
+
+private func plistIntegerValue(_ key: String, in contents: String) -> Int? {
+    guard let keyRange = contents.range(of: "<key>\(key)</key>"),
+          let integerStart = contents.range(of: "<integer>", range: keyRange.upperBound..<contents.endIndex),
+          let integerEnd = contents.range(of: "</integer>", range: integerStart.upperBound..<contents.endIndex)
+    else {
+        return nil
+    }
+
+    return Int(contents[integerStart.upperBound..<integerEnd.lowerBound])
 }
 
 private func rubyStringAssignment(_ key: String, in contents: String) -> String? {
