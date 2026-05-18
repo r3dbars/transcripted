@@ -376,15 +376,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
-        PermissionsOnboardingPreferences.markCompleted()
-        MenuBarOptionalItem.allCases.forEach {
-            MenuBarVisibilityPreferences.setVisible($0, true)
-        }
-
+        let smokeMenuVisibility = Dictionary(uniqueKeysWithValues: MenuBarOptionalItem.allCases.map { ($0, true) })
         let report = menuPanelController.launchUISmokeReport(
             statusItemExists: statusItem != nil,
             popoverConfigured: popover != nil,
-            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+            onboardingCompleted: true,
+            menuVisibilityOverride: smokeMenuVisibility
         )
         let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
 

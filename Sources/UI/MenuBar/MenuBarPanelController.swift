@@ -69,7 +69,10 @@ final class MenuBarPanelController: NSViewController {
         setupSubscriptions()
     }
 
-    func refresh() {
+    func refresh(
+        menuVisibilityOverride: [MenuBarOptionalItem: Bool]? = nil,
+        allowUpdateRefresh: Bool = true
+    ) {
         scheduledRefreshTask?.cancel()
         scheduledRefreshTask = nil
 
@@ -89,7 +92,7 @@ final class MenuBarPanelController: NSViewController {
             for: appState.sparkleUpdater.updateStatus,
             automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
         )
-        let menuVisibility = MenuBarVisibilityPreferences.snapshot()
+        let menuVisibility = menuVisibilityOverride ?? MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
             warmupStatus: warmupStatus,
@@ -129,7 +132,7 @@ final class MenuBarPanelController: NSViewController {
             showUpdateRow: !updatePresentation.isProminent
         )
 
-        if case .unknown = appState.sparkleUpdater.updateStatus.state {
+        if allowUpdateRefresh, case .unknown = appState.sparkleUpdater.updateStatus.state {
             appState.sparkleUpdater.refreshUpdateStatus()
         }
 
@@ -142,10 +145,11 @@ final class MenuBarPanelController: NSViewController {
     func launchUISmokeReport(
         statusItemExists: Bool,
         popoverConfigured: Bool,
-        onboardingCompleted: Bool
+        onboardingCompleted: Bool,
+        menuVisibilityOverride: [MenuBarOptionalItem: Bool]
     ) -> MenuBarLaunchUISmokeReport {
         loadViewIfNeeded()
-        refresh()
+        refresh(menuVisibilityOverride: menuVisibilityOverride, allowUpdateRefresh: false)
         return MenuBarLaunchUISmokeReport(
             appLaunched: true,
             statusItemExists: statusItemExists,
