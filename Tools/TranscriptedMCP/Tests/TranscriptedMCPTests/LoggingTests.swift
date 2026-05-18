@@ -21,6 +21,14 @@ final class LoggingTests: XCTestCase {
         XCTAssertEqual(output.trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
 
+    func testLogPrefixAndLineEndingStayStable() {
+        let output = captureStandardError {
+            log("indexed fixture")
+        }
+
+        XCTAssertEqual(output, "[transcripted-mcp] indexed fixture\n")
+    }
+
     private func captureStandardError(_ body: () -> Void) -> String {
         let pipe = Pipe()
         let original = dup(STDERR_FILENO)

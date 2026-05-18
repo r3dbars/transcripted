@@ -153,6 +153,18 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertTrue(results.isEmpty)
     }
 
+    func testMalformedDictationMarkdownIsSkipped() throws {
+        try "# Dictations with no frontmatter".write(
+            to: tempDir.appendingPathComponent("Dictations_2026-04-07.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        XCTAssertTrue(try index.listDictationDays(count: 10).isEmpty)
+        XCTAssertTrue(try index.listRecentContext(kind: .all, count: 10).items.isEmpty)
+    }
+
     func testIndexSingleFileRejectsSymlinkEscape() throws {
         let outsideDir = makeTempDir()
         defer { removeTempDir(outsideDir) }
@@ -303,6 +315,28 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertEqual(results.results.last?.kind, .meeting)
     }
 
+    func testSearchContextWithSpeakerFilterDoesNotReturnDictations() throws {
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "Roadmap meeting update"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try writeFixture(makeDictationDayJSON(entries: [
+            ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Roadmap note", "Roadmap dictation note", "Slack", "copied"),
+        ]), filename: "Dictations_2026-04-07", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let results = try index.searchContext(
+            query: "roadmap",
+            speaker: "Jenny",
+            kind: .all,
+            dateFrom: nil,
+            dateTo: nil,
+            maxItems: 10
+        )
+
+        XCTAssertEqual(results.results.count, 1)
+        XCTAssertEqual(results.results.first?.kind, .meeting)
+    }
+
     func testRecentContextIncludesDictationEntries() throws {
         try writeFixture(makeFixtureJSON(date: "2026-03-29T10:00:00-0500"), filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
@@ -363,5 +397,39 @@ final class TranscriptIndexTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items.first?.preview, "No transcript captured.")
+    }
+
+    func testContextSearchResultEncodesStableAgentKeys() throws {
+        let result = ContextSearchResult(
+            results: [
+                ContextSearchGroup(
+                    kind: .dictation,
+                    title: "Morning note",
+                    filename: "Dictations_2026-04-07",
+                    entryId: "dictation-20260407-091500-000",
+                    date: "2026-04-07",
+                    datetime: "2026-04-07T09:15:00-0500",
+                    snippets: [
+                        ContextSearchSnippet(
+                            text: "Ship the follow-up note.",
+                            speaker: nil,
+                            speakerId: nil,
+                            timestamp: nil,
+                            sourceAppName: "Slack",
+                            delivery: "copied"
+                        )
+                    ]
+                )
+            ],
+            totalItemsMatched: 1,
+            truncated: false
+        )
+
+        let json = String(data: try JSONEncoder.pretty.encode(result), encoding: .utf8)
+
+        XCTAssertTrue(json?.contains("\"entry_id\" : \"dictation-20260407-091500-000\"") == true)
+        XCTAssertTrue(json?.contains("\"source_app_name\" : \"Slack\"") == true)
+        XCTAssertTrue(json?.contains("\"total_items_matched\" : 1") == true)
+        XCTAssertTrue(json?.contains("\"truncated\" : false") == true)
     }
 }

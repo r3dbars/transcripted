@@ -95,6 +95,68 @@ final class ValidatorTests: XCTestCase {
         })
     }
 
+    func testJSONSidecarValidatorReportsMalformedJSON() throws {
+        try "{ not valid json".write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = JSONSidecarValidator(directory: tempRoot).validate()
+
+        XCTAssertTrue(results.contains {
+            $0.status == .fail
+                && $0.check == "artifact/json-valid"
+                && $0.target == "Call_2026-04-18_14-43-40.json"
+        })
+    }
+
+    func testTranscriptValidatorReportsMalformedMarkdownFrontmatter() throws {
+        try "not markdown at all".write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+
+        XCTAssertTrue(results.contains {
+            $0.status == .fail
+                && $0.check == "transcript/yaml-present"
+                && ($0.detail ?? "").contains("No YAML frontmatter found")
+        })
+    }
+
+    func testLogValidatorAcceptsStableJSONLFields() throws {
+        let logURL = tempRoot.appendingPathComponent("app.jsonl")
+        try """
+        {"t":"2026-05-18T12:00:00Z","l":"info","s":"app","m":"started"}
+        {"t":"2026-05-18T12:00:01Z","l":"debug","s":"audio.mic","m":"ready"}
+        """.write(to: logURL, atomically: true, encoding: .utf8)
+
+        let results = LogValidator(logPath: logURL.path).validate()
+
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "logs/jsonl-valid" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "logs/jsonl-required-keys" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "logs/jsonl-valid-levels" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "logs/jsonl-valid-subsystems" })
+    }
+
+    func testLogValidatorFailsMissingStableJSONLFields() throws {
+        let logURL = tempRoot.appendingPathComponent("app.jsonl")
+        try """
+        {"t":"2026-05-18T12:00:00Z","l":"info","s":"app"}
+        """.write(to: logURL, atomically: true, encoding: .utf8)
+
+        let results = LogValidator(logPath: logURL.path).validate()
+
+        XCTAssertTrue(results.contains {
+            $0.status == .fail
+                && $0.check == "logs/jsonl-required-keys"
+                && ($0.detail ?? "").contains("t/l/s/m")
+        })
+    }
+
     func testValidationReportExitsNonZeroOnlyForFailures() {
         XCTAssertEqual(
             ValidationReport(results: [.pass("ok", target: "fixture"), .warn("warn", target: "fixture", detail: "heads up")]).exitCode,
@@ -146,5 +208,19 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(groupedFailure["status"] as? String, "FAIL")
         XCTAssertEqual(groupedFailure["count"] as? Int, 1)
         XCTAssertEqual(groupedFailure["detail"] as? String, "No corresponding .md file")
+    }
+
+    func testValidationReportFingerprintIDDoesNotDependOnTargets() throws {
+        let first = ValidationReport(results: [
+            .fail("artifact/md-match", target: "one.json", detail: "No corresponding .md file"),
+        ])
+        let second = ValidationReport(results: [
+            .fail("artifact/md-match", target: "two.json", detail: "No corresponding .md file"),
+        ])
+
+        XCTAssertEqual(
+            try XCTUnwrap(first.failureFingerprints.first?.id),
+            try XCTUnwrap(second.failureFingerprints.first?.id)
+        )
     }
 }
