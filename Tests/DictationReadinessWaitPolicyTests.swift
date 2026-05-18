@@ -60,6 +60,20 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .refreshInputReadiness, "forced recovery should stay bounded inside a single dictation wait")
     }
 
+    runSuite("DictationReadinessWaitPolicy — zero forced-recovery budget keeps refreshing") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 10,
+            forcedRecoveryAttempts: 0,
+            forcedRecoveryRefreshThreshold: 6,
+            maxForcedRecoveryAttempts: 0,
+            recoveryStartAttempts: 1
+        )
+
+        assertEqual(action, .refreshInputReadiness, "disabled forced recovery should fall back to bounded readiness refreshes")
+    }
+
     runSuite("DictationReadinessWaitPolicy — active recovery wins over forced recovery threshold") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: true,
@@ -200,5 +214,16 @@ func testDictationReadinessWaitPolicy() {
         )
 
         assertFalse(timedOut, "no active refresh should not be treated as timed out")
+    }
+
+    runSuite("DictationReadinessRefreshTimeoutPolicy — non-positive timeout never expires") {
+        assertFalse(
+            DictationReadinessRefreshTimeoutPolicy.timedOut(
+                startedAt: 10,
+                now: 20,
+                timeout: 0
+            ),
+            "a disabled timeout should not make a refresh look stale"
+        )
     }
 }

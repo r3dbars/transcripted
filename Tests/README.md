@@ -2,15 +2,17 @@
 
 ## Test Surfaces
 
-This repo has four distinct verification layers:
+This repo has five distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
 2. `bash run-integration-smoke.sh`
    App-to-core linkage smoke test
-3. `swift test`
+3. `bash run-e2e-smoke.sh`
+   Deterministic release-critical artifact smoke without microphone/TCC
+4. `swift test`
    Swift Package tests for the standalone `TranscriptedCore` package surface
-4. `bash build.sh`
+5. `bash build.sh`
    Authoritative app build for the menubar target
 
 ## Fast Test Runner
@@ -28,6 +30,16 @@ Important implications:
 - `run-tests.sh` now fails if the manifest and the actual root test files drift
 
 The current compiled fast test set lives in `Tests/FastTests.manifest`.
+
+To measure fast-test coverage, run:
+
+```bash
+bash run-tests.sh --coverage
+```
+
+This uses the same manifest-driven runner with LLVM coverage instrumentation
+and writes `summary.txt`, `coverage.profdata`, raw `.profraw`, and
+`report.lcov` under `build/coverage/fast-tests/`.
 
 ## Core Package Tests
 
@@ -61,3 +73,18 @@ Run it whenever you touch:
 - `Sources/Meeting/`
 - `Sources/TranscriptedCore/`
 - dependency wiring in `build-deps.sh`
+
+## Deterministic E2E Smoke
+
+`bash run-e2e-smoke.sh` compiles `Tests/E2E/TranscriptedE2ESmoke.swift`
+with the small app source set needed to prove the release-critical local
+artifact contract. It does not use the microphone, ScreenCaptureKit, Calendar,
+Accessibility, Sparkle, or a real app launch.
+
+It currently verifies:
+
+- saved dictation Markdown can be written, counted, and read back
+- meeting Markdown can be previewed and parsed for Home/agent use
+- retained meeting audio can be resolved from the saved transcript
+- the MCP directories manifest names the capture, meeting, and dictation roots
+- support diagnostics redact titles, paths, emails, raw URLs, and device names

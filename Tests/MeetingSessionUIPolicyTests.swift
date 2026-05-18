@@ -83,6 +83,16 @@ func testMeetingSessionUIPolicy() {
         )
     }
 
+    runSuite("MeetingRecordingTitlePolicy — nil titles stay nil") {
+        assertNil(
+            MeetingRecordingTitlePolicy.resolve(
+                explicitTitle: nil,
+                calendarTitle: nil
+            ),
+            "untitled manual starts should stay untitled instead of inventing metadata"
+        )
+    }
+
     runSuite("MeetingRecordingTitlePolicy — explicit prompt title wins over calendar fallback") {
         assertEqual(
             MeetingRecordingTitlePolicy.resolve(
@@ -120,6 +130,14 @@ func testMeetingSessionUIPolicy() {
                 calendarTitle: " \r\n "
             ),
             "blank calendar titles should not become transcript titles"
+        )
+    }
+
+    runSuite("MeetingRecordingTitlePolicy — multiline titles normalize before save") {
+        assertEqual(
+            MeetingRecordingTitlePolicy.normalized("  Product sync\r\nFollow-up  "),
+            "Product sync  Follow-up",
+            "transcript titles should be single-line and trimmed before persistence"
         )
     }
 }

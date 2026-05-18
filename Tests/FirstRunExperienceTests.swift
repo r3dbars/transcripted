@@ -21,6 +21,13 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience step navigation stays bounded") {
+        assertNil(FirstRunExperience.previousStep(before: .hero), "hero should be the first onboarding step")
+        assertEqual(FirstRunExperience.nextStep(after: .hero), .value, "hero should advance into value copy")
+        assertEqual(FirstRunExperience.previousStep(before: .agentPayoff), .meetingSetup, "final step should have a back target")
+        assertNil(FirstRunExperience.nextStep(after: .agentPayoff), "agent payoff should be the terminal onboarding step")
+    }
+
     runSuite("FirstRunExperience.onboardingAction — gates first dictation on microphone plus paste-back") {
         let blocked = FirstRunExperience.onboardingAction(
             for: .dictationSetup,
@@ -39,6 +46,19 @@ func testFirstRunExperience() {
         assertFalse(blocked.isPrimaryEnabled, "dictation setup should block until paste-back is ready")
         assertEqual(ready.primaryTitle, "Continue", "ready setup should let users reach the first dictation test")
         assertTrue(ready.isPrimaryEnabled, "ready setup should unlock")
+    }
+
+    runSuite("FirstRunExperience.onboardingAction — blocks the dictation test until setup is complete") {
+        let blocked = FirstRunExperience.onboardingAction(
+            for: .testDictation,
+            microphoneGranted: false,
+            accessibilityGranted: true,
+            hasFirstDictation: false
+        )
+
+        assertEqual(blocked.primaryTitle, "Start Dictation", "the test step should keep the same CTA")
+        assertFalse(blocked.isPrimaryEnabled, "the first dictation test should stay disabled until required permissions are ready")
+        assertTrue(blocked.detail.contains("Finish dictation setup first"), "blocked copy should point back to setup")
     }
 
     runSuite("FirstRunExperience.onboardingAction — presents meetings and agent payoff after first dictation") {
@@ -69,6 +89,19 @@ func testFirstRunExperience() {
         assertEqual(meetings.primaryTitle, "Set up meetings", "meeting intro should offer setup")
         assertEqual(meetings.secondaryTitle, "Skip for now", "meeting intro should not trap dictation-first users")
         assertEqual(agent.primaryTitle, "Open Transcripted", "last step should land users in the app")
+    }
+
+    runSuite("FirstRunExperience.onboardingAction — missing first dictation offers retry") {
+        let result = FirstRunExperience.onboardingAction(
+            for: .dictationResult,
+            microphoneGranted: true,
+            accessibilityGranted: true,
+            hasFirstDictation: false
+        )
+
+        assertEqual(result.primaryTitle, "Try Again", "missing proof should return users to the dictation attempt")
+        assertTrue(result.detail.contains("No dictation has been saved yet"), "retry copy should be explicit")
+        assertTrue(result.isPrimaryEnabled, "retry should stay available")
     }
 
     runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
@@ -116,6 +149,23 @@ func testFirstRunExperience() {
         assertEqual(sanitized["completion_flow"], "meetings", "completion flow should survive analytics sanitization")
     }
 
+    runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — handles dictation-only completion without elapsed timing") {
+        let properties = FirstRunExperience.onboardingCompletionAnalyticsProperties(
+            completionPath: .dictation,
+            systemAudioGranted: false,
+            calendarGranted: true,
+            meetingPromptsEnabled: false,
+            anonymousUsageEnabled: false,
+            crashReportingEnabled: true,
+            elapsedSeconds: nil
+        )
+
+        assertEqual(properties["completion_flow"], "dictation", "dictation-only completion should stay distinct")
+        assertEqual(properties["meeting_recording_ready"], "false", "missing system audio should be preserved")
+        assertEqual(properties["calendar_status"], "disabled", "disabled meeting prompts should not report calendar as granted")
+        assertNil(properties["flow_elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
+    }
+
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
         let idle = FirstRunExperience.meetingAction(
             dictationReady: true,
@@ -133,6 +183,20 @@ func testFirstRunExperience() {
         assertEqual(recording.title, "Stop Meeting", "recording menu action should not keep saying Start Meeting")
         assertEqual(recording.symbolName, "stop.circle.fill", "recording menu action should use the stop icon")
         assertEqual(recording.subtitle, "Recording now", "recording menu detail should explain the current state")
+    }
+
+    runSuite("FirstRunExperience.meetingAction — exposes retry copy after meeting tool failure") {
+        let failed = FirstRunExperience.meetingAction(
+            dictationReady: true,
+            meetingsStatus: "Failed"
+        )
+        let lazy = FirstRunExperience.meetingAction(
+            dictationReady: false,
+            meetingsStatus: "On demand"
+        )
+
+        assertEqual(failed.subtitle, "Try again to reload meeting tools", "failed meeting warmup should offer a retry path")
+        assertEqual(lazy.subtitle, "Starts local meeting setup on first use", "cold startup should explain lazy meeting setup")
     }
 
     runSuite("FirstRunExperience.primaryAction — explains only dictation-critical permissions are required up front") {
@@ -186,6 +250,18 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.primaryAction — explains cached model without paste target") {
+        let action = FirstRunExperience.primaryAction(
+            hasRequiredPermissions: true,
+            hasPasteTarget: false,
+            modelState: .cached
+        )
+
+        assertEqual(action.title, "Continue to Transcripted", "cached fallback should keep onboarding moving")
+        assertFalse(action.shouldStartDictation, "cached fallback should not start dictation without a target")
+        assertTrue(action.detail.contains("cached"), "cached fallback copy should distinguish files from loaded model")
+    }
+
     runSuite("FirstRunExperience.primaryAction — keeps first dictation available after model warmup failed") {
         let action = FirstRunExperience.primaryAction(
             hasRequiredPermissions: true,
@@ -226,6 +302,13 @@ func testFirstRunExperience() {
             "Downloads once, then starts automatically",
             "dictation row should explain the one-time background wait"
         )
+    }
+
+    runSuite("FirstRunExperience.dictationAction — failed model setup still offers retry") {
+        let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
+
+        assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
+        assertEqual(state.subtitle, "Try again to retry local voice setup", "failed dictation row should explain retry behavior")
     }
 
     runSuite("FirstRunExperience.meetingAction — stays enabled while meetings load in the background") {

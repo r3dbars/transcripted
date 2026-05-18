@@ -6,6 +6,7 @@ func testRepoCommandContract() {
             "build-deps.sh": "scripts/entrypoints/build-deps.sh",
             "build-beta.sh": "scripts/entrypoints/build-beta.sh",
             "build.sh": "scripts/entrypoints/build.sh",
+            "run-e2e-smoke.sh": "scripts/entrypoints/run-e2e-smoke.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
         ]
@@ -69,6 +70,34 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("trap cleanup_generated_runner EXIT"),
             "temporary generated test runners should be removed on exit"
+        )
+    }
+
+    runSuite("Repo command contract - deterministic E2E smoke stays on the release surface") {
+        let wrapper = readRepoTextFile("run-e2e-smoke.sh")
+        let entrypoint = readRepoTextFile("scripts/entrypoints/run-e2e-smoke.sh")
+        let testsReadme = readRepoTextFile("Tests/README.md")
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+
+        assertTrue(
+            wrapper.contains("exec \"$SCRIPT_DIR/scripts/entrypoints/run-e2e-smoke.sh\" \"$@\""),
+            "root E2E wrapper should delegate to the scripts entrypoint"
+        )
+        assertTrue(
+            entrypoint.contains("Tests/E2E/TranscriptedE2ESmoke.swift"),
+            "E2E entrypoint should compile the deterministic release-critical smoke"
+        )
+        assertTrue(
+            entrypoint.contains("TRANSCRIPTED_DISABLE_FILE_LOGGER=1"),
+            "E2E smoke should keep local production logs clean"
+        )
+        assertTrue(
+            testsReadme.contains("bash run-e2e-smoke.sh"),
+            "Tests README should document the deterministic E2E smoke"
+        )
+        assertTrue(
+            matrix.contains("Tests/E2E/**") && matrix.contains("bash run-e2e-smoke.sh"),
+            "test matrix should map E2E smoke changes to the E2E command"
         )
     }
 

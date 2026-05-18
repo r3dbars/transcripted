@@ -19,6 +19,18 @@ func testSettingsRecentCaptureRefreshPolicy() {
         }
     }
 
+    runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
+        assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
+        assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
+        assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
+        assertEqual(TranscriptedSettingsPage.privacy.systemImage, "lock.shield.fill", "privacy page should keep the shield affordance")
+        assertEqual(
+            Set(TranscriptedSettingsPage.allCases.map(\.rawValue)).count,
+            TranscriptedSettingsPage.allCases.count,
+            "settings page raw values should stay unique for selection persistence"
+        )
+    }
+
     runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — allows the first passive refresh") {
         assertTrue(
             SettingsDashboardRefreshPolicy.shouldStartRefresh(
@@ -64,6 +76,19 @@ func testSettingsRecentCaptureRefreshPolicy() {
                 minimumInterval: 1.5
             ),
             "passive refreshes after the debounce window should run"
+        )
+    }
+
+    runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — treats the debounce boundary as refreshable") {
+        assertTrue(
+            SettingsDashboardRefreshPolicy.shouldStartRefresh(
+                force: false,
+                isInFlight: false,
+                lastStartedAt: Date(timeIntervalSinceReferenceDate: 10),
+                now: Date(timeIntervalSinceReferenceDate: 11.5),
+                minimumInterval: 1.5
+            ),
+            "refreshes should be allowed exactly at the debounce boundary"
         )
     }
 

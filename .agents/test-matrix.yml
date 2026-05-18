@@ -23,6 +23,13 @@ rules:
       - "bash run-integration-smoke.sh"
 
   - paths:
+      - "Tests/E2E/**"
+      - "run-e2e-smoke.sh"
+      - "scripts/entrypoints/run-e2e-smoke.sh"
+    checks:
+      - "bash run-e2e-smoke.sh"
+
+  - paths:
       - "Package.swift"
       - "Sources/TranscriptedCore/**"
       - "Tests/TranscriptedCoreTests/**"
