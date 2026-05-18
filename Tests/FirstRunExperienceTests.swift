@@ -87,6 +87,35 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — keeps completion payload coarse") {
+        let properties = FirstRunExperience.onboardingCompletionAnalyticsProperties(
+            completionPath: .meetings,
+            systemAudioGranted: true,
+            calendarGranted: false,
+            meetingPromptsEnabled: true,
+            anonymousUsageEnabled: true,
+            crashReportingEnabled: false,
+            elapsedSeconds: 75
+        )
+
+        assertEqual(properties["completion_flow"], "meetings", "completion flow should stay a coarse enum")
+        assertEqual(properties["meeting_recording_ready"], "true", "completion should preserve meeting readiness")
+        assertEqual(properties["calendar_status"], "not_granted", "calendar status should avoid raw event details")
+        assertEqual(properties["anonymous_usage_enabled"], "true", "completion should preserve analytics preference state")
+        assertEqual(properties["crash_reporting_enabled"], "false", "completion should preserve crash preference state")
+        assertEqual(properties["flow_elapsed_bucket"], "30_119s", "completion should bucket elapsed time")
+        assertEqual(properties["step_id"], "done", "completion should anchor to the final onboarding step")
+        assertNil(properties["transcript"], "completion analytics should not include spoken content")
+        assertNil(properties["audio_path"], "completion analytics should not include local paths")
+        assertNil(properties["meeting_title"], "completion analytics should not include titles")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            properties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["completion_flow"], "meetings", "completion flow should survive analytics sanitization")
+    }
+
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
         let idle = FirstRunExperience.meetingAction(
             dictationReady: true,

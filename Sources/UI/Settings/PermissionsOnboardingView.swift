@@ -46,6 +46,8 @@ struct PermissionsOnboardingView: View {
     @State private var copiedAgentItem: AgentCopyItem?
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var pollTask: Task<Void, Never>?
+    @State private var flowStartedAt: CFAbsoluteTime?
+    @State private var didTrackCompletion = false
     @FocusState private var demoEditorFocused: Bool
 
     init(onComplete: @escaping () -> Void) {
@@ -101,6 +103,9 @@ struct PermissionsOnboardingView: View {
         .frame(width: Self.preferredSize.width, height: Self.preferredSize.height)
         .background(OnboardingTheme.canvas)
         .onAppear {
+            if flowStartedAt == nil {
+                flowStartedAt = CFAbsoluteTimeGetCurrent()
+            }
             checkAllPermissions()
             startPolling()
         }
@@ -517,7 +522,26 @@ struct PermissionsOnboardingView: View {
     private func completeOnboarding() {
         guard hasRequiredPermissions else { return }
         stopPolling()
+        trackCompletionIfNeeded()
         onComplete()
+    }
+
+    private func trackCompletionIfNeeded() {
+        guard !didTrackCompletion else { return }
+        didTrackCompletion = true
+
+        AnalyticsReporter.track(
+            "onboarding_completed",
+            properties: FirstRunExperience.onboardingCompletionAnalyticsProperties(
+                completionPath: selectedUseCase.completionPath,
+                systemAudioGranted: screenRecordingGranted,
+                calendarGranted: calendarGranted,
+                meetingPromptsEnabled: meetingPromptsEnabled,
+                anonymousUsageEnabled: AnalyticsPreferences.isEnabled(),
+                crashReportingEnabled: CrashReportingPreferences.isEnabled(),
+                elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
+            )
+        )
     }
 
     static var hasCompleted: Bool {
@@ -594,6 +618,15 @@ private enum OnboardingUseCase: Hashable {
     case dictation
 
     var shortcutPolicyUseCase: OnboardingDictationShortcutPolicy.UseCase {
+        switch self {
+        case .meetings:
+            return .meetings
+        case .dictation:
+            return .dictation
+        }
+    }
+
+    var completionPath: FirstRunCompletionPath {
         switch self {
         case .meetings:
             return .meetings

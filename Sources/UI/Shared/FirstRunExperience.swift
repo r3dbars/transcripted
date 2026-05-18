@@ -111,6 +111,11 @@ struct FirstRunOnboardingActionState: Equatable {
     let isPrimaryEnabled: Bool
 }
 
+enum FirstRunCompletionPath: String, Equatable {
+    case meetings
+    case dictation
+}
+
 struct FirstRunOnboardingCopy {
     static let heroDetail = "Dictations and meetings become private Markdown files on this Mac, ready for search, notes, and agent context."
     static let valueFooter = "Your spoken context is saved as clean local Markdown."
@@ -233,6 +238,34 @@ enum FirstRunExperience {
         [.systemAudioRecording, .calendar]
     }
 
+    static func onboardingCompletionAnalyticsProperties(
+        completionPath: FirstRunCompletionPath,
+        systemAudioGranted: Bool,
+        calendarGranted: Bool,
+        meetingPromptsEnabled: Bool,
+        anonymousUsageEnabled: Bool,
+        crashReportingEnabled: Bool,
+        elapsedSeconds: Double?
+    ) -> [String: String] {
+        var properties: [String: String] = [
+            "anonymous_usage_enabled": booleanString(anonymousUsageEnabled),
+            "calendar_status": calendarStatus(
+                calendarGranted: calendarGranted,
+                meetingPromptsEnabled: meetingPromptsEnabled
+            ),
+            "completion_flow": completionPath.rawValue,
+            "crash_reporting_enabled": booleanString(crashReportingEnabled),
+            "meeting_recording_ready": booleanString(systemAudioGranted),
+            "step_id": "done",
+        ]
+
+        if let elapsedSeconds {
+            properties["flow_elapsed_bucket"] = AnalyticsReporter.durationBucket(seconds: elapsedSeconds)
+        }
+
+        return properties
+    }
+
     static func primaryAction(
         hasRequiredPermissions: Bool,
         hasPasteTarget: Bool,
@@ -284,6 +317,18 @@ enum FirstRunExperience {
             isEnabled: true,
             shouldStartDictation: false
         )
+    }
+
+    private static func booleanString(_ value: Bool) -> String {
+        value ? "true" : "false"
+    }
+
+    private static func calendarStatus(
+        calendarGranted: Bool,
+        meetingPromptsEnabled: Bool
+    ) -> String {
+        guard meetingPromptsEnabled else { return "disabled" }
+        return calendarGranted ? "granted" : "not_granted"
     }
 
     static func modelCard(
