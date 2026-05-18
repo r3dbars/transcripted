@@ -1436,6 +1436,7 @@ struct HomeMeetingRow: View {
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
+    let hasSpeakerReviewWork: Bool
     let onReviewSpeakers: () -> Void
     let menuItems: [HomeRowMenuItem]
 
@@ -1459,7 +1460,10 @@ struct HomeMeetingRow: View {
     }
 
     private var reviewSpeakersAccessory: AnyView? {
-        guard item.speakerStatus.needsReview else { return nil }
+        guard RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+            speakerStatus: item.speakerStatus,
+            hasSpeakerReviewWork: hasSpeakerReviewWork
+        ) else { return nil }
         return AnyView(
             HomeAttentionActionButton(
                 title: "Review speakers",
@@ -1872,6 +1876,7 @@ struct HomeActivityTabsCard: View {
                                 onOpen: { onOpenMeeting(meeting) },
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },
+                                hasSpeakerReviewWork: hasSpeakerReviewWork,
                                 onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
                                 menuItems: meetingMenuItems(meeting)
                             )
@@ -1892,6 +1897,10 @@ struct HomeActivityTabsCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var hasSpeakerReviewWork: Bool {
+        !speakerPeopleModel.hasLoadedProfiles || speakerPeopleModel.needsReviewCount > 0
     }
 
     @ViewBuilder

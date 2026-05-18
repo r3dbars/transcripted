@@ -78,4 +78,31 @@ func testRecentCaptureScanners() {
             "Legacy inline transcript labels should still surface review work"
         )
     }
+
+    runSuite("RecentMeetingSpeakerReviewActionPolicy hides stale meeting review buttons when people queue is clean") {
+        assertFalse(
+            RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+                speakerStatus: .needsReview(1),
+                hasSpeakerReviewWork: false
+            ),
+            "A generic old transcript should not keep showing a review button after the Speakers queue is clean"
+        )
+    }
+
+    runSuite("RecentMeetingSpeakerReviewActionPolicy shows actionable meeting review buttons") {
+        assertTrue(
+            RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+                speakerStatus: .needsReview(1),
+                hasSpeakerReviewWork: true
+            ),
+            "Generic speaker labels should still show a review button while Speakers has review work"
+        )
+        assertFalse(
+            RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+                speakerStatus: .ready,
+                hasSpeakerReviewWork: true
+            ),
+            "Ready meetings should not show a speaker review button"
+        )
+    }
 }

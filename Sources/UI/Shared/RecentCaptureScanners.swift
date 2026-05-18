@@ -117,6 +117,15 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 }
 
+enum RecentMeetingSpeakerReviewActionPolicy {
+    static func shouldShowReviewAction(
+        speakerStatus: RecentMeetingSpeakerStatus,
+        hasSpeakerReviewWork: Bool
+    ) -> Bool {
+        speakerStatus.needsReview && hasSpeakerReviewWork
+    }
+}
+
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]

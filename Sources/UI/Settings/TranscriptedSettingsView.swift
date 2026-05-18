@@ -476,6 +476,11 @@ struct TranscriptedSettingsView: View {
         }
         .onChange(of: homeActivityTab) { _, newValue in
             trackSettingsAction("home_tab_\(newValue.rawValue)", page: .home)
+            if newValue == .meetings {
+                refreshRecentCaptures(force: true)
+            } else if newValue == .speakers {
+                speakerPeopleModel.refresh()
+            }
         }
         .alert(item: $homeDeleteConfirmation) { confirmation in
             Alert(
