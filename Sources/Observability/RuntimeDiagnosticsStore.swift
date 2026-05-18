@@ -12,6 +12,7 @@ struct RuntimeDiagnosticsMarker: Codable, Equatable {
     var sessionKind: String
     var sessionStage: String
     var sessionActive: Bool
+    var retainedForActiveWork: Bool? = nil
 }
 
 enum RuntimeDiagnosticsStore {
@@ -140,6 +141,10 @@ enum RuntimeDiagnosticsStore {
             return true
         }
 
+        if shouldSuppressInactiveSessionMarker(marker) {
+            return false
+        }
+
         if marker.sessionKind != "none" || marker.sessionStage != "idle" {
             return true
         }
@@ -152,6 +157,63 @@ enum RuntimeDiagnosticsStore {
         return heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now) != "lt_15s"
     }
 
+    private static func shouldSuppressInactiveSessionMarker(
+        _ marker: RuntimeDiagnosticsMarker
+    ) -> Bool {
+        if marker.sessionKind == "none" && marker.sessionStage == "idle" {
+            return terminalIdleEvents.contains(marker.lastEvent)
+        }
+
+        if marker.sessionKind == "dictation" {
+            guard marker.retainedForActiveWork != true else { return false }
+            return terminalDictationStages.contains(marker.sessionStage)
+        }
+
+        return false
+    }
+
+    private static let terminalIdleEvents: Set<String> = [
+        "app_launched",
+        "heartbeat",
+        "clean_shutdown",
+        "dictation_cancelled",
+        "dictation_completed",
+        "dictation_interrupted",
+        "dictation_microphone_route_not_ready",
+        "dictation_microphone_start_failed",
+        "dictation_microphone_start_timeout",
+        "dictation_model_failed",
+        "dictation_model_load_timeout",
+        "dictation_model_unavailable",
+        "dictation_no_speech",
+        "dictation_start_failed",
+        "meeting_cancelled",
+        "meeting_file_import_failed",
+        "meeting_models_unavailable",
+        "meeting_recording_too_short",
+        "meeting_speaker_finalization_failed",
+        "meeting_start_blocked_permission",
+        "meeting_start_failed",
+        "meeting_stop_timeout",
+        "meeting_transcript_failed",
+        "meeting_transcript_saved",
+        "meeting_transcription_cancelled",
+    ]
+
+    private static let terminalDictationStages: Set<String> = [
+        "cancelled",
+        "completed",
+        "interrupted",
+        "microphone_route_not_ready",
+        "microphone_start_failed",
+        "microphone_start_timeout",
+        "model_failed",
+        "model_load_timeout",
+        "model_unavailable",
+        "no_speech",
+        "start_failed",
+    ]
+
     static func clearInactiveSessionContextForHeartbeat(
         _ marker: inout RuntimeDiagnosticsMarker,
         runtimeWorkActive: Bool = false
@@ -161,5 +223,6 @@ enum RuntimeDiagnosticsStore {
 
         marker.sessionKind = "none"
         marker.sessionStage = "idle"
+        marker.retainedForActiveWork = nil
     }
 }

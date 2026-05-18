@@ -478,6 +478,7 @@ class DictationSessionController: ObservableObject {
                 if started {
                     overlayController.state = .listening
                     resizePanelToCompact()
+                    appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
                     let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
                     appState.logger.log("DICTATION | started after forced recovery start and \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
