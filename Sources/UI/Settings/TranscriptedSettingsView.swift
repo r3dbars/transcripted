@@ -387,10 +387,6 @@ struct TranscriptedSettingsView: View {
                     copiedRowID: homeCopiedRowID,
                     canRetryFailedMeetings: canRetryFailedMeetings,
                     failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    onImportAudio: {
-                        trackSettingsAction("import_recording", page: .home)
-                        actions.importAudioFile()
-                    },
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
                         NSWorkspace.shared.open(entry.url)
@@ -1125,7 +1121,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "General",
-                summary: "Startup and simple corrections for names, acronyms, and phrases."
+                summary: "Startup, audio imports, and simple corrections."
             )
 
             SettingsSection(
@@ -1182,6 +1178,34 @@ struct TranscriptedSettingsView: View {
                         }
                     )
                 )
+            }
+
+            SettingsSection(
+                title: "Audio Files",
+                detail: "Transcribe a recording you already have."
+            ) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Transcribe Audio File")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Choose a saved audio file and turn it into Transcripted Markdown.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    SettingsInlineActionButton(
+                        title: "Choose File",
+                        symbolName: "waveform",
+                        tone: .accent
+                    ) {
+                        trackSettingsAction("import_recording", page: .general)
+                        actions.importAudioFile()
+                    }
+                    .help("Choose an audio file to transcribe")
+                }
             }
 
             SettingsSection(
