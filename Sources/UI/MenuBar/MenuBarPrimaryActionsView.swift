@@ -156,4 +156,14 @@ final class MenuBarPrimaryActionsView: NSView {
     private var hiddenActionRows: [MenuBarActionRowView] {
         actionRows.filter(\.isHidden)
     }
+
+    var smokeSnapshot: [String: MenuBarActionRowSmokeSnapshot] {
+        [
+            "home": homeRow.smokeSnapshot,
+            "startDictation": dictationRow.smokeSnapshot,
+            "startMeeting": meetingRow.smokeSnapshot,
+            "pasteLastDictation": pasteRow.smokeSnapshot,
+            "recentMeetings": recentMeetingsRow.smokeSnapshot,
+        ]
+    }
 }

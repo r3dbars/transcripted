@@ -30,6 +30,13 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"
+      - "run-live-capture-smoke.sh"
+      - "scripts/entrypoints/run-live-capture-smoke.sh"
+    checks:
+      - "bash run-live-capture-smoke.sh --skip-build"
+
+  - paths:
       - "Package.swift"
       - "Sources/TranscriptedCore/**"
       - "Tests/TranscriptedCoreTests/**"
@@ -90,4 +97,5 @@ rules:
 notes:
   - "If a change matches multiple rules, run the union of checks."
   - "When in doubt, prefer the stricter AGENTS.md rule."
+  - "Live capture smoke requires local microphone and System Audio Recording permissions; document permission blockers explicitly."
   - "UI changes should include sanitized review visuals under .agent-review/visuals/."

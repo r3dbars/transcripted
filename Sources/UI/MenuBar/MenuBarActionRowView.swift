@@ -1,5 +1,13 @@
 import AppKit
 
+struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
+    let title: String
+    let detail: String
+    let trailingText: String
+    let isVisible: Bool
+    let isEnabled: Bool
+}
+
 @MainActor
 final class MenuBarActionRowView: NSControl {
     enum Tone {
@@ -261,5 +269,15 @@ final class MenuBarActionRowView: NSControl {
         defer { isPressing = false }
         guard isEnabled, inside else { return }
         onPress?()
+    }
+
+    var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
+        MenuBarActionRowSmokeSnapshot(
+            title: titleLabel.stringValue,
+            detail: detailLabel.stringValue,
+            trailingText: trailingLabel.stringValue,
+            isVisible: !isHidden,
+            isEnabled: isEnabled
+        )
     }
 }

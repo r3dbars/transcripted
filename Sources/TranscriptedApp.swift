@@ -189,6 +189,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         pop.appearance = NSAppearance(named: .darkAqua)
         popover = pop
 
+        writeLaunchUISmokeReportIfRequested()
+
         // Engine recovery on wake — hotkeys and overlay state
         let wakeRecoveryObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -365,6 +367,38 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
             statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
         ])
+    }
+
+    private func writeLaunchUISmokeReportIfRequested() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let reportPath = environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"],
+              !reportPath.isEmpty else {
+            return
+        }
+
+        PermissionsOnboardingPreferences.markCompleted()
+        MenuBarOptionalItem.allCases.forEach {
+            MenuBarVisibilityPreferences.setVisible($0, true)
+        }
+
+        let report = menuPanelController.launchUISmokeReport(
+            statusItemExists: statusItem != nil,
+            popoverConfigured: popover != nil,
+            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+        )
+        let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: reportURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(report).write(to: reportURL, options: .atomic)
+        } catch {
+            NSLog("Failed to write launch UI smoke report: \(error.localizedDescription)")
+        }
     }
 
     private func bindStatusItemUpdateBadge() {

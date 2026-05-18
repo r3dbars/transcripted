@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has five distinct verification layers:
+This repo has six distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -14,6 +14,8 @@ This repo has five distinct verification layers:
    Swift Package tests for the standalone `TranscriptedCore` package surface
 5. `bash build.sh`
    Authoritative app build for the menubar target
+6. `bash run-live-capture-smoke.sh`
+   Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 
 ## Fast Test Runner
 
@@ -88,3 +90,24 @@ It currently verifies:
 - retained meeting audio can be resolved from the saved transcript
 - the MCP directories manifest names the capture, meeting, and dictation roots
 - support diagnostics redact titles, paths, emails, raw URLs, and device names
+
+## Live Capture Smoke
+
+`bash run-live-capture-smoke.sh` first runs `bash build.sh --no-open`, which
+includes the signed app launch smoke and an env-gated menu-bar JSON snapshot
+that checks the status item plus visible, enabled Start Dictation and Start
+Meeting rows. It then runs
+`LiveCaptureSmokeTests` with `TRANSCRIPTED_LIVE_CAPTURE_SMOKE=1`.
+
+This is a local release gate, not a default CI test. It requires a microphone,
+microphone permission for the test runner, and System Audio Recording permission
+for ScreenCaptureKit audio. The smoke starts production `Audio`, waits for
+meeting capture readiness, plays a short system tone from a separate process,
+records briefly, stops, and verifies real mic and system-audio scratch WAVs were
+written.
+
+For a faster rerun after a fresh build:
+
+```bash
+bash run-live-capture-smoke.sh --skip-build
+```

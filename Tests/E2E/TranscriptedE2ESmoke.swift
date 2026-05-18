@@ -51,7 +51,7 @@ private final class TranscriptedE2ESmokeHarness {
             try fileManager.createDirectory(at: $0, withIntermediateDirectories: true)
         }
 
-        let fixtures = try writeCaptureFixtures(
+        let fixtures = try await writeCaptureFixtures(
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
             stateDir: stateDir,
@@ -70,7 +70,7 @@ private final class TranscriptedE2ESmokeHarness {
         dictationsDir: URL,
         stateDir: URL,
         logsDir: URL
-    ) throws -> SmokeFixtures {
+    ) async throws -> SmokeFixtures {
         let meetingURL = meetingsDir.appendingPathComponent("Customer Launch Sync.md", isDirectory: false)
         let meetingMarkdown = """
         ---
@@ -152,24 +152,18 @@ private final class TranscriptedE2ESmokeHarness {
         try fileManager.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
         let micAudioURL = audioDirectory.appendingPathComponent("microphone.m4a", isDirectory: false)
         let systemAudioURL = audioDirectory.appendingPathComponent("system_audio.m4a", isDirectory: false)
-        try Data("mic-audio-placeholder".utf8).write(to: micAudioURL)
-        try Data("system-audio-placeholder".utf8).write(to: systemAudioURL)
+        try writeTinyAudioFixture(to: micAudioURL, amplitude: 0.20)
+        try writeTinyAudioFixture(to: systemAudioURL, amplitude: 0.35)
 
-        let failedArtifact = FailedMeetingArtifact(
-            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
-            timestamp: try fixedDate("2026-05-18T15:00:00Z"),
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            errorMessage: "Temporary transcription failure",
-            meetingTitle: "Customer Launch Sync",
-            retryCount: 1,
-            lastRetryDate: nil
-        )
         let failedQueueURL = stateDir.appendingPathComponent("failed_transcriptions.json", isDirectory: false)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode([failedArtifact]).write(to: failedQueueURL, options: .atomic)
+        try await writeFailedQueueWithProductionManager(
+            failedQueueURL: failedQueueURL,
+            meetingsDir: meetingsDir,
+            stateDir: stateDir,
+            retainedAudioDir: audioDirectory,
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL
+        )
 
         let eventLogURL = logsDir.appendingPathComponent("events.jsonl", isDirectory: false)
         let sanitizedEvent = AnalyticsPayloadSanitizer.sanitizeProperties(
@@ -314,12 +308,14 @@ private final class TranscriptedE2ESmokeHarness {
 
     private func verifyFailedMeetingArtifact(fixtures: SmokeFixtures) throws {
         let data = try Data(contentsOf: fixtures.failedQueueURL)
-        let decoded = try JSONDecoder.iso8601.decode([FailedMeetingArtifact].self, from: data)
+        let decoded = try JSONDecoder.iso8601.decode([FailedTranscription].self, from: data)
 
         try expect(decoded.count == 1, "Failed meeting queue should contain one representative artifact")
         let failed = try unwrap(decoded.first, "Failed meeting artifact should decode")
         try expect(failed.micAudioURL == fixtures.micAudioURL, "Failed meeting artifact should keep mic audio URL")
         try expect(failed.systemAudioURL == fixtures.systemAudioURL, "Failed meeting artifact should keep system audio URL")
+        try expect(failed.audioFilesExist(), "Production failed transcription model should confirm retained audio exists")
+        try expect(failed.isRetryable, "Temporary failed meeting fixture should stay retryable")
         try expect(fileManager.fileExists(atPath: failed.micAudioURL.path), "Failed meeting mic audio placeholder should exist")
         try expect(
             failed.systemAudioURL.map { fileManager.fileExists(atPath: $0.path) } == true,
@@ -403,6 +399,37 @@ private final class TranscriptedE2ESmokeHarness {
         try expect(!eventLog.contains(secretToken), "Sanitized observability event should not contain tokens")
         try expect(!eventLog.contains(secretTranscript), "Sanitized observability event should not contain transcript text")
     }
+
+    private func writeFailedQueueWithProductionManager(
+        failedQueueURL: URL,
+        meetingsDir: URL,
+        stateDir: URL,
+        retainedAudioDir: URL,
+        micAudioURL: URL,
+        systemAudioURL: URL
+    ) async throws {
+        let paths = CoreStoragePaths(
+            transcripts: meetingsDir,
+            speakerDB: stateDir.appendingPathComponent("speakers.sqlite", isDirectory: false),
+            statsDB: stateDir.appendingPathComponent("stats.sqlite", isDirectory: false),
+            failedQueue: failedQueueURL,
+            speakerClips: stateDir.appendingPathComponent("speaker_clips", isDirectory: true),
+            audioCaptures: retainedAudioDir,
+            logs: stateDir.appendingPathComponent("logs", isDirectory: true)
+        )
+
+        let didPersist = await MainActor.run {
+            let manager = FailedTranscriptionManager(paths: paths)
+            return manager.addFailedTranscription(
+                micAudioURL: micAudioURL,
+                systemAudioURL: systemAudioURL,
+                errorMessage: "Temporary transcription failure",
+                meetingTitle: "Customer Launch Sync"
+            )
+        }
+
+        try expect(didPersist, "Production failed transcription manager should persist failed meeting fixture")
+    }
 }
 
 private struct SmokeFixtures {
@@ -418,21 +445,43 @@ private struct SmokeFixtures {
     let dictationMarkdown: String
 }
 
-private struct FailedMeetingArtifact: Codable {
-    let id: UUID
-    let timestamp: Date
-    let micAudioURL: URL
-    let systemAudioURL: URL?
-    let errorMessage: String
-    let meetingTitle: String?
-    let retryCount: Int
-    let lastRetryDate: Date?
-}
-
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     guard condition() else {
         throw E2ESmokeError.failed(message)
     }
+}
+
+private func writeTinyAudioFixture(to url: URL, amplitude: Double) throws {
+    let sampleRate = 16_000
+    let frames = sampleRate
+    var pcm = Data()
+    pcm.reserveCapacity(frames * 2)
+
+    for frame in 0..<frames {
+        let phase = (Double(frame) / Double(sampleRate)) * 440.0 * 2.0 * Double.pi
+        var sample = Int16(Double(Int16.max) * amplitude * sin(phase)).littleEndian
+        Swift.withUnsafeBytes(of: &sample) { bytes in
+            pcm.append(contentsOf: bytes)
+        }
+    }
+
+    var data = Data()
+    data.appendASCII("RIFF")
+    data.appendLittleEndianUInt32(UInt32(36 + pcm.count))
+    data.appendASCII("WAVE")
+    data.appendASCII("fmt ")
+    data.appendLittleEndianUInt32(16)
+    data.appendLittleEndianUInt16(1)
+    data.appendLittleEndianUInt16(1)
+    data.appendLittleEndianUInt32(UInt32(sampleRate))
+    data.appendLittleEndianUInt32(UInt32(sampleRate * 2))
+    data.appendLittleEndianUInt16(2)
+    data.appendLittleEndianUInt16(16)
+    data.appendASCII("data")
+    data.appendLittleEndianUInt32(UInt32(pcm.count))
+    data.append(pcm)
+
+    try data.write(to: url, options: .atomic)
 }
 
 private func unwrap<T>(_ value: T?, _ message: String) throws -> T {
@@ -456,5 +505,25 @@ private extension JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+}
+
+private extension Data {
+    mutating func appendASCII(_ value: String) {
+        append(contentsOf: value.utf8)
+    }
+
+    mutating func appendLittleEndianUInt16(_ value: UInt16) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
+            append(contentsOf: bytes)
+        }
+    }
+
+    mutating func appendLittleEndianUInt32(_ value: UInt32) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
+            append(contentsOf: bytes)
+        }
     }
 }

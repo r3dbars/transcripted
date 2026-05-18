@@ -3,6 +3,13 @@
 
 import AppKit
 
+struct MenuBarHeaderSmokeSnapshot: Codable, Equatable {
+    let statusText: String
+    let detailText: String
+    let warningText: String
+    let isReady: Bool
+}
+
 @MainActor
 final class MenuBarHeaderView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Transcripted")
@@ -122,5 +129,14 @@ final class MenuBarHeaderView: NSView {
             return hasWarning ? 56 : 0
         }
         return hasWarning ? 110 : 78
+    }
+
+    var smokeSnapshot: MenuBarHeaderSmokeSnapshot {
+        MenuBarHeaderSmokeSnapshot(
+            statusText: statusLabel.stringValue,
+            detailText: detailLabel.stringValue,
+            warningText: warningLabel.stringValue,
+            isReady: currentWarmupStatus.isReadyForMenuHeader
+        )
     }
 }

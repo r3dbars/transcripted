@@ -3,6 +3,11 @@
 
 import AppKit
 
+struct MenuBarContentSmokeSnapshot: Codable, Equatable {
+    let header: MenuBarHeaderSmokeSnapshot
+    let primaryActions: [String: MenuBarActionRowSmokeSnapshot]
+}
+
 @MainActor
 final class MenuBarContentView: NSView {
     private let scrollView = NSScrollView()
@@ -142,6 +147,13 @@ final class MenuBarContentView: NSView {
 
     var preferredPanelSize: NSSize {
         NSSize(width: MenuTokens.panelWidth, height: min(documentHeight, MenuTokens.panelHeight))
+    }
+
+    var smokeSnapshot: MenuBarContentSmokeSnapshot {
+        MenuBarContentSmokeSnapshot(
+            header: headerView.smokeSnapshot,
+            primaryActions: primaryActionsView.smokeSnapshot
+        )
     }
 }
 

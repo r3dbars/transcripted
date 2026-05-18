@@ -4,6 +4,14 @@
 import AppKit
 import Combine
 
+struct MenuBarLaunchUISmokeReport: Codable, Equatable {
+    let appLaunched: Bool
+    let statusItemExists: Bool
+    let popoverConfigured: Bool
+    let onboardingCompleted: Bool
+    let content: MenuBarContentSmokeSnapshot
+}
+
 @MainActor
 final class MenuBarPanelController: NSViewController {
     private let appState: TranscriptedAppState
@@ -129,6 +137,30 @@ final class MenuBarPanelController: NSViewController {
         content.layoutSubtreeIfNeeded()
         preferredContentSize = content.preferredPanelSize
         refreshLatestDictationIfNeeded()
+    }
+
+    func launchUISmokeReport(
+        statusItemExists: Bool,
+        popoverConfigured: Bool,
+        onboardingCompleted: Bool
+    ) -> MenuBarLaunchUISmokeReport {
+        loadViewIfNeeded()
+        refresh()
+        return MenuBarLaunchUISmokeReport(
+            appLaunched: true,
+            statusItemExists: statusItemExists,
+            popoverConfigured: popoverConfigured,
+            onboardingCompleted: onboardingCompleted,
+            content: contentView?.smokeSnapshot ?? MenuBarContentSmokeSnapshot(
+                header: MenuBarHeaderSmokeSnapshot(
+                    statusText: "",
+                    detailText: "",
+                    warningText: "",
+                    isReady: false
+                ),
+                primaryActions: [:]
+            )
+        )
     }
 
     private func setupSubscriptions() {
