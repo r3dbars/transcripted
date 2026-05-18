@@ -115,6 +115,8 @@ func testSupportDiagnosticsBundle() {
         assertEqual(sanitized["queued_meeting_count"], "2", "queued meeting count should survive Sentry key sanitization")
         assertEqual(sanitized["meeting_shortcut"], "⌥M", "meeting shortcut should survive Sentry key sanitization")
         assertEqual(sanitized["reliability_packet_count"], "1", "support diagnostics should include packet count")
+        assertEqual(sanitized["system_recording_granted"], "true", "system recording permission should survive Sentry key sanitization")
+        assertNil(sanitized["system_audio_recording_granted"], "support diagnostics should avoid audio-prefixed permission keys")
         assertNil(sanitized["audio_input_device_class"], "support diagnostics should not use audio-prefixed Sentry keys")
     }
 }

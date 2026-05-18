@@ -107,7 +107,7 @@ enum SupportDiagnosticsBundle {
             "pasteback_granted": bool(snapshot.pastebackGranted),
             "queued_meeting_count": "\(snapshot.queuedMeetingCount)",
             "reliability_packet_count": "\(min(snapshot.reliabilityPackets.count, maxReliabilityPackets))",
-            "system_audio_recording_granted": bool(snapshot.systemAudioRecordingGranted),
+            "system_recording_granted": bool(snapshot.systemAudioRecordingGranted),
         ]
         if let latest = snapshot.reliabilityPackets.last {
             context["latest_reliability_packet"] = latest
