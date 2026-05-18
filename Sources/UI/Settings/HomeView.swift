@@ -1862,7 +1862,7 @@ struct HomeActivityTabsCard: View {
                 case .meetings:
                     activitySection(
                         sections: meetingSections,
-                        emptyMessage: "No recent meetings.",
+                        emptyMessage: "No recent meetings. Record one or transcribe an audio file from General.",
                         canLoadMore: canLoadMoreMeetings,
                         loadMoreTitle: "Load more",
                         loadMoreAction: onLoadMoreMeetings,

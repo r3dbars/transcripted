@@ -49,6 +49,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .microphonePermission, "microphone access wording should stay centralized in the canonical classifier")
     }
 
+    runSuite("MeetingFailureKind classifies no-speech results") {
+        let kind = MeetingFailureKind.classify(
+            message: "No speech detected in the audio."
+        )
+
+        assertEqual(kind, .noSpeechDetected, "audio with no spoken content should get a direct user-facing bucket")
+    }
+
     runSuite("MeetingFailureKind classifies save failures") {
         let kind = MeetingFailureKind.classify(
             message: "Failed to save transcript: Could not write transcript to meetings"
@@ -119,6 +127,34 @@ func testMeetingFailureKind() {
         )
 
         assertEqual(kind, .stopTimeout, "stop-timeout failures should keep their own bucket so retry copy can target them")
+    }
+
+    runSuite("MeetingFailureKind classifies imported-audio preparation failures") {
+        assertEqual(
+            MeetingFailureKind.classify(message: "The selected audio file could not be found. It may have been moved or deleted."),
+            .importFileMissing,
+            "missing import files should not fall into unexpected_error"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "That file does not look like audio. Choose a WAV, MP3, M4A, AAC, or AIFF file."),
+            .importUnsupportedFile,
+            "unsupported import files should have a stable bucket"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "Transcripted couldn't copy that audio file into its working area. Check disk space and try again."),
+            .importCopyFailed,
+            "copy failures should point to the working-area step"
+        )
+    }
+
+    runSuite("MeetingFailureCopy surfaces imported-audio repair guidance") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "That file does not look like audio. Choose a WAV, MP3, M4A, AAC, or AIFF file.",
+            shortErrorMessage: "Unsupported audio file.",
+            isRetryable: false
+        )
+
+        assertEqual(copy.title, "Choose an audio file", "unsupported import files should get direct user guidance")
     }
 
     runSuite("MeetingFailureCopy surfaces stop-timeout retry guidance") {

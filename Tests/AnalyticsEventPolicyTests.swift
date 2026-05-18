@@ -370,6 +370,15 @@ func testAnalyticsEventPolicy() {
         assertEqual(fileImported?.allowedProperties.contains("queue_depth_bucket"), true, "file import should allow bucketed queue depth")
     }
 
+    runSuite("AnalyticsEventPolicy allows only stable imported-audio failure fields") {
+        let fileImportFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_file_import_failed")
+        assertEqual(fileImportFailed?.allowedProperties.contains("failure_kind"), true, "file import failures should preserve normalized failure kind")
+        assertEqual(fileImportFailed?.allowedProperties.contains("import_stage"), true, "file import failures should preserve the coarse failure stage")
+        assertEqual(fileImportFailed?.allowedProperties.contains("error"), false, "file import failures should not allow raw error text")
+        assertEqual(fileImportFailed?.allowedProperties.contains("file"), false, "file import failures should not allow filenames")
+        assertEqual(fileImportFailed?.allowedProperties.contains("title"), false, "file import failures should not allow source-derived titles")
+    }
+
     runSuite("AnalyticsEventPolicy allows coarse meeting prompt telemetry") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")

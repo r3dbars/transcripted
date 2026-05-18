@@ -240,7 +240,7 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
             removeRecordingFile(audioURL, label: "rejected imported recording")
             publishFailure(
-                displayMessage: "Transcription already in progress",
+                displayMessage: "Another transcript is already running. Wait for it to finish, then import the file again.",
                 diagnosticMessage: "Transcription already in progress"
             )
             scheduleStatusReset(delay: 4)
@@ -252,7 +252,7 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.info("Imported recording too short, skipping transcription", ["duration": String(format: "%.1fs", audioDuration)])
             removeRecordingFile(audioURL, label: "short imported recording")
             publishFailure(
-                displayMessage: "Recording too short",
+                displayMessage: "That audio file is too short to transcribe. Choose audio that is at least two seconds long.",
                 diagnosticMessage: "Recording too short"
             )
             scheduleStatusReset(delay: 3)
@@ -294,9 +294,10 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     self.removeRecordingFile(audioURL, label: "failed imported recording")
+                    let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
-                        displayMessage: "Transcription failed",
-                        diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
+                        displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
+                        diagnosticMessage: diagnosticMessage
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: taskId)
@@ -313,6 +314,8 @@ public class TranscriptionTaskManager: ObservableObject {
             switch pipelineError {
             case .emptyAudioFile:
                 return "Empty audio file"
+            case .noSpeechDetected:
+                return "No speech detected"
             case .recordingTooShort:
                 return "Recording too short"
             case .invalidAudioFormat:
@@ -367,9 +370,22 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         if normalized.contains(anyOf: [
+            "no speech detected",
+            "no speech was found",
+        ]) {
+            return "No speech detected"
+        }
+
+        if normalized.contains(anyOf: [
             "invalid audio",
             "invalid audio data",
             "invalid audio format",
+            "audio file has an invalid sample rate or channel count",
+            "avaudiofile",
+            "avfaudio error",
+            "com.apple.coreaudio.avfaudio",
+            "coreaudio error",
+            "failed to create avaudioconverter",
         ]) {
             return "Invalid audio format"
         }
@@ -419,6 +435,40 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         return "Pipeline failed"
+    }
+
+    private static func importedAudioFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains("transcription already in progress") {
+            return "Another transcript is already running. Wait for it to finish, then import the file again."
+        }
+        if normalized.contains("recording too short") {
+            return "That audio file is too short to transcribe. Choose audio that is at least two seconds long."
+        }
+        if normalized.contains("empty audio file") {
+            return "That audio file has no readable audio. Choose a different recording and try again."
+        }
+        if normalized.contains("no speech detected") {
+            return "No speech was found in that audio file. Choose a file with clear spoken audio and try again."
+        }
+        if normalized.contains("invalid audio format") {
+            return "Transcripted couldn't read that audio file. Choose a WAV, MP3, M4A, AAC, or AIFF file."
+        }
+        if normalized.contains("failed to save transcript") {
+            return "Transcripted couldn't save the transcript. Check your capture folder and try again."
+        }
+        if normalized.contains("model not loaded") {
+            return "The local transcription model was not ready. Try again after Models finishes loading."
+        }
+        if normalized.contains("diarization failed") {
+            return "Transcripted couldn't separate speakers in that file. Try importing it again."
+        }
+        if normalized.contains("transcription inference failed") {
+            return "The local transcription model couldn't process that file. Try converting it to WAV or M4A and import again."
+        }
+
+        return "Transcripted couldn't transcribe that audio file. Try converting it to WAV or M4A and import again."
     }
 
     private func publishFailure(displayMessage: String, diagnosticMessage: String) {

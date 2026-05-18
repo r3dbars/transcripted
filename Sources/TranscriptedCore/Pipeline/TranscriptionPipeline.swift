@@ -97,7 +97,7 @@ extension Transcription {
                     "samples": "\(systemSamples.count)",
                     "expectedMinimum": "16000"
                 ])
-                throw PipelineError.missingSystemAudio
+                throw PipelineError.recordingTooShort(duration: Double(systemSamples.count) / 16000.0)
             }
 
             // Pre-compute mic energy per 100ms frame for embedding quality gating.
@@ -522,13 +522,6 @@ extension Transcription {
 
             let processingTime = Date().timeIntervalSince(processingStartTime)
 
-            await MainActor.run {
-                self.processingStatus = "Transcription complete!"
-                self.isProcessing = false
-            }
-
-            onProgress?(1.0)
-
             // Merge consecutive utterances from the same speaker when the gap is small.
             // Diarizer segments often break mid-sentence, producing fragments like:
             //   [00:03] "Opus four point six and"
@@ -536,6 +529,19 @@ extension Transcription {
             // Merging produces cleaner, more readable transcripts.
             let mergedSystemUtterances = Self.mergeConsecutiveUtterances(systemUtterances, maxGap: 1.5)
             let mergedMicUtterances = Self.mergeConsecutiveUtterances(micUtterances, maxGap: 1.5)
+            guard !mergedSystemUtterances.isEmpty || !mergedMicUtterances.isEmpty else {
+                AppLogger.transcription.warning("No speech detected after local transcription", [
+                    "droppedSegments": "\(droppedSegments)"
+                ])
+                throw PipelineError.noSpeechDetected
+            }
+
+            await MainActor.run {
+                self.processingStatus = "Transcription complete!"
+                self.isProcessing = false
+            }
+
+            onProgress?(1.0)
 
             AppLogger.transcription.info("Local transcription complete", [
                 "micUtterances": "\(mergedMicUtterances.count)",

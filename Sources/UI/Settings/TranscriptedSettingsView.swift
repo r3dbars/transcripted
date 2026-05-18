@@ -1196,7 +1196,7 @@ struct TranscriptedSettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Transcribe Audio File")
                             .font(.subheadline.weight(.semibold))
-                        Text("Choose a saved audio file and turn it into Transcripted Markdown.")
+                        Text("Choose a WAV, MP3, M4A, AAC, or AIFF file and turn it into Transcripted Markdown.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1212,7 +1212,7 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction("import_recording", page: .general)
                         actions.importAudioFile()
                     }
-                    .help("Choose an audio file to transcribe")
+                    .help("Choose a WAV, MP3, M4A, AAC, or AIFF audio file to transcribe")
                 }
             }
 

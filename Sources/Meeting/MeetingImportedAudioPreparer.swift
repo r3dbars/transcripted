@@ -1,8 +1,50 @@
 import Foundation
+import UniformTypeIdentifiers
 
 struct PreparedImportedMeetingAudio: Sendable {
     let copiedAudioURL: URL
     let suggestedTitle: String
+}
+
+enum MeetingImportedAudioPreparationError: LocalizedError, Equatable {
+    case fileMissing
+    case cannotInspect
+    case notRegularFile
+    case unsupportedAudioType
+    case unreadable
+    case copyFailed
+
+    var diagnosticKind: String {
+        switch self {
+        case .fileMissing:
+            return MeetingFailureKind.importFileMissing.rawValue
+        case .cannotInspect,
+             .unreadable:
+            return MeetingFailureKind.importFileUnreadable.rawValue
+        case .notRegularFile,
+             .unsupportedAudioType:
+            return MeetingFailureKind.importUnsupportedFile.rawValue
+        case .copyFailed:
+            return MeetingFailureKind.importCopyFailed.rawValue
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .fileMissing:
+            return "The selected audio file could not be found. It may have been moved or deleted."
+        case .cannotInspect:
+            return "Transcripted couldn't inspect that audio file. Check Finder permissions and try again."
+        case .notRegularFile:
+            return "Choose an audio file, not a folder or app package."
+        case .unsupportedAudioType:
+            return "That file does not look like audio. Choose a WAV, MP3, M4A, AAC, or AIFF file."
+        case .unreadable:
+            return "Transcripted couldn't read that audio file. Try moving it to a folder you can access."
+        case .copyFailed:
+            return "Transcripted couldn't copy that audio file into its working area. Check disk space and try again."
+        }
+    }
 }
 
 enum MeetingImportedAudioPreparer {
@@ -18,36 +60,44 @@ enum MeetingImportedAudioPreparer {
 
         let resolvedSourceURL = sourceURL.standardizedFileURL
         guard fileManager.fileExists(atPath: resolvedSourceURL.path) else {
-            throw NSError(
-                domain: "MeetingImportedAudioPreparer",
-                code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "The selected audio file could not be found."
-                ]
-            )
+            throw MeetingImportedAudioPreparationError.fileMissing
+        }
+
+        let didStartSecurityScope = resolvedSourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStartSecurityScope {
+                resolvedSourceURL.stopAccessingSecurityScopedResource()
+            }
         }
 
         let sourceAttributes: [FileAttributeKey: Any]
         do {
             sourceAttributes = try fileManager.attributesOfItem(atPath: resolvedSourceURL.path)
         } catch {
-            throw NSError(
-                domain: "MeetingImportedAudioPreparer",
-                code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Transcripted couldn't inspect that audio file."
-                ]
-            )
+            throw MeetingImportedAudioPreparationError.cannotInspect
         }
 
         guard sourceAttributes[.type] as? FileAttributeType == .typeRegular else {
-            throw NSError(
-                domain: "MeetingImportedAudioPreparer",
-                code: 1,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Select an audio file, not a folder or package."
-                ]
-            )
+            throw MeetingImportedAudioPreparationError.notRegularFile
+        }
+
+        let resourceValues: URLResourceValues
+        do {
+            resourceValues = try resolvedSourceURL.resourceValues(forKeys: [
+                .contentTypeKey,
+                .isReadableKey
+            ])
+        } catch {
+            throw MeetingImportedAudioPreparationError.cannotInspect
+        }
+
+        if resourceValues.isReadable == false {
+            throw MeetingImportedAudioPreparationError.unreadable
+        }
+
+        if let contentType = resourceValues.contentType,
+           !contentType.conforms(to: .audio) {
+            throw MeetingImportedAudioPreparationError.unsupportedAudioType
         }
 
         let destinationURL = uniqueScratchURL(
@@ -61,13 +111,7 @@ enum MeetingImportedAudioPreparer {
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
         } catch {
             try? fileManager.removeItem(at: destinationURL)
-            throw NSError(
-                domain: "MeetingImportedAudioPreparer",
-                code: 2,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Transcripted couldn't copy that audio file into its working area."
-                ]
-            )
+            throw MeetingImportedAudioPreparationError.copyFailed
         }
 
         return PreparedImportedMeetingAudio(

@@ -535,5 +535,12 @@ struct AnalyticsEventPolicy: Equatable {
                 "queue_depth_bucket",
             ]
         ),
+        "meeting_file_import_failed": .init(
+            name: "meeting_file_import_failed",
+            allowedProperties: [
+                "failure_kind",
+                "import_stage",
+            ]
+        ),
     ]
 }

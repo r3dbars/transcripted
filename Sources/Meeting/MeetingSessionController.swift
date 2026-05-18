@@ -869,14 +869,29 @@ final class MeetingSessionController: ObservableObject {
                 try MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
             }.value
         } catch {
+            let failureKind = importPreparationFailureKind(for: error)
+            let displayMessage = importPreparationFailureMessage(for: error)
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
                 event: "meeting_file_import_failed",
                 message: "Imported meeting audio could not be prepared",
-                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "failure_kind": failureKind,
+                        "import_stage": "preparation",
+                        "trigger": StartTrigger.fileImport.rawValue
+                    ]
+                )
             )
-            state = .error(error.localizedDescription)
+            AnalyticsReporter.track(
+                "meeting_file_import_failed",
+                properties: [
+                    "failure_kind": failureKind,
+                    "import_stage": "preparation",
+                ]
+            )
+            state = .error(displayMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_failed")
             return false
         }
@@ -897,9 +912,8 @@ final class MeetingSessionController: ObservableObject {
                 : "Imported meeting transcription queued",
             context: baseDiagnosticsContext(
                 extra: [
-                    "file": preparedAudio.copiedAudioURL.lastPathComponent,
                     "queue_depth": "\(queuedTranscriptionJobs.count)",
-                    "title": preparedAudio.suggestedTitle
+                    "trigger": StartTrigger.fileImport.rawValue
                 ]
             )
         )
@@ -911,6 +925,23 @@ final class MeetingSessionController: ObservableObject {
         )
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         return true
+    }
+
+    private func importPreparationFailureKind(for error: Error) -> String {
+        if let preparationError = error as? MeetingImportedAudioPreparationError {
+            return preparationError.diagnosticKind
+        }
+
+        return MeetingFailureKind.classify(message: error.localizedDescription).rawValue
+    }
+
+    private func importPreparationFailureMessage(for error: Error) -> String {
+        if let preparationError = error as? MeetingImportedAudioPreparationError,
+           let description = preparationError.errorDescription {
+            return description
+        }
+
+        return "Transcripted couldn't prepare that audio file. Try choosing it again, or convert it to WAV or M4A first."
     }
 
     /// Cancel any in-progress pipeline. Does not cancel an active recording —

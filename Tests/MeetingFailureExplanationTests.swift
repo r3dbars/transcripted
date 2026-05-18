@@ -127,6 +127,19 @@ func testMeetingFailureExplanation() async {
         assertEqual(explanation.reportFields["recoverable_artifact"], "no", "pre-recording failures should not claim retained artifacts")
         assertEqual(explanation.reportFields["retry_available"], "no", "pre-recording permission failures should not show artifact retry")
     }
+
+    runSuite("MeetingFailureExplanation treats imported-audio prep failures as user-action preflight") {
+        let explanation = MeetingFailureExplanation.make(
+            failureKind: .importFileUnreadable,
+            hasAudioFiles: false,
+            isRetryable: false
+        )
+
+        assertEqual(explanation.stage, .preflight, "import prep fails before transcription starts")
+        assertEqual(explanation.outcomeKind, .noArtifactFailure, "failed imports should not claim saved audio")
+        assertEqual(explanation.retryability, .retryableAfterUserAction, "the user can choose a readable file and try again")
+        assertEqual(explanation.userVisibleState, .needsUserAction, "Home should point the user at the file problem")
+    }
 }
 
 private func testScenario(_ scenario: AudioReliabilityScenario) async {

@@ -32,10 +32,35 @@ struct MeetingFailureCopy: Equatable {
                 title: "No audio was captured",
                 detail: "Transcripted kept the recording, but there was not enough audio signal to transcribe."
             )
+        case .noSpeechDetected:
+            return MeetingFailureCopy(
+                title: "No speech found",
+                detail: "Transcripted found audio, but not enough spoken words to write a transcript."
+            )
         case .saveFailed:
             return MeetingFailureCopy(
                 title: "Couldn't save the transcript",
                 detail: shortErrorMessage
+            )
+        case .importFileMissing:
+            return MeetingFailureCopy(
+                title: "Audio file was missing",
+                detail: "The file may have moved or been deleted. Choose it again from Finder."
+            )
+        case .importFileUnreadable:
+            return MeetingFailureCopy(
+                title: "Can't read that file",
+                detail: "Try moving the audio file to a folder you can access, then import it again."
+            )
+        case .importUnsupportedFile:
+            return MeetingFailureCopy(
+                title: "Choose an audio file",
+                detail: "Transcripted can import common audio files like WAV, MP3, M4A, AAC, and AIFF."
+            )
+        case .importCopyFailed:
+            return MeetingFailureCopy(
+                title: "Couldn't prepare the file",
+                detail: "Check disk space, then try importing the audio file again."
             )
         case .speakerNameFinalizationFailed,
              .speakerFinalizationFailed:

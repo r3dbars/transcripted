@@ -25,9 +25,17 @@ func testHomeImportAudioAction() {
             "general settings should expose a visible choose-file control"
         )
         assertTrue(
+            settingsSource.contains("WAV, MP3, M4A, AAC, or AIFF"),
+            "general settings should name common supported audio formats"
+        )
+        assertTrue(
             !homeSource.contains("HomeMeetingImportActionRow")
                 && !homeSource.contains("onImportAudio"),
             "meetings tab should not carry the imported-audio action"
+        )
+        assertTrue(
+            homeSource.contains("transcribe an audio file from General"),
+            "home meeting empty state should point users back to the import location"
         )
     }
 }
