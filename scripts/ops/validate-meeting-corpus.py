@@ -333,6 +333,9 @@ def main() -> int:
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
+    if not selected:
+        print("No corpus meetings selected; manifest must contain at least one meeting.", file=sys.stderr)
+        return 1
 
     all_checks: list[Check] = []
     summaries: list[dict[str, Any]] = []

@@ -101,7 +101,7 @@ if [ -n "$changed_paths" ]; then
 
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "docs/qa-test-bench.md"; then
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
-            add_command "bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025"
+            add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
         fi
 
         if matches_any "$path" "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift" "run-live-capture-smoke.sh" "scripts/entrypoints/run-live-capture-smoke.sh"; then

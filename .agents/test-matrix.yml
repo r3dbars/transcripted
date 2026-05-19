@@ -35,7 +35,7 @@ rules:
       - "docs/qa-test-bench.md"
     checks:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025"
+      - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
 
   - paths:
       - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"

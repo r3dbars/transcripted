@@ -94,6 +94,9 @@ This does not commit the corpus and does not upload audio or transcripts. It is
 currently a corpus-readiness and ground-truth check. Use it before comparing new
 Transcripted output against the corpus.
 
+The corpus is private local test data, so it stays out of the required agent
+test matrix. Use the corpus mode only on machines that have the corpus.
+
 ## Exit Codes
 
 - `0`: all blocking checks passed with no warnings or skipped steps
