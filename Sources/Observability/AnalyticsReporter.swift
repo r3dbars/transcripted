@@ -150,6 +150,27 @@ final class AnalyticsReporter {
         }
     }
 
+    static func defaultProperties(
+        distinctID: String,
+        sessionID: String,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        operatingSystemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> [String: String] {
+        var properties: [String: String] = [
+            "distinct_id": distinctID,
+            "app_version": infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            "build_version": infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+            "os_major": "\(operatingSystemVersion.majorVersion)",
+        ]
+
+        let sanitizedSessionID = AnalyticsPayloadSanitizer.sanitizeText(sessionID)
+        if !sanitizedSessionID.isEmpty {
+            properties["session_id"] = sanitizedSessionID
+        }
+
+        return properties
+    }
+
     private init() {}
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
@@ -188,12 +209,8 @@ final class AnalyticsReporter {
         )
 
         var eventProperties: [String: String] = sanitizedProperties
-        eventProperties["distinct_id"] = distinctID
-        eventProperties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        eventProperties["os_major"] = "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"
-        let sanitizedSessionID = AnalyticsPayloadSanitizer.sanitizeText(sessionID)
-        if !sanitizedSessionID.isEmpty {
-            eventProperties["session_id"] = sanitizedSessionID
+        for (key, value) in Self.defaultProperties(distinctID: distinctID, sessionID: sessionID) {
+            eventProperties[key] = value
         }
 
         let payload = AnalyticsCaptureRequest(
