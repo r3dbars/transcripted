@@ -97,6 +97,23 @@ Transcripted output against the corpus.
 The corpus is private local test data, so it stays out of the required agent
 test matrix. Use the corpus mode only on machines that have the corpus.
 
+## Short Output
+
+Every bench report starts with a plain short answer:
+
+```text
+PASS: tested 504/504 checks. Good to go.
+```
+
+When something is flagged, it stays short:
+
+```text
+INCOMPLETE: tested 502/504 checks. Not good yet: 2 flagged.
+```
+
+The next section is `Flags`, which lists only the failed, warned, or skipped
+checks. The full logs stay linked later in the report.
+
 ## Corpus Compare Run
 
 Use this after Transcripted has produced Markdown for one or more corpus

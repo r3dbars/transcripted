@@ -19,7 +19,7 @@ DEFAULT_OUTPUT_DIR = DEFAULT_ROOT / "transcripted-output"
 DEFAULT_IDS = ["meeting-0024", "meeting-0025"]
 ZOOM_SPEAKER_RE = re.compile(r"^\[(?P<speaker>[^\]]+)\]\s+(?P<time>\d{1,2}:\d{2}:\d{2})(?:\s+(?P<text>.*))?$")
 TRANSCRIPTED_TIME_RE = re.compile(
-    r"^(?:\*\*(?P<bold_time>\d{1,2}:\d{2}(?::\d{2})?)\*\*|\[(?P<bracket_time>\d{1,2}:\d{2}(?::\d{2})?)\])\s+"
+    r"^(?:\*\*(?P<bold_time>\d+:\d{2}(?::\d{2})?)\*\*|\[(?P<bracket_time>\d+:\d{2}(?::\d{2})?)\])\s+"
 )
 WORD_RE = re.compile(r"[a-z0-9][a-z0-9']*", re.IGNORECASE)
 STOPWORDS = {
@@ -329,14 +329,57 @@ def status_rank(status: str) -> int:
     return {"FAIL": 0, "WARN": 1, "PASS": 2}.get(status, 3)
 
 
+def verdict_for_counts(passed: int, warned: int, failed: int) -> str:
+    if failed:
+        return "FAIL"
+    if warned:
+        return "INCOMPLETE"
+    return "PASS"
+
+
+def short_summary(verdict: str, passed: int, warned: int, failed: int) -> str:
+    total = passed + warned + failed
+    if verdict == "PASS":
+        return f"PASS: tested {passed}/{total} checks. Good to go."
+    if verdict == "FAIL":
+        return f"FAIL: tested {passed}/{total} checks. Not good yet: {failed + warned} flagged."
+    return f"INCOMPLETE: tested {passed}/{total} checks. Not good yet: {warned} flagged."
+
+
+def flag_line(check: Check) -> str:
+    detail = f" - {check.detail}" if check.detail else ""
+    return f"{check.status} - {check.target} - {check.check}{detail}"
+
+
 def write_markdown(path: Path, root: Path, output_dir: Path, checks: list[Check], summaries: list[dict[str, Any]]) -> None:
     passed = sum(1 for check in checks if check.status == "PASS")
     warned = sum(1 for check in checks if check.status == "WARN")
     failed = sum(1 for check in checks if check.status == "FAIL")
-    verdict = "FAIL" if failed else "INCOMPLETE" if warned else "PASS"
+    verdict = verdict_for_counts(passed, warned, failed)
+    flags = [check for check in checks if check.status != "PASS"]
 
     lines = [
         "# Transcripted Corpus Comparison QA",
+        "",
+        "## Short Answer",
+        "",
+        short_summary(verdict, passed, warned, failed),
+        "",
+        "## Flags",
+        "",
+    ]
+
+    if not flags:
+        lines.append("No flags.")
+    else:
+        for check in flags[:10]:
+            lines.append(f"- {flag_line(check)}")
+        if len(flags) > 10:
+            lines.append(f"- ...and {len(flags) - 10} more flags.")
+
+    lines.extend([
+        "",
+        "## Run Details",
         "",
         f"- Verdict: {verdict}",
         f"- Corpus root: `{root}`",
@@ -352,7 +395,7 @@ def write_markdown(path: Path, root: Path, output_dir: Path, checks: list[Check]
         "",
         "| Meeting | Candidate | Word recall | Content recall | Speaker labels | Private name matches |",
         "| --- | --- | ---: | ---: | ---: | ---: |",
-    ]
+    ])
 
     for summary in summaries:
         word_recall = "n/a" if summary["wordRecall"] is None else f"{summary['wordRecall'] * 100:.1f}%"
@@ -470,7 +513,16 @@ def main() -> int:
 
     failed = payload["summary"]["failed"]
     warnings = payload["summary"]["warnings"]
-    print(f"Corpus comparisons: {len(selected)}   Failures: {failed}   Warnings: {warnings}")
+    passed = payload["summary"]["passed"]
+    verdict = verdict_for_counts(passed, warnings, failed)
+    flags = [check for check in all_checks if check.status != "PASS"]
+    print(short_summary(verdict, passed, warnings, failed))
+    if flags:
+        print("Flags:")
+        for check in flags[:5]:
+            print(f"- {flag_line(check)}")
+        if len(flags) > 5:
+            print(f"- ...and {len(flags) - 5} more flags in the report.")
     print(f"Report: {markdown_path}")
     if failed:
         return 1

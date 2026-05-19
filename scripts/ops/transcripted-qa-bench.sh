@@ -15,6 +15,7 @@ STRICT_ARTIFACTS=0
 LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
 CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
 CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
+CORPUS_COMPARE_DEFAULT_IDS="meeting-0024,meeting-0025"
 CORPUS_OUTPUT_DIR="${TRANSCRIPTED_QA_CORPUS_OUTPUT_DIR:-${CORPUS_ROOT}/transcripted-output}"
 CORPUS_CANDIDATE_MAP="${TRANSCRIPTED_QA_CORPUS_CANDIDATE_MAP:-}"
 CORPUS_MIN_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_RECALL:-0.45}"
@@ -317,12 +318,14 @@ MARKDOWN
 }
 
 write_report() {
-  local fail_count warn_count skip_count pass_count verdict branch commit app_version started finished
+  local fail_count warn_count skip_count pass_count flag_count total_count verdict branch commit app_version started finished short_summary
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
   skip_count="$(awk -F '\t' '$3 == "SKIP" { count++ } END { print count + 0 }' "${RESULTS}")"
   pass_count="$(awk -F '\t' '$3 == "PASS" { count++ } END { print count + 0 }' "${RESULTS}")"
+  flag_count=$((fail_count + warn_count + skip_count))
+  total_count=$((pass_count + flag_count))
 
   if [[ "${fail_count}" -gt 0 ]]; then
     verdict="FAIL"
@@ -341,8 +344,33 @@ write_report() {
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   finished="${started}"
 
+  if [[ "${verdict}" == "PASS" ]]; then
+    short_summary="PASS: tested ${pass_count}/${total_count} checks. Good to go."
+  elif [[ "${verdict}" == "FAIL" ]]; then
+    short_summary="FAIL: tested ${pass_count}/${total_count} checks. Not good yet: ${flag_count} flagged."
+  else
+    short_summary="INCOMPLETE: tested ${pass_count}/${total_count} checks. Not good yet: ${flag_count} flagged."
+  fi
+
   if ! {
     echo "# Transcripted QA Bench Report"
+    echo
+    echo "## Short Answer"
+    echo
+    echo "${short_summary}"
+    echo
+    echo "## Flags"
+    echo
+    if [[ "${flag_count}" -eq 0 ]]; then
+      echo "No flags."
+    else
+      awk -F '\t' '$3 != "PASS" {
+        gsub(/\|/, "\\|", $2)
+        printf "- %s - %s\n", $3, $2
+      }' "${RESULTS}"
+    fi
+    echo
+    echo "## Run Details"
     echo
     echo "- Verdict: ${verdict}"
     echo "- Run id: \`${RUN_ID}\`"
@@ -387,6 +415,21 @@ write_report() {
   echo
   echo "[qa] Report: ${REPORT}"
   echo "[qa] Verdict: ${verdict}"
+  echo "[qa] ${short_summary}"
+
+  if [[ "${flag_count}" -gt 0 ]]; then
+    echo "[qa] Flags:"
+    awk -F '\t' '$3 != "PASS" {
+      printf "[qa] - %s - %s\n", $3, $2
+      count++
+      if (count == 5) {
+        exit
+      }
+    }' "${RESULTS}"
+    if [[ "${flag_count}" -gt 5 ]]; then
+      echo "[qa] - ...and $((flag_count - 5)) more flags in the report."
+    fi
+  fi
 
   if [[ "${fail_count}" -gt 0 ]]; then
     return 1
@@ -443,9 +486,10 @@ run_live_tail() {
 }
 
 run_corpus_tail() {
+  local selected_ids="${1:-${CORPUS_IDS}}"
   local ids_arg=""
-  if [[ -n "${CORPUS_IDS}" ]]; then
-    ids_arg=" --ids $(shell_quote "${CORPUS_IDS}")"
+  if [[ -n "${selected_ids}" ]]; then
+    ids_arg=" --ids $(shell_quote "${selected_ids}")"
   fi
 
   run_step "50-meeting-corpus" "Private meeting corpus validation" "yes" \
@@ -453,10 +497,11 @@ run_corpus_tail() {
 }
 
 run_corpus_compare_tail() {
+  local selected_ids="${1:-${CORPUS_IDS:-${CORPUS_COMPARE_DEFAULT_IDS}}}"
   local ids_arg=""
   local map_arg=""
-  if [[ -n "${CORPUS_IDS}" ]]; then
-    ids_arg=" --ids $(shell_quote "${CORPUS_IDS}")"
+  if [[ -n "${selected_ids}" ]]; then
+    ids_arg=" --ids $(shell_quote "${selected_ids}")"
   fi
   if [[ -n "${CORPUS_CANDIDATE_MAP}" ]]; then
     map_arg=" --candidate-map $(shell_quote "${CORPUS_CANDIDATE_MAP}")"
@@ -497,8 +542,9 @@ case "${MODE}" in
     ;;
   corpus-compare)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
-    run_corpus_tail
-    run_corpus_compare_tail
+    corpus_compare_ids="${CORPUS_IDS:-${CORPUS_COMPARE_DEFAULT_IDS}}"
+    run_corpus_tail "${corpus_compare_ids}"
+    run_corpus_compare_tail "${corpus_compare_ids}"
     ;;
   live)
     run_quick
