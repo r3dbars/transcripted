@@ -73,6 +73,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .speakerNameFinalizationFailed, "speaker-name save failures should stay out of generic transcript save failures")
     }
 
+    runSuite("MeetingFailureKind classifies support-thread speaker-name save wording") {
+        let kind = MeetingFailureKind.classify(
+            message: "Couldnt save speaker names. Saved them all in preview window, then got failed to save need another pass."
+        )
+
+        assertEqual(kind, .speakerNameFinalizationFailed, "Grigory-style save-stage speaker-name failures should not become generic transcript save failures")
+    }
+
     runSuite("MeetingFailureKind classifies pipeline-busy errors") {
         let kind = MeetingFailureKind.classify(
             message: "Transcription already in progress"

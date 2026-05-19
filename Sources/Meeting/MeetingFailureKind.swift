@@ -137,10 +137,21 @@ enum MeetingFailureKind: String {
             return .noSpeechDetected
         }
 
+        let mentionsSpeakerNames = normalized.contains("speaker name")
+            || normalized.contains("speaker names")
+        let mentionsSpeakerNameSaveFailure = mentionsSpeakerNames
+            && normalized.contains(anyOf: [
+                "couldn't save",
+                "couldnt save",
+                "could not save",
+                "failed to save",
+                "save failed",
+                "need another pass",
+            ])
         if normalized.contains(anyOf: [
             "speaker names could not be saved",
             "speaker-name finalization failed",
-        ]) {
+        ]) || mentionsSpeakerNameSaveFailure {
             return .speakerNameFinalizationFailed
         }
 

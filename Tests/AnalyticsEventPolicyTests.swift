@@ -362,6 +362,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("trigger"), true, "speaker finalization failures should preserve trigger attribution")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("queue_depth_bucket"), true, "speaker finalization failures should preserve bucketed queue depth")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("session_stage"), true, "speaker finalization failures should keep save-stage attribution")
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
