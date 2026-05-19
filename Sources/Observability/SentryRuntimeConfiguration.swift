@@ -3,10 +3,14 @@ import Foundation
 enum SentryRuntimeConfiguration {
     static let dsnInfoKey = "TranscriptedSentryDSN"
     static let environmentInfoKey = "TranscriptedSentryEnvironment"
+    static let releasePrefixInfoKey = "TranscriptedSentryReleasePrefix"
     static let appHangTrackingInfoKey = "TranscriptedSentryAppHangTrackingEnabled"
     static let dsnEnvironmentKey = "SENTRY_DSN"
     static let environmentEnvironmentKey = "SENTRY_ENVIRONMENT"
+    static let releaseEnvironmentKey = "SENTRY_RELEASE"
+    static let distEnvironmentKey = "SENTRY_DIST"
     static let appHangTrackingEnvironmentKey = "SENTRY_ENABLE_APP_HANG_TRACKING"
+    static let defaultReleasePrefix = "transcripted"
 
     static func dsn(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -28,13 +32,32 @@ enum SentryRuntimeConfiguration {
         ) ?? "production"
     }
 
-    static func releaseName(infoDictionary: [String: Any]? = Bundle.main.infoDictionary) -> String {
-        let version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        return "transcripted@\(version)"
+    static func releaseName(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String {
+        if let releaseOverride = firstNonEmpty(environment[releaseEnvironmentKey]),
+           isValidReleaseName(releaseOverride) {
+            return releaseOverride
+        }
+
+        let prefix = firstNonEmpty(
+            infoDictionary?[releasePrefixInfoKey] as? String,
+            defaultReleasePrefix
+        ) ?? defaultReleasePrefix
+        let version = firstNonEmpty(infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+        let releaseName = "\(prefix)@\(version)"
+        return isValidReleaseName(releaseName) ? releaseName : "\(defaultReleasePrefix)@unknown"
     }
 
-    static func dist(infoDictionary: [String: Any]? = Bundle.main.infoDictionary) -> String? {
-        firstNonEmpty(infoDictionary?["CFBundleVersion"] as? String)
+    static func dist(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String? {
+        firstNonEmpty(
+            environment[distEnvironmentKey],
+            infoDictionary?["CFBundleVersion"] as? String
+        )
     }
 
     static func appHangTrackingEnabled(
@@ -82,6 +105,14 @@ enum SentryRuntimeConfiguration {
         }
 
         return trimmed
+    }
+
+    private static func isValidReleaseName(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 200, ![".", "..", " "].contains(value) else {
+            return false
+        }
+
+        return !["\n", "\t", "/", "\\"].contains { value.contains($0) }
     }
 
     private static func parseBoolean(_ value: String) -> Bool? {

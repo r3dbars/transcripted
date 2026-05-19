@@ -168,6 +168,7 @@ func testRepoCommandContract() {
 
         let appVersion = plistStringValue("CFBundleShortVersionString", in: infoPlist)
         let buildVersion = plistStringValue("CFBundleVersion", in: infoPlist)
+        let sentryReleasePrefix = plistStringValue("TranscriptedSentryReleasePrefix", in: infoPlist)
         let caskVersion = rubyStringAssignment("version", in: cask)
         let caskSHA = rubyStringAssignment("sha256", in: cask)
         let latestAppcastItem = firstAppcastItem(in: appcast)
@@ -186,6 +187,7 @@ func testRepoCommandContract() {
 
         assertNotNil(appVersion, "Info.plist should expose CFBundleShortVersionString")
         assertEqual(buildVersion, appVersion, "marketing and build versions should move together for Sparkle")
+        assertEqual(sentryReleasePrefix, "transcripted", "Sentry release names should stay on the transcripted@<version> format")
         assertEqual(caskVersion, appVersion, "Homebrew cask version should match the app bundle version")
         assertEqual(appcastTitle, appVersion, "latest appcast title should name the release version")
         assertEqual(appcastVersion, appVersion, "latest appcast item should match the app bundle version")
@@ -264,6 +266,10 @@ func testRepoCommandContract() {
             "release packaging docs should include the Homebrew cask update command"
         )
         assertTrue(
+            releaseDocs.contains("bash scripts/release/register-sentry-release.sh <version>"),
+            "release packaging docs should include the Sentry release registration command"
+        )
+        assertTrue(
             releaseDocs.contains("Homebrew users will still") && releaseDocs.contains("install or upgrade to the older version"),
             "release packaging docs should warn when the cask is stale"
         )
@@ -290,22 +296,29 @@ func testRepoCommandContract() {
         assertTrue(
             scriptsReadme.contains("scripts/release/generate-sparkle-appcast.sh")
                 && scriptsReadme.contains("scripts/release/verify-sparkle-release.sh")
-                && scriptsReadme.contains("scripts/release/update-cask.sh"),
+                && scriptsReadme.contains("scripts/release/update-cask.sh")
+                && scriptsReadme.contains("scripts/release/register-sentry-release.sh"),
             "scripts README should list the active release helper scripts"
         )
     }
 
     runSuite("Repo command contract - release helper scripts keep local release checks available") {
-        let expectedScripts = [
+        let expectedBashScripts = [
             "scripts/release/generate-sparkle-appcast.sh",
             "scripts/release/verify-sparkle-release.sh",
-            "scripts/release/update-cask.sh"
+            "scripts/release/update-cask.sh",
+            "scripts/release/register-sentry-release.sh",
         ]
 
-        for script in expectedScripts {
+        for script in expectedBashScripts {
             assertTrue(fileExists(script), "\(script) should stay in the repo")
             assertTrue(readRepoTextFile(script).hasPrefix("#!/bin/bash"), "\(script) should remain a bash entrypoint")
         }
+        assertTrue(fileExists("scripts/release/sentry-release-metadata.py"), "Sentry release metadata helper should stay in the repo")
+        assertTrue(
+            readRepoTextFile("scripts/release/sentry-release-metadata.py").hasPrefix("#!/usr/bin/env python3"),
+            "Sentry release metadata helper should remain a Python entrypoint"
+        )
 
         let generateAppcast = readRepoTextFile("scripts/release/generate-sparkle-appcast.sh")
         assertTrue(
@@ -355,6 +368,46 @@ func testRepoCommandContract() {
             updateCask.contains("shasum -a 256")
                 && updateCask.contains("sha256"),
             "update-cask should compute the published artifact digest locally"
+        )
+
+        let sentryMetadata = readRepoTextFile("scripts/release/sentry-release-metadata.py")
+        assertTrue(
+            sentryMetadata.contains("CFBundleShortVersionString")
+                && sentryMetadata.contains("CFBundleVersion")
+                && sentryMetadata.contains("TranscriptedSentryReleasePrefix"),
+            "Sentry metadata helper should derive release and dist from Info.plist"
+        )
+
+        let registerSentry = readRepoTextFile("scripts/release/register-sentry-release.sh")
+        assertTrue(
+            registerSentry.contains("sentry-cli releases new")
+                && registerSentry.contains("--finalize")
+                && registerSentry.contains("sentry-cli releases set-commits")
+                && registerSentry.contains("SENTRY_REPOSITORY")
+                && registerSentry.contains("v${APP_VERSION}")
+                && registerSentry.contains("--commit \"$COMMIT_SPEC\"")
+                && registerSentry.contains("Skipping finalize so reruns do not change the existing release date.")
+                && registerSentry.contains("scripts/release/sentry-release-metadata.py"),
+            "Sentry release registration should create the matching finalized release and pin commits to the matching release tag"
+        )
+
+        let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")
+        let betaBuildScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        assertTrue(
+            localBuildScript.contains("sentry-release-metadata.py --format shell Info.plist"),
+            "local builds should verify Sentry release metadata before compiling"
+        )
+        assertTrue(
+            localBuildScript.contains("ORIGINAL_SENTRY_RELEASE_WAS_SET")
+                && localBuildScript.contains("export SENTRY_RELEASE=\"$ORIGINAL_SENTRY_RELEASE\"")
+                && localBuildScript.contains("unset SENTRY_RELEASE"),
+            "local builds should not clobber exported Sentry runtime overrides before launch smoke"
+        )
+        assertTrue(
+            betaBuildScript.contains("sentry-release-metadata.py --format shell Info.plist")
+                && betaBuildScript.contains("REGISTER_SENTRY_RELEASE")
+                && betaBuildScript.contains("register-sentry-release.sh \"$APP_VERSION\""),
+            "distribution builds should surface the Sentry release/dist and support explicit registration"
         )
     }
 

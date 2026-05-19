@@ -18,6 +18,7 @@
     "SUPublicEDKey": "Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=",
     "SUEnableAutomaticChecks": true,
     "SUAllowsAutomaticUpdates": true,
+    "TranscriptedSentryReleasePrefix": "transcripted",
     "TranscriptedPostHogHost": "https://us.i.posthog.com"
   },
   "expected_entitlements": {

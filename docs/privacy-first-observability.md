@@ -16,6 +16,9 @@ PostHog controls described below.
 Sentry DSNs should stay on `https://`. Non-HTTPS overrides are ignored so local
 or bundled config cannot silently downgrade crash reports to plaintext
 transport.
+Sentry release registration is limited to build metadata: release name, dist,
+and commit refs. It must not include transcript text, audio
+references, meeting titles, speaker names, local paths, or user identifiers.
 
 ## Privacy contract
 

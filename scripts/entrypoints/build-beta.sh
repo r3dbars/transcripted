@@ -11,12 +11,6 @@
 
 set -euo pipefail
 
-plist_value() {
-    local plist_path="$1"
-    local key="$2"
-    /usr/libexec/PlistBuddy -c "Print :$key" "$plist_path" 2>/dev/null || true
-}
-
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -31,8 +25,10 @@ USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
+REGISTER_SENTRY_RELEASE="${REGISTER_SENTRY_RELEASE:-0}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
-APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
+SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
+eval "$SENTRY_METADATA"
 
 if [ -n "$BETA_TOKEN" ]; then
     echo "ℹ️  BETA_TOKEN passed but no longer injected into the binary. Continuing."
@@ -361,6 +357,7 @@ if [ -n "${newest_input_mtime:-}" ] && [ -n "${build_stamp_mtime:-}" ] && [ "$ne
 fi
 
 echo "🔨 Building Transcripted Beta for $USER_NAME (token: $(mask_secret "$BETA_TOKEN"))..."
+echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
 
 # Clean app bundle only (preserve previously built DMGs)
 rm -rf "$APP_BUNDLE"
@@ -568,10 +565,20 @@ else
     echo "⚠️  Skipping notarization (using development cert — local testing only)"
 fi
 
+if [ "$REGISTER_SENTRY_RELEASE" = "1" ]; then
+    echo "Registering Sentry release..."
+    bash scripts/release/register-sentry-release.sh "$APP_VERSION"
+fi
+
 echo ""
 echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
 echo "   Size: $(du -sh "$BUILD_DIR/$DMG_NAME" | cut -f1)"
 echo "   User: $USER_NAME"
+echo "   Sentry release: $SENTRY_RELEASE"
+echo "   Sentry dist: $SENTRY_DIST"
+if [ "$REGISTER_SENTRY_RELEASE" != "1" ]; then
+    echo "   Sentry registration: bash scripts/release/register-sentry-release.sh $APP_VERSION"
+fi
 if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     echo "   Note: this build is not notarized yet, so Gatekeeper rejection is still expected."
 else

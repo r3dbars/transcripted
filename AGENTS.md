@@ -115,10 +115,13 @@ Rules:
 2. Runtime Sentry config lives in `Info.plist` under:
    - `TranscriptedSentryDSN`
    - `TranscriptedSentryEnvironment`
+   - `TranscriptedSentryReleasePrefix`
    - optional: `TranscriptedSentryAppHangTrackingEnabled`
 3. Local overrides for testing can come from process environment:
    - `SENTRY_DSN`
    - `SENTRY_ENVIRONMENT`
+   - `SENTRY_RELEASE`
+   - `SENTRY_DIST`
    - `SENTRY_ENABLE_APP_HANG_TRACKING`
 4. Runtime PostHog config lives in `Info.plist` under:
    - `TranscriptedPostHogAPIKey`

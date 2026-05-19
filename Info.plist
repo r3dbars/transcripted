@@ -18,6 +18,8 @@
 	<string>https://137ddd7f72199a8d7a06f1644224dce5@o4511202804170752.ingest.us.sentry.io/4511202823045120</string>
 	<key>TranscriptedSentryEnvironment</key>
 	<string>production</string>
+	<key>TranscriptedSentryReleasePrefix</key>
+	<string>transcripted</string>
 	<key>TranscriptedPostHogAPIKey</key>
 	<string>phc_zQu8kX7TpsuVFqjrmPaK4XXpoSuuxSMrvzpP8cZTS63o</string>
 	<key>TranscriptedPostHogHost</key>
