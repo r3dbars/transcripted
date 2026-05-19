@@ -122,6 +122,14 @@ case "$MODE" in
     ;;
 esac
 
+resolve_out_root() {
+  case "$1" in
+    /*) printf "%s" "$1" ;;
+    *) printf "%s/%s" "${PWD}" "$1" ;;
+  esac
+}
+
+OUT_ROOT="$(resolve_out_root "${OUT_ROOT}")"
 OUT="${OUT_ROOT}/${RUN_ID}"
 LOG_DIR="${OUT}/logs"
 RAW_DIR="${OUT}/raw"
