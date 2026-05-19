@@ -9,6 +9,11 @@ func testNightlySecurityContract() {
         assertEqual(totalWeight, 100, "nightly scoring weights should add up to 100")
         assertNotNil(manifest["paths"]?.dictionaryValue?["sanitizer_corpus"]?.stringValue, "manifest should point at the shared sanitizer corpus")
         assertNotNil(manifest["expected_info_plist"]?.dictionaryValue?["SUFeedURL"]?.stringValue, "manifest should pin the Sparkle feed URL")
+        assertEqual(
+            manifest["expected_info_plist"]?.dictionaryValue?["TranscriptedSentryReleasePrefix"]?.stringValue,
+            "transcripted",
+            "manifest should pin the Sentry release prefix"
+        )
     }
 
     runSuite("Nightly security sanitizer corpus stays shared and non-empty") {

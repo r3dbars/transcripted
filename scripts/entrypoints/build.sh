@@ -313,6 +313,9 @@ echo "Building Transcripted..."
 
 ensure_build_prerequisites
 ensure_deps_ready
+SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
+eval "$SENTRY_METADATA"
+echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
 
 # Clean
 rm -rf "$BUILD_DIR"

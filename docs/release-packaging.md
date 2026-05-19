@@ -30,6 +30,9 @@ backwards-compatible invocations, but the value is no longer injected into the
 binary. See `Sources/Beta/BetaConfig.swift` for the rationale. The packaged
 release archive is versioned from `Info.plist`, so published artifacts keep the
 stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
+The same `Info.plist` metadata also drives Sentry release reporting:
+`transcripted@<CFBundleShortVersionString>` with dist set to
+`CFBundleVersion`.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
@@ -99,6 +102,7 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 Before you publish a user-facing release note, sanity-check the release state:
 
 - compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
+- confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
 - if you want a clean starting point, use `docs/release-notes-template.md`
@@ -106,6 +110,18 @@ Before you publish a user-facing release note, sanity-check the release state:
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
+
+After the release is published on GitHub, register the matching Sentry release
+so Sentry sees a real finalized release before production events arrive:
+
+```bash
+bash scripts/release/register-sentry-release.sh <version>
+```
+
+The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
+Sentry project and associates commits when Sentry can resolve the repo. It sends
+only release metadata and commit refs; runtime crash/event payloads still flow
+through the existing Sentry sanitizers and allowlists.
 
 If you expect `brew install` or `brew upgrade` to pick up the new version, do
 not stop after the GitHub release is published. You must also refresh and push
