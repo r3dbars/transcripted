@@ -179,6 +179,9 @@ func testSentryEventPolicy() {
                 "default_output_volume_dropped": "true",
                 "default_system_output_volume_dropped": "true",
                 "default_input_volume_dropped": "false",
+                "output_ducking_detected": "true",
+                "quiet_mic_recovered": "false",
+                "quiet_mic_unrecovered": "true",
                 "system_status": "failed",
             ]
         )
@@ -186,6 +189,9 @@ func testSentryEventPolicy() {
         assertEqual(tags["default_output_volume_dropped"], "true", "output volume drops should be queryable in APPLE-MACOS-1B")
         assertEqual(tags["default_system_output_volume_dropped"], "true", "system output drops should be queryable in APPLE-MACOS-1B")
         assertEqual(tags["default_input_volume_dropped"], "false", "input volume state should stay available as a control")
+        assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
+        assertEqual(tags["quiet_mic_recovered"], "false", "quiet mic recovery state should stay queryable")
+        assertEqual(tags["quiet_mic_unrecovered"], "true", "unrecovered quiet mic state should stay queryable")
         assertEqual(tags["system_status"], "failed", "existing meeting health tags should still survive")
     }
 

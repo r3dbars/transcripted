@@ -48,6 +48,8 @@ final class MeetingCaptureAttempt<Output> {
 
 enum MeetingCaptureVolumeDiagnostics {
     private static let changeThreshold = 0.02
+    private static let quietMicRawPeakThreshold = 0.05
+    private static let usableMicProcessedPeakThreshold = 0.12
     private static let routePrefixes = [
         "default_input",
         "default_output",
@@ -69,7 +71,33 @@ enum MeetingCaptureVolumeDiagnostics {
             context["\(prefix)_volume_dropped"] = change.droppedState
         }
 
+        let quietMicState = quietMicRecoveryState(
+            rawPeak: context["mic_raw_peak"],
+            processedPeak: context["mic_processed_peak"]
+        )
+        context["quiet_mic_recovered"] = quietMicState.recovered
+        context["quiet_mic_unrecovered"] = quietMicState.unrecovered
+        context["output_ducking_detected"] = outputDuckingState(
+            dropStates: [
+                context["default_output_volume_dropped"],
+                context["default_system_output_volume_dropped"],
+                optionalVolumeDrop(
+                    before: context["default_output_volume_before"],
+                    after: context["default_output_volume_during"]
+                ),
+                optionalVolumeDrop(
+                    before: context["default_system_output_volume_before"],
+                    after: context["default_system_output_volume_during"]
+                ),
+            ]
+        )
+
         return context
+    }
+
+    private static func optionalVolumeDrop(before: String?, after: String?) -> String? {
+        guard after != nil else { return nil }
+        return volumeChange(before: before, after: after).droppedState
     }
 
     private static func volumeChange(before: String?, after: String?) -> (changedState: String, droppedState: String) {
@@ -93,5 +121,32 @@ enum MeetingCaptureVolumeDiagnostics {
             return nil
         }
         return value
+    }
+
+    private static func quietMicRecoveryState(
+        rawPeak: String?,
+        processedPeak: String?
+    ) -> (recovered: String, unrecovered: String) {
+        guard let rawPeak = scalarValue(rawPeak),
+              let processedPeak = scalarValue(processedPeak) else {
+            return ("unavailable", "unavailable")
+        }
+
+        guard rawPeak > 0, rawPeak < quietMicRawPeakThreshold else {
+            return ("false", "false")
+        }
+
+        if processedPeak >= usableMicProcessedPeakThreshold {
+            return ("true", "false")
+        }
+
+        return ("false", "true")
+    }
+
+    private static func outputDuckingState(dropStates: [String?]) -> String {
+        let values = dropStates.compactMap { $0 }
+        if values.contains("true") { return "true" }
+        if values.allSatisfy({ $0 == "false" }) { return "false" }
+        return "unavailable"
     }
 }
