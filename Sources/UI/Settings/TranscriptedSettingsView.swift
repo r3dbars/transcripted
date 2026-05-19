@@ -1708,8 +1708,10 @@ struct TranscriptedSettingsView: View {
                 ForEach(TranscriptedPermissionKind.allCases) { kind in
                     PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
                         trackPermissionCTA(kind)
-                        TranscriptedPermissionAccess.openSettings(for: kind)
-                        refreshPermissions()
+                        Task { @MainActor in
+                            await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+                            refreshPermissions()
+                        }
                     }
                 }
             }
