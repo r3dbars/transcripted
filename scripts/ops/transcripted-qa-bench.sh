@@ -15,10 +15,14 @@ STRICT_ARTIFACTS=0
 LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
 CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
 CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
+CORPUS_OUTPUT_DIR="${TRANSCRIPTED_QA_CORPUS_OUTPUT_DIR:-${CORPUS_ROOT}/transcripted-output}"
+CORPUS_CANDIDATE_MAP="${TRANSCRIPTED_QA_CORPUS_CANDIDATE_MAP:-}"
+CORPUS_MIN_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_RECALL:-0.45}"
+CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -29,6 +33,7 @@ Modes:
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
   corpus           validate a local private meeting corpus
+  corpus-compare   validate corpus, then compare Transcripted Markdown to Zoom truth
   live             deep + live mic/system-audio smoke
 
 Options:
@@ -37,6 +42,15 @@ Options:
   --duration seconds    Live capture duration. Default: 2.0
   --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
   --corpus-ids ids      Comma-separated meeting ids to validate.
+  --corpus-output-dir path
+                       Transcripted Markdown output dir for corpus-compare.
+                       Default: ~/Downloads/meeting-corpus/transcripted-output
+  --corpus-candidate-map path
+                       JSON map of meeting id to Transcripted Markdown path.
+  --corpus-min-recall n
+                       Minimum full-word recall for corpus-compare. Default: 0.45
+  --corpus-min-content-recall n
+                       Minimum content-word recall for corpus-compare. Default: 0.35
   --out-root path       Output root. Default: /tmp/transcripted-qa-bench
   --run-id id           Run id. Default: qa-YYYYMMDD-HHMMSS
   -h, --help            Show this help.
@@ -85,6 +99,38 @@ while [[ $# -gt 0 ]]; do
       CORPUS_IDS="$2"
       shift 2
       ;;
+    --corpus-output-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-output-dir requires a value" >&2
+        exit 2
+      fi
+      CORPUS_OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --corpus-candidate-map)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-candidate-map requires a value" >&2
+        exit 2
+      fi
+      CORPUS_CANDIDATE_MAP="$2"
+      shift 2
+      ;;
+    --corpus-min-recall)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-min-recall requires a value" >&2
+        exit 2
+      fi
+      CORPUS_MIN_RECALL="$2"
+      shift 2
+      ;;
+    --corpus-min-content-recall)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-min-content-recall requires a value" >&2
+        exit 2
+      fi
+      CORPUS_MIN_CONTENT_RECALL="$2"
+      shift 2
+      ;;
     --out-root)
       if [[ $# -lt 2 ]]; then
         echo "--out-root requires a value" >&2
@@ -114,7 +160,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|artifact|audio-synthetic|corpus|live) ;;
+  quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -406,6 +452,20 @@ run_corpus_tail() {
     "python3 scripts/ops/validate-meeting-corpus.py --corpus-root $(shell_quote "${CORPUS_ROOT}")${ids_arg} --json-out $(shell_quote "${RAW_DIR}/meeting-corpus.json") --markdown-out $(shell_quote "${OUT}/meeting-corpus-report.md") --subset-out $(shell_quote "${OUT}/meeting-corpus-subset.json")"
 }
 
+run_corpus_compare_tail() {
+  local ids_arg=""
+  local map_arg=""
+  if [[ -n "${CORPUS_IDS}" ]]; then
+    ids_arg=" --ids $(shell_quote "${CORPUS_IDS}")"
+  fi
+  if [[ -n "${CORPUS_CANDIDATE_MAP}" ]]; then
+    map_arg=" --candidate-map $(shell_quote "${CORPUS_CANDIDATE_MAP}")"
+  fi
+
+  run_step "51-meeting-corpus-compare" "Compare Transcripted output with Zoom corpus truth" "yes" \
+    "python3 scripts/ops/compare-meeting-corpus.py --corpus-root $(shell_quote "${CORPUS_ROOT}") --transcripted-output-dir $(shell_quote "${CORPUS_OUTPUT_DIR}")${map_arg}${ids_arg} --min-recall $(shell_quote "${CORPUS_MIN_RECALL}") --min-content-recall $(shell_quote "${CORPUS_MIN_CONTENT_RECALL}") --json-out $(shell_quote "${RAW_DIR}/meeting-corpus-comparison.json") --markdown-out $(shell_quote "${OUT}/meeting-corpus-comparison-report.md")"
+}
+
 cd "${REPO_ROOT}" || exit 1
 write_manual_scenarios
 
@@ -434,6 +494,11 @@ case "${MODE}" in
   corpus)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
     run_corpus_tail
+    ;;
+  corpus-compare)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    run_corpus_tail
+    run_corpus_compare_tail
     ;;
   live)
     run_quick

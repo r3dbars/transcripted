@@ -23,11 +23,12 @@ There is also an orchestrated QA bench for human-style passes:
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 bash scripts/ops/transcripted-qa-bench.sh --mode live
 ```
 
 It wraps the layers above, `Tools/TranscriptedQA`, synthetic audio reliability,
-and the optional local meeting corpus into one local report. See
+the optional local meeting corpus, and redacted corpus comparison into one local report. See
 `docs/qa-test-bench.md`.
 
 ## Fast Test Runner

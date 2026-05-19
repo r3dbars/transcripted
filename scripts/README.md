@@ -70,9 +70,11 @@ not have to carry the full operational logic:
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
   - Corpus usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus`
+  - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
   - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
+- `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
   - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state

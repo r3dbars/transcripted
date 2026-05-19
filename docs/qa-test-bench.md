@@ -91,11 +91,66 @@ bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-002
 ```
 
 This does not commit the corpus and does not upload audio or transcripts. It is
-currently a corpus-readiness and ground-truth check. Use it before comparing new
+the corpus-readiness and ground-truth check. Use it before comparing new
 Transcripted output against the corpus.
 
 The corpus is private local test data, so it stays out of the required agent
 test matrix. Use the corpus mode only on machines that have the corpus.
+
+## Corpus Compare Run
+
+Use this after Transcripted has produced Markdown for one or more corpus
+meetings:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025
+```
+
+By default, the bench looks for Transcripted Markdown here:
+
+```text
+~/Downloads/meeting-corpus/transcripted-output
+```
+
+Expected file shapes are:
+
+```text
+transcripted-output/meeting-0024.md
+transcripted-output/meeting-0024/transcript.md
+transcripted-output/meeting-0024/*.md
+```
+
+You can point it somewhere else:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare \
+  --corpus-ids meeting-0024,meeting-0025 \
+  --corpus-output-dir /path/to/transcripted-output
+```
+
+Or provide a private JSON map:
+
+```json
+{
+  "meeting-0024": "/path/to/Transcripted meeting 24.md",
+  "meeting-0025": "/path/to/Transcripted meeting 25.md"
+}
+```
+
+Then run:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare \
+  --corpus-candidate-map /path/to/candidate-map.json
+```
+
+This mode compares Transcripted Markdown against Zoom ground truth with
+redacted scores: word recall, content-word recall, speaker-label count, and
+private speaker-name match counts. Reports do not print transcript text or
+speaker names.
+
+This does not yet drive the app UI or import audio automatically. It scores the
+Transcripted Markdown once that Markdown exists.
 
 ## Exit Codes
 
@@ -139,6 +194,7 @@ A strong QA pass should answer:
 - Do meetings start, stop, transcribe, and save?
 - Do dictations paste or copy and then save readable Markdown?
 - Can the local meeting corpus be read as private ground truth?
+- Does Transcripted output match the private Zoom truth closely enough?
 - Do speaker labels stay understandable, with `You` for the local mic by default?
 - Do manual speaker names survive into Markdown?
 - Do failed meetings explain stage, retryability, retained artifacts, and user-visible state?
