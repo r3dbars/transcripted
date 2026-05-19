@@ -138,6 +138,26 @@ func testParakeetStartRecordingFailurePolicy() {
         )
     }
 
+    runSuite("ParakeetASRInferenceActivityState stays active until all inference exits") {
+        var state = ParakeetASRInferenceActivityState()
+
+        state.begin()
+        state.begin()
+        assertTrue(state.isActive, "any active CoreML inference should block manager cleanup")
+        assertEqual(state.activeCount, 2, "nested activity should keep an exact count")
+
+        state.finish()
+        assertTrue(state.isActive, "one completed inference should not clear cleanup protection while another remains")
+        assertEqual(state.activeCount, 1, "finish should decrement one active inference")
+
+        state.finish()
+        assertFalse(state.isActive, "cleanup protection can clear once every inference is done")
+        assertEqual(state.activeCount, 0, "activity count should return to zero")
+
+        state.finish()
+        assertEqual(state.activeCount, 0, "extra finish calls should not underflow")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,

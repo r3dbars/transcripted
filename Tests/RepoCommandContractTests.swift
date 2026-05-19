@@ -666,6 +666,23 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - CoreML inference outputs stay locally owned") {
+        let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let diarizationContents = readRepoTextFile("Sources/TranscriptedCore/Services/DiarizationService.swift")
+
+        assertTrue(
+            engineContents.contains("runASRInference(")
+                && engineContents.contains("beginASRInference()")
+                && engineContents.contains("finishASRInference()"),
+            "meeting segment ASR should mark CoreML inference active so cleanup cannot release the manager mid-prediction"
+        )
+        assertTrue(
+            diarizationContents.contains("withExtendedLifetime(result)")
+                && diarizationContents.contains("embedding.map { $0 }"),
+            "diarization should copy CoreML-backed embeddings into plain Swift arrays before returning segments"
+        )
+    }
+
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
         let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
         assertTrue(
