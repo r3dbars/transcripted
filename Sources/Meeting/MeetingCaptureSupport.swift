@@ -78,11 +78,26 @@ enum MeetingCaptureVolumeDiagnostics {
         context["quiet_mic_recovered"] = quietMicState.recovered
         context["quiet_mic_unrecovered"] = quietMicState.unrecovered
         context["output_ducking_detected"] = outputDuckingState(
-            outputDropped: context["default_output_volume_dropped"],
-            systemOutputDropped: context["default_system_output_volume_dropped"]
+            dropStates: [
+                context["default_output_volume_dropped"],
+                context["default_system_output_volume_dropped"],
+                optionalVolumeDrop(
+                    before: context["default_output_volume_before"],
+                    after: context["default_output_volume_during"]
+                ),
+                optionalVolumeDrop(
+                    before: context["default_system_output_volume_before"],
+                    after: context["default_system_output_volume_during"]
+                ),
+            ]
         )
 
         return context
+    }
+
+    private static func optionalVolumeDrop(before: String?, after: String?) -> String? {
+        guard after != nil else { return nil }
+        return volumeChange(before: before, after: after).droppedState
     }
 
     private static func volumeChange(before: String?, after: String?) -> (changedState: String, droppedState: String) {
@@ -128,11 +143,8 @@ enum MeetingCaptureVolumeDiagnostics {
         return ("false", "true")
     }
 
-    private static func outputDuckingState(
-        outputDropped: String?,
-        systemOutputDropped: String?
-    ) -> String {
-        let values = [outputDropped, systemOutputDropped]
+    private static func outputDuckingState(dropStates: [String?]) -> String {
+        let values = dropStates.compactMap { $0 }
         if values.contains("true") { return "true" }
         if values.allSatisfy({ $0 == "false" }) { return "false" }
         return "unavailable"

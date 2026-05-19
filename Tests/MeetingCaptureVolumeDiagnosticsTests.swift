@@ -72,6 +72,24 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["output_ducking_detected"], "unavailable", "mixed unavailable and false states should stay cautious")
     }
 
+    runSuite("MeetingCaptureVolumeDiagnostics flags transient output ducking during recording") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_output_volume_before": "0.750",
+                "default_output_volume_during": "0.500",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_during": "0.750",
+            ],
+            afterStopContext: [
+                "default_output_volume_after": "0.750",
+                "default_system_output_volume_after": "0.750",
+            ]
+        )
+
+        assertEqual(context["default_output_volume_dropped"], "false", "after-stop recovery should keep the final scalar truthful")
+        assertEqual(context["output_ducking_detected"], "true", "during-recording output drops should still mark possible ducking")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics classifies quiet mic recovery") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [
