@@ -8,13 +8,13 @@ struct DictationFillerCleanupResult: Equatable {
 
 enum DictationFillerCleanupPolicy {
     private static let fillerRegex = try? NSRegularExpression(
-        pattern: #"(?i)(?<!\S)(?:um+|uh+|ah+|er+|erm+|hm+|hmm+)(?![\p{L}\p{N}_])[\s,.;:!?-]*"#
+        pattern: #"(?<!\S)(?:[Uu]m+|[Uu]h+|[Aa]h+|[Ee]r+|[Ee]rm+|[Hh]m+|[Hh]mm+)(?![\p{L}\p{N}_])[\s,.;:!?-]*"#
     )
     private static let leadingOpenerRegex = try? NSRegularExpression(
-        pattern: #"(?i)^\s*(?:ok|okay|alright|all\s+right|so|well)[\s,.;:!?-]+"#
+        pattern: #"(?i)^\s*(?:ok|okay|alright|all\s+right|so|well)[,.;:!?-]+\s*"#
     )
     private static let duplicateWordRegex = try? NSRegularExpression(
-        pattern: #"(?i)(?<![\p{L}\p{N}_])([\p{L}\p{N}']+)([ \t]+)\1(?![\p{L}\p{N}_])"#
+        pattern: #"(?i)(?<![\p{L}\p{N}_])(i)([ \t]+)\1(?![\p{L}\p{N}_])"#
     )
     private static let punctuationSpacingRegex = try? NSRegularExpression(
         pattern: #"\s+([,.;:!?])"#

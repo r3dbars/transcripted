@@ -46,6 +46,24 @@ func testDictationFillerCleanupPolicy() {
         assertEqual(filePath.text, "save this under /tmp/um-notes today", "file path segment should not be removed")
     }
 
+    runSuite("DictationFillerCleanupPolicy keeps meaningful leading words") {
+        let soFar = DictationFillerCleanupPolicy.clean("So far we have shipped two builds")
+        let wellWater = DictationFillerCleanupPolicy.clean("Well water should be tested today")
+
+        assertEqual(soFar.text, "So far we have shipped two builds.", "leading 'so' should survive without opener punctuation")
+        assertEqual(wellWater.text, "Well water should be tested today.", "leading 'well' should survive without opener punctuation")
+    }
+
+    runSuite("DictationFillerCleanupPolicy keeps acronyms and valid repeated words") {
+        let acronym = DictationFillerCleanupPolicy.clean("send this to ER before noon")
+        let repeatedThat = DictationFillerCleanupPolicy.clean("the issue is that that policy still applies")
+        let repeatedHad = DictationFillerCleanupPolicy.clean("we had had enough context")
+
+        assertEqual(acronym.text, "send this to ER before noon.", "uppercase acronym should not be treated as filler")
+        assertEqual(repeatedThat.text, "the issue is that that policy still applies.", "valid repeated 'that' should survive")
+        assertEqual(repeatedHad.text, "we had had enough context", "valid repeated 'had' should survive")
+    }
+
     runSuite("DictationFillerCleanupPolicy does not collapse emphasized punctuation") {
         let cleaned = DictationFillerCleanupPolicy.clean("This is very, very important.")
 
