@@ -22,6 +22,9 @@ func testReliabilityPacketRecorder() {
                 "error": "/Users/redbars/private.txt should not be copied",
                 "mic_processed_peak": "0.36000",
                 "mic_raw_peak": "0.03000",
+                "output_ducking_detected": "false",
+                "quiet_mic_recovered": "true",
+                "quiet_mic_unrecovered": "false",
                 "reason": "overlay_stop_button",
                 "source_app_name": "Private App",
                 "system_peak": "0.25000",
@@ -48,6 +51,9 @@ func testReliabilityPacketRecorder() {
         assertEqual(packet?.context["default_output_volume_before"], "0.740", "before volume scalar should stay available for manual QA")
         assertEqual(packet?.context["default_output_volume_after"], "0.740", "after volume scalar should stay available for manual QA")
         assertEqual(packet?.context["default_output_volume_dropped"], "false", "issue 500 volume-drop flags should stay available for manual QA")
+        assertEqual(packet?.context["output_ducking_detected"], "false", "ducking classification should stay available for manual QA")
+        assertEqual(packet?.context["quiet_mic_recovered"], "true", "quiet mic recovery classification should stay available for manual QA")
+        assertEqual(packet?.context["quiet_mic_unrecovered"], "false", "quiet mic failure classification should stay available for manual QA")
         assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
         assertNil(packet?.context["source_app_name"], "source app names should not be copied into reliability packets")
     }

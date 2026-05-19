@@ -249,6 +249,9 @@ func testAnalyticsEventPolicy() {
         assertEqual(startFailedPolicy?.allowedProperties.contains("failure_kind"), true, "meeting start failures should preserve normalized failure kinds")
         assertEqual(policy?.allowedProperties.contains("mic_raw_peak"), true, "meeting stop events should preserve raw mic peak for issue 500 diagnostics")
         assertEqual(policy?.allowedProperties.contains("mic_processed_peak"), true, "meeting stop events should preserve processed mic peak for issue 500 diagnostics")
+        assertEqual(policy?.allowedProperties.contains("quiet_mic_recovered"), true, "meeting stop events should preserve quiet-mic recovery classification")
+        assertEqual(policy?.allowedProperties.contains("quiet_mic_unrecovered"), true, "meeting stop events should preserve unrecovered quiet-mic classification")
+        assertEqual(policy?.allowedProperties.contains("output_ducking_detected"), true, "meeting stop events should preserve output-ducking classification")
         assertEqual(policy?.allowedProperties.contains("system_peak"), true, "meeting stop events should preserve system audio peak for issue 500 diagnostics")
         assertEqual(policy?.allowedProperties.contains("default_input_volume_before"), true, "meeting stop events should preserve input volume before recording")
         assertEqual(policy?.allowedProperties.contains("default_output_volume_during"), true, "meeting stop events should preserve output volume during recording")
@@ -276,7 +279,10 @@ func testAnalyticsEventPolicy() {
                 "mic_processing": "software_agc",
                 "mic_processed_peak": "0.36000",
                 "mic_raw_peak": "0.03000",
+                "output_ducking_detected": "true",
                 "output_device_class": "built_in",
+                "quiet_mic_recovered": "true",
+                "quiet_mic_unrecovered": "false",
                 "recovery_attempt_bucket": "0",
                 "route_change_count_bucket": "2_3",
                 "system_peak": "0.25000",
@@ -304,7 +310,10 @@ func testAnalyticsEventPolicy() {
                 "mic_processing",
                 "mic_processed_peak",
                 "mic_raw_peak",
+                "output_ducking_detected",
                 "output_device_class",
+                "quiet_mic_recovered",
+                "quiet_mic_unrecovered",
                 "recovery_attempt_bucket",
                 "route_change_count_bucket",
                 "system_peak",
@@ -326,6 +335,9 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["mic_processing"], "software_agc", "coarse mic processing mode should survive sanitization")
         assertEqual(sanitized["mic_raw_peak"], "0.03000", "raw mic peak should survive sanitization")
         assertEqual(sanitized["mic_processed_peak"], "0.36000", "processed mic peak should survive sanitization")
+        assertEqual(sanitized["quiet_mic_recovered"], "true", "quiet-mic recovery classification should survive sanitization")
+        assertEqual(sanitized["quiet_mic_unrecovered"], "false", "quiet-mic failure classification should survive sanitization")
+        assertEqual(sanitized["output_ducking_detected"], "true", "output-ducking classification should survive sanitization")
         assertEqual(sanitized["output_device_class"], "built_in", "coarse output device class should survive sanitization")
         assertEqual(sanitized["recovery_attempt_bucket"], "0", "recovery attempt buckets should survive sanitization")
         assertEqual(sanitized["route_change_count_bucket"], "2_3", "route-change buckets should survive sanitization")
