@@ -301,10 +301,21 @@ def compare_meeting(
         "privateSpeakerNameMatches": private_name_matches,
     })
 
-    if len(candidate_words) > 50:
-        checks.append(Check("PASS", "compare/transcripted-word-count", meeting_id, f"{len(candidate_words)} words"))
+    min_candidate_words = min(50, max(1, math.ceil(len(ref_words) * min_recall)))
+    if len(candidate_words) >= min_candidate_words:
+        checks.append(Check(
+            "PASS",
+            "compare/transcripted-word-count",
+            meeting_id,
+            f"{len(candidate_words)} words vs {len(ref_words)} reference words",
+        ))
     else:
-        checks.append(Check("FAIL", "compare/transcripted-word-count", meeting_id, "candidate transcript is too short"))
+        checks.append(Check(
+            "FAIL",
+            "compare/transcripted-word-count",
+            meeting_id,
+            f"{len(candidate_words)} words below {min_candidate_words} word minimum",
+        ))
 
     if word_metrics["recall"] >= min_recall:
         checks.append(Check("PASS", "compare/word-recall", meeting_id, f"{word_metrics['recall']:.1%}"))
