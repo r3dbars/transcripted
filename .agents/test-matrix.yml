@@ -30,6 +30,12 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "scripts/ops/transcripted-qa-bench.sh"
+      - "docs/qa-test-bench.md"
+    checks:
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode quick --skip-build"
+
+  - paths:
       - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"
       - "run-live-capture-smoke.sh"
       - "scripts/entrypoints/run-live-capture-smoke.sh"

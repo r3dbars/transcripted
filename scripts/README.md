@@ -66,6 +66,11 @@ not have to carry the full operational logic:
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
   - Usage: `bash scripts/ops/qa-gate-closeout.sh [repo] [issue_number] [owner_login]`
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, and optional live capture
+  - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
+  - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
+  - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
+  - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
   - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state

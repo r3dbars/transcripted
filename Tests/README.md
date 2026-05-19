@@ -17,6 +17,17 @@ This repo has six distinct verification layers:
 6. `bash run-live-capture-smoke.sh`
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 
+There is also an orchestrated QA bench for human-style passes:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode quick
+bash scripts/ops/transcripted-qa-bench.sh --mode deep
+bash scripts/ops/transcripted-qa-bench.sh --mode live
+```
+
+It wraps the layers above, `Tools/TranscriptedQA`, and synthetic audio
+reliability into one local report. See `docs/qa-test-bench.md`.
+
 ## Fast Test Runner
 
 `run-tests.sh` compiles the root fast tests listed in

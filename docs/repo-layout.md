@@ -28,6 +28,7 @@ bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-daily-audio-reliability.sh
+bash scripts/ops/transcripted-qa-bench.sh --mode quick
 swift test
 ```
 
@@ -40,6 +41,7 @@ Command ownership:
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output
 - `swift test` — `TranscriptedCore` package seam tests
 
 For helper and legacy scripts, see `scripts/README.md`.
@@ -84,6 +86,7 @@ Use these docs for these jobs:
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
+- `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, live, artifact, and synthetic audio passes
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
