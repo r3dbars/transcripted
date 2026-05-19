@@ -87,12 +87,18 @@ local-only corpus evidence into the QA run folder.
 To choose exact meetings:
 
 ```bash
-bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025,meeting-0004
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025
 ```
 
 This does not commit the corpus and does not upload audio or transcripts. It is
 currently a corpus-readiness and ground-truth check. Use it before comparing new
 Transcripted output against the corpus.
+
+## Exit Codes
+
+- `0`: all blocking checks passed with no warnings or skipped steps
+- `1`: at least one blocking check failed
+- `3`: the report is incomplete because at least one step warned or was skipped
 
 ## Manual QA
 

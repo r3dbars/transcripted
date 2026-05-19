@@ -320,6 +320,9 @@ write_report() {
   if [[ "${fail_count}" -gt 0 ]]; then
     return 1
   fi
+  if [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+    return 3
+  fi
   return 0
 }
 

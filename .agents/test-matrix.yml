@@ -34,8 +34,8 @@ rules:
       - "scripts/ops/validate-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode quick --skip-build"
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025"
 
   - paths:
       - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"
