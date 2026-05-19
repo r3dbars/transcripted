@@ -440,7 +440,7 @@ def write_markdown(path: Path, root: Path, output_dir: Path, checks: list[Check]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus-root", default=str(DEFAULT_ROOT))
-    parser.add_argument("--transcripted-output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--transcripted-output-dir", default="")
     parser.add_argument("--candidate-map", default="")
     parser.add_argument("--ids", default="", help="Comma-separated meeting ids.")
     parser.add_argument("--json-out", required=True)
@@ -450,7 +450,8 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(args.corpus_root).expanduser().resolve()
-    output_dir = Path(args.transcripted_output_dir).expanduser().resolve()
+    output_dir_arg = args.transcripted_output_dir or str(root / "transcripted-output")
+    output_dir = Path(output_dir_arg).expanduser().resolve()
     candidate_map_path = Path(args.candidate_map).expanduser().resolve() if args.candidate_map else None
 
     if not root.exists():
