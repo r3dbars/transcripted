@@ -25,7 +25,8 @@
     "local": {
       "com.apple.security.app-sandbox": false,
       "com.apple.security.device.audio-capture": true,
-      "com.apple.security.device.audio-input": true
+      "com.apple.security.device.audio-input": true,
+      "com.apple.security.personal-information.calendars": true
     },
     "beta": {
       "com.apple.security.app-sandbox": false,
@@ -33,6 +34,7 @@
       "com.apple.security.cs.disable-library-validation": true,
       "com.apple.security.device.audio-capture": true,
       "com.apple.security.device.audio-input": true,
+      "com.apple.security.personal-information.calendars": true,
       "com.apple.security.network.client": true
     }
   },
