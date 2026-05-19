@@ -518,6 +518,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "failure_kind",
                 "queue_depth_bucket",
+                "session_stage",
                 "trigger",
             ]
         ),

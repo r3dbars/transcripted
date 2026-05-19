@@ -158,6 +158,7 @@ func testSentryEventPolicy() {
             context: [
                 "failure_kind": "speaker_finalization_failed",
                 "queue_depth_bucket": "zero",
+                "session_stage": "save",
                 "speaker_name": "Private Person",
                 "trigger": "unknown",
             ]
@@ -165,6 +166,7 @@ func testSentryEventPolicy() {
 
         assertEqual(tags["failure_kind"], "speaker_finalization_failed", "speaker finalization should keep its stable failure kind")
         assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
+        assertEqual(tags["session_stage"], "save", "save-stage failures should be queryable separately from transcription failures")
         assertEqual(tags["trigger"], "unknown", "trigger should stay queryable")
         assertNil(tags["speaker_name"], "speaker names must stay out of Sentry tags")
     }
