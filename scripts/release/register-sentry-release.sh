@@ -58,6 +58,10 @@ echo "Sentry project: $SENTRY_ORG/$SENTRY_PROJECT"
 
 if sentry_release_exists; then
     echo "Sentry release already exists."
+    sentry-cli releases finalize \
+        --org "$SENTRY_ORG" \
+        --project "$SENTRY_PROJECT" \
+        "$SENTRY_RELEASE"
 else
     sentry-cli releases new \
         --org "$SENTRY_ORG" \
