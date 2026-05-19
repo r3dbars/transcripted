@@ -18,6 +18,11 @@ struct ParakeetDeviceRecoveryFailureAction: Equatable {
     let schedulePrewarmRetry: Bool
 }
 
+enum ParakeetDeviceRecoveryReadinessAction: Equatable {
+    case finishRecovery
+    case keepWaiting
+}
+
 enum ParakeetAudioEngineRebuildStrategy: Equatable {
     case queuedOnAudioEngineQueue
     case abandonBlockedAudioGraph
@@ -54,6 +59,17 @@ enum ParakeetDeviceRecoveryFailurePolicy {
             markRecordingInterrupted: wasRecording,
             schedulePrewarmRetry: true
         )
+    }
+}
+
+enum ParakeetDeviceRecoveryReadinessPolicy {
+    static func action(for readiness: ParakeetAudioFormatReadiness) -> ParakeetDeviceRecoveryReadinessAction {
+        switch readiness {
+        case .ready:
+            return .finishRecovery
+        case .invalid, .routeNotSettled:
+            return .keepWaiting
+        }
     }
 }
 

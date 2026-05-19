@@ -35,17 +35,6 @@ private enum ParakeetAudioEngineWorkError: LocalizedError {
     }
 }
 
-private enum ParakeetDeviceRecoveryError: LocalizedError {
-    case routeNotSettled
-
-    var errorDescription: String? {
-        switch self {
-        case .routeNotSettled:
-            return "Audio route not settled after device change"
-        }
-    }
-}
-
 private enum CoreAudioInputDeviceLookup {
     static func preferredDictationInputSelection() throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
@@ -1267,41 +1256,44 @@ class ParakeetEngine: ObservableObject {
             guard !Task.isCancelled, let self = self else { return }
             guard !self.recoveryState.isStale(generation: myGeneration) else { return }
             do {
-                // Two-step format validation. CoreAudio sometimes reports zero
-                // sample rate on first read after device change, even past the
-                // initial settle delay. One extra wait + re-read is enough.
-                var snapshot = try await self.audioInputSnapshot(
-                    operation: "device_recovery",
-                    recoveryGeneration: myGeneration
-                )
-                if self.audioFormatReadiness(outputFormat: snapshot.outputFormat, hwFormat: snapshot.hwFormat, selection: snapshot.selection) != .ready {
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                    snapshot = try await self.audioInputSnapshot(
-                        operation: "device_recovery_retry",
+                var recoveryAttempt = 0
+                var readySnapshot: ParakeetAudioInputSnapshot?
+                while readySnapshot == nil {
+                    recoveryAttempt += 1
+                    let snapshot = try await self.audioInputSnapshot(
+                        operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
                         recoveryGeneration: myGeneration
                     )
-                }
-                let readiness = self.audioFormatReadiness(
-                    outputFormat: snapshot.outputFormat,
-                    hwFormat: snapshot.hwFormat,
-                    selection: snapshot.selection
-                )
-                guard readiness == .ready else {
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "device_change_rewarm_deferred",
-                        message: "Audio route still settling after device change",
-                        context: self.audioFormatContext(
+                    let readiness = self.audioFormatReadiness(
+                        outputFormat: snapshot.outputFormat,
+                        hwFormat: snapshot.hwFormat,
+                        selection: snapshot.selection
+                    )
+                    switch ParakeetDeviceRecoveryReadinessPolicy.action(for: readiness) {
+                    case .finishRecovery:
+                        readySnapshot = snapshot
+                    case .keepWaiting:
+                        var context = self.audioFormatContext(
                             outputFormat: snapshot.outputFormat,
                             hwFormat: snapshot.hwFormat,
                             selection: snapshot.selection,
                             readiness: readiness
                         )
-                    )
-                    throw ParakeetDeviceRecoveryError.routeNotSettled
+                        context["recovery_attempt"] = "\(recoveryAttempt)"
+                        EventReporter.shared.capture(
+                            level: .warning,
+                            engine: "parakeet",
+                            event: "device_change_rewarm_deferred",
+                            message: "Audio route still settling after device change",
+                            context: context
+                        )
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                        guard !Task.isCancelled else { return }
+                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
+                        continue
+                    }
                 }
+                guard let snapshot = readySnapshot else { return }
                 self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
                 self.prewarmRetryCount = 0
                 print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
@@ -1421,10 +1413,7 @@ class ParakeetEngine: ObservableObject {
                             ]
                         ))
                 }
-                let rebuildReason = error is ParakeetDeviceRecoveryError
-                    ? "device_change_route_not_settled"
-                    : "device_change_rewarm_failed"
-                await self.rebuildAudioEngine(reason: rebuildReason)
+                await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
                 if failureAction.schedulePrewarmRetry {
                     self.prewarmRetryCount = 0
                     self.schedulePrewarmRetry()

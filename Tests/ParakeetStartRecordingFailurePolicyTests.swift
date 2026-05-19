@@ -83,6 +83,30 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
     }
 
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy waits on unsettled route formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .routeNotSettled),
+            .keepWaiting,
+            "route churn should keep using the recovery budget instead of failing after the first stale format"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy waits on invalid transient formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .invalid),
+            .keepWaiting,
+            "zero or invalid formats during device churn should wait for the recovery timeout"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy finishes only on ready formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .ready),
+            .finishRecovery,
+            "ready formats should complete the device-change recovery"
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryTimeoutPolicy abandons blocked audio graph") {
         let idleAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: false)
         let recordingAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: true)
