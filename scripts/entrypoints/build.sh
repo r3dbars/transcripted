@@ -313,9 +313,31 @@ echo "Building Transcripted..."
 
 ensure_build_prerequisites
 ensure_deps_ready
+ORIGINAL_SENTRY_RELEASE_WAS_SET=0
+ORIGINAL_SENTRY_DIST_WAS_SET=0
+if [ "${SENTRY_RELEASE+x}" = "x" ]; then
+    ORIGINAL_SENTRY_RELEASE_WAS_SET=1
+    ORIGINAL_SENTRY_RELEASE="$SENTRY_RELEASE"
+fi
+if [ "${SENTRY_DIST+x}" = "x" ]; then
+    ORIGINAL_SENTRY_DIST_WAS_SET=1
+    ORIGINAL_SENTRY_DIST="$SENTRY_DIST"
+fi
 SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
 eval "$SENTRY_METADATA"
-echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
+BUILD_SENTRY_RELEASE="$SENTRY_RELEASE"
+BUILD_SENTRY_DIST="$SENTRY_DIST"
+if [ "$ORIGINAL_SENTRY_RELEASE_WAS_SET" = "1" ]; then
+    export SENTRY_RELEASE="$ORIGINAL_SENTRY_RELEASE"
+else
+    unset SENTRY_RELEASE
+fi
+if [ "$ORIGINAL_SENTRY_DIST_WAS_SET" = "1" ]; then
+    export SENTRY_DIST="$ORIGINAL_SENTRY_DIST"
+else
+    unset SENTRY_DIST
+fi
+echo "Sentry metadata: release=$BUILD_SENTRY_RELEASE dist=$BUILD_SENTRY_DIST"
 
 # Clean
 rm -rf "$BUILD_DIR"

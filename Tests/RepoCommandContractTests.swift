@@ -346,6 +346,7 @@ func testRepoCommandContract() {
             registerSentry.contains("sentry-cli releases new")
                 && registerSentry.contains("--finalize")
                 && registerSentry.contains("sentry-cli releases set-commits")
+                && registerSentry.contains("Skipping finalize so reruns do not change the existing release date.")
                 && registerSentry.contains("scripts/release/sentry-release-metadata.py"),
             "Sentry release registration should create the matching finalized release from the shared metadata helper"
         )
@@ -355,6 +356,12 @@ func testRepoCommandContract() {
         assertTrue(
             localBuildScript.contains("sentry-release-metadata.py --format shell Info.plist"),
             "local builds should verify Sentry release metadata before compiling"
+        )
+        assertTrue(
+            localBuildScript.contains("ORIGINAL_SENTRY_RELEASE_WAS_SET")
+                && localBuildScript.contains("export SENTRY_RELEASE=\"$ORIGINAL_SENTRY_RELEASE\"")
+                && localBuildScript.contains("unset SENTRY_RELEASE"),
+            "local builds should not clobber exported Sentry runtime overrides before launch smoke"
         )
         assertTrue(
             betaBuildScript.contains("sentry-release-metadata.py --format shell Info.plist")
