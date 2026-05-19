@@ -8,7 +8,7 @@ struct DictationFillerCleanupResult: Equatable {
 
 enum DictationFillerCleanupPolicy {
     private static let fillerRegex = try? NSRegularExpression(
-        pattern: #"(?i)(?<![\p{L}\p{N}_])(?:um+|uh+|ah+|er+|erm+|hm+|hmm+)(?![\p{L}\p{N}_])[\s,.;:!?-]*"#
+        pattern: #"(?i)(?<!\S)(?:um+|uh+|ah+|er+|erm+|hm+|hmm+)(?![\p{L}\p{N}_])[\s,.;:!?-]*"#
     )
     private static let leadingOpenerRegex = try? NSRegularExpression(
         pattern: #"(?i)^\s*(?:ok|okay|alright|all\s+right|so|well)[\s,.;:!?-]+"#

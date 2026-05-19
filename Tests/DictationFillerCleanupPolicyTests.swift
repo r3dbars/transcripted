@@ -38,6 +38,14 @@ func testDictationFillerCleanupPolicy() {
         )
     }
 
+    runSuite("DictationFillerCleanupPolicy preserves filler-looking URL and path segments") {
+        let url = DictationFillerCleanupPolicy.clean("open https://example.com/er now")
+        let filePath = DictationFillerCleanupPolicy.clean("save this under /tmp/um-notes today")
+
+        assertEqual(url.text, "open https://example.com/er now", "URL path segment should not be removed")
+        assertEqual(filePath.text, "save this under /tmp/um-notes today", "file path segment should not be removed")
+    }
+
     runSuite("DictationFillerCleanupPolicy does not collapse emphasized punctuation") {
         let cleaned = DictationFillerCleanupPolicy.clean("This is very, very important.")
 
