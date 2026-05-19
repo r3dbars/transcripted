@@ -80,9 +80,10 @@ By default this reads:
 ~/Downloads/meeting-corpus
 ```
 
-It validates a small representative subset, checks local audio/transcript
+It validates an audio-ready representative subset, checks local audio/transcript
 presence, parses Zoom caption turns without printing transcript text, and writes
-local-only corpus evidence into the QA run folder.
+local-only corpus evidence into the QA run folder. The default subset is
+`meeting-0024,meeting-0025`.
 
 To choose exact meetings:
 

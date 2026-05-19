@@ -15,7 +15,7 @@ from typing import Any
 
 
 DEFAULT_ROOT = Path.home() / "Downloads" / "meeting-corpus"
-DEFAULT_IDS = ["meeting-0024", "meeting-0025", "meeting-0004", "meeting-0003"]
+DEFAULT_IDS = ["meeting-0024", "meeting-0025"]
 ZOOM_LINE_RE = re.compile(r"^\[(?P<speaker>[^\]]+)\]\s+(?P<time>\d{1,2}:\d{2}:\d{2})\s+(?P<text>.*)$")
 
 
@@ -314,7 +314,7 @@ def write_markdown(path: Path, root: Path, selected: list[dict[str, Any]], check
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus-root", default=str(DEFAULT_ROOT))
-    parser.add_argument("--ids", default="", help="Comma-separated meeting ids. Defaults to a small representative subset.")
+    parser.add_argument("--ids", default="", help="Comma-separated meeting ids. Defaults to an audio-ready representative subset.")
     parser.add_argument("--json-out", required=True)
     parser.add_argument("--markdown-out", required=True)
     parser.add_argument("--subset-out", default="")
