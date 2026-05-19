@@ -60,7 +60,8 @@ struct TranscriptedSettingsView: View {
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
-    @State private var customDictionaryPreviewInput = "review the okay ours before the q four meeting"
+    @State private var customDictionaryPreviewInput = "um okay review the okay ours before the q four meeting"
+    @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
@@ -1221,6 +1222,24 @@ struct TranscriptedSettingsView: View {
                 detail: "Fix the words Transcripted usually gets wrong."
             ) {
                 VStack(alignment: .leading, spacing: 10) {
+                    SettingsToggleRow(
+                        title: "Clean up dictated text before paste",
+                        detail: dictationCleanupEnabled
+                            ? "On. Removes clear fillers, repeated words, and safe spacing issues."
+                            : "Off. Pastes the local transcription output without filler cleanup.",
+                        isOn: Binding(
+                            get: { dictationCleanupEnabled },
+                            set: { newValue in
+                                dictationCleanupEnabled = newValue
+                                DictationCleanupPreferences.setEnabled(newValue)
+                                trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
+                            }
+                        ),
+                        help: "Clean up dictated text before paste"
+                    )
+
+                    Divider()
+
                     Text("Add what Transcripted writes now, then the version you want saved.")
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2565,8 +2584,12 @@ struct TranscriptedSettingsView: View {
         guard !sample.isEmpty else { return "Dictate a sample phrase above to check your corrections." }
 
         let entries = CustomDictionaryPreferences.entries(from: customDictionaryText)
-        guard !entries.isEmpty else { return sample }
-        return CustomDictionaryTextProcessor.apply(to: sample, entries: entries)
+        let corrected = entries.isEmpty
+            ? sample
+            : CustomDictionaryTextProcessor.apply(to: sample, entries: entries)
+
+        guard dictationCleanupEnabled else { return corrected }
+        return DictationFillerCleanupPolicy.clean(corrected).text
     }
 
     private func updateCustomDictionaryText(_ text: String) {

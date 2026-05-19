@@ -856,7 +856,13 @@ class DictationSessionController: ObservableObject {
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
 
-            let cleanupResult = voiceText.map(DictationFillerCleanupPolicy.clean)
+            let cleanupResult = voiceText.map { rawText in
+                if DictationCleanupPreferences.isEnabled() {
+                    return DictationFillerCleanupPolicy.clean(rawText)
+                }
+                let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                return DictationFillerCleanupResult(text: trimmedText, removedCount: 0, changed: trimmedText != rawText)
+            }
             guard let text = cleanupResult?.text, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(
