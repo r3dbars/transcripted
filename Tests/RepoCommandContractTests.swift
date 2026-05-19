@@ -7,6 +7,7 @@ func testRepoCommandContract() {
             "build-beta.sh": "scripts/entrypoints/build-beta.sh",
             "build.sh": "scripts/entrypoints/build.sh",
             "run-e2e-smoke.sh": "scripts/entrypoints/run-e2e-smoke.sh",
+            "run-live-capture-smoke.sh": "scripts/entrypoints/run-live-capture-smoke.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
         ]
@@ -98,6 +99,42 @@ func testRepoCommandContract() {
         assertTrue(
             matrix.contains("Tests/E2E/**") && matrix.contains("bash run-e2e-smoke.sh"),
             "test matrix should map E2E smoke changes to the E2E command"
+        )
+    }
+
+    runSuite("Repo command contract - live capture smoke stays explicit and opt-in") {
+        let wrapper = readRepoTextFile("run-live-capture-smoke.sh")
+        let entrypoint = readRepoTextFile("scripts/entrypoints/run-live-capture-smoke.sh")
+        let liveSmokeTest = readRepoTextFile("Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift")
+        let testsReadme = readRepoTextFile("Tests/README.md")
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+
+        assertTrue(
+            wrapper.contains("exec \"$SCRIPT_DIR/scripts/entrypoints/run-live-capture-smoke.sh\" \"$@\""),
+            "root live-capture wrapper should delegate to the scripts entrypoint"
+        )
+        assertTrue(
+            entrypoint.contains("bash build.sh --no-open") && entrypoint.contains("--skip-build"),
+            "live capture smoke should build by default while keeping a faster rerun path"
+        )
+        assertTrue(
+            entrypoint.contains("TRANSCRIPTED_LIVE_CAPTURE_SMOKE=1")
+                && entrypoint.contains("swift test --filter LiveCaptureSmokeTests"),
+            "live capture smoke should stay env-gated and scoped to the hardware/TCC XCTest"
+        )
+        assertTrue(
+            liveSmokeTest.contains("XCTSkip(\"Set TRANSCRIPTED_LIVE_CAPTURE_SMOKE=1"),
+            "the live capture XCTest should skip by default outside the explicit smoke command"
+        )
+        assertTrue(
+            testsReadme.contains("bash run-live-capture-smoke.sh")
+                && testsReadme.contains("microphone permission"),
+            "Tests README should document the local permission requirements"
+        )
+        assertTrue(
+            matrix.contains("Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift")
+                && matrix.contains("bash run-live-capture-smoke.sh --skip-build"),
+            "test matrix should map live-smoke changes to the permission-aware command"
         )
     }
 
