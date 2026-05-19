@@ -16,7 +16,13 @@ LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
 CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
 CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
 CORPUS_COMPARE_DEFAULT_IDS="meeting-0024,meeting-0025"
-CORPUS_OUTPUT_DIR="${TRANSCRIPTED_QA_CORPUS_OUTPUT_DIR:-${CORPUS_ROOT}/transcripted-output}"
+if [[ -n "${TRANSCRIPTED_QA_CORPUS_OUTPUT_DIR:-}" ]]; then
+  CORPUS_OUTPUT_DIR="${TRANSCRIPTED_QA_CORPUS_OUTPUT_DIR}"
+  CORPUS_OUTPUT_DIR_EXPLICIT=1
+else
+  CORPUS_OUTPUT_DIR="${CORPUS_ROOT}/transcripted-output"
+  CORPUS_OUTPUT_DIR_EXPLICIT=0
+fi
 CORPUS_CANDIDATE_MAP="${TRANSCRIPTED_QA_CORPUS_CANDIDATE_MAP:-}"
 CORPUS_MIN_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_RECALL:-0.45}"
 CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
@@ -45,7 +51,7 @@ Options:
   --corpus-ids ids      Comma-separated meeting ids to validate.
   --corpus-output-dir path
                        Transcripted Markdown output dir for corpus-compare.
-                       Default: ~/Downloads/meeting-corpus/transcripted-output
+                       Default: <corpus-root>/transcripted-output
   --corpus-candidate-map path
                        JSON map of meeting id to Transcripted Markdown path.
   --corpus-min-recall n
@@ -90,6 +96,9 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       CORPUS_ROOT="$2"
+      if [[ "$CORPUS_OUTPUT_DIR_EXPLICIT" -eq 0 ]]; then
+        CORPUS_OUTPUT_DIR="${CORPUS_ROOT}/transcripted-output"
+      fi
       shift 2
       ;;
     --corpus-ids)
@@ -106,6 +115,7 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       CORPUS_OUTPUT_DIR="$2"
+      CORPUS_OUTPUT_DIR_EXPLICIT=1
       shift 2
       ;;
     --corpus-candidate-map)
