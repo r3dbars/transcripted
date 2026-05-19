@@ -856,7 +856,14 @@ class DictationSessionController: ObservableObject {
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
 
-            guard let text = voiceText, !text.isEmpty else {
+            let cleanupResult = voiceText.map { rawText in
+                if DictationCleanupPreferences.isEnabled() {
+                    return DictationFillerCleanupPolicy.clean(rawText)
+                }
+                let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                return DictationFillerCleanupResult(text: trimmedText, removedCount: 0, changed: trimmedText != rawText)
+            }
+            guard let text = cleanupResult?.text, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(
                     level: .warning,
@@ -890,6 +897,9 @@ class DictationSessionController: ObservableObject {
             }
 
             guard !Task.isCancelled else { return }
+            if (cleanupResult?.removedCount ?? 0) > 0 {
+                appState.logger.log("DICTATION | filler cleanup removed \(cleanupResult?.removedCount ?? 0) items")
+            }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)

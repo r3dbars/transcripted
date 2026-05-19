@@ -163,6 +163,8 @@ APP_SOURCES=(
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
+    "Sources/Support/DictationCleanupPreferences.swift"
+    "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
