@@ -171,6 +171,27 @@ final class AnalyticsReporter {
         return properties
     }
 
+    static func captureProperties(
+        sanitizedProperties: [String: String],
+        distinctID: String,
+        sessionID: String,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        operatingSystemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> [String: String] {
+        var eventProperties = defaultProperties(
+            distinctID: distinctID,
+            sessionID: sessionID,
+            infoDictionary: infoDictionary,
+            operatingSystemVersion: operatingSystemVersion
+        )
+        // Caller properties can carry historical build metadata, such as an older
+        // build that crashed before the current app launch noticed it.
+        for (key, value) in sanitizedProperties {
+            eventProperties[key] = value
+        }
+        return eventProperties
+    }
+
     private init() {}
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
@@ -208,10 +229,11 @@ final class AnalyticsReporter {
             allowedKeys: policy.allowedProperties
         )
 
-        var eventProperties: [String: String] = sanitizedProperties
-        for (key, value) in Self.defaultProperties(distinctID: distinctID, sessionID: sessionID) {
-            eventProperties[key] = value
-        }
+        let eventProperties = Self.captureProperties(
+            sanitizedProperties: sanitizedProperties,
+            distinctID: distinctID,
+            sessionID: sessionID
+        )
 
         let payload = AnalyticsCaptureRequest(
             apiKey: apiKey,
