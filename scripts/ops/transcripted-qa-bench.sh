@@ -417,7 +417,7 @@ write_report() {
     echo
     echo "## Evidence Index"
     echo
-    find "${LOG_DIR}" -maxdepth 1 -type f -name '*.log' -print | sort | sed 's#^#- `#; s#$#`#'
+    awk -F '\t' '$6 != "" { print "- `" $6 "`" }' "${RESULTS}"
   } > "${REPORT}"; then
     fail_io "Unable to write QA report at ${REPORT}."
   fi
