@@ -31,9 +31,11 @@ rules:
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/ops/validate-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick --skip-build"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
 
   - paths:
       - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"

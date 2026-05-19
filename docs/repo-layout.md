@@ -29,6 +29,7 @@ bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-daily-audio-reliability.sh
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 swift test
 ```
 
@@ -42,6 +43,7 @@ Command ownership:
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output
+- `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
 - `swift test` — `TranscriptedCore` package seam tests
 
 For helper and legacy scripts, see `scripts/README.md`.

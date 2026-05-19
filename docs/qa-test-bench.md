@@ -65,6 +65,35 @@ It requires local microphone permission and System Audio Recording permission.
 If macOS blocks it, report that as `INCOMPLETE` or `FAIL` with the permission
 reason. Do not treat a TCC blocker as product proof.
 
+## Corpus Run
+
+Use this when you want the QA tester to inspect Justin's local meeting corpus
+from Downloads:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus
+```
+
+By default this reads:
+
+```text
+~/Downloads/meeting-corpus
+```
+
+It validates a small representative subset, checks local audio/transcript
+presence, parses Zoom caption turns without printing transcript text, and writes
+local-only corpus evidence into the QA run folder.
+
+To choose exact meetings:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus --corpus-ids meeting-0024,meeting-0025,meeting-0004
+```
+
+This does not commit the corpus and does not upload audio or transcripts. It is
+currently a corpus-readiness and ground-truth check. Use it before comparing new
+Transcripted output against the corpus.
+
 ## Manual QA
 
 Every run writes:
@@ -100,6 +129,7 @@ A strong QA pass should answer:
 
 - Do meetings start, stop, transcribe, and save?
 - Do dictations paste or copy and then save readable Markdown?
+- Can the local meeting corpus be read as private ground truth?
 - Do speaker labels stay understandable, with `You` for the local mic by default?
 - Do manual speaker names survive into Markdown?
 - Do failed meetings explain stage, retryability, retained artifacts, and user-visible state?

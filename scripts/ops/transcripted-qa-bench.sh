@@ -13,10 +13,12 @@ RUN_ID="${TRANSCRIPTED_QA_BENCH_RUN_ID:-qa-$(date +%Y%m%d-%H%M%S)}"
 SKIP_BUILD=0
 STRICT_ARTIFACTS=0
 LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
+CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
+CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -26,12 +28,15 @@ Modes:
   deep             quick + integration, Core tests, QA CLI, synthetic audio
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
+  corpus           validate a local private meeting corpus
   live             deep + live mic/system-audio smoke
 
 Options:
   --skip-build          Do not run build.sh in quick/deep/live modes.
   --strict-artifacts    Make live artifact validation blocking in deep/live mode.
   --duration seconds    Live capture duration. Default: 2.0
+  --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
+  --corpus-ids ids      Comma-separated meeting ids to validate.
   --out-root path       Output root. Default: /tmp/transcripted-qa-bench
   --run-id id           Run id. Default: qa-YYYYMMDD-HHMMSS
   -h, --help            Show this help.
@@ -64,6 +69,22 @@ while [[ $# -gt 0 ]]; do
       LIVE_DURATION="$2"
       shift 2
       ;;
+    --corpus-root)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-root requires a value" >&2
+        exit 2
+      fi
+      CORPUS_ROOT="$2"
+      shift 2
+      ;;
+    --corpus-ids)
+      if [[ $# -lt 2 ]]; then
+        echo "--corpus-ids requires a value" >&2
+        exit 2
+      fi
+      CORPUS_IDS="$2"
+      shift 2
+      ;;
     --out-root)
       if [[ $# -lt 2 ]]; then
         echo "--out-root requires a value" >&2
@@ -93,7 +114,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|artifact|audio-synthetic|live) ;;
+  quick|deep|artifact|audio-synthetic|corpus|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -149,6 +170,8 @@ run_step() {
 
   if [[ "${exit_code}" -eq 0 ]]; then
     status="PASS"
+  elif [[ "${exit_code}" -eq 3 ]]; then
+    status="WARN"
   elif [[ "${blocking}" == "yes" ]]; then
     status="FAIL"
   else
@@ -345,6 +368,16 @@ run_live_tail() {
     "bash run-live-capture-smoke.sh --skip-build --duration ${LIVE_DURATION}"
 }
 
+run_corpus_tail() {
+  local ids_arg=""
+  if [[ -n "${CORPUS_IDS}" ]]; then
+    ids_arg="--ids '${CORPUS_IDS}'"
+  fi
+
+  run_step "50-meeting-corpus" "Private meeting corpus validation" "yes" \
+    "python3 scripts/ops/validate-meeting-corpus.py --corpus-root '${CORPUS_ROOT}' ${ids_arg} --json-out '${RAW_DIR}/meeting-corpus.json' --markdown-out '${OUT}/meeting-corpus-report.md' --subset-out '${OUT}/meeting-corpus-subset.json'"
+}
+
 cd "${REPO_ROOT}" || exit 1
 write_manual_scenarios
 
@@ -369,6 +402,10 @@ case "${MODE}" in
   audio-synthetic)
     run_step "30-audio-synthetic" "Synthetic audio reliability matrix" "yes" \
       "bash run-daily-audio-reliability.sh --synthetic"
+    ;;
+  corpus)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    run_corpus_tail
     ;;
   live)
     run_quick
