@@ -129,8 +129,13 @@ RESULTS="${OUT}/results.tsv"
 REPORT="${OUT}/qa-report.md"
 MANUAL="${OUT}/manual-scenarios.md"
 
-mkdir -p "${LOG_DIR}" "${RAW_DIR}"
-: > "${RESULTS}"
+fail_io() {
+  echo "[qa] ERROR: $1" >&2
+  exit 2
+}
+
+mkdir -p "${LOG_DIR}" "${RAW_DIR}" || fail_io "Unable to create output directories under ${OUT}."
+: > "${RESULTS}" || fail_io "Unable to write results file at ${RESULTS}."
 
 append_result() {
   local id="$1"
@@ -141,7 +146,8 @@ append_result() {
   local log_path="$6"
 
   printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}" >> "${RESULTS}"
+    "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}" >> "${RESULTS}" \
+    || fail_io "Unable to append results file at ${RESULTS}."
 }
 
 run_step() {
@@ -153,10 +159,12 @@ run_step() {
   local started finished duration exit_code status
 
   started="$(date -u +%s)"
-  {
+  if ! {
     echo "$ ${command}"
     echo
-  } > "${log_path}"
+  } > "${log_path}"; then
+    fail_io "Unable to write step log at ${log_path}."
+  fi
 
   echo "[qa] ${title}"
   (
@@ -190,7 +198,7 @@ skip_step() {
 }
 
 write_manual_scenarios() {
-  cat > "${MANUAL}" <<'MARKDOWN'
+  if ! cat > "${MANUAL}" <<'MARKDOWN'
 # Transcripted Manual QA Scenarios
 
 Keep this local. Use synthetic speech only.
@@ -245,6 +253,9 @@ Stop immediately if the user's meeting gets quieter.
 - Try imported audio.
 - Pass bar: no stuck recording UI, clear retry path, recoverable artifacts are retained when capture succeeded but transcription failed.
 MARKDOWN
+  then
+    fail_io "Unable to write manual scenario file at ${MANUAL}."
+  fi
 }
 
 write_report() {
@@ -272,7 +283,7 @@ write_report() {
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   finished="${started}"
 
-  {
+  if ! {
     echo "# Transcripted QA Bench Report"
     echo
     echo "- Verdict: ${verdict}"
@@ -311,7 +322,9 @@ write_report() {
     echo "## Evidence Index"
     echo
     find "${LOG_DIR}" -maxdepth 1 -type f -name '*.log' -print | sort | sed 's#^#- `#; s#$#`#'
-  } > "${REPORT}"
+  } > "${REPORT}"; then
+    fail_io "Unable to write QA report at ${REPORT}."
+  fi
 
   echo
   echo "[qa] Report: ${REPORT}"
