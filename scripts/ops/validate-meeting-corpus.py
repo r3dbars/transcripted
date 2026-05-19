@@ -129,11 +129,15 @@ def load_manifest(root: Path) -> list[dict[str, Any]]:
 
 def select_meetings(manifest: list[dict[str, Any]], ids: list[str] | None) -> list[dict[str, Any]]:
     by_id = {entry["id"]: entry for entry in manifest}
-    selected_ids = ids or DEFAULT_IDS
-    selected = [by_id[mid] for mid in selected_ids if mid in by_id]
+    if ids:
+        missing = [mid for mid in ids if mid not in by_id]
+        if missing:
+            raise ValueError(f"Requested meeting ids not found in manifest: {', '.join(missing)}")
+        return [by_id[mid] for mid in ids]
+
+    selected = [by_id[mid] for mid in DEFAULT_IDS if mid in by_id]
     if selected:
         return selected
-
     return manifest[: min(4, len(manifest))]
 
 
@@ -216,6 +220,7 @@ def validate_meeting(root: Path, entry: dict[str, Any], verify_hashes: bool) -> 
     if transcript_path.is_file():
         checks.append(Check("PASS", "corpus/zoom-transcript", meeting_id))
         parsed = parse_zoom_transcript(transcript_path)
+        private_speaker_names = set(parsed.pop("private_speaker_names", []))
         summary["transcript"] = parsed
         summary["available_for_transcript_eval"] = parsed["turn_count"] > 0
         if parsed["turn_count"] > 0:
@@ -228,15 +233,14 @@ def validate_meeting(root: Path, entry: dict[str, Any], verify_hashes: bool) -> 
             checks.append(Check("WARN", "corpus/zoom-speakers", meeting_id, "fewer than two parsed speakers"))
 
         expected_speakers = set(entry.get("speaker_names") or [])
-        parsed_speakers = set(parsed.get("private_speaker_names") or [])
-        if expected_speakers and parsed_speakers == expected_speakers:
+        if expected_speakers and private_speaker_names == expected_speakers:
             checks.append(Check("PASS", "corpus/zoom-speaker-ground-truth", meeting_id))
         elif expected_speakers:
             checks.append(Check(
                 "WARN",
                 "corpus/zoom-speaker-ground-truth",
                 meeting_id,
-                f"parsed {len(parsed_speakers)} speakers; manifest has {len(expected_speakers)}",
+                f"parsed {len(private_speaker_names)} speakers; manifest has {len(expected_speakers)}",
             ))
         if verify_hashes:
             expected_hash = transcript_info.get("sha256")
@@ -324,7 +328,11 @@ def main() -> int:
 
     manifest = load_manifest(root)
     requested_ids = [part.strip() for part in args.ids.split(",") if part.strip()] or None
-    selected = select_meetings(manifest, requested_ids)
+    try:
+        selected = select_meetings(manifest, requested_ids)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
 
     all_checks: list[Check] = []
     summaries: list[dict[str, Any]] = []
