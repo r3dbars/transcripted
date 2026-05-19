@@ -346,9 +346,12 @@ func testRepoCommandContract() {
             registerSentry.contains("sentry-cli releases new")
                 && registerSentry.contains("--finalize")
                 && registerSentry.contains("sentry-cli releases set-commits")
+                && registerSentry.contains("SENTRY_REPOSITORY")
+                && registerSentry.contains("v${APP_VERSION}")
+                && registerSentry.contains("--commit \"$COMMIT_SPEC\"")
                 && registerSentry.contains("Skipping finalize so reruns do not change the existing release date.")
                 && registerSentry.contains("scripts/release/sentry-release-metadata.py"),
-            "Sentry release registration should create the matching finalized release from the shared metadata helper"
+            "Sentry release registration should create the matching finalized release and pin commits to the matching release tag"
         )
 
         let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")

@@ -22,6 +22,7 @@ cd "$REPO_ROOT"
 INFO_PLIST_PATH="${INFO_PLIST_PATH:-Info.plist}"
 SENTRY_ORG="${SENTRY_ORG:-r3dbars}"
 SENTRY_PROJECT="${SENTRY_PROJECT:-apple-macos}"
+SENTRY_REPOSITORY="${SENTRY_REPOSITORY:-r3dbars/transcripted}"
 SENTRY_SET_COMMITS="${SENTRY_SET_COMMITS:-1}"
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
@@ -52,6 +53,32 @@ sentry_release_exists() {
         "$SENTRY_RELEASE" >/dev/null 2>&1
 }
 
+sentry_commit_spec() {
+    local release_tag="v${APP_VERSION}"
+    local release_commit
+    local previous_tag
+    local previous_commit
+
+    if ! release_commit="$(git rev-parse --verify "${release_tag}^{commit}" 2>/dev/null)"; then
+        echo "Missing release tag: ${release_tag}" >&2
+        echo "Publish or fetch the matching tag before setting Sentry commits, or set SENTRY_SET_COMMITS=0." >&2
+        return 1
+    fi
+
+    previous_tag="$(
+        {
+            git tag --merged "$release_commit" --sort=-v:refname 'v[0-9]*' \
+                | grep -v -F -x "$release_tag" \
+                | head -n 1
+        } || true
+    )"
+    if [ -n "$previous_tag" ] && previous_commit="$(git rev-parse --verify "${previous_tag}^{commit}" 2>/dev/null)"; then
+        echo "${SENTRY_REPOSITORY}@${previous_commit}..${release_commit}"
+    else
+        echo "${SENTRY_REPOSITORY}@${release_commit}"
+    fi
+}
+
 echo "Sentry release: $SENTRY_RELEASE"
 echo "Sentry dist: $SENTRY_DIST"
 echo "Sentry project: $SENTRY_ORG/$SENTRY_PROJECT"
@@ -68,11 +95,13 @@ else
 fi
 
 if [ "$SENTRY_SET_COMMITS" = "1" ]; then
+    COMMIT_SPEC="$(sentry_commit_spec)"
+    echo "Sentry commit spec: $COMMIT_SPEC"
     sentry-cli releases set-commits \
         --org "$SENTRY_ORG" \
         --project "$SENTRY_PROJECT" \
-        --auto \
         --ignore-missing \
+        --commit "$COMMIT_SPEC" \
         "$SENTRY_RELEASE"
 else
     echo "Skipping Sentry commit association because SENTRY_SET_COMMITS=$SENTRY_SET_COMMITS."
