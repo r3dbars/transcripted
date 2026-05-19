@@ -134,6 +134,10 @@ fail_io() {
   exit 2
 }
 
+shell_quote() {
+  printf "%q" "$1"
+}
+
 mkdir -p "${LOG_DIR}" "${RAW_DIR}" || fail_io "Unable to create output directories under ${OUT}."
 : > "${RESULTS}" || fail_io "Unable to write results file at ${RESULTS}."
 
@@ -381,17 +385,17 @@ run_deep_tail() {
 
 run_live_tail() {
   run_step "40-live-capture" "Live mic and system-audio capture smoke" "yes" \
-    "bash run-live-capture-smoke.sh --skip-build --duration ${LIVE_DURATION}"
+    "bash run-live-capture-smoke.sh --skip-build --duration $(shell_quote "${LIVE_DURATION}")"
 }
 
 run_corpus_tail() {
   local ids_arg=""
   if [[ -n "${CORPUS_IDS}" ]]; then
-    ids_arg="--ids '${CORPUS_IDS}'"
+    ids_arg=" --ids $(shell_quote "${CORPUS_IDS}")"
   fi
 
   run_step "50-meeting-corpus" "Private meeting corpus validation" "yes" \
-    "python3 scripts/ops/validate-meeting-corpus.py --corpus-root '${CORPUS_ROOT}' ${ids_arg} --json-out '${RAW_DIR}/meeting-corpus.json' --markdown-out '${OUT}/meeting-corpus-report.md' --subset-out '${OUT}/meeting-corpus-subset.json'"
+    "python3 scripts/ops/validate-meeting-corpus.py --corpus-root $(shell_quote "${CORPUS_ROOT}")${ids_arg} --json-out $(shell_quote "${RAW_DIR}/meeting-corpus.json") --markdown-out $(shell_quote "${OUT}/meeting-corpus-report.md") --subset-out $(shell_quote "${OUT}/meeting-corpus-subset.json")"
 }
 
 cd "${REPO_ROOT}" || exit 1
