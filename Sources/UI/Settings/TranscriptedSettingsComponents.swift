@@ -3,24 +3,32 @@ import SwiftUI
 
 struct SettingsPageIntro: View {
     let title: String
-    let summary: String
+    var summary: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: summaryText == nil ? 0 : 8) {
             Text(title)
                 .font(.system(size: 28, weight: .semibold))
 
-            Text(summary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let summaryText {
+                Text(summaryText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    private var summaryText: String? {
+        guard let summary else { return nil }
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedSummary.isEmpty ? nil : summary
     }
 }
 
 struct SettingsSection<Content: View>: View {
     let title: String
-    let detail: String
+    var detail: String? = nil
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -29,10 +37,12 @@ struct SettingsSection<Content: View>: View {
                 Text(title)
                     .font(.headline)
 
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let detailText {
+                    Text(detailText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -49,6 +59,12 @@ struct SettingsSection<Content: View>: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }
+    }
+
+    private var detailText: String? {
+        guard let detail else { return nil }
+        let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedDetail.isEmpty ? nil : detail
     }
 }
 
