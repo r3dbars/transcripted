@@ -365,6 +365,7 @@ struct TranscriptedSettingsView: View {
     @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+    @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -476,6 +477,9 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
             splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
+            refreshPermissions()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
@@ -1479,6 +1483,25 @@ struct TranscriptedSettingsView: View {
                         message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
                     )
                 )
+
+                GeneralToggleRow(
+                    title: "Confirm meeting quits",
+                    isOn: Binding(
+                        get: { confirmQuitDuringMeetingEnabled },
+                        set: { newValue in
+                            confirmQuitDuringMeetingEnabled = newValue
+                            trackSettingsToggle("meeting_quit_confirmation", enabled: newValue, page: .general)
+                            QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording(newValue)
+                        }
+                    ),
+                    help: confirmQuitDuringMeetingEnabled
+                        ? "Ask before stopping a live meeting."
+                        : "Quit immediately and save recoverable audio.",
+                    info: GeneralInfo(
+                        title: "Confirm meeting quits",
+                        message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
+                    )
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -1781,8 +1804,10 @@ struct TranscriptedSettingsView: View {
                 ForEach(TranscriptedPermissionKind.allCases) { kind in
                     PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
                         trackPermissionCTA(kind)
-                        TranscriptedPermissionAccess.openSettings(for: kind)
-                        refreshPermissions()
+                        Task { @MainActor in
+                            await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+                            refreshPermissions()
+                        }
                     }
                 }
             }
@@ -2342,8 +2367,10 @@ struct TranscriptedSettingsView: View {
                 ForEach(TranscriptedPermissionKind.allCases) { kind in
                     PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
                         trackPermissionCTA(kind)
-                        TranscriptedPermissionAccess.openSettings(for: kind)
-                        refreshPermissions()
+                        Task { @MainActor in
+                            await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
+                            refreshPermissions()
+                        }
                     }
                 }
             }

@@ -666,6 +666,23 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - CoreML inference outputs stay locally owned") {
+        let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let diarizationContents = readRepoTextFile("Sources/TranscriptedCore/Services/DiarizationService.swift")
+
+        assertTrue(
+            engineContents.contains("runASRInference(")
+                && engineContents.contains("beginASRInference()")
+                && engineContents.contains("finishASRInference()"),
+            "meeting segment ASR should mark CoreML inference active so cleanup cannot release the manager mid-prediction"
+        )
+        assertTrue(
+            diarizationContents.contains("withExtendedLifetime(result)")
+                && diarizationContents.contains("embedding.map { $0 }"),
+            "diarization should copy CoreML-backed embeddings into plain Swift arrays before returning segments"
+        )
+    }
+
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
         let contents = readRepoTextFile("scripts/ops/agent-todo-runner.rb")
         assertTrue(
@@ -691,6 +708,29 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("AgentConnectionGuide.starterPrompt(filename: nil)\n        AnalyticsReporter.track"),
             "onboarding telemetry should not send copied prompt text"
+        )
+    }
+
+    runSuite("Repo command contract - settings permissions refresh after async grants") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
+
+        assertTrue(
+            permissionAccessContents.contains("static func requestAccessOrOpenSettings(for kind: TranscriptedPermissionKind) async -> Bool"),
+            "permission actions should expose an awaitable path so callers can refresh after macOS returns a grant"
+        )
+        assertTrue(
+            permissionAccessContents.contains("_ = await requestAccessOrOpenSettings(for: kind)"),
+            "legacy fire-and-forget permission actions should delegate to the awaitable implementation"
+        )
+        assertTrue(
+            settingsContents.contains("await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)")
+                && settingsContents.contains("refreshPermissions()"),
+            "settings should refresh its permission snapshot after the permission request completes, not before"
+        )
+        assertFalse(
+            settingsContents.contains("TranscriptedPermissionAccess.openSettings(for: kind)\n                        refreshPermissions()"),
+            "settings should not immediately refresh after a fire-and-forget permission action"
         )
     }
 }

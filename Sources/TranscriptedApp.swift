@@ -255,7 +255,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .terminateNow
         }
 
-        guard !terminationCleanupStarted else { return .terminateNow }
+        guard !terminationCleanupStarted else { return .terminateLater }
+        switch activeMeetingTerminationDecision() {
+        case .keepRecording:
+            return .terminateCancel
+        case .stopAndTranscribe:
+            Task { @MainActor [weak self] in
+                await self?.appState.meetingSession.stopRecording(reason: .quitConfirmation)
+            }
+            return .terminateCancel
+        case .saveAudioAndQuit:
+            break
+        }
+
         terminationCleanupStarted = true
 
         Task { @MainActor [weak self, sender] in
@@ -274,6 +286,43 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         return .terminateLater
+    }
+
+    private func activeMeetingTerminationDecision() -> ActiveMeetingQuitDecision {
+        guard #available(macOS 14.0, *) else { return .saveAudioAndQuit }
+        guard ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
+            preferenceEnabled: QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording(),
+            activeMeetingCapture: appState.meetingSession.shouldConfirmQuitForActiveCapture
+        ) else {
+            return .saveAudioAndQuit
+        }
+
+        return confirmQuitDuringActiveMeeting()
+    }
+
+    private func confirmQuitDuringActiveMeeting() -> ActiveMeetingQuitDecision {
+        closePopover()
+        NSApp.activate(ignoringOtherApps: true)
+
+        let presentation = ActiveMeetingQuitConfirmationPolicy.presentation
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = presentation.title
+        alert.informativeText = presentation.message
+        alert.addButton(withTitle: presentation.keepRecordingTitle)
+        alert.addButton(withTitle: presentation.stopAndTranscribeTitle)
+        alert.addButton(withTitle: presentation.saveAudioAndQuitTitle)
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
+            return .stopAndTranscribe
+        case .alertThirdButtonReturn:
+            return .saveAudioAndQuit
+        default:
+            return .keepRecording
+        }
     }
 
     private func acquireSingleInstanceLock() -> Bool {

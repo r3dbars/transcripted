@@ -450,6 +450,9 @@ class ParakeetEngine: ObservableObject {
     private var modelFilePrefetchTask: Task<URL, Error>?
     private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
+    private var asrInferenceActivity = ParakeetASRInferenceActivityState()
+    private var asrInferenceWaiters: [CheckedContinuation<Void, Never>] = []
+    private var pureSampleTranscriptionActivityCount = 0
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
     private var cachedInputDeviceName = "Unknown"
@@ -2776,9 +2779,77 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func finishTranscription() {
-        isTranscribing = false
+        if !hasActiveASRWork {
+            isTranscribing = false
+        }
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
+    }
+
+    private var hasActiveASRWork: Bool {
+        asrInferenceActivity.isActive
+            || !asrInferenceWaiters.isEmpty
+            || pureSampleTranscriptionActivityCount > 0
+    }
+
+    private func beginPureSampleTranscriptionActivity() {
+        pureSampleTranscriptionActivityCount += 1
+        isTranscribing = true
+    }
+
+    private func finishPureSampleTranscriptionActivity() {
+        pureSampleTranscriptionActivityCount = max(0, pureSampleTranscriptionActivityCount - 1)
+        if !hasActiveASRWork {
+            isTranscribing = false
+        }
+    }
+
+    private func beginASRInference() async {
+        if !asrInferenceActivity.isActive {
+            asrInferenceActivity.begin()
+            isTranscribing = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            asrInferenceWaiters.append(continuation)
+        }
+        asrInferenceActivity.begin()
+        isTranscribing = true
+    }
+
+    private func finishASRInference() {
+        asrInferenceActivity.finish()
+        if let next = asrInferenceWaiters.first {
+            asrInferenceWaiters.removeFirst()
+            isTranscribing = true
+            next.resume()
+            return
+        }
+
+        if !hasActiveASRWork {
+            isTranscribing = false
+        }
+    }
+
+    private func runASRInference(
+        manager: AsrManager,
+        samples: [Float],
+        source: AudioSource
+    ) async throws -> String {
+        await beginASRInference()
+        do {
+            try Task.checkCancellation()
+            let result = try await manager.transcribe(samples, source: source)
+            let text = withExtendedLifetime(result) {
+                String(result.text)
+            }
+            finishASRInference()
+            return text
+        } catch {
+            finishASRInference()
+            throw error
+        }
     }
 
     func transcribe() async -> String? {
@@ -2830,9 +2901,13 @@ class ParakeetEngine: ObservableObject {
         }
 
         do {
-            let result = try await manager.transcribe(resampled, source: .microphone)
+            let resultText = try await runASRInference(
+                manager: manager,
+                samples: resampled,
+                source: .microphone
+            )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
             let corrected = CustomDictionaryTextProcessor.apply(to: trimmed)
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
@@ -2865,9 +2940,13 @@ class ParakeetEngine: ObservableObject {
                     )
 
                     do {
-                        let retryResult = try await manager.transcribe(retrySamples, source: .microphone)
+                        let retryResultText = try await runASRInference(
+                            manager: manager,
+                            samples: retrySamples,
+                            source: .microphone
+                        )
                         let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
-                        let retryTrimmed = retryResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let retryTrimmed = retryResultText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let retryCorrected = CustomDictionaryTextProcessor.apply(to: retryTrimmed)
                         if !retryTrimmed.isEmpty {
                             let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -2969,6 +3048,9 @@ class ParakeetEngine: ObservableObject {
     /// - Returns: Transcribed text, trimmed. Empty string if Parakeet returned nothing.
     /// - Throws: Re-throws `AsrManager.transcribe` errors (including model-not-ready).
     func transcribeSamples(_ samples: [Float], source: AudioSource) async throws -> String {
+        beginPureSampleTranscriptionActivity()
+        defer { finishPureSampleTranscriptionActivity() }
+
         guard let manager = asrManager, asrManagerReady else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcribeSamples")
@@ -2996,8 +3078,11 @@ class ParakeetEngine: ObservableObject {
         let sourceDescription = source == .microphone ? "microphone" : "system"
         let resultText: String
         do {
-            let result = try await manager.transcribe(samples, source: source)
-            resultText = result.text
+            resultText = try await runASRInference(
+                manager: manager,
+                samples: samples,
+                source: source
+            )
         } catch {
             if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
                 sampleCount: samples.count,
@@ -3188,7 +3273,9 @@ class ParakeetEngine: ObservableObject {
             wakeObserver = nil
         }
         removeInputDeviceChangeListener()
-        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(isTranscribing: isTranscribing)
+        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(
+            isTranscribing: isTranscribing || hasActiveASRWork
+        )
         let mgr = asrManager
         if cleanupDecision == .cleanupNow {
             asrManager = nil
