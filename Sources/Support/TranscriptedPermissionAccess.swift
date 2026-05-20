@@ -64,24 +64,32 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func openSettings(for kind: TranscriptedPermissionKind) {
+        Task { @MainActor in
+            _ = await requestAccessOrOpenSettings(for: kind)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    static func requestAccessOrOpenSettings(for kind: TranscriptedPermissionKind) async -> Bool {
         switch kind {
         case .microphone:
             switch microphoneAuthorizationStatus() {
             case .authorized:
-                break
+                return true
             case .notDetermined:
-                activateForPermissionPrompt()
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    Task { @MainActor in
-                        notifyPermissionsDidChange(kind: .microphone)
-                        guard !granted else { return }
-                        openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-                    }
+                let granted = await requestMicrophoneAccessIfNeeded()
+                notifyPermissionsDidChange(kind: .microphone)
+                if !granted {
+                    openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                 }
+                return granted
             case .denied, .restricted:
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                return false
             @unknown default:
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                return false
             }
         case .accessibility:
             if !AXIsProcessTrusted() {
@@ -90,26 +98,27 @@ enum TranscriptedPermissionAccess {
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             notifyPermissionsDidChange(kind: .accessibility)
+            return AXIsProcessTrusted()
         case .systemAudioRecording:
             if systemAudioRecordingStatus() == .granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
-                return
+                return true
             }
 
-            Task { @MainActor in
-                let granted = await requestSystemAudioRecordingAccessIfNeeded()
-                notifyPermissionsDidChange(kind: .systemAudioRecording)
-                guard !granted else { return }
+            let granted = await requestSystemAudioRecordingAccessIfNeeded()
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+            if !granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             }
+            return granted
         case .calendar:
-            Task { @MainActor in
-                activateForPermissionPrompt()
-                let granted = await requestCalendarAccessIfNeeded()
-                notifyPermissionsDidChange(kind: .calendar)
-                guard !granted else { return }
+            activateForPermissionPrompt()
+            let granted = await requestCalendarAccessIfNeeded()
+            notifyPermissionsDidChange(kind: .calendar)
+            if !granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
             }
+            return granted
         }
     }
 
