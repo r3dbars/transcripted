@@ -38,6 +38,15 @@ func testRepoCommandContract() {
         assertEqual(disallowedMatches, [], "live docs/scripts should reference bash build.sh, not the historical Xcode project")
     }
 
+    runSuite("Repo command contract - health probe checks live Cloudflare Pages projects") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(contents.contains("\"transcripted-web\""), "Cloudflare probe should check the live Transcripted Pages project")
+        assertTrue(contents.contains("\"redbars\""), "Cloudflare probe should check the live r3d.bar Pages project")
+        assertFalse(contents.contains("\"transcripted-app\""), "Cloudflare probe should not check the old Transcripted Pages project name")
+        assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
