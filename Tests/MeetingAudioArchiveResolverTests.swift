@@ -4,7 +4,9 @@ func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
         testResolverFindsLiveMeetingAudioPair()
         testResolverPrefersImportedRecording()
+        testResolverUsesPlaybackMixForPlaybackOnlyArchive()
         testResolverPrefersPlaybackMix()
+        testResolverFallsBackToPlaybackMixWhenSplitSidecarsAreIncomplete()
         testResolverReturnsNilWhenAudioIsMissing()
         testRetranscriptionInputMapsLiveSplitStreams()
         testRetranscriptionInputMapsSingleRecording()
@@ -107,6 +109,33 @@ private func testRetranscriptionInputMapsSingleRecording() {
     assertEqual(input?.systemURL.lastPathComponent, "recording.m4a", "Single-file re-transcription should use the retained recording")
 }
 
+private func testResolverUsesPlaybackMixForPlaybackOnlyArchive() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Playback Only.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("playback.m4a").path,
+        contents: Data("mix".utf8)
+    )
+
+    let attachment = MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)
+
+    assertEqual(
+        attachment?.urls.map(\.lastPathComponent),
+        ["playback.m4a"],
+        "Playback-only archives should play the retained playback mix"
+    )
+    assertNil(attachment?.retranscriptionInput?.micURL, "Playback-only re-transcription should not invent microphone audio")
+    assertEqual(
+        attachment?.retranscriptionInput?.systemURL.lastPathComponent,
+        "playback.m4a",
+        "Playback-only archives should still be re-transcribable"
+    )
+}
+
 private func testResolverPrefersPlaybackMix() {
     let directory = makeMeetingAudioResolverTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -149,6 +178,56 @@ private func testResolverPrefersPlaybackMix() {
         "Re-transcription should prefer retained system audio even when playback uses the mix"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single playback mix is not composite playback")
+}
+
+private func testResolverFallsBackToPlaybackMixWhenSplitSidecarsAreIncomplete() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let micOnlyTranscriptURL = directory.appendingPathComponent("Partial Mic Split.md")
+    let micOnlyAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: micOnlyTranscriptURL)
+    try? FileManager.default.createDirectory(at: micOnlyAudioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: micOnlyAudioDirectory.appendingPathComponent("playback.m4a").path,
+        contents: Data("mix".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: micOnlyAudioDirectory.appendingPathComponent("microphone.m4a").path,
+        contents: Data("mic".utf8)
+    )
+
+    let micOnlyAttachment = MeetingAudioArchiveResolver.attachment(forTranscript: micOnlyTranscriptURL)
+
+    assertEqual(
+        micOnlyAttachment?.retranscriptionInput?.systemURL.lastPathComponent,
+        "playback.m4a",
+        "Incomplete split sidecars should not hide playback-mix re-transcription"
+    )
+    assertNil(
+        micOnlyAttachment?.retranscriptionInput?.micURL,
+        "Incomplete split sidecars should fall back to the playback mix instead of using a partial split"
+    )
+
+    let systemOnlyTranscriptURL = directory.appendingPathComponent("Partial System Split.md")
+    let systemOnlyAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: systemOnlyTranscriptURL)
+    try? FileManager.default.createDirectory(at: systemOnlyAudioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: systemOnlyAudioDirectory.appendingPathComponent("playback.m4a").path,
+        contents: Data("mix".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: systemOnlyAudioDirectory.appendingPathComponent("system_audio.m4a").path,
+        contents: Data("system".utf8)
+    )
+
+    let systemOnlyAttachment = MeetingAudioArchiveResolver.attachment(forTranscript: systemOnlyTranscriptURL)
+
+    assertEqual(
+        systemOnlyAttachment?.retranscriptionInput?.systemURL.lastPathComponent,
+        "playback.m4a",
+        "System-only split sidecars should not drop the mic side from the playback mix"
+    )
+    assertNil(systemOnlyAttachment?.retranscriptionInput?.micURL, "Playback fallback should stay single-source")
 }
 
 private func testResolverReturnsNilWhenAudioIsMissing() {

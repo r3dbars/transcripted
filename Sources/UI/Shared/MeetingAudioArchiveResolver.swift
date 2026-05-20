@@ -83,17 +83,21 @@ enum MeetingAudioArchiveResolver {
             return values?.isRegularFile == true
         }
 
-        let liveURLs = [
-            firstAudioFile(named: systemStem, in: regularFiles),
-            firstAudioFile(named: microphoneStem, in: regularFiles)
-        ].compactMap { $0 }
-        let liveRetranscriptionURLs = liveURLs.isEmpty ? nil : liveURLs
+        let systemURL = firstAudioFile(named: systemStem, in: regularFiles)
+        let microphoneURL = firstAudioFile(named: microphoneStem, in: regularFiles)
+        let liveURLs = [systemURL, microphoneURL].compactMap { $0 }
+        let splitRetranscriptionURLs: [URL]?
+        if let systemURL, let microphoneURL {
+            splitRetranscriptionURLs = [systemURL, microphoneURL]
+        } else {
+            splitRetranscriptionURLs = nil
+        }
 
         if let playbackURL = firstAudioFile(named: playbackStem, in: regularFiles) {
             return MeetingAudioAttachment(
                 directoryURL: directoryURL,
                 urls: [playbackURL],
-                retranscriptionURLs: liveRetranscriptionURLs
+                retranscriptionURLs: splitRetranscriptionURLs
             )
         }
 

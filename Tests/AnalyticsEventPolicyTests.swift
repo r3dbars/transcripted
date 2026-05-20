@@ -381,9 +381,19 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows saved-audio retranscription request attribution") {
         let requested = AnalyticsEventPolicy.policy(forEvent: "meeting_saved_audio_retranscription_requested")
 
-        assertEqual(requested?.allowedProperties.contains("has_mic_audio"), true, "saved-audio retranscription requests should preserve whether mic audio is present")
+        assertEqual(requested?.allowedProperties.contains("mic_stream_present"), true, "saved-audio retranscription requests should preserve whether a local mic stream is present")
         assertEqual(requested?.allowedProperties.contains("trigger"), true, "saved-audio retranscription requests should preserve trigger attribution")
         assertEqual(requested?.allowedProperties.contains("meeting_title"), false, "saved-audio retranscription requests should not preserve meeting titles")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "mic_stream_present": "true",
+                "trigger": "saved_meeting_retranscription",
+            ],
+            allowedKeys: requested?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["mic_stream_present"], "true", "mic stream presence should survive the analytics sanitizer")
+        assertEqual(sanitized["trigger"], "saved_meeting_retranscription", "saved-meeting trigger should survive the analytics sanitizer")
     }
 
     runSuite("AnalyticsEventPolicy allows meeting_file_imported with queue depth") {

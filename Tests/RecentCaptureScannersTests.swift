@@ -173,4 +173,31 @@ func testRecentCaptureScanners() {
             "Ready meetings should keep re-transcription in the row menu instead of showing an inline warning action"
         )
     }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy blocks while models prepare") {
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: true,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Preparing models...",
+            "saved-meeting re-transcription should not accept duplicate clicks while model prep is in flight"
+        )
+    }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy allows idle saved meetings") {
+        assertNil(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "idle saved meetings with retained audio should stay re-transcribable"
+        )
+    }
 }

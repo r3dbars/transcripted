@@ -17,9 +17,10 @@ enum MeetingSessionUIPolicy {
     }
 
     static func shouldClearTranscriptionTriggerAfterBackgroundWork(
-        hasTerminalOutcome: Bool
+        hasTerminalOutcome: Bool,
+        hasSpeakerReviewWork: Bool = false
     ) -> Bool {
-        hasTerminalOutcome
+        hasTerminalOutcome && !hasSpeakerReviewWork
     }
 }
 

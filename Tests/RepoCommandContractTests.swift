@@ -752,6 +752,14 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - saved meeting retranscription respects dictation activity") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        assertTrue(
+            controllerContents.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing)"),
+            "saved meeting re-transcription should enforce the dictation-active guard at the controller entry point"
+        )
+    }
+
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")

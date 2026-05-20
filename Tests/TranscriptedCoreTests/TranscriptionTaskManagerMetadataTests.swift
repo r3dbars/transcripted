@@ -451,6 +451,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
     }
 
+    func testStartSavedAudioRetranscriptionDoesNotDeleteSourceWhenRejectedForActiveTask() throws {
+        let manager = makeManager()
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        let activeTaskId = UUID()
+        manager.activeTasks[activeTaskId] = Task {}
+        defer {
+            manager.activeTasks[activeTaskId]?.cancel()
+            manager.activeTasks.removeValue(forKey: activeTaskId)
+        }
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Saved customer call"
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Transcription already in progress")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected saved-audio retranscription rejection to publish a failed status")
+        }
+        XCTAssertEqual(message, "Another transcript is already running. Wait for it to finish, then try again.")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),
@@ -496,7 +524,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         try await waitUntil {
             if case .failed(let message) = manager.displayStatus,
                manager.activeTasks.isEmpty {
-                return message.contains("No speech was found")
+                return message == "No speech was found in that audio file. Choose a file with clear spoken audio and try again."
             }
             return false
         }
@@ -564,6 +592,131 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: retainedAudioDirectory.path),
             "new transcript should still get its own retained-audio archive"
+        )
+    }
+
+    func testSavedAudioRetranscriptionDefaultsToSingleLocalMicSpeaker() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: tempDirectory
+                .appendingPathComponent("transcripts", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true)
+        )
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let micURL = savedAudioDirectory.appendingPathComponent("microphone.wav")
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startSavedAudioRetranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true),
+            meetingTitle: "Saved customer call"
+        )
+
+        try await waitUntil {
+            manager.speakerNamingRequest != nil && manager.activeTasks.isEmpty
+        }
+
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        XCTAssertTrue(
+            request.speakers.contains { $0.channel == .system },
+            "saved meeting re-transcription should still identify system-audio speakers"
+        )
+        XCTAssertFalse(
+            request.speakers.contains { $0.channel == .mic },
+            "saved meeting re-transcription should not split local mic speakers unless the app opts in"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
+    func testSavedAudioRetranscriptionRejectsTooShortAudioWithoutDeletingSource() throws {
+        let manager = makeManager()
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 1.0)
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Short saved call"
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected too-short saved audio to publish a failed status")
+        }
+        XCTAssertEqual(message, "That saved audio is too short to transcribe again.")
+    }
+
+    func testSavedAudioRetranscriptionUsesSavedAudioFailureCopyAfterPipelineFailure() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored")
+        )
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Quiet saved call"
+        )
+
+        try await waitUntil {
+            if case .failed(let message) = manager.displayStatus,
+               manager.activeTasks.isEmpty {
+                return message == "No speech was found in that saved audio. Try a recording with clearer spoken audio."
+            }
+            return false
+        }
+
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "No speech detected")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertNil(manager.lastSavedTranscriptURL)
+    }
+
+    func testSavedAudioRetranscriptionUsesSavedAudioFailureCopy() {
+        XCTAssertEqual(
+            TranscriptionTaskManager.savedAudioRetranscriptionFailureDisplayMessage(
+                forDiagnosticMessage: "No speech detected"
+            ),
+            "No speech was found in that saved audio. Try a recording with clearer spoken audio."
+        )
+        XCTAssertEqual(
+            TranscriptionTaskManager.savedAudioRetranscriptionFailureDisplayMessage(
+                forDiagnosticMessage: "Invalid audio format"
+            ),
+            "Transcripted couldn't read that saved audio. Try another retained recording."
+        )
+        XCTAssertFalse(
+            TranscriptionTaskManager.savedAudioRetranscriptionFailureDisplayMessage(
+                forDiagnosticMessage: "Transcription inference failed"
+            ).contains("import"),
+            "saved-audio failures should not tell the user to import the file again"
         )
     }
 

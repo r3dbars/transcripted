@@ -1313,19 +1313,13 @@ struct TranscriptedSettingsView: View {
     }
 
     private var savedMeetingRetranscriptionUnavailableReason: String? {
-        if sttRouter.isRecording || sttRouter.isTranscribing {
-            return "Wait for the current dictation to finish before re-transcribing saved audio."
-        }
-        if meetingSession.isRecording {
-            return "Stop the current recording before re-transcribing saved audio."
-        }
-        if meetingSession.hasRuntimeDiagnosticsWork {
-            return "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
-        }
-        if meetingSession.isSpeakerReviewPending {
-            return "Finish the speaker review window before re-transcribing saved audio."
-        }
-        return nil
+        SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+            isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
+            isMeetingRecording: meetingSession.isRecording,
+            isPreparingModels: meetingSession.state == .loadingModels,
+            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        )
     }
 
     private var shortcutsPage: some View {

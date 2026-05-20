@@ -1128,6 +1128,10 @@ final class MeetingSessionController: ObservableObject {
         systemAudioURL: URL,
         title: String?
     ) async -> Bool {
+        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
+            state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
+            return false
+        }
         guard !isCaptureSessionActive else {
             state = .error("Stop the current meeting before re-transcribing saved audio.")
             return false
@@ -1147,7 +1151,7 @@ final class MeetingSessionController: ObservableObject {
             message: "Saved meeting audio retranscription requested",
             context: baseDiagnosticsContext(
                 extra: [
-                    "has_mic_audio": boolString(micAudioURL != nil),
+                    "mic_stream_present": boolString(micAudioURL != nil),
                     "trigger": StartTrigger.savedMeetingRetranscription.rawValue
                 ]
             )
@@ -1155,7 +1159,7 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_saved_audio_retranscription_requested",
             properties: [
-                "has_mic_audio": boolString(micAudioURL != nil),
+                "mic_stream_present": boolString(micAudioURL != nil),
                 "trigger": StartTrigger.savedMeetingRetranscription.rawValue
             ]
         )
@@ -1183,7 +1187,7 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
         )
         return true
     }
@@ -1733,7 +1737,8 @@ final class MeetingSessionController: ObservableObject {
         guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
         guard !isCaptureSessionActive else { return }
         if MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
-            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil
+            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil,
+            hasSpeakerReviewWork: snapshot.speakerNamingRequest != nil
         ) {
             activeTranscriptionTrigger = .unknown
         }

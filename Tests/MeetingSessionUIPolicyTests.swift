@@ -81,6 +81,13 @@ func testMeetingSessionUIPolicy() {
             ),
             "the trigger can clear once terminal telemetry has a status to report"
         )
+        assertFalse(
+            MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
+                hasTerminalOutcome: true,
+                hasSpeakerReviewWork: true
+            ),
+            "saved meeting trigger attribution should survive until speaker review finalization reports its own outcome"
+        )
     }
 
     runSuite("MeetingRecordingTitlePolicy — nil titles stay nil") {

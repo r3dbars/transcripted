@@ -536,7 +536,7 @@ struct AnalyticsEventPolicy: Equatable {
         "meeting_saved_audio_retranscription_requested": .init(
             name: "meeting_saved_audio_retranscription_requested",
             allowedProperties: [
-                "has_mic_audio",
+                "mic_stream_present",
                 "trigger",
             ]
         ),
