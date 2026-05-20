@@ -818,6 +818,29 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - home stats action uses parent presenter") {
+        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertTrue(
+            homeContents.contains("Label(\"View stats\", systemImage: \"info.circle\")"),
+            "home stats should keep a visible View stats action"
+        )
+        assertTrue(
+            homeContents.contains("let onViewStats: () -> Void")
+                && homeContents.contains("onViewStats()")
+                && settingsContents.contains("@State private var homeShowsStatsDetails = false")
+                && settingsContents.contains(".sheet(isPresented: $homeShowsStatsDetails)")
+                && settingsContents.contains("HomeStatsDetailSheet("),
+            "home stats should route View stats through the parent settings sheet presenter"
+        )
+        assertFalse(
+            homeContents.contains("@State private var isShowingDetails")
+                || homeContents.contains(".sheet(isPresented: $isShowingDetails")
+                || homeContents.contains(".popover(isPresented: $isShowingDetails"),
+            "home stats badge should not own its own details presentation state"
+        )
+    }
+
     runSuite("Repo command contract - settings permissions refresh after async grants") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")

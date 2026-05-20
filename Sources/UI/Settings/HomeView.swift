@@ -772,13 +772,13 @@ struct HomeStatsTopCard: View {
 struct HomeStatsBadge: View {
     let stats: [HomeStatItem]
     let streak: Int?
+    let onViewStats: () -> Void
 
     @State private var isHovering = false
-    @State private var isShowingDetails = false
 
     var body: some View {
         Button {
-            isShowingDetails = true
+            onViewStats()
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
@@ -815,6 +815,7 @@ struct HomeStatsBadge: View {
             .padding(14)
             .frame(width: 348, alignment: .leading)
             .frame(minHeight: 112)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.88))
@@ -830,13 +831,6 @@ struct HomeStatsBadge: View {
         }
         .buttonStyle(.plain)
         .help("Show more stats")
-        .sheet(isPresented: $isShowingDetails) {
-            HomeStatsDetailSheet(
-                stats: stats,
-                streak: streak,
-                onDone: { isShowingDetails = false }
-            )
-        }
     }
 
     private var metricColumns: [GridItem] {
@@ -891,7 +885,7 @@ private struct HomeStatsStripMetric: View {
     }
 }
 
-private struct HomeStatsDetailSheet: View {
+struct HomeStatsDetailSheet: View {
     let stats: [HomeStatItem]
     let streak: Int?
     let onDone: () -> Void
