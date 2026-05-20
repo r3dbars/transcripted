@@ -1155,7 +1155,8 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_saved_audio_retranscription_requested",
             properties: [
-                "has_mic_audio": boolString(micAudioURL != nil)
+                "has_mic_audio": boolString(micAudioURL != nil),
+                "trigger": StartTrigger.savedMeetingRetranscription.rawValue
             ]
         )
 

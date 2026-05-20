@@ -79,6 +79,15 @@ private func testResolverPrefersImportedRecording() {
         ["recording.m4a"],
         "Imported recordings should play the original retained recording"
     )
+    assertNil(
+        attachment?.retranscriptionInput?.micURL,
+        "Imported recordings should not invent microphone audio from neighboring files"
+    )
+    assertEqual(
+        attachment?.retranscriptionInput?.systemURL.lastPathComponent,
+        "recording.m4a",
+        "Imported recordings should re-transcribe the original retained recording"
+    )
     assertTrue(attachment?.isCompositePlayback == false, "A single imported recording is not composite playback")
 }
 
@@ -128,6 +137,16 @@ private func testResolverPrefersPlaybackMix() {
         attachment?.urls.map(\.lastPathComponent),
         ["playback.m4a"],
         "Playback mixes should win over imported and split-stream audio"
+    )
+    assertEqual(
+        attachment?.retranscriptionInput?.micURL?.lastPathComponent,
+        "microphone.m4a",
+        "Re-transcription should prefer retained microphone audio even when playback uses the mix"
+    )
+    assertEqual(
+        attachment?.retranscriptionInput?.systemURL.lastPathComponent,
+        "system_audio.m4a",
+        "Re-transcription should prefer retained system audio even when playback uses the mix"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single playback mix is not composite playback")
 }

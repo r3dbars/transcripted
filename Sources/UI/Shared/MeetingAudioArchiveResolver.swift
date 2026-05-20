@@ -3,6 +3,13 @@ import Foundation
 struct MeetingAudioAttachment: Equatable, Sendable {
     let directoryURL: URL
     let urls: [URL]
+    let retranscriptionURLs: [URL]
+
+    init(directoryURL: URL, urls: [URL], retranscriptionURLs: [URL]? = nil) {
+        self.directoryURL = directoryURL
+        self.urls = urls
+        self.retranscriptionURLs = retranscriptionURLs ?? urls
+    }
 
     var id: String {
         urls.map { $0.standardizedFileURL.path }.joined(separator: "|")
@@ -13,7 +20,7 @@ struct MeetingAudioAttachment: Equatable, Sendable {
     }
 
     var retranscriptionInput: MeetingRetranscriptionInput? {
-        MeetingRetranscriptionInput.make(from: urls)
+        MeetingRetranscriptionInput.make(from: retranscriptionURLs)
     }
 }
 
@@ -76,18 +83,26 @@ enum MeetingAudioArchiveResolver {
             return values?.isRegularFile == true
         }
 
-        if let playbackURL = firstAudioFile(named: playbackStem, in: regularFiles) {
-            return MeetingAudioAttachment(directoryURL: directoryURL, urls: [playbackURL])
-        }
-
-        if let importedURL = firstAudioFile(named: importedStem, in: regularFiles) {
-            return MeetingAudioAttachment(directoryURL: directoryURL, urls: [importedURL])
-        }
-
         let liveURLs = [
             firstAudioFile(named: systemStem, in: regularFiles),
             firstAudioFile(named: microphoneStem, in: regularFiles)
         ].compactMap { $0 }
+        let liveRetranscriptionURLs = liveURLs.isEmpty ? nil : liveURLs
+
+        if let playbackURL = firstAudioFile(named: playbackStem, in: regularFiles) {
+            return MeetingAudioAttachment(
+                directoryURL: directoryURL,
+                urls: [playbackURL],
+                retranscriptionURLs: liveRetranscriptionURLs
+            )
+        }
+
+        if let importedURL = firstAudioFile(named: importedStem, in: regularFiles) {
+            return MeetingAudioAttachment(
+                directoryURL: directoryURL,
+                urls: [importedURL]
+            )
+        }
 
         guard !liveURLs.isEmpty else { return nil }
         return MeetingAudioAttachment(directoryURL: directoryURL, urls: liveURLs)
