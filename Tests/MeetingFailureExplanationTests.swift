@@ -107,6 +107,24 @@ func testMeetingFailureExplanation() async {
         assertEqual(explanation.reportFields["retry_available"], "yes", "retained audio should preserve a retry path")
     }
 
+    runSuite("MeetingFailureExplanation keeps saved-before-quit recordings recoverable") {
+        let explanation = MeetingFailureExplanation.make(
+            failureKind: .savedBeforeQuit,
+            hasAudioFiles: true,
+            isRetryable: false,
+            failedQueueEntryRetained: true
+        )
+
+        assertEqual(explanation.stage, .save, "saved-before-quit entries should stay on the save stage")
+        assertEqual(explanation.outcomeKind, .recoverableFailure, "saved-before-quit audio should not become permanent loss")
+        assertEqual(explanation.retryability, .retryableAfterUserAction, "saved-before-quit audio should be finishable from Home")
+        assertEqual(explanation.artifactRetention, .retainedFailedQueueEntry, "saved-before-quit audio should keep the failed row")
+        assertEqual(explanation.userVisibleState, .needsUserAction, "Home should ask the user to finish the transcript")
+        assertEqual(explanation.reportFields["failure_kind"], "saved_before_quit", "support reports should keep the dedicated failure kind")
+        assertEqual(explanation.reportFields["save_failed"], "yes", "saved-before-quit is a save-stage recovery state")
+        assertEqual(explanation.reportFields["retry_available"], "yes", "retained audio should preserve the finish-later path")
+    }
+
     runSuite("MeetingFailureExplanation blocks pre-recording permission failures cleanly") {
         let explanation = MeetingFailureExplanation.make(
             failureKind: .microphonePermission,
