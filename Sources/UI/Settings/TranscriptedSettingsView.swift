@@ -4024,7 +4024,7 @@ private struct AgentConnectionSettingsPage: View {
                 title: "Details",
                 detail: "Advanced setup."
             ) {
-                DisclosureGroup("Show setup details", isExpanded: $showAdvancedAgentSetup) {
+                AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
                     VStack(alignment: .leading, spacing: 14) {
                         ClaudeDesktopStatusRow(status: claudeDesktopStatus)
 
@@ -4097,7 +4097,6 @@ private struct AgentConnectionSettingsPage: View {
                             }
                         }
                     }
-                    .padding(.top, 10)
                 }
             }
         }
@@ -4330,6 +4329,71 @@ private struct AgentConnectActionButton: View {
             hoverStroke: tint.opacity(0.56)
         ))
         .disabled(!isEnabled)
+    }
+}
+
+private struct AgentSetupDetailsDisclosure<Content: View>: View {
+    @Binding var isExpanded: Bool
+    let content: Content
+
+    init(
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) {
+        self._isExpanded = isExpanded
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 16, height: 16)
+
+                    Text("Show setup details")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 12)
+
+                    Text(isExpanded ? "Hide" : "Show")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: .neutral,
+                cornerRadius: 8,
+                normalFill: Color.primary.opacity(0.018),
+                normalStroke: Color.primary.opacity(0.07),
+                hoverFill: Color.primary.opacity(0.04),
+                pressedFill: Color.primary.opacity(0.06),
+                hoverStroke: Color.primary.opacity(0.12)
+            ))
+            .accessibilityLabel(Text("Show setup details"))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text(isExpanded ? "Hide advanced agent setup details" : "Show advanced agent setup details"))
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    content
+                }
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 
