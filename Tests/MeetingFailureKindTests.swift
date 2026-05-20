@@ -137,6 +137,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .stopTimeout, "stop-timeout failures should keep their own bucket so retry copy can target them")
     }
 
+    runSuite("MeetingFailureKind classifies saved-before-quit recovery") {
+        let kind = MeetingFailureKind.classify(
+            message: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+        )
+
+        assertEqual(kind, .savedBeforeQuit, "intentional quit recovery should not look like a broken meeting")
+    }
+
     runSuite("MeetingFailureKind classifies imported-audio preparation failures") {
         assertEqual(
             MeetingFailureKind.classify(message: "The selected audio file could not be found. It may have been moved or deleted."),
@@ -173,6 +181,17 @@ func testMeetingFailureKind() {
         )
 
         assertEqual(copy.title, "Recording didn't close cleanly", "stop-timeout users should see specific copy, not generic retry phrasing")
+    }
+
+    runSuite("MeetingFailureCopy surfaces saved-before-quit recovery guidance") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+            shortErrorMessage: "Meeting saved before quit.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Meeting saved before quit", "quit recovery should not look like a failure")
+        assertTrue(copy.detail.contains("Audio is safe"), "quit recovery should reassure users that audio was kept")
     }
 
     runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {

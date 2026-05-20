@@ -43,6 +43,7 @@ final class MeetingSessionController: ObservableObject {
         case hotkeyToggle = "hotkey_toggle"
         case overlayStopButton = "overlay_stop_button"
         case menuBarStopButton = "menu_bar_stop_button"
+        case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
         case unknown = "unknown"
@@ -189,6 +190,10 @@ final class MeetingSessionController: ObservableObject {
     private var audioInactivityDetector = MeetingAudioInactivityDetector()
     private var latestMicLevel: Float = 0
     private var latestSystemLevel: Float = 0
+
+    var shouldConfirmQuitForActiveCapture: Bool {
+        isCaptureSessionActive || isFinishingRecording
+    }
 
     // MARK: - Init
 
@@ -987,6 +992,10 @@ final class MeetingSessionController: ObservableObject {
         var recordingTrigger = activeRecordingTrigger
         var stoppedFiles: (micURL: URL?, systemURL: URL?) = (nil, nil)
 
+        if isFinishingRecording {
+            await waitForRecordingFinishBeforeTermination()
+        }
+
         if case .recording = state, !isFinishingRecording {
             isFinishingRecording = true
             defer { isFinishingRecording = false }
@@ -1004,7 +1013,7 @@ final class MeetingSessionController: ObservableObject {
                 didPreserveRecording = taskManager.addFailedTranscriptionRetainingAvailableAudio(
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
-                    errorMessage: "Transcripted quit before this meeting could be transcribed.",
+                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle
                 )
             }
@@ -1013,10 +1022,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         let queuedPreserved = preserveQueuedTranscriptionJobsForShutdown(
-            errorMessage: "Transcripted quit before this queued meeting could be transcribed."
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from Home after reopening."
         )
         let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown(
-            errorMessage: "Transcripted quit while this meeting was being transcribed."
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
         )
 
         guard didPreserveRecording || queuedPreserved > 0 || activePreserved > 0 else { return }
@@ -1038,6 +1047,13 @@ final class MeetingSessionController: ObservableObject {
                 ]
             )
         )
+    }
+
+    private func waitForRecordingFinishBeforeTermination() async {
+        let deadline = Date().addingTimeInterval(20)
+        while isFinishingRecording && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
     }
 
     private func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {

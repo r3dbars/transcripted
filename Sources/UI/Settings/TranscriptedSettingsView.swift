@@ -90,6 +90,7 @@ struct TranscriptedSettingsView: View {
     @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+    @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -1167,6 +1168,26 @@ struct TranscriptedSettingsView: View {
                             showTranscriptedInDock = newValue
                             trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
                             DockVisibilityPreferences.setVisible(newValue)
+                        }
+                    )
+                )
+            }
+
+            SettingsSection(
+                title: "Quit Safety",
+                detail: "Protect live meeting recordings from accidental quits."
+            ) {
+                SettingsToggleRow(
+                    title: "Ask before quitting during a meeting",
+                    detail: confirmQuitDuringMeetingEnabled
+                        ? "On. Transcripted asks before it stops a live meeting recording."
+                        : "Off. Quitting stops the recording and saves recoverable audio right away.",
+                    isOn: Binding(
+                        get: { confirmQuitDuringMeetingEnabled },
+                        set: { newValue in
+                            confirmQuitDuringMeetingEnabled = newValue
+                            trackSettingsToggle("meeting_quit_confirmation", enabled: newValue, page: .general)
+                            QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording(newValue)
                         }
                     )
                 )
