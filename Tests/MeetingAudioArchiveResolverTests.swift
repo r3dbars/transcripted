@@ -6,6 +6,8 @@ func testMeetingAudioArchiveResolver() {
         testResolverPrefersImportedRecording()
         testResolverPrefersPlaybackMix()
         testResolverReturnsNilWhenAudioIsMissing()
+        testRetranscriptionInputMapsLiveSplitStreams()
+        testRetranscriptionInputMapsSingleRecording()
     }
 }
 
@@ -36,6 +38,24 @@ private func testResolverFindsLiveMeetingAudioPair() {
     assertTrue(attachment?.isCompositePlayback == true, "Two retained streams should be treated as composite playback")
 }
 
+private func testRetranscriptionInputMapsLiveSplitStreams() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Local Room.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    let micURL = audioDirectory.appendingPathComponent("microphone.m4a")
+    let systemURL = audioDirectory.appendingPathComponent("system_audio.m4a")
+    FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+    FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+
+    let input = MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)?.retranscriptionInput
+
+    assertEqual(input?.micURL?.lastPathComponent, "microphone.m4a", "Live re-transcription should reuse retained microphone audio")
+    assertEqual(input?.systemURL.lastPathComponent, "system_audio.m4a", "Live re-transcription should reuse retained system audio")
+}
+
 private func testResolverPrefersImportedRecording() {
     let directory = makeMeetingAudioResolverTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -60,6 +80,22 @@ private func testResolverPrefersImportedRecording() {
         "Imported recordings should play the original retained recording"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single imported recording is not composite playback")
+}
+
+private func testRetranscriptionInputMapsSingleRecording() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Imported Recording.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    let recordingURL = audioDirectory.appendingPathComponent("recording.m4a")
+    FileManager.default.createFile(atPath: recordingURL.path, contents: Data("imported".utf8))
+
+    let input = MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)?.retranscriptionInput
+
+    assertNil(input?.micURL, "Single-file re-transcription should not invent microphone audio")
+    assertEqual(input?.systemURL.lastPathComponent, "recording.m4a", "Single-file re-transcription should use the retained recording")
 }
 
 private func testResolverPrefersPlaybackMix() {

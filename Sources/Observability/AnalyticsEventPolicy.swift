@@ -533,6 +533,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]))
         ),
+        "meeting_saved_audio_retranscription_requested": .init(
+            name: "meeting_saved_audio_retranscription_requested",
+            allowedProperties: [
+                "has_mic_audio",
+                "trigger",
+            ]
+        ),
         "meeting_file_imported": .init(
             name: "meeting_file_imported",
             allowedProperties: [

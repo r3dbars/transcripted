@@ -378,6 +378,14 @@ func testAnalyticsEventPolicy() {
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy allows saved-audio retranscription request attribution") {
+        let requested = AnalyticsEventPolicy.policy(forEvent: "meeting_saved_audio_retranscription_requested")
+
+        assertEqual(requested?.allowedProperties.contains("has_mic_audio"), true, "saved-audio retranscription requests should preserve whether mic audio is present")
+        assertEqual(requested?.allowedProperties.contains("trigger"), true, "saved-audio retranscription requests should preserve trigger attribution")
+        assertEqual(requested?.allowedProperties.contains("meeting_title"), false, "saved-audio retranscription requests should not preserve meeting titles")
+    }
+
     runSuite("AnalyticsEventPolicy allows meeting_file_imported with queue depth") {
         let fileImported = AnalyticsEventPolicy.policy(forEvent: "meeting_file_imported")
         assertEqual(fileImported?.allowedProperties.contains("queue_depth_bucket"), true, "file import should allow bucketed queue depth")

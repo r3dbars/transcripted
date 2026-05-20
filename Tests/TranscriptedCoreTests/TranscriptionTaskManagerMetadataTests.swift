@@ -506,6 +506,67 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertNil(manager.lastSavedTranscriptURL)
     }
 
+    func testSavedAudioRetranscriptionRunsSpeakerIdentificationAndKeepsSourceAudio() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let micURL = savedAudioDirectory.appendingPathComponent("microphone.wav")
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startSavedAudioRetranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true),
+            meetingTitle: "Saved customer call",
+            splitLocalSpeakers: true
+        )
+
+        try await waitUntil {
+            manager.speakerNamingRequest != nil && manager.activeTasks.isEmpty
+        }
+
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        XCTAssertTrue(
+            request.speakers.contains { $0.channel == .mic },
+            "saved meeting re-transcription should run local-speaker identification on retained mic audio"
+        )
+        XCTAssertFalse(
+            request.shouldRemoveTemporaryAudioOnCleanup,
+            "saved meeting re-transcription must not clean up retained source audio"
+        )
+        XCTAssertNil(request.sourceFailedTranscriptionId)
+        XCTAssertEqual(request.micAudioURL, micURL)
+        XCTAssertEqual(request.systemAudioURL, systemURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: retainedAudioDirectory.path),
+            "new transcript should still get its own retained-audio archive"
+        )
+    }
+
     func testPipelineModelReadinessReloadsModelsAfterCleanup() async throws {
         let speech = MetadataStubSpeechToTextEngine(isReady: false)
         let diarization = MetadataStubDiarizationEngine(isReady: false)

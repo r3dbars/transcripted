@@ -671,6 +671,8 @@ struct TranscriptedSettingsView: View {
                     copiedRowID: homeCopiedRowID,
                     canRetryFailedMeetings: canRetryFailedMeetings,
                     failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
+                    canRetranscribeSavedMeetings: canRetranscribeSavedMeetings,
+                    savedMeetingRetranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
                         NSWorkspace.shared.open(entry.url)
@@ -697,6 +699,9 @@ struct TranscriptedSettingsView: View {
                     },
                     onReviewMeetingSpeakers: { _ in
                         openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
+                    },
+                    onRetranscribeMeeting: { item in
+                        handleRetranscribeMeeting(item)
                     },
                     meetingMenuItems: { item in
                         meetingRowMenuItems(for: item)
@@ -883,6 +888,25 @@ struct TranscriptedSettingsView: View {
         pasteboard.setString(preview.markdown, forType: .string)
     }
 
+    private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
+        guard let input = item.audio?.retranscriptionInput else {
+            NSSound.beep()
+            return
+        }
+
+        trackSettingsAction("retranscribe_saved_meeting", page: .home)
+        Task { @MainActor in
+            let didStart = await meetingSession.retranscribeSavedMeeting(
+                micAudioURL: input.micURL,
+                systemAudioURL: input.systemURL,
+                title: item.title
+            )
+            if !didStart {
+                NSSound.beep()
+            }
+        }
+    }
+
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
         homeMeetingPreviewLoadTask?.cancel()
@@ -1012,6 +1036,18 @@ struct TranscriptedSettingsView: View {
         ])
 
         if let audio = item.audio, let firstAudio = audio.urls.first {
+            if audio.retranscriptionInput != nil {
+                items.append(
+                    HomeRowMenuItem(
+                        title: "Re-transcribe with speaker ID",
+                        symbolName: "person.2.fill",
+                        isEnabled: canRetranscribeSavedMeetings
+                    ) {
+                        handleRetranscribeMeeting(item)
+                    }
+                )
+            }
+
             items.append(
                 HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
                     trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
@@ -1256,6 +1292,10 @@ struct TranscriptedSettingsView: View {
         failedMeetingRetryUnavailableReason == nil
     }
 
+    private var canRetranscribeSavedMeetings: Bool {
+        savedMeetingRetranscriptionUnavailableReason == nil
+    }
+
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -1268,6 +1308,22 @@ struct TranscriptedSettingsView: View {
         }
         if meetingSession.isSpeakerReviewPending {
             return "Finish the speaker review window before retrying a failed meeting."
+        }
+        return nil
+    }
+
+    private var savedMeetingRetranscriptionUnavailableReason: String? {
+        if sttRouter.isRecording || sttRouter.isTranscribing {
+            return "Wait for the current dictation to finish before re-transcribing saved audio."
+        }
+        if meetingSession.isRecording {
+            return "Stop the current recording before re-transcribing saved audio."
+        }
+        if meetingSession.hasRuntimeDiagnosticsWork {
+            return "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio."
+        }
+        if meetingSession.isSpeakerReviewPending {
+            return "Finish the speaker review window before re-transcribing saved audio."
         }
         return nil
     }

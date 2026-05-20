@@ -11,13 +11,46 @@ struct MeetingAudioAttachment: Equatable, Sendable {
     var isCompositePlayback: Bool {
         urls.count > 1
     }
+
+    var retranscriptionInput: MeetingRetranscriptionInput? {
+        MeetingRetranscriptionInput.make(from: urls)
+    }
+}
+
+struct MeetingRetranscriptionInput: Equatable, Sendable {
+    let micURL: URL?
+    let systemURL: URL
+
+    static func make(from urls: [URL]) -> MeetingRetranscriptionInput? {
+        let filesByStem = urls.reduce(into: [String: URL]()) { result, url in
+            let stem = url.deletingPathExtension().lastPathComponent
+            result[stem] = result[stem] ?? url
+        }
+
+        if let playbackURL = filesByStem[MeetingAudioArchiveResolver.playbackStem] {
+            return MeetingRetranscriptionInput(micURL: nil, systemURL: playbackURL)
+        }
+
+        if let importedURL = filesByStem[MeetingAudioArchiveResolver.importedStem] {
+            return MeetingRetranscriptionInput(micURL: nil, systemURL: importedURL)
+        }
+
+        guard let systemURL = filesByStem[MeetingAudioArchiveResolver.systemStem] else {
+            return nil
+        }
+
+        return MeetingRetranscriptionInput(
+            micURL: filesByStem[MeetingAudioArchiveResolver.microphoneStem],
+            systemURL: systemURL
+        )
+    }
 }
 
 enum MeetingAudioArchiveResolver {
-    private static let playbackStem = "playback"
-    private static let importedStem = "recording"
-    private static let systemStem = "system_audio"
-    private static let microphoneStem = "microphone"
+    static let playbackStem = "playback"
+    static let importedStem = "recording"
+    static let systemStem = "system_audio"
+    static let microphoneStem = "microphone"
 
     static func attachment(
         forTranscript transcriptURL: URL,

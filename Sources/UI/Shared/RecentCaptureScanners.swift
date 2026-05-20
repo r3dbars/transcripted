@@ -126,6 +126,16 @@ enum RecentMeetingSpeakerReviewActionPolicy {
     }
 }
 
+enum RecentMeetingRetranscriptionActionPolicy {
+    static func shouldShowInlineAction(
+        speakerStatus: RecentMeetingSpeakerStatus,
+        hasRetainedAudio: Bool,
+        hasSpeakerReviewWork: Bool
+    ) -> Bool {
+        hasRetainedAudio && speakerStatus.needsReview && !hasSpeakerReviewWork
+    }
+}
+
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]

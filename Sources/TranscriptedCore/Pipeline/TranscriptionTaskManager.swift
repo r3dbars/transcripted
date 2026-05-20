@@ -309,6 +309,101 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTasks[taskId] = asyncTask
     }
 
+    /// Re-transcribe audio retained beside an already-saved meeting transcript.
+    /// Unlike live-capture scratch audio, the source files are user-facing retained
+    /// artifacts, so this path never deletes them after success, failure, or rejection.
+    public func startSavedAudioRetranscription(
+        micURL: URL?,
+        systemURL: URL,
+        outputFolder: URL,
+        meetingTitle: String? = nil,
+        splitLocalSpeakers: Bool = true
+    ) {
+        if !activeTasks.isEmpty {
+            AppLogger.pipeline.warning("Rejecting saved-audio retranscription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            publishFailure(
+                displayMessage: "Another transcript is already running. Wait for it to finish, then try again.",
+                diagnosticMessage: "Transcription already in progress"
+            )
+            scheduleStatusReset(delay: 4)
+            return
+        }
+
+        let minDuration: TimeInterval = 2.0
+        let micDuration = micURL.flatMap { audioDuration(url: $0) }
+        let systemDuration = audioDuration(url: systemURL)
+        let hasUsableMicAudio = micDuration.map { $0 >= minDuration } ?? false
+        let hasUsableSystemAudio = systemDuration.map { $0 >= minDuration } ?? false
+        let hasUnknownDuration = systemDuration == nil || (micURL != nil && micDuration == nil)
+
+        guard hasUsableMicAudio || hasUsableSystemAudio || hasUnknownDuration else {
+            AppLogger.pipeline.info("Saved audio too short, skipping retranscription", [
+                "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? (micURL == nil ? "none" : "unknown"),
+                "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "unknown"
+            ])
+            publishFailure(
+                displayMessage: "That saved audio is too short to transcribe again.",
+                diagnosticMessage: "Recording too short"
+            )
+            scheduleStatusReset(delay: 3)
+            return
+        }
+
+        let taskId = UUID()
+        activeCount += 1
+        backgroundTaskCount += 1
+        publishNonFailureStatus(.gettingReady)
+
+        AppLogger.pipeline.info("Starting saved-audio retranscription task", [
+            "taskId": taskId.uuidString,
+            "activeCount": "\(activeCount)",
+            "hasMic": "\(micURL != nil)",
+            "splitLocalSpeakers": "\(splitLocalSpeakers)"
+        ])
+
+        let asyncTask = Task {
+            do {
+                await MainActor.run {
+                    self.publishNonFailureStatus(.transcribing(progress: 0.0))
+                }
+
+                let transcriptURL = try await self.transcribeMultichannelPipeline(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    outputFolder: outputFolder,
+                    taskId: taskId,
+                    healthInfo: nil,
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    meetingTitle: meetingTitle,
+                    removeSourceAudioAfterArchive: false
+                )
+
+                await MainActor.run {
+                    self.publishTranscriptSaved(from: transcriptURL)
+                    self.handleTaskCompletion(taskId: taskId)
+                }
+            } catch {
+                AppLogger.pipeline.error("Saved-audio retranscription task failed", [
+                    "taskId": taskId.uuidString,
+                    "error": error.localizedDescription
+                ])
+
+                await MainActor.run {
+                    let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
+                    self.publishFailure(
+                        displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
+                        diagnosticMessage: diagnosticMessage
+                    )
+                    self.sendFailureNotification(errorMessage: error.localizedDescription)
+                    self.handleTaskCompletion(taskId: taskId)
+                    self.scheduleStatusReset(delay: 4)
+                }
+            }
+        }
+
+        activeTasks[taskId] = asyncTask
+    }
+
     public static func safeFailureDiagnosticMessage(for error: Error) -> String {
         if let pipelineError = error as? PipelineError {
             switch pipelineError {

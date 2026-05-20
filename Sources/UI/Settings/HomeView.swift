@@ -1018,12 +1018,20 @@ struct HomeRowMenuItem: Identifiable {
     let id = UUID()
     let title: String
     let symbolName: String
+    let isEnabled: Bool
     let isDestructive: Bool
     let action: () -> Void
 
-    init(title: String, symbolName: String, isDestructive: Bool = false, action: @escaping () -> Void) {
+    init(
+        title: String,
+        symbolName: String,
+        isEnabled: Bool = true,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.symbolName = symbolName
+        self.isEnabled = isEnabled
         self.isDestructive = isDestructive
         self.action = action
     }
@@ -1116,6 +1124,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 )
                 menuItem.target = self
                 menuItem.representedObject = item.id
+                menuItem.isEnabled = item.isEnabled
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
                     menuItem.image = image.withSymbolConfiguration(
@@ -1140,7 +1149,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func performMenuItem(_ sender: NSMenuItem) {
             guard let id = sender.representedObject as? UUID,
-                  let item = items.first(where: { $0.id == id }) else {
+                  let item = items.first(where: { $0.id == id }),
+                  item.isEnabled else {
                 return
             }
             item.action()
@@ -1437,7 +1447,10 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let hasSpeakerReviewWork: Bool
+    let canRetranscribe: Bool
+    let retranscriptionUnavailableReason: String?
     let onReviewSpeakers: () -> Void
+    let onRetranscribe: () -> Void
     let menuItems: [HomeRowMenuItem]
 
     var body: some View {
@@ -1460,18 +1473,35 @@ struct HomeMeetingRow: View {
     }
 
     private var reviewSpeakersAccessory: AnyView? {
-        guard RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+        if RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
             speakerStatus: item.speakerStatus,
             hasSpeakerReviewWork: hasSpeakerReviewWork
+        ) {
+            return AnyView(
+                HomeAttentionActionButton(
+                    title: "Review speakers",
+                    isDisabled: false,
+                    tint: .orange,
+                    action: onReviewSpeakers
+                )
+                    .help("Review speakers")
+            )
+        }
+
+        guard RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+            speakerStatus: item.speakerStatus,
+            hasRetainedAudio: item.audio?.retranscriptionInput != nil,
+            hasSpeakerReviewWork: hasSpeakerReviewWork
         ) else { return nil }
+
         return AnyView(
             HomeAttentionActionButton(
-                title: "Review speakers",
-                isDisabled: false,
+                title: "Identify speakers",
+                isDisabled: !canRetranscribe,
                 tint: .orange,
-                action: onReviewSpeakers
+                action: onRetranscribe
             )
-                .help("Review speakers")
+                .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
     }
 }
@@ -1812,6 +1842,8 @@ struct HomeActivityTabsCard: View {
     let copiedRowID: String?
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
+    let canRetranscribeSavedMeetings: Bool
+    let savedMeetingRetranscriptionUnavailableReason: String?
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let onFlagDictation: (SavedDictationEntry) -> Void
@@ -1820,6 +1852,7 @@ struct HomeActivityTabsCard: View {
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onFlagMeeting: (RecentMeetingItem) -> Void
     let onReviewMeetingSpeakers: (RecentMeetingItem) -> Void
+    let onRetranscribeMeeting: (RecentMeetingItem) -> Void
     let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -1877,7 +1910,10 @@ struct HomeActivityTabsCard: View {
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },
                                 hasSpeakerReviewWork: hasSpeakerReviewWork,
+                                canRetranscribe: canRetranscribeSavedMeetings,
+                                retranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
                                 onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
+                                onRetranscribe: { onRetranscribeMeeting(meeting) },
                                 menuItems: meetingMenuItems(meeting)
                             )
                         case .failed(let failedMeeting):
