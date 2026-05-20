@@ -698,6 +698,50 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let timeoutBlock = sourceSlice(
+            controllerContents,
+            from: "if stopResult.didTimeOut {",
+            to: "let outcome = enqueueTranscriptionJob("
+        )
+        let helperBlock = sourceSlice(
+            controllerContents,
+            from: "private func preserveFailedMeetingForRetry(",
+            to: "private func refreshFailedMeetings("
+        )
+
+        assertTrue(
+            timeoutBlock.contains("let preserved = preserveFailedMeetingForRetry("),
+            "stop timeouts should route retained audio through the refresh helper before returning"
+        )
+        assertTrue(
+            timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
+            "stop-timeout diagnostics should state whether the retained audio reached the retry queue"
+        )
+        assertTrue(
+            helperBlock.contains("taskManager.addFailedTranscriptionRetainingAvailableAudio(")
+                && helperBlock.contains("if preserved {\n            refreshFailedMeetings()"),
+            "retained failed-meeting audio should refresh MeetingSessionController.failedMeetings immediately"
+        )
+        assertTrue(
+            controllerContents.contains(".sink { [weak self] failedTranscriptions in\n                self?.refreshFailedMeetings(failedTranscriptions)"),
+            "the failed-manager subscription should render the emitted queue instead of re-reading stale @Published state"
+        )
+        assertFalse(
+            controllerContents.contains("taskManager.addFailedTranscriptionRetainingAudio("),
+            "MeetingSessionController should not bypass the failed-meeting refresh helper"
+        )
+        assertEqual(
+            countOccurrences(
+                of: "taskManager.addFailedTranscriptionRetainingAvailableAudio(",
+                in: controllerContents
+            ),
+            1,
+            "direct failed-queue writes in MeetingSessionController should stay centralized in the refresh helper"
+        )
+    }
+
     runSuite("Repo command contract - dictation joins existing model downloads") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
@@ -838,6 +882,27 @@ func testRepoCommandContract() {
                 || homeContents.contains(".sheet(isPresented: $isShowingDetails")
                 || homeContents.contains(".popover(isPresented: $isShowingDetails"),
             "home stats badge should not own its own details presentation state"
+        )
+    }
+
+    runSuite("Repo command contract - Agent setup details has an explicit toggle") {
+        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+
+        assertTrue(
+            contents.contains("AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup)"),
+            "Agent settings should use the explicit setup-details toggle row"
+        )
+        assertTrue(
+            contents.contains("private struct AgentSetupDetailsDisclosure<Content: View>"),
+            "Agent setup-details disclosure should stay owned by a dedicated view"
+        )
+        assertTrue(
+            contents.contains("withAnimation(.snappy(duration: 0.18)) {\n                    isExpanded.toggle()"),
+            "Agent setup-details disclosure should toggle its expansion state directly"
+        )
+        assertFalse(
+            contents.contains("DisclosureGroup(\"Show setup details\", isExpanded: $showAdvancedAgentSetup)"),
+            "Agent setup details should not rely on the macOS DisclosureGroup click path"
         )
     }
 
@@ -1047,6 +1112,29 @@ private func shouldScanForLiveCommandContract(_ relativePath: String) -> Bool {
         || relativePath.hasPrefix("docs/")
         || relativePath.hasPrefix("scripts/")
         || relativePath.hasSuffix(".sh")
+}
+
+private func sourceSlice(_ contents: String, from start: String, to end: String) -> String {
+    guard
+        let startRange = contents.range(of: start),
+        let endRange = contents.range(of: end, range: startRange.upperBound..<contents.endIndex)
+    else {
+        return ""
+    }
+
+    return String(contents[startRange.lowerBound..<endRange.lowerBound])
+}
+
+private func countOccurrences(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+
+    var count = 0
+    var searchRange = haystack.startIndex..<haystack.endIndex
+    while let range = haystack.range(of: needle, range: searchRange) {
+        count += 1
+        searchRange = range.upperBound..<haystack.endIndex
+    }
+    return count
 }
 
 private func isTextPath(_ relativePath: String) -> Bool {

@@ -101,9 +101,14 @@ final class MenuBarHeaderView: NSView {
         warningIconView.isHidden = !hasWarning
         warningLabel.isHidden = !hasWarning
         if hasWarning {
-            let warningY: CGFloat = isReady ? 28 : 82
+            let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
-            warningLabel.frame = NSRect(x: 18, y: warningY - 1, width: bounds.width - 18, height: 26)
+            warningLabel.frame = NSRect(
+                x: 18,
+                y: warningY - 1,
+                width: bounds.width - 18,
+                height: MenuBarHeaderLayoutPolicy.warningTextHeight
+            )
         }
     }
 
@@ -125,10 +130,7 @@ final class MenuBarHeaderView: NSView {
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
-        if isReady {
-            return hasWarning ? 56 : 0
-        }
-        return hasWarning ? 110 : 78
+        return MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: isReady, hasWarning: hasWarning)
     }
 
     var smokeSnapshot: MenuBarHeaderSmokeSnapshot {
