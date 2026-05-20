@@ -1082,11 +1082,7 @@ struct TranscriptedSettingsView: View {
     private func failedMeetingAudioAttachment(
         for item: MeetingSessionController.FailedMeetingItem
     ) -> MeetingAudioAttachment? {
-        guard let firstAudioURL = item.audioURLs.first else { return nil }
-        return MeetingAudioAttachment(
-            directoryURL: firstAudioURL.deletingLastPathComponent(),
-            urls: item.audioURLs
-        )
+        MeetingAudioAttachment.retainedAudio(urls: item.audioURLs)
     }
 
     private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -3887,6 +3883,7 @@ private struct SettingsFailedMeetingRow: View {
     let revealAudioAction: () -> Void
     let secondaryAction: () -> Void
     @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @State private var selectedPlaybackChoiceID: String?
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -3919,18 +3916,28 @@ private struct SettingsFailedMeetingRow: View {
             Spacer(minLength: 12)
 
             if let audio {
+                let selectedChoice = selectedPlaybackChoice(for: audio)
                 SettingsRecentMeetingAudioControl(
-                    title: playback.buttonTitle(for: audio),
-                    symbolName: playback.symbolName(for: audio),
-                    isActive: playback.isActive(audio),
-                    isPlaying: playback.isPlaying && playback.isActive(audio),
+                    title: playback.buttonTitle(for: audio, choice: selectedChoice),
+                    symbolName: playback.symbolName(for: audio, choice: selectedChoice),
+                    isActive: playback.isActive(audio, choice: selectedChoice),
+                    isPlaying: playback.isPlaying && playback.isActive(audio, choice: selectedChoice),
                     scrubber: playback.isActive(audio)
                         ? AnyView(MeetingAudioScrubber(attachment: audio, width: 190))
                         : nil
                 ) {
-                    playback.toggle(audio)
+                    playback.toggle(audio, choice: selectedChoice)
                 }
-                .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+                .help("\(playback.buttonTitle(for: audio, choice: selectedChoice)) retained meeting audio")
+
+                MeetingAudioSourceMenu(
+                    attachment: audio,
+                    selectedChoiceID: selectedPlaybackChoiceBinding(for: audio)
+                ) { choice in
+                    if playback.isActive(audio) {
+                        playback.switchSource(audio, choice: choice)
+                    }
+                }
 
                 Button {
                     revealAudioAction()
@@ -4008,6 +4015,17 @@ private struct SettingsFailedMeetingRow: View {
 
     private var hasRetainedAudioFiles: Bool {
         !item.audioURLs.isEmpty
+    }
+
+    private func selectedPlaybackChoice(for audio: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
+        playback.activeChoice(for: audio) ?? audio.playbackChoice(id: selectedPlaybackChoiceID)
+    }
+
+    private func selectedPlaybackChoiceBinding(for audio: MeetingAudioAttachment) -> Binding<String?> {
+        Binding(
+            get: { selectedPlaybackChoice(for: audio)?.id },
+            set: { selectedPlaybackChoiceID = $0 }
+        )
     }
 }
 
