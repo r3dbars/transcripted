@@ -662,6 +662,21 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - old failed meeting audio is pruned by age") {
+        let constantsContents = readRepoTextFile("Sources/Support/TranscriptedConstants.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+
+        assertTrue(
+            constantsContents.contains("failedMeetingAudioRetentionDays"),
+            "failed meeting audio cleanup should use a named retention constant"
+        )
+        assertTrue(
+            controllerContents.contains("cleanupOldFailedTranscriptions(")
+                && controllerContents.contains("TranscriptedConstants.failedMeetingAudioRetentionDays"),
+            "MeetingSessionController should prune old failed meeting audio during startup"
+        )
+    }
+
     runSuite("Repo command contract - dictation joins existing model downloads") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")

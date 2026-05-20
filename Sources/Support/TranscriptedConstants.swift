@@ -63,6 +63,9 @@ enum TranscriptedConstants {
     /// give up before the bridge returns retained audio URLs.
     static let meetingTerminationFinishWaitTimeout: TimeInterval = 35.0
 
+    /// Failed meeting audio is recoverable, but old unretried files should not grow forever.
+    static let failedMeetingAudioRetentionDays = 30
+
     /// Max time wake recovery should wait for background model warmup.
     /// Hotkey recovery must finish even if a model load stalls after sleep.
     static let wakeRuntimeReadinessTimeout: TimeInterval = 30.0
