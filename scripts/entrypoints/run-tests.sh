@@ -157,6 +157,7 @@ APP_SOURCES=(
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
+    "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"

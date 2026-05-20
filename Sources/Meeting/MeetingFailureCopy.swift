@@ -73,6 +73,11 @@ struct MeetingFailureCopy: Equatable {
                 title: "Recording didn't close cleanly",
                 detail: "The audio files may be incomplete. Retry to transcribe what was captured, or delete to discard."
             )
+        case .savedBeforeQuit:
+            return MeetingFailureCopy(
+                title: "Meeting saved before quit",
+                detail: "Audio is safe. Finish the transcript from Home when you're ready."
+            )
         default:
             return MeetingFailureCopy(
                 title: isRetryable ? "Transcript needs another pass" : "Recording needs attention",

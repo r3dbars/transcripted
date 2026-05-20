@@ -168,7 +168,8 @@ struct MeetingFailureExplanation: Equatable {
             return .diarization
         case .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .save
         case .unexpectedError:
             return .activeCapture
@@ -311,5 +312,6 @@ struct MeetingFailureExplanation: Equatable {
         failureKind == .saveFailed
             || failureKind == .speakerNameFinalizationFailed
             || failureKind == .speakerFinalizationFailed
+            || failureKind == .savedBeforeQuit
     }
 }

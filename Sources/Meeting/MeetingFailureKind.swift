@@ -22,6 +22,7 @@ enum MeetingFailureKind: String {
     case importCopyFailed = "import_copy_failed"
     case pipelineBusy = "pipeline_busy"
     case pipelineFailed = "pipeline_failed"
+    case savedBeforeQuit = "saved_before_quit"
     case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
@@ -40,6 +41,15 @@ enum MeetingFailureKind: String {
 
     static func classify(message: String) -> MeetingFailureKind {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains(anyOf: [
+            "saved before quit",
+            "quit before this meeting could be transcribed",
+            "quit before this queued meeting could be transcribed",
+            "quit while this meeting was being transcribed",
+        ]) {
+            return .savedBeforeQuit
+        }
 
         if normalized.contains(anyOf: [
             "stop timed out",
