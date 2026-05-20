@@ -774,6 +774,15 @@ struct TranscriptedSettingsView: View {
                 }
             )
         }
+        .sheet(isPresented: $homeShowsStatsDetails) {
+            HomeStatsDetailSheet(
+                stats: homeStatItems,
+                streak: homeStreak,
+                onDone: {
+                    homeShowsStatsDetails = false
+                }
+            )
+        }
         .onChange(of: homeActivityTab) { _, newValue in
             trackSettingsAction("home_tab_\(newValue.rawValue)", page: .home)
             if newValue == .meetings {
