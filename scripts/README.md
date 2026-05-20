@@ -12,6 +12,8 @@ stable and the docs can keep pointing at the same commands:
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
+- `run-e2e-smoke.sh` — deterministic release-critical artifact smoke without microphone/TCC
+- `run-live-capture-smoke.sh` — local hardware/TCC smoke for app launch plus mic and system-audio capture
 - `run-daily-audio-reliability.sh` — interactive or synthetic daily audio reliability check
 
 ## Entrypoint implementations
@@ -22,8 +24,10 @@ not have to carry the full operational logic:
 - `scripts/entrypoints/build-deps.sh`
 - `scripts/entrypoints/build.sh`
 - `scripts/entrypoints/build-beta.sh`
+- `scripts/entrypoints/run-e2e-smoke.sh`
 - `scripts/entrypoints/run-tests.sh`
 - `scripts/entrypoints/run-integration-smoke.sh`
+- `scripts/entrypoints/run-live-capture-smoke.sh`
 
 ## Active helper scripts
 
