@@ -23,6 +23,13 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants keeps failed meeting audio cleanup conservative") {
+        assertTrue(
+            TranscriptedConstants.failedMeetingAudioRetentionDays >= 30,
+            "failed meeting audio should stay recoverable long enough for users to retry or delete it intentionally"
+        )
+    }
+
     await runSuite("TranscriptedConstants.withTimeout — returns completed work before deadline") {
         let result = try? await TranscriptedConstants.withTimeout(seconds: 1) {
             "ok"

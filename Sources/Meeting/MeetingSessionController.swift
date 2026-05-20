@@ -244,6 +244,9 @@ final class MeetingSessionController: ObservableObject {
         // wired through `retryFailedMeeting`, `dismissFailedMeeting`, and
         // `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
+        self.failedManager.cleanupOldFailedTranscriptions(
+            olderThanDays: TranscriptedConstants.failedMeetingAudioRetentionDays
+        )
 
         // DI container — the protocol-typed "what Core sees" surface.
         self.services = AppServices(
