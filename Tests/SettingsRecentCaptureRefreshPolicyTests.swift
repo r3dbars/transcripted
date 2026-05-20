@@ -24,6 +24,9 @@ func testSettingsRecentCaptureRefreshPolicy() {
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
         assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
         assertEqual(TranscriptedSettingsPage.privacy.systemImage, "lock.shield.fill", "privacy page should keep the shield affordance")
+        assertEqual(TranscriptedSettingsPage.models.consolidatedDestination, .general, "models should now open inside General")
+        assertEqual(TranscriptedSettingsPage.shortcuts.consolidatedDestination, .general, "shortcuts should now open inside General")
+        assertEqual(TranscriptedSettingsPage.privacy.consolidatedDestination, .general, "privacy should now open inside General")
         assertEqual(
             Set(TranscriptedSettingsPage.allCases.map(\.rawValue)).count,
             TranscriptedSettingsPage.allCases.count,

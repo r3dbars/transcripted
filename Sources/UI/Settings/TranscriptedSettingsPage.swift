@@ -23,6 +23,15 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
+    var consolidatedDestination: TranscriptedSettingsPage {
+        switch self {
+        case .models, .shortcuts, .privacy:
+            return .general
+        default:
+            return self
+        }
+    }
+
     var title: String {
         switch self {
         case .home: return "Home"

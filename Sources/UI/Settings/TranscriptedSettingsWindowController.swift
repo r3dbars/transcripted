@@ -48,13 +48,14 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func present(page: TranscriptedSettingsPage = .home, source: String = "unknown") {
         guard let window else { return }
+        let presentedPage = page.consolidatedDestination
         speakerPeopleModel.refresh()
-        navigationModel.selectedPage = page
+        navigationModel.selectedPage = presentedPage
         navigationModel.presentationID = UUID()
         AnalyticsReporter.track(
             "settings_opened",
             properties: [
-                "page_id": page.analyticsValue,
+                "page_id": presentedPage.analyticsValue,
                 "source": source,
             ]
         )

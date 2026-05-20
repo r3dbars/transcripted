@@ -11,8 +11,8 @@ private struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .models, .shortcuts, .storage, .connectAgent]),
-        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.privacy, .support, .about])
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .connectAgent]),
+        SettingsSidebarSection(id: "trust", title: "Trust", pages: [.support, .about])
     ]
 }
 
@@ -77,18 +77,99 @@ private struct GeneralSettingsGroup<Content: View>: View {
     }
 }
 
-private struct GeneralToggleRow: View {
+private struct GeneralInfo {
     let title: String
-    @Binding var isOn: Bool
-    var help: String
+    let message: String
+}
+
+private struct GeneralInfoButton: View {
+    let info: GeneralInfo
+
+    @State private var isPresented = false
+    @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        Button {
+            isPresented.toggle()
+        } label: {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .frame(width: 18, height: 18)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(isHovering ? 0.10 : 0.04))
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Learn about \(info.title)")
+        .accessibilityLabel(Text("About \(info.title)"))
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(info.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+
+                Text(info.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(14)
+            .frame(width: 260, alignment: .leading)
+        }
+        .onHover { isHovering = $0 }
+    }
+}
+
+private struct GeneralTitleLabel: View {
+    let title: String
+    let info: GeneralInfo?
+
+    var body: some View {
+        HStack(spacing: 5) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
+
+            if let info {
+                GeneralInfoButton(info: info)
+            }
+        }
+        .layoutPriority(1)
+    }
+}
+
+private struct GeneralSectionHeading: View {
+    let title: String
+    let info: GeneralInfo?
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if let info {
+                GeneralInfoButton(info: info)
+            }
+        }
+        .padding(.leading, 10)
+    }
+}
+
+private struct GeneralToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    var help: String
+    var info: GeneralInfo? = nil
+
+    var body: some View {
+        HStack(spacing: 10) {
+            GeneralTitleLabel(title: title, info: info)
 
             Spacer(minLength: 10)
 
@@ -384,6 +465,9 @@ struct TranscriptedSettingsView: View {
     @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
     @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    @State private var showGeneralModelSettings = false
+    @State private var showGeneralShortcutSettings = false
+    @State private var showGeneralPrivacySettings = false
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
@@ -504,7 +588,7 @@ struct TranscriptedSettingsView: View {
         }
         .onChange(of: navigation.selectedPage) { _, page in
             refreshRecentCaptures()
-            if page == .shortcuts {
+            if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
             trackSettingsPageViewed(page, source: "navigation")
@@ -878,10 +962,12 @@ struct TranscriptedSettingsView: View {
             homeHeroMode = .meeting
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
-            navigation.selectedPage = .privacy
+            showGeneralPrivacySettings = true
+            navigation.selectedPage = .general
         case .models:
             trackSettingsAction("open_needs_attention_models", page: .home)
-            navigation.selectedPage = .models
+            showGeneralModelSettings = true
+            navigation.selectedPage = .general
         }
     }
 
@@ -1467,7 +1553,11 @@ struct TranscriptedSettingsView: View {
                             updateLaunchAtLogin(newValue)
                         }
                     ),
-                    help: launchAtLoginStatus
+                    help: launchAtLoginStatus,
+                    info: GeneralInfo(
+                        title: "Launch at login",
+                        message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
+                    )
                 )
 
                 GeneralToggleRow(
@@ -1482,7 +1572,11 @@ struct TranscriptedSettingsView: View {
                     ),
                     help: showTranscriptedInDock
                         ? "Transcripted is visible in the Dock."
-                        : "Transcripted only appears in the menu bar."
+                        : "Transcripted only appears in the menu bar.",
+                    info: GeneralInfo(
+                        title: "Show in Dock",
+                        message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
+                    )
                 )
 
                 GeneralToggleRow(
@@ -1497,7 +1591,11 @@ struct TranscriptedSettingsView: View {
                     ),
                     help: uiSoundsEnabled
                         ? "Play sounds when dictation starts and finishes."
-                        : "No dictation sounds."
+                        : "No dictation sounds.",
+                    info: GeneralInfo(
+                        title: "Dictation sounds",
+                        message: "These short sounds tell you when dictation starts, finishes, or hears no speech. Turn them off if you want Transcripted to stay quiet."
+                    )
                 )
 
                 GeneralToggleRow(
@@ -1512,15 +1610,79 @@ struct TranscriptedSettingsView: View {
                     ),
                     help: dictationCleanupEnabled
                         ? "Remove filler words, repeats, and spacing mistakes before pasting."
-                        : "Paste the raw local transcript."
+                        : "Paste the raw local transcript.",
+                    info: GeneralInfo(
+                        title: "Clean up pasted text",
+                        message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
+                    )
                 )
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Dictation shortcut")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 10)
+                GeneralSectionHeading(
+                    title: "System",
+                    info: GeneralInfo(
+                        title: "System",
+                        message: "Model, shortcut, and privacy settings now live here so the sidebar stays simpler."
+                    )
+                )
+
+                GeneralSettingsGroup {
+                    GeneralDisclosureRow(
+                        title: "Transcription model",
+                        value: effectiveTranscriptionModel.title,
+                        isExpanded: $showGeneralModelSettings,
+                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings."
+                    ) {
+                        trackSettingsAction("toggle_model_settings", page: .general)
+                    }
+
+                    if showGeneralModelSettings {
+                        GeneralExpandedContent {
+                            generalModelSettingsEditor
+                        }
+                    }
+
+                    GeneralDisclosureRow(
+                        title: "Keyboard shortcuts",
+                        value: dictationShortcutsEnabled ? "On" : "Off",
+                        isExpanded: $showGeneralShortcutSettings,
+                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings."
+                    ) {
+                        trackSettingsAction("toggle_shortcut_settings", page: .general)
+                    }
+
+                    if showGeneralShortcutSettings {
+                        GeneralExpandedContent {
+                            generalShortcutSettingsEditor
+                        }
+                    }
+
+                    GeneralDisclosureRow(
+                        title: "Privacy",
+                        value: generalPrivacyStatusLine,
+                        isExpanded: $showGeneralPrivacySettings,
+                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings."
+                    ) {
+                        trackSettingsAction("toggle_privacy_settings", page: .general)
+                    }
+
+                    if showGeneralPrivacySettings {
+                        GeneralExpandedContent {
+                            generalPrivacySettingsEditor
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                GeneralSectionHeading(
+                    title: "Dictation shortcut",
+                    info: GeneralInfo(
+                        title: "Dictation shortcut",
+                        message: "This shows the shortcut Transcripted listens for. Use Edit to change push-to-talk or hands-free dictation shortcuts."
+                    )
+                )
 
                 GeneralHotkeyGroup(
                     title: "Dictation",
@@ -1528,15 +1690,20 @@ struct TranscriptedSettingsView: View {
                     isEnabled: dictationShortcutsEnabled
                 ) {
                     trackSettingsAction("edit_dictation_hotkey", page: .general)
-                    navigation.selectedPage = .shortcuts
+                    withAnimation(.snappy(duration: 0.18)) {
+                        showGeneralShortcutSettings = true
+                    }
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Tools")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 10)
+                GeneralSectionHeading(
+                    title: "Tools",
+                    info: GeneralInfo(
+                        title: "Tools",
+                        message: "These are occasional actions: transcribe an existing audio file, or teach Transcripted corrections for words it hears wrong."
+                    )
+                )
 
                 GeneralSettingsGroup {
                     GeneralActionRow(
@@ -1564,6 +1731,320 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private var generalPrivacyStatusLine: String {
+        if !missingRequiredPermissions.isEmpty {
+            return "\(missingRequiredPermissions.count) to review"
+        }
+        if !CrashReporter.isAvailable && !AnalyticsReporter.isAvailable {
+            return "Local only"
+        }
+        return "Ready"
+    }
+
+    private var generalModelSettingsEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsStatusCard(
+                title: "Active transcription engine",
+                status: effectiveTranscriptionModel.title,
+                detail: activeModelDetail,
+                tone: .ready
+            )
+
+            let modelCard = FirstRunExperience.modelCard(
+                for: FirstRunLocalModelState(sttRouter.modelDownloadState),
+                model: effectiveTranscriptionModel
+            )
+            SettingsStatusCard(
+                title: "Model files",
+                status: modelCard.status,
+                detail: modelCard.detail,
+                tone: tone(for: modelCard.tone),
+                progress: modelCard.progress,
+                actionTitle: modelDownloadActionTitle,
+                action: modelDownloadAction(page: .general)
+            )
+
+            DisclosureGroup("Change model", isExpanded: $showAdvancedModelControls) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Preferred model", selection: Binding(
+                        get: { preferredTranscriptionModel },
+                        set: { newValue in
+                            updatePreferredTranscriptionModel(newValue, page: .general)
+                        }
+                    )) {
+                        ForEach(TranscriptionModelChoice.allCases) { model in
+                            Text(model.title).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    ForEach(TranscriptionModelChoice.allCases) { model in
+                        ModelChoiceRow(
+                            model: model,
+                            isPreferred: preferredTranscriptionModel == model,
+                            isEffective: effectiveTranscriptionModel == model
+                        )
+                    }
+
+                    HStack {
+                        SettingsInlineActionButton(title: "Use Parakeet", tone: .accent) {
+                            updatePreferredTranscriptionModel(.parakeetTDTv3, page: .general)
+                        }
+                        .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+
+                        Text("Changes apply to the next capture.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    private var generalShortcutSettingsEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsToggleRow(
+                title: "Enable dictation shortcuts",
+                detail: dictationShortcutsEnabled
+                    ? "Push-to-talk and hands-free keys can start dictation."
+                    : "Off. You can still start dictation from the app, and meeting controls still work.",
+                isOn: Binding(
+                    get: { dictationShortcutsEnabled },
+                    set: { newValue in
+                        dictationShortcutsEnabled = newValue
+                        trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .general)
+                        HotkeyPreferences.setDictationShortcutsEnabled(newValue)
+                    }
+                )
+            )
+
+            HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
+                .frame(height: 108)
+
+            if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+
+                    Text(dictationTriggerSystemWarning)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+            }
+
+            Divider()
+
+            SettingsToggleRow(
+                title: "Send after dictation",
+                detail: autoEnterEnabled
+                    ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
+                    : "Off. Dictation only pastes text.",
+                isOn: Binding(
+                    get: { autoEnterEnabled },
+                    set: { newValue in
+                        autoEnterEnabled = newValue
+                        trackSettingsToggle("auto_send", enabled: newValue, page: .general)
+                        DictationAutoSendPreferences.setEnabled(newValue)
+                    }
+                )
+            )
+
+            Picker("Send key", selection: Binding(
+                get: { autoEnterKey },
+                set: { newValue in
+                    autoEnterKey = newValue
+                    trackSettingsAction("change_auto_send_key", page: .general)
+                    DictationAutoSendPreferences.setSendKey(newValue)
+                }
+            )) {
+                ForEach(DictationAutoSendKey.allCases) { key in
+                    Text(key.title).tag(key)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!autoEnterEnabled)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Allowed apps")
+                        .font(.subheadline.weight(.semibold))
+
+                    Spacer()
+
+                    SettingsInlineActionButton(title: "Refresh") {
+                        trackSettingsAction("refresh_auto_send_apps", page: .general)
+                        refreshAutoEnterAppCandidates()
+                    }
+
+                    SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
+                        trackSettingsAction("add_auto_send_app", page: .general)
+                        chooseAutoEnterApp(page: .general)
+                    }
+                }
+
+                if autoEnterAllowedBundleIDs.isEmpty {
+                    Text("Add an app before Transcripted can send.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(sortedAutoEnterAllowedBundleIDs, id: \.self) { bundleID in
+                        AutoEnterAllowedAppRow(
+                            title: autoEnterDisplayName(for: bundleID),
+                            bundleID: bundleID
+                        ) {
+                            setAutoEnterApp(bundleID, isAllowed: false, page: .general)
+                        }
+                    }
+                }
+            }
+            .disabled(!autoEnterEnabled)
+
+            if !autoEnterAppCandidates.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Running apps")
+                        .font(.subheadline.weight(.semibold))
+
+                    ForEach(autoEnterAppCandidates) { app in
+                        SettingsToggleRow(
+                            title: app.name,
+                            detail: app.bundleID,
+                            isOn: Binding(
+                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                                set: { isAllowed in
+                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
+                                }
+                            ),
+                            help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
+                        )
+                    }
+                }
+                .disabled(!autoEnterEnabled)
+            }
+        }
+    }
+
+    private var generalPrivacySettingsEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Permissions")
+                    .font(.subheadline.weight(.semibold))
+
+                ForEach(TranscriptedPermissionKind.allCases) { kind in
+                    PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
+                        trackPermissionCTA(kind)
+                        TranscriptedPermissionAccess.openSettings(for: kind)
+                        refreshPermissions()
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Meeting audio")
+                    .font(.subheadline.weight(.semibold))
+
+                SettingsToggleRow(
+                    title: "Use Apple voice processing",
+                    detail: meetingVoiceProcessingEnabled
+                        ? "May lower other app audio in Zoom/Meet."
+                        : "Off. Transcripted boosts the saved mic and live transcript without changing system audio.",
+                    isOn: Binding(
+                        get: { meetingVoiceProcessingEnabled },
+                        set: { newValue in
+                            meetingVoiceProcessingEnabled = newValue
+                            trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .general)
+                            MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                        }
+                    )
+                )
+
+                SettingsToggleRow(
+                    title: "Identify multiple people on this Mac",
+                    detail: splitLocalSpeakersEnabled
+                        ? "On. After shared-room meetings, Transcripted asks you to name people captured by your mic."
+                        : "Off. The local mic stays as You, which is simpler when only you are near this Mac.",
+                    isOn: Binding(
+                        get: { splitLocalSpeakersEnabled },
+                        set: { newValue in
+                            splitLocalSpeakersEnabled = newValue
+                            trackSettingsToggle("local_speaker_split", enabled: newValue, page: .general)
+                            LocalSpeakerPreferences.setEnabled(newValue)
+                        }
+                    )
+                )
+
+                Text("Meeting audio changes apply to the next recording.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Reporting")
+                    .font(.subheadline.weight(.semibold))
+
+                SettingsToggleRow(
+                    title: "Send crash and error reports",
+                    detail: crashReportingFootnote,
+                    isOn: Binding(
+                        get: { crashReportingEnabled },
+                        set: { newValue in
+                            crashReportingEnabled = newValue
+                            trackSettingsToggle("crash_reporting", enabled: newValue, page: .general)
+                            CrashReportingPreferences.setEnabled(newValue)
+                            sentryTestStatus = nil
+                            diagnosticsActionStatus = nil
+                        }
+                    )
+                )
+                .disabled(!CrashReporter.isAvailable)
+
+                SettingsToggleRow(
+                    title: "Send anonymous usage stats",
+                    detail: analyticsFootnote,
+                    isOn: Binding(
+                        get: { anonymousAnalyticsEnabled },
+                        set: { newValue in
+                            anonymousAnalyticsEnabled = newValue
+                            if newValue {
+                                AnalyticsPreferences.setEnabled(true)
+                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .general)
+                            } else {
+                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .general)
+                                AnalyticsPreferences.setEnabled(false)
+                            }
+                            diagnosticsActionStatus = nil
+                        }
+                    )
+                )
+                .disabled(!AnalyticsReporter.isAvailable)
+
+                HStack {
+                    SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
+                        trackSettingsAction("send_test_sentry_event", page: .general)
+                        sendTestSentryEvent()
+                    }
+                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
+
+                    if let sentryTestStatus {
+                        Text(sentryTestStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -2538,9 +3019,13 @@ struct TranscriptedSettingsView: View {
     }
 
     private var modelDownloadAction: (() -> Void)? {
+        modelDownloadAction(page: .models)
+    }
+
+    private func modelDownloadAction(page: TranscriptedSettingsPage) -> (() -> Void)? {
         guard modelDownloadActionTitle != nil else { return nil }
         return {
-            trackSettingsAction("download_model", page: .models)
+            trackSettingsAction("download_model", page: page)
             Task { @MainActor in
                 await sttRouter.initializeSelectedModel()
             }
@@ -2636,7 +3121,7 @@ struct TranscriptedSettingsView: View {
         meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
-        refreshAutoEnterPreferences(includeCandidates: navigation.selectedPage == .shortcuts)
+        refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
@@ -2959,10 +3444,13 @@ struct TranscriptedSettingsView: View {
         CustomDictionaryPreferences.setRawText(clampedText)
     }
 
-    private func updatePreferredTranscriptionModel(_ model: TranscriptionModelChoice) {
+    private func updatePreferredTranscriptionModel(
+        _ model: TranscriptionModelChoice,
+        page: TranscriptedSettingsPage = .models
+    ) {
         preferredTranscriptionModel = model
         showAdvancedModelControls = true
-        trackSettingsAction("switch_model", page: .models)
+        trackSettingsAction("switch_model", page: page)
         TranscriptionModelPreferences.setPreferredModel(model)
         Task { @MainActor in
             await sttRouter.initializeSelectedModel()
@@ -3035,14 +3523,22 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func setAutoEnterApp(_ bundleID: String, isAllowed: Bool) {
+    private func setAutoEnterApp(
+        _ bundleID: String,
+        isAllowed: Bool,
+        page: TranscriptedSettingsPage = .shortcuts
+    ) {
         if isAllowed {
             autoEnterAllowedBundleIDs.insert(bundleID)
         } else {
             autoEnterAllowedBundleIDs.remove(bundleID)
         }
-        trackSettingsToggle("auto_send_app_allowed", enabled: isAllowed, page: .shortcuts)
+        trackSettingsToggle("auto_send_app_allowed", enabled: isAllowed, page: page)
         DictationAutoSendPreferences.setAllowedBundleIDs(autoEnterAllowedBundleIDs)
+    }
+
+    private func pageShowsAutoEnterSettings(_ page: TranscriptedSettingsPage) -> Bool {
+        page == .general || page == .shortcuts
     }
 
     private func refreshAutoEnterAppCandidates() {
@@ -3058,7 +3554,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func chooseAutoEnterApp() {
+    private func chooseAutoEnterApp(page: TranscriptedSettingsPage = .shortcuts) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
@@ -3075,7 +3571,7 @@ struct TranscriptedSettingsView: View {
             return
         }
 
-        setAutoEnterApp(bundleID, isAllowed: true)
+        setAutoEnterApp(bundleID, isAllowed: true, page: page)
         refreshAutoEnterAppCandidates()
     }
 
