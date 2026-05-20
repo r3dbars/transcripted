@@ -309,6 +309,47 @@ private struct GeneralExpandedContent<Content: View>: View {
     }
 }
 
+private struct GeneralAudioRetentionRow: View {
+    @Binding var selection: AudioRetentionWindow
+    let info: GeneralInfo?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                GeneralTitleLabel(title: "Delete replay audio after", info: info)
+
+                Spacer(minLength: 10)
+
+                Picker("Delete replay audio after", selection: $selection) {
+                    ForEach(AudioRetentionWindow.allCases) { window in
+                        Text(window.title).tag(window)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 300)
+                .accessibilityLabel(Text("Delete replay audio after"))
+                .accessibilityValue(Text(selection.title))
+            }
+
+            Text(selection.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Choosing 7 or 30 days asks before deleting old replay audio.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -368,6 +409,7 @@ struct TranscriptedSettingsView: View {
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
+    @State private var pendingAudioRetentionPage: TranscriptedSettingsPage = .storage
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeActivityTab: HomeActivityTab = .meetings
     @State private var homeHeroMode: HomeHeroMode = .meeting
@@ -788,7 +830,7 @@ struct TranscriptedSettingsView: View {
                 title: Text("Delete old replay audio?"),
                 message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
                 primaryButton: .destructive(Text("Delete Old Audio")) {
-                    applyAudioRetentionWindow(window)
+                    applyAudioRetentionWindow(window, page: pendingAudioRetentionPage)
                 },
                 secondaryButton: .cancel()
             )
@@ -1507,6 +1549,29 @@ struct TranscriptedSettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 GeneralSectionHeading(
+                    title: "Data retention",
+                    info: GeneralInfo(
+                        title: "Data retention",
+                        message: "Transcripted always keeps Markdown transcripts. This controls how long compressed meeting replay audio stays on this Mac after transcripts are saved."
+                    )
+                )
+
+                GeneralSettingsGroup {
+                    GeneralAudioRetentionRow(
+                        selection: Binding(
+                            get: { audioRetentionWindow },
+                            set: { updateAudioRetentionWindow($0, page: .general) }
+                        ),
+                        info: GeneralInfo(
+                            title: "Replay audio",
+                            message: "Replay audio is the compressed meeting audio Transcripted keeps after saving a transcript. Choose 7 or 30 days to clean up older audio, or Never to keep it until you delete it."
+                        )
+                    )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                GeneralSectionHeading(
                     title: "System",
                     info: GeneralInfo(
                         title: "System",
@@ -2185,7 +2250,7 @@ struct TranscriptedSettingsView: View {
 
                 Picker("Delete audio after", selection: Binding(
                     get: { audioRetentionWindow },
-                    set: { updateAudioRetentionWindow($0) }
+                    set: { updateAudioRetentionWindow($0, page: .storage) }
                 )) {
                     ForEach(AudioRetentionWindow.allCases) { window in
                         Text(window.title).tag(window)
@@ -3153,19 +3218,26 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {
+    private func updateAudioRetentionWindow(
+        _ window: AudioRetentionWindow,
+        page: TranscriptedSettingsPage
+    ) {
         guard window != audioRetentionWindow else { return }
         guard window.days == nil else {
+            pendingAudioRetentionPage = page
             pendingAudioRetentionWindow = window
             return
         }
 
-        applyAudioRetentionWindow(window)
+        applyAudioRetentionWindow(window, page: page)
     }
 
-    private func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {
+    private func applyAudioRetentionWindow(
+        _ window: AudioRetentionWindow,
+        page: TranscriptedSettingsPage
+    ) {
         audioRetentionWindow = window
-        trackSettingsAction("audio_retention_changed", page: .storage)
+        trackSettingsAction("audio_retention_changed", page: page)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
             await MeetingAudioStorageManager.processExistingRetainedAudio(
