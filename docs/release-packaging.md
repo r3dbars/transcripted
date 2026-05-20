@@ -77,19 +77,20 @@ SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 
-`build-beta.sh` bundles Parakeet by default for distribution builds. That keeps
-the first dictation/meeting path local after install.
+`build-beta.sh` bundles Parakeet and offline diarizer models by default for
+distribution builds. That keeps the first dictation/meeting path local after
+install.
 
 If you deliberately want a thin local test artifact, make both opt-outs explicit:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 For a thin packaging smoke that also skips notarization, keep every opt-out visible:
 
 ```bash
-SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 ## Release Flow

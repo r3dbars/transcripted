@@ -58,6 +58,11 @@ enum TranscriptedConstants {
     /// stuck forever if CoreAudio cleanup never calls completion.
     static let meetingStopTimeout: UInt64 = 30_000_000_000  // 30 seconds
 
+    /// Max time app termination waits for an in-flight meeting stop to finish.
+    /// This must stay above `meetingStopTimeout` so quit preservation does not
+    /// give up before the bridge returns retained audio URLs.
+    static let meetingTerminationFinishWaitTimeout: TimeInterval = 35.0
+
     /// Max time wake recovery should wait for background model warmup.
     /// Hotkey recovery must finish even if a model load stalls after sleep.
     static let wakeRuntimeReadinessTimeout: TimeInterval = 30.0

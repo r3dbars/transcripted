@@ -451,6 +451,7 @@ class ParakeetEngine: ObservableObject {
     private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
     private var asrInferenceActivity = ParakeetASRInferenceActivityState()
+    private var asrInferenceHandoffCount = 0
     private var asrInferenceWaiters: [CheckedContinuation<Void, Never>] = []
     private var pureSampleTranscriptionActivityCount = 0
     private var asrManagerReady = false
@@ -2779,56 +2780,46 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func finishTranscription() {
-        if !hasActiveASRWork {
-            isTranscribing = false
-        }
+        isTranscribing = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
     }
 
     private var hasActiveASRWork: Bool {
         asrInferenceActivity.isActive
+            || asrInferenceHandoffCount > 0
             || !asrInferenceWaiters.isEmpty
             || pureSampleTranscriptionActivityCount > 0
     }
 
     private func beginPureSampleTranscriptionActivity() {
         pureSampleTranscriptionActivityCount += 1
-        isTranscribing = true
     }
 
     private func finishPureSampleTranscriptionActivity() {
         pureSampleTranscriptionActivityCount = max(0, pureSampleTranscriptionActivityCount - 1)
-        if !hasActiveASRWork {
-            isTranscribing = false
-        }
     }
 
     private func beginASRInference() async {
         if !asrInferenceActivity.isActive {
             asrInferenceActivity.begin()
-            isTranscribing = true
             return
         }
 
         await withCheckedContinuation { continuation in
             asrInferenceWaiters.append(continuation)
         }
+        asrInferenceHandoffCount = max(0, asrInferenceHandoffCount - 1)
         asrInferenceActivity.begin()
-        isTranscribing = true
     }
 
     private func finishASRInference() {
         asrInferenceActivity.finish()
         if let next = asrInferenceWaiters.first {
             asrInferenceWaiters.removeFirst()
-            isTranscribing = true
+            asrInferenceHandoffCount += 1
             next.resume()
             return
-        }
-
-        if !hasActiveASRWork {
-            isTranscribing = false
         }
     }
 
@@ -2912,7 +2903,7 @@ class ParakeetEngine: ObservableObject {
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
-            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(corrected.prefix(80))...\"")
+            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
 
             if trimmed.isEmpty {
                 let analysis = DictationAudioRecovery.analyze(

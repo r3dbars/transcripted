@@ -50,6 +50,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         guard let window else { return }
         let presentedPage = page.consolidatedDestination
         speakerPeopleModel.refresh()
+        navigationModel.presentedPage = page
         navigationModel.selectedPage = presentedPage
         navigationModel.presentationID = UUID()
         AnalyticsReporter.track(

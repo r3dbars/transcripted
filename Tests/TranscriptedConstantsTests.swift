@@ -15,6 +15,14 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants gives meeting quit preservation enough time") {
+        let meetingStopTimeoutSeconds = TimeInterval(TranscriptedConstants.meetingStopTimeout) / 1_000_000_000
+        assertTrue(
+            TranscriptedConstants.meetingTerminationFinishWaitTimeout > meetingStopTimeoutSeconds,
+            "termination wait should outlast meeting stop timeout so retained audio can be queued before quit"
+        )
+    }
+
     await runSuite("TranscriptedConstants.withTimeout — returns completed work before deadline") {
         let result = try? await TranscriptedConstants.withTimeout(seconds: 1) {
             "ok"

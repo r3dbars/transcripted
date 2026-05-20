@@ -1050,7 +1050,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func waitForRecordingFinishBeforeTermination() async {
-        let deadline = Date().addingTimeInterval(20)
+        let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
         while isFinishingRecording && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }

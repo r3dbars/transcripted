@@ -676,8 +676,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         let sourceApp = resolvedSourceApp()
+        let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sourceApp?.activate(options: [])
-        _ = settingsTextPaster.paste(latestText)
+        _ = settingsTextPaster.paste(latestText, target: pasteTarget)
     }
 
     @available(macOS 14.0, *)
