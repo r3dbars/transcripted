@@ -136,7 +136,7 @@ probe_cloudflare() {
     return 1
   fi
 
-  local project_names=("transcripted-app" "r3d-bar")
+  local project_names=("transcripted-web" "redbars")
   for proj in "${project_names[@]}"; do
     local project_data
     project_data=$(echo "$projects" | jq -r --arg name "$proj" '.result[] | select(.name == $name)')
