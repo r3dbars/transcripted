@@ -35,7 +35,7 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
     func play(_ attachment: MeetingAudioAttachment) {
         stop()
 
-        let loadedSounds = attachment.urls.compactMap { url in
+        let loadedSounds = attachment.playbackURLs.compactMap { url in
             NSSound(contentsOf: url, byReference: true)
         }
 

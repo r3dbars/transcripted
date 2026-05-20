@@ -2,14 +2,16 @@ import Foundation
 
 func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
-        testResolverFindsLiveMeetingAudioPair()
+        testResolverKeepsLiveMeetingAudioPairButPrefersSystemPlayback()
+        testResolverFallsBackToMicrophonePlayback()
+        testAttachmentPlaybackPrefersSystemForFailedMeetingAudio()
         testResolverPrefersImportedRecording()
         testResolverPrefersPlaybackMix()
         testResolverReturnsNilWhenAudioIsMissing()
     }
 }
 
-private func testResolverFindsLiveMeetingAudioPair() {
+private func testResolverKeepsLiveMeetingAudioPairButPrefersSystemPlayback() {
     let directory = makeMeetingAudioResolverTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -31,9 +33,65 @@ private func testResolverFindsLiveMeetingAudioPair() {
     assertEqual(
         attachment?.urls.map(\.lastPathComponent),
         ["system_audio.wav", "microphone.wav"],
-        "Live playback should include system audio and microphone together"
+        "Live meetings should keep both retained source files available"
     )
-    assertTrue(attachment?.isCompositePlayback == true, "Two retained streams should be treated as composite playback")
+    assertEqual(
+        attachment?.playbackURLs.map(\.lastPathComponent),
+        ["system_audio.wav"],
+        "Live meeting playback should prefer the clean system track over mic+system echo"
+    )
+    assertTrue(attachment?.isCompositePlayback == false, "Live playback should not layer mic and system audio by default")
+}
+
+private func testResolverFallsBackToMicrophonePlayback() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("In Room Meeting.md")
+    let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+    try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: audioDirectory.appendingPathComponent("microphone.wav").path,
+        contents: Data("mic".utf8)
+    )
+
+    let attachment = MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)
+
+    assertEqual(
+        attachment?.urls.map(\.lastPathComponent),
+        ["microphone.wav"],
+        "Mic-only retained audio should still resolve"
+    )
+    assertEqual(
+        attachment?.playbackURLs.map(\.lastPathComponent),
+        ["microphone.wav"],
+        "Mic-only retained audio should remain playable when system audio is missing"
+    )
+    assertTrue(attachment?.isCompositePlayback == false, "A mic fallback should stay single-file playback")
+}
+
+private func testAttachmentPlaybackPrefersSystemForFailedMeetingAudio() {
+    let directory = makeMeetingAudioResolverTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let systemURL = directory.appendingPathComponent("system_audio.wav")
+    let micURL = directory.appendingPathComponent("microphone.wav")
+    let attachment = MeetingAudioAttachment(
+        directoryURL: directory,
+        urls: [micURL, systemURL]
+    )
+
+    assertEqual(
+        attachment.urls.map(\.lastPathComponent),
+        ["microphone.wav", "system_audio.wav"],
+        "Failed-meeting attachments should preserve all retained source URLs"
+    )
+    assertEqual(
+        attachment.playbackURLs.map(\.lastPathComponent),
+        ["system_audio.wav"],
+        "Failed-meeting playback should also avoid layering mic and system audio"
+    )
+    assertTrue(attachment.isCompositePlayback == false, "Failed-meeting playback should default to one source")
 }
 
 private func testResolverPrefersImportedRecording() {
@@ -58,6 +116,11 @@ private func testResolverPrefersImportedRecording() {
         attachment?.urls.map(\.lastPathComponent),
         ["recording.m4a"],
         "Imported recordings should play the original retained recording"
+    )
+    assertEqual(
+        attachment?.playbackURLs.map(\.lastPathComponent),
+        ["recording.m4a"],
+        "Imported recordings should keep the same single playback source"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single imported recording is not composite playback")
 }
@@ -92,6 +155,11 @@ private func testResolverPrefersPlaybackMix() {
         attachment?.urls.map(\.lastPathComponent),
         ["playback.m4a"],
         "Playback mixes should win over imported and split-stream audio"
+    )
+    assertEqual(
+        attachment?.playbackURLs.map(\.lastPathComponent),
+        ["playback.m4a"],
+        "Playback mixes should remain the default listening source"
     )
     assertTrue(attachment?.isCompositePlayback == false, "A single playback mix is not composite playback")
 }

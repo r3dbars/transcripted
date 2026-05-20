@@ -8,8 +8,34 @@ struct MeetingAudioAttachment: Equatable, Sendable {
         urls.map { $0.standardizedFileURL.path }.joined(separator: "|")
     }
 
+    var playbackURLs: [URL] {
+        if urls.count <= 1 { return urls }
+        if let playbackURL = firstAudioFile(named: "playback", in: urls) {
+            return [playbackURL]
+        }
+        if let importedURL = firstAudioFile(named: "recording", in: urls) {
+            return [importedURL]
+        }
+        if let systemURL = firstAudioFile(named: "system_audio", in: urls) {
+            return [systemURL]
+        }
+        if let microphoneURL = firstAudioFile(named: "microphone", in: urls) {
+            return [microphoneURL]
+        }
+        return [urls[0]]
+    }
+
     var isCompositePlayback: Bool {
-        urls.count > 1
+        playbackURLs.count > 1
+    }
+
+    private func firstAudioFile(named stem: String, in urls: [URL]) -> URL? {
+        urls
+            .filter { $0.deletingPathExtension().lastPathComponent == stem }
+            .sorted { lhs, rhs in
+                lhs.pathExtension.localizedCaseInsensitiveCompare(rhs.pathExtension) == .orderedAscending
+            }
+            .first
     }
 }
 
