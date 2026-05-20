@@ -202,6 +202,9 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
             splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
+            refreshPermissions()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
             refreshRecentCaptures()

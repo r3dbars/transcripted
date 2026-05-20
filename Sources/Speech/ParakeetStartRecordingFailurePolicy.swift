@@ -99,6 +99,22 @@ enum ParakeetASRManagerCleanupPolicy {
     }
 }
 
+struct ParakeetASRInferenceActivityState: Equatable {
+    private(set) var activeCount = 0
+
+    var isActive: Bool {
+        activeCount > 0
+    }
+
+    mutating func begin() {
+        activeCount += 1
+    }
+
+    mutating func finish() {
+        activeCount = max(0, activeCount - 1)
+    }
+}
+
 enum ParakeetAudioFormatReadiness: String, Equatable {
     case ready
     case invalid
