@@ -943,11 +943,9 @@ struct TranscriptedSettingsView: View {
             report: report,
             rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
         ) else {
-            NSSound.beep()
             return
         }
 
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         homeFeedbackTarget = nil
         NSWorkspace.shared.open(url)
     }
