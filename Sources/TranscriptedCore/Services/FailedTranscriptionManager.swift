@@ -35,9 +35,9 @@ public class FailedTranscriptionManager: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
-        // Load existing failed transcriptions and auto-clean permanent failures
+        // Load existing failed transcriptions. User-visible failed meetings stay
+        // queued until the user retries, deletes, or the age-based cleanup runs.
         loadFailedTranscriptions()
-        cleanupPermanentFailures()
     }
 
     /// Loads failed transcriptions from disk
@@ -222,37 +222,6 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Gets the total number of failed transcriptions
     public var count: Int {
         return failedTranscriptions.count
-    }
-
-    /// Auto-clean permanent failures (unrecoverable errors or exhausted retries).
-    /// Deletes audio files and removes from queue on launch.
-    private func cleanupPermanentFailures() {
-        let toRemove = failedTranscriptions.filter { failed in
-            // Permanent error that will never succeed
-            !failed.isRetryable ||
-            // Exhausted retries (3+ attempts, still failing)
-            failed.retryCount >= 3
-        }
-
-        guard !toRemove.isEmpty else { return }
-
-        for failure in toRemove {
-            // Delete audio files to reclaim disk space
-            removeAudioFile(failure.micAudioURL, label: "cleanup mic audio")
-            if let systemURL = failure.systemAudioURL {
-                removeAudioFile(systemURL, label: "cleanup system audio")
-            }
-            removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
-            if let systemURL = failure.systemAudioURL {
-                removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
-            }
-        }
-
-        let removedIds = Set(toRemove.map { $0.id })
-        failedTranscriptions.removeAll { removedIds.contains($0.id) }
-        saveFailedTranscriptions()
-
-        AppLogger.pipeline.info("Auto-cleaned permanent failures", ["count": "\(toRemove.count)"])
     }
 
     /// Cleans up failed transcriptions older than the specified number of days

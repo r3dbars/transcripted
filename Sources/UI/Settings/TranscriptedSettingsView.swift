@@ -448,6 +448,7 @@ struct TranscriptedSettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .task(id: navigation.presentationID) {
             refreshState()
+            expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
         .onChange(of: navigation.selectedPage) { _, page in
@@ -2988,6 +2989,19 @@ struct TranscriptedSettingsView: View {
         anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
         if case .unknown = sparkleUpdater.updateStatus.state {
             sparkleUpdater.refreshUpdateStatus()
+        }
+    }
+
+    private func expandGeneralDisclosureForPresentedPage() {
+        switch navigation.presentedPage {
+        case .models:
+            showGeneralModelSettings = true
+        case .shortcuts:
+            showGeneralShortcutSettings = true
+        case .privacy:
+            showGeneralPrivacySettings = true
+        default:
+            break
         }
     }
 

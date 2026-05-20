@@ -276,9 +276,10 @@ final class MenuBarPanelController: NSViewController {
         }
 
         let sourceApp = resolvedSourceApp()
+        let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         dismissPopover()
         sourceApp?.activate(options: [])
-        _ = textPaster.paste(latestText)
+        _ = textPaster.paste(latestText, target: pasteTarget)
     }
 
     private func openSettingsFromMenu(_ page: TranscriptedSettingsPage, actionID: String? = nil) {

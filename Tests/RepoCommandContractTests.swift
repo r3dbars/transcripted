@@ -274,7 +274,7 @@ func testRepoCommandContract() {
             "release packaging docs should warn when the cask is stale"
         )
         assertTrue(
-            releaseDocs.contains("SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"),
+            releaseDocs.contains("SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"),
             "release packaging docs should include a local thin packaging smoke command"
         )
         assertTrue(
@@ -540,6 +540,16 @@ func testRepoCommandContract() {
             "beta release build should not allow thin distribution unless the model requirement is explicitly disabled"
         )
         assertTrue(
+            betaBuildScript.contains("BUNDLE_DIARIZER_MODELS=\"${BUNDLE_DIARIZER_MODELS:-1}\"")
+                && betaBuildScript.contains("offline-diarizer-models")
+                && betaBuildScript.contains("speaker-diarization-coreml"),
+            "beta release build should bundle the offline diarizer models used by meeting capture"
+        )
+        assertTrue(
+            betaBuildScript.contains("BUNDLE_DIARIZER_MODELS=0 requires REQUIRE_BUNDLED_DIARIZER_MODELS=0"),
+            "beta release build should not allow missing diarizer models unless the requirement is explicitly disabled"
+        )
+        assertTrue(
             betaBuildScript.contains("SWIFTC_NUM_THREADS")
                 && betaBuildScript.contains("-whole-module-optimization")
                 && betaBuildScript.contains("-num-threads \"$SWIFTC_NUM_THREADS\""),
@@ -668,6 +678,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - CoreML inference outputs stay locally owned") {
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
         let diarizationContents = readRepoTextFile("Sources/TranscriptedCore/Services/DiarizationService.swift")
 
         assertTrue(
@@ -680,6 +691,66 @@ func testRepoCommandContract() {
             diarizationContents.contains("withExtendedLifetime(result)")
                 && diarizationContents.contains("embedding.map { $0 }"),
             "diarization should copy CoreML-backed embeddings into plain Swift arrays before returning segments"
+        )
+        assertFalse(
+            engineContents.contains("corrected.prefix(80)") || whisperContents.contains("trimmed.prefix(80)"),
+            "local STT success logs should report counts and timing, not transcript snippets"
+        )
+    }
+
+    runSuite("Repo command contract - meeting ASR does not block dictation state") {
+        let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        guard
+            let pureStart = engineContents.range(of: "private func beginPureSampleTranscriptionActivity()"),
+            let inferenceStart = engineContents.range(of: "private func beginASRInference()", range: pureStart.upperBound..<engineContents.endIndex),
+            let runStart = engineContents.range(of: "private func runASRInference(", range: inferenceStart.upperBound..<engineContents.endIndex)
+        else {
+            assertionFailure("ParakeetEngine should keep pure-sample and ASR inference helpers")
+            return
+        }
+
+        let pureAndInferenceHelpers = String(engineContents[pureStart.lowerBound..<runStart.lowerBound])
+        assertFalse(
+            pureAndInferenceHelpers.contains("isTranscribing = true") || pureAndInferenceHelpers.contains("isTranscribing = false"),
+            "meeting/import pure-sample ASR should not flip the published dictation transcribing flag"
+        )
+    }
+
+    runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
+        let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+
+        assertTrue(
+            menuContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
+                && menuContents.contains("textPaster.paste(latestText, target: pasteTarget)"),
+            "menu Paste Last Dictation should copy instead of pasting if focus moves away from the source app"
+        )
+        assertTrue(
+            appContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
+                && appContents.contains("settingsTextPaster.paste(latestText, target: pasteTarget)"),
+            "settings Paste Last Dictation should use the same focus guard as normal dictation paste"
+        )
+    }
+
+    runSuite("Repo command contract - consolidated settings deep links expand their General section") {
+        let windowControllerContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
+        let navigationContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsNavigationModel.swift")
+        let viewContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+
+        assertTrue(
+            navigationContents.contains("var presentedPage: TranscriptedSettingsPage")
+                && windowControllerContents.contains("navigationModel.presentedPage = page"),
+            "settings presentation should retain the originally requested page before consolidating to General"
+        )
+        assertTrue(
+            viewContents.contains("expandGeneralDisclosureForPresentedPage()")
+                && viewContents.contains("case .models:")
+                && viewContents.contains("showGeneralModelSettings = true")
+                && viewContents.contains("case .shortcuts:")
+                && viewContents.contains("showGeneralShortcutSettings = true")
+                && viewContents.contains("case .privacy:")
+                && viewContents.contains("showGeneralPrivacySettings = true"),
+            "legacy settings deep links should reveal their matching consolidated General controls"
         )
     }
 

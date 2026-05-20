@@ -233,6 +233,58 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
     }
 
+    func testInitKeepsNonRetryableFailuresUntilUserDeletesThem() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let micURL = paths.audioCaptures.appendingPathComponent("missing-system-audio-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let failure = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 10),
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "System audio is required to transcribe this meeting."
+        )
+        XCTAssertFalse(failure.isRetryable)
+        try JSONEncoder.iso8601.encode([failure]).write(to: paths.failedQueue, options: .atomic)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertEqual(manager.failedTranscriptions, [failure])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
+    func testInitKeepsExhaustedRetryFailuresUntilUserDeletesThem() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let micURL = paths.audioCaptures.appendingPathComponent("exhausted-retry-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let failure = FailedTranscription(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 11),
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure",
+            retryCount: 3
+        )
+        try JSONEncoder.iso8601.encode([failure]).write(to: paths.failedQueue, options: .atomic)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertEqual(manager.failedTranscriptions, [failure])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+    }
+
     func testFailedTranscriptionRetryabilityDoesNotOvermatchGenericMinimumLanguage() {
         let failure = FailedTranscription(
             micAudioURL: testRoot.appendingPathComponent("mic.wav"),

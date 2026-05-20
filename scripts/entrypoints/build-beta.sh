@@ -25,6 +25,8 @@ USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
+REQUIRE_BUNDLED_DIARIZER_MODELS="${REQUIRE_BUNDLED_DIARIZER_MODELS:-1}"
+BUNDLE_DIARIZER_MODELS="${BUNDLE_DIARIZER_MODELS:-1}"
 REGISTER_SENTRY_RELEASE="${REGISTER_SENTRY_RELEASE:-0}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
 SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
@@ -45,6 +47,15 @@ if [ "$BUNDLE_PARAKEET_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" !
     echo "   depend on a runtime model download."
     echo "   If you intentionally want a thin local test build, rerun with:"
     echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+    exit 1
+fi
+
+if [ "$BUNDLE_DIARIZER_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" != "0" ]; then
+    echo "❌ BUNDLE_DIARIZER_MODELS=0 requires REQUIRE_BUNDLED_DIARIZER_MODELS=0"
+    echo "   Distribution builds bundle offline diarizer models by default so meetings"
+    echo "   do not depend on a runtime model download."
+    echo "   If you intentionally want a thin local test build, rerun with:"
+    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
     exit 1
 fi
 
@@ -385,6 +396,30 @@ else
         echo "   distribution builds do not fall back to a runtime download on first launch."
         echo "   If you intentionally want a thin local test build, rerun with:"
         echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        exit 1
+    fi
+fi
+
+# Bundle offline diarizer CoreML models used by DiarizationService.
+DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml"
+DIARIZER_DEST="$APP_BUNDLE/Contents/Resources/offline-diarizer-models"
+if [ "$BUNDLE_DIARIZER_MODELS" = "0" ]; then
+    echo "⚠️  Skipping bundled offline diarizer models because BUNDLE_DIARIZER_MODELS=0"
+    echo "   Runtime model download may occur on first meeting."
+elif [ -d "$DIARIZER_SRC/speaker-diarization-offline" ] && [ -d "$DIARIZER_SRC/wespeaker_v2.mlmodelc" ]; then
+    echo "Bundling offline diarizer models..."
+    mkdir -p "$DIARIZER_DEST"
+    cp -R "$DIARIZER_SRC"/. "$DIARIZER_DEST/"
+else
+    if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
+        echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
+        echo "   Runtime model download may still occur on first meeting."
+    else
+        echo "❌ Missing local offline diarizer models: $DIARIZER_SRC"
+        echo "   build-beta.sh now requires bundled diarizer models by default so"
+        echo "   distribution builds do not fall back to a runtime download on first meeting."
+        echo "   If you intentionally want a thin local test build, rerun with:"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
         exit 1
     fi
 fi
