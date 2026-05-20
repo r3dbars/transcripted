@@ -31,6 +31,8 @@ artifact exists.
   returning from transcription work.
 - Bundles offline diarizer models in beta and release builds by default.
 - Keeps meeting ASR work from blocking dictation UI state.
+- Generates and uploads Sentry dSYMs during the release flow so production
+  crashes can symbolicate app frames.
 - Extends release smoke coverage to catch packaging and release-gate failures
   before publication.
 
@@ -42,8 +44,6 @@ artifact exists.
   the merged CoreML lifetime fix targets that shape, but the next release needs
   monitoring to prove it.
 - Open issue `#500` remains the manual audio-output-volume watch item.
-- Open draft PRs `#818` and `#819` are adjacent release-readiness work and
-  should be reviewed before deciding whether they belong in `1.1.43`.
 - Existing installs will not see `1.1.43` in-app unless a real GitHub release
   artifact is approved and `docs/appcast.xml` is updated for that artifact.
 
