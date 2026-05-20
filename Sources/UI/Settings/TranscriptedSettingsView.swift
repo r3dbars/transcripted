@@ -376,6 +376,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeShowsAllFailedMeetings = false
+    @State private var homeShowsStatsDetails = false
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
@@ -446,6 +447,15 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $homeShowsStatsDetails) {
+            HomeStatsDetailSheet(
+                stats: homeStatItems,
+                streak: homeStreak,
+                onDone: {
+                    homeShowsStatsDetails = false
+                }
+            )
+        }
         .task(id: navigation.presentationID) {
             refreshState()
             expandGeneralDisclosureForPresentedPage()
@@ -624,7 +634,13 @@ struct TranscriptedSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                HomeStatsBadge(stats: stats, streak: homeStreak)
+                HomeStatsBadge(
+                    stats: stats,
+                    streak: homeStreak,
+                    onViewStats: {
+                        homeShowsStatsDetails = true
+                    }
+                )
                     .layoutPriority(0)
             }
 
@@ -760,6 +776,15 @@ struct TranscriptedSettingsView: View {
                 },
                 onDone: {
                     homeMeetingPreview = nil
+                }
+            )
+        }
+        .sheet(isPresented: $homeShowsStatsDetails) {
+            HomeStatsDetailSheet(
+                stats: homeStatItems,
+                streak: homeStreak,
+                onDone: {
+                    homeShowsStatsDetails = false
                 }
             )
         }
@@ -967,11 +992,9 @@ struct TranscriptedSettingsView: View {
             report: report,
             rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
         ) else {
-            NSSound.beep()
             return
         }
 
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         homeFeedbackTarget = nil
         NSWorkspace.shared.open(url)
     }
@@ -1095,11 +1118,7 @@ struct TranscriptedSettingsView: View {
     private func failedMeetingAudioAttachment(
         for item: MeetingSessionController.FailedMeetingItem
     ) -> MeetingAudioAttachment? {
-        guard let firstAudioURL = item.audioURLs.first else { return nil }
-        return MeetingAudioAttachment(
-            directoryURL: firstAudioURL.deletingLastPathComponent(),
-            urls: item.audioURLs
-        )
+        MeetingAudioAttachment.retainedAudio(urls: item.audioURLs)
     }
 
     private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -3914,6 +3933,7 @@ private struct SettingsFailedMeetingRow: View {
     let revealAudioAction: () -> Void
     let secondaryAction: () -> Void
     @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @State private var selectedPlaybackChoiceID: String?
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -3946,18 +3966,28 @@ private struct SettingsFailedMeetingRow: View {
             Spacer(minLength: 12)
 
             if let audio {
+                let selectedChoice = selectedPlaybackChoice(for: audio)
                 SettingsRecentMeetingAudioControl(
-                    title: playback.buttonTitle(for: audio),
-                    symbolName: playback.symbolName(for: audio),
-                    isActive: playback.isActive(audio),
-                    isPlaying: playback.isPlaying && playback.isActive(audio),
+                    title: playback.buttonTitle(for: audio, choice: selectedChoice),
+                    symbolName: playback.symbolName(for: audio, choice: selectedChoice),
+                    isActive: playback.isActive(audio, choice: selectedChoice),
+                    isPlaying: playback.isPlaying && playback.isActive(audio, choice: selectedChoice),
                     scrubber: playback.isActive(audio)
                         ? AnyView(MeetingAudioScrubber(attachment: audio, width: 190))
                         : nil
                 ) {
-                    playback.toggle(audio)
+                    playback.toggle(audio, choice: selectedChoice)
                 }
-                .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+                .help("\(playback.buttonTitle(for: audio, choice: selectedChoice)) retained meeting audio")
+
+                MeetingAudioSourceMenu(
+                    attachment: audio,
+                    selectedChoiceID: selectedPlaybackChoiceBinding(for: audio)
+                ) { choice in
+                    if playback.isActive(audio) {
+                        playback.switchSource(audio, choice: choice)
+                    }
+                }
 
                 Button {
                     revealAudioAction()
@@ -4036,6 +4066,17 @@ private struct SettingsFailedMeetingRow: View {
     private var hasRetainedAudioFiles: Bool {
         !item.audioURLs.isEmpty
     }
+
+    private func selectedPlaybackChoice(for audio: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
+        playback.activeChoice(for: audio) ?? audio.playbackChoice(id: selectedPlaybackChoiceID)
+    }
+
+    private func selectedPlaybackChoiceBinding(for audio: MeetingAudioAttachment) -> Binding<String?> {
+        Binding(
+            get: { selectedPlaybackChoice(for: audio)?.id },
+            set: { selectedPlaybackChoiceID = $0 }
+        )
+    }
 }
 
 private struct AgentConnectionSettingsPage: View {
@@ -4076,7 +4117,7 @@ private struct AgentConnectionSettingsPage: View {
                 title: "Details",
                 detail: "Advanced setup."
             ) {
-                DisclosureGroup("Show setup details", isExpanded: $showAdvancedAgentSetup) {
+                AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
                     VStack(alignment: .leading, spacing: 14) {
                         ClaudeDesktopStatusRow(status: claudeDesktopStatus)
 
@@ -4149,7 +4190,6 @@ private struct AgentConnectionSettingsPage: View {
                             }
                         }
                     }
-                    .padding(.top, 10)
                 }
             }
         }
@@ -4382,6 +4422,71 @@ private struct AgentConnectActionButton: View {
             hoverStroke: tint.opacity(0.56)
         ))
         .disabled(!isEnabled)
+    }
+}
+
+private struct AgentSetupDetailsDisclosure<Content: View>: View {
+    @Binding var isExpanded: Bool
+    let content: Content
+
+    init(
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) {
+        self._isExpanded = isExpanded
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 16, height: 16)
+
+                    Text("Show setup details")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Spacer(minLength: 12)
+
+                    Text(isExpanded ? "Hide" : "Show")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(SettingsHoverButtonStyle(
+                tone: .neutral,
+                cornerRadius: 8,
+                normalFill: Color.primary.opacity(0.018),
+                normalStroke: Color.primary.opacity(0.07),
+                hoverFill: Color.primary.opacity(0.04),
+                pressedFill: Color.primary.opacity(0.06),
+                hoverStroke: Color.primary.opacity(0.12)
+            ))
+            .accessibilityLabel(Text("Show setup details"))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text(isExpanded ? "Hide advanced agent setup details" : "Show advanced agent setup details"))
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    content
+                }
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 

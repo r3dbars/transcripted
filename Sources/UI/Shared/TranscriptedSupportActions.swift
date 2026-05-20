@@ -7,13 +7,11 @@ import TranscriptedCore
 enum TranscriptedSupportActions {
     static func sendFeedback(appState: TranscriptedAppState) {
         guard let url = feedbackEmailURL(appState: appState) else { return }
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         NSWorkspace.shared.open(url)
     }
 
     static func sendFeedback(logger: AppLogger?) {
         guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return }
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         NSWorkspace.shared.open(url)
     }
 

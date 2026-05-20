@@ -630,7 +630,7 @@ final class MeetingSessionController: ObservableObject {
         )
 
         guard let micURL = files.micURL else {
-            let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
+            let preserved = preserveFailedMeetingForRetry(
                 micAudioURL: nil,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stopped without microphone audio.",
@@ -649,9 +649,6 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            if preserved {
-                refreshFailedMeetings()
-            }
             Self.runtimeDiagnosticsRecorder?.clearSession(
                 kind: "meeting",
                 outcome: files.systemURL == nil ? "no_audio_captured" : "missing_mic_audio"
@@ -677,7 +674,7 @@ final class MeetingSessionController: ObservableObject {
                     "reason": reason.rawValue
                 ]
             )
-            taskManager.addFailedTranscriptionRetainingAudio(
+            let preserved = preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
@@ -688,7 +685,12 @@ final class MeetingSessionController: ObservableObject {
                 engine: "meeting",
                 event: "meeting_recording_stop_timeout_failed",
                 message: "Meeting routed to failed queue due to stop timeout",
-                context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "reason": reason.rawValue,
+                        "preserved_for_retry": boolString(preserved)
+                    ]
+                )
             )
             state = .error("Recording didn't close cleanly. Open Transcripted Home to retry.")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
@@ -968,7 +970,7 @@ final class MeetingSessionController: ObservableObject {
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
             case .recorded(let micURL, let systemURL, _, let meetingTitle):
-                taskManager.addFailedTranscriptionRetainingAudio(
+                preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
@@ -1014,7 +1016,7 @@ final class MeetingSessionController: ObservableObject {
             activeRecordingSuggestedTitle = nil
 
             if files.micURL != nil || files.systemURL != nil {
-                didPreserveRecording = taskManager.addFailedTranscriptionRetainingAvailableAudio(
+                didPreserveRecording = preserveFailedMeetingForRetry(
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
@@ -1074,7 +1076,7 @@ final class MeetingSessionController: ObservableObject {
         for job in jobs {
             switch job.kind {
             case .recorded(let micURL, let systemURL, _, let meetingTitle):
-                if taskManager.addFailedTranscriptionRetainingAvailableAudio(
+                if preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: errorMessage,
@@ -1318,8 +1320,8 @@ final class MeetingSessionController: ObservableObject {
             .store(in: &cancellables)
 
         failedManager.$failedTranscriptions
-            .sink { [weak self] _ in
-                self?.refreshFailedMeetings()
+            .sink { [weak self] failedTranscriptions in
+                self?.refreshFailedMeetings(failedTranscriptions)
             }
             .store(in: &cancellables)
 
@@ -1666,7 +1668,7 @@ final class MeetingSessionController: ObservableObject {
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, _, let meetingTitle):
-            taskManager.addFailedTranscriptionRetainingAudio(
+            preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message,
@@ -2117,8 +2119,27 @@ final class MeetingSessionController: ObservableObject {
         value ? "true" : "false"
     }
 
-    private func refreshFailedMeetings() {
-        let failedTranscriptions = failedManager.failedTranscriptions
+    @discardableResult
+    private func preserveFailedMeetingForRetry(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        meetingTitle: String?
+    ) -> Bool {
+        let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            meetingTitle: meetingTitle
+        )
+        if preserved {
+            refreshFailedMeetings()
+        }
+        return preserved
+    }
+
+    private func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
+        let failedTranscriptions = updatedFailedTranscriptions ?? failedManager.failedTranscriptions
         retryingFailedMeetingIDs.formIntersection(Set(failedTranscriptions.map(\.id)))
 
         failedMeetings = failedTranscriptions
