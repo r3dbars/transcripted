@@ -60,7 +60,8 @@ struct TranscriptedSettingsView: View {
     @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
-    @State private var customDictionaryPreviewInput = "um okay review the okay ours before the q four meeting"
+    @State private var customDictionaryPreviewInput = ""
+    @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -1128,17 +1129,11 @@ struct TranscriptedSettingsView: View {
 
     private var generalPage: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "General",
-                summary: "Startup, audio imports, and simple corrections."
-            )
+            SettingsPageIntro(title: "General")
 
-            SettingsSection(
-                title: "Startup",
-                detail: "Open Transcripted when you log in."
-            ) {
+            SettingsSection(title: "App") {
                 SettingsToggleRow(
-                    title: "Launch Transcripted at login",
+                    title: "Open at login",
                     detail: launchAtLoginStatus,
                     isOn: Binding(
                         get: { launchAtLoginEnabled },
@@ -1147,17 +1142,12 @@ struct TranscriptedSettingsView: View {
                         }
                     )
                 )
-            }
 
-            SettingsSection(
-                title: "Dock",
-                detail: "Choose whether Transcripted stays visible in the Dock when idle."
-            ) {
                 SettingsToggleRow(
-                    title: "Show Transcripted in Dock",
+                    title: "Show in Dock",
                     detail: showTranscriptedInDock
-                        ? "Transcripted keeps a normal Dock icon."
-                        : "Transcripted stays menu-bar-only while idle and still becomes visible during active recording if recovery is needed.",
+                        ? "Keep Transcripted visible in the Dock."
+                        : "Hide the Dock icon while idle. Recording can still bring Transcripted forward if needed.",
                     isOn: Binding(
                         get: { showTranscriptedInDock },
                         set: { newValue in
@@ -1169,15 +1159,12 @@ struct TranscriptedSettingsView: View {
                 )
             }
 
-            SettingsSection(
-                title: "Sounds",
-                detail: "Play short cues for dictation state."
-            ) {
+            SettingsSection(title: "Dictation") {
                 SettingsToggleRow(
-                    title: "Play dictation feedback sounds",
+                    title: "Feedback sounds",
                     detail: uiSoundsEnabled
-                        ? "Sounds play when dictation starts, completes, or hears no speech."
-                        : "Dictation sounds are off.",
+                        ? "Play start, finish, and no-speech cues."
+                        : "No dictation cues.",
                     isOn: Binding(
                         get: { uiSoundsEnabled },
                         set: { newValue in
@@ -1187,17 +1174,31 @@ struct TranscriptedSettingsView: View {
                         }
                     )
                 )
+
+                SettingsToggleRow(
+                    title: "Clean up text before paste",
+                    detail: dictationCleanupEnabled
+                        ? "Remove clear fillers, repeated words, and spacing issues."
+                        : "Paste the raw local transcript.",
+                    isOn: Binding(
+                        get: { dictationCleanupEnabled },
+                        set: { newValue in
+                            dictationCleanupEnabled = newValue
+                            DictationCleanupPreferences.setEnabled(newValue)
+                            trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
+                        }
+                    ),
+                    help: "Clean up dictated text before paste"
+                )
             }
 
-            SettingsSection(
-                title: "Audio Files",
-                detail: "Transcribe a recording you already have."
-            ) {
+            SettingsSection(title: "Audio Files") {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Transcribe Audio File")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Choose a WAV, MP3, M4A, AAC, or AIFF file and turn it into Transcripted Markdown.")
+                        Text("Turn an existing recording into Markdown.")
+                            .font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("WAV, MP3, M4A, AAC, or AIFF")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1217,36 +1218,15 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
-            SettingsSection(
-                title: "Corrections",
-                detail: "Fix the words Transcripted usually gets wrong."
-            ) {
+            SettingsSection(title: "Corrections") {
                 VStack(alignment: .leading, spacing: 10) {
-                    SettingsToggleRow(
-                        title: "Clean up dictated text before paste",
-                        detail: dictationCleanupEnabled
-                            ? "On. Removes clear fillers, repeated words, and safe spacing issues."
-                            : "Off. Pastes the local transcription output without filler cleanup.",
-                        isOn: Binding(
-                            get: { dictationCleanupEnabled },
-                            set: { newValue in
-                                dictationCleanupEnabled = newValue
-                                DictationCleanupPreferences.setEnabled(newValue)
-                                trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
-                            }
-                        ),
-                        help: "Clean up dictated text before paste"
-                    )
-
-                    Divider()
-
-                    Text("Add what Transcripted writes now, then the version you want saved.")
+                    Text("Add what Transcripted heard, then what you want instead.")
                         .font(.subheadline)
                         .fixedSize(horizontal: false, vertical: true)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 12) {
-                            Text("When Transcripted writes this")
+                            Text("Heard as")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1297,7 +1277,7 @@ struct TranscriptedSettingsView: View {
 
                         Spacer()
 
-                        SettingsInlineActionButton(title: "Clear", tone: .destructive) {
+                        SettingsInlineActionButton(title: "Clear all", tone: .destructive) {
                             trackSettingsAction("clear_corrections", page: .general)
                             clearCorrectionRows()
                         }
@@ -1310,33 +1290,29 @@ struct TranscriptedSettingsView: View {
                             .foregroundStyle(.secondary)
 
                         Spacer()
-
-                        Text("Applies to dictation and meetings after transcription.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Try it")
-                            .font(.subheadline.weight(.semibold))
+                    DisclosureGroup("Test a phrase", isExpanded: $showCorrectionPreview) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("Type a sample phrase", text: $customDictionaryPreviewInput)
+                                .textFieldStyle(.roundedBorder)
 
-                        TextField("Dictate a sample phrase", text: $customDictionaryPreviewInput)
-                            .textFieldStyle(.roundedBorder)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Result")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Preview")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            Text(customDictionaryPreviewOutput)
-                                .font(.body)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
-                                )
+                                Text(customDictionaryPreviewOutput)
+                                    .font(.body)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
+                                    )
+                            }
                         }
+                        .padding(.top, 8)
                     }
 
                     DisclosureGroup("Advanced text format", isExpanded: $showAdvancedCorrectionsText) {
@@ -1365,11 +1341,6 @@ struct TranscriptedSettingsView: View {
                         }
                     }
                     .padding(.top, 4)
-
-                    Text("Examples: `okay ours` becomes `OKRs`, or `q four roadmap` becomes `Q4 roadmap`.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -2581,7 +2552,7 @@ struct TranscriptedSettingsView: View {
 
     private var customDictionaryPreviewOutput: String {
         let sample = customDictionaryPreviewInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sample.isEmpty else { return "Dictate a sample phrase above to check your corrections." }
+        guard !sample.isEmpty else { return "Type a sample phrase above to check corrections." }
 
         let entries = CustomDictionaryPreferences.entries(from: customDictionaryText)
         let corrected = entries.isEmpty

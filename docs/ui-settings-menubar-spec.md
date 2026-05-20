@@ -146,11 +146,15 @@ This page should not own privacy, storage, or analytics controls.
 ### General
 
 Purpose:
-Own startup and custom words.
+Own basic app behavior, audio import, dictation cleanup, and custom words.
 
 Contents:
 
 - launch at login
+- Dock icon visibility
+- feedback sounds
+- imported-audio transcription
+- dictated-text cleanup
 - custom words and spoken-text corrections
 
 ### Models
@@ -176,7 +180,7 @@ Contents:
 - duplicate cleanup
 - local speaker split toggle
 
-Meeting start, audio import, recent meeting transcripts, and unfinished meeting repair live on `Home`.
+Meeting start, recent meeting transcripts, and unfinished meeting repair live on `Home`.
 
 ### Dictation
 
@@ -187,7 +191,7 @@ Contents:
 
 - `Paste Last Dictation`
 - explanation of paste-back behavior
-- `Play dictation feedback sounds`
+- `Feedback sounds`
 - dictation folder shortcut or supporting storage context
 
 ### Storage
@@ -265,7 +269,7 @@ Optional supporting text can explain local-first behavior in one short paragraph
 
 ### Transcribe Audio File
 
-- appears on `Home`
+- appears on `General`
 - does not appear in the menubar popover in this version
 
 ### Update Status

@@ -43,7 +43,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .home:
             return "Start capture and check setup."
         case .general:
-            return "Startup, audio imports, and corrections."
+            return "Basic app behavior."
         case .models:
             return "Local transcription model."
         case .shortcuts:
