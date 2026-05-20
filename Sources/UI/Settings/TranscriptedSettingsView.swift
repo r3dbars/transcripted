@@ -943,7 +943,6 @@ struct TranscriptedSettingsView: View {
             report: report,
             rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
         ) else {
-            NSSound.beep()
             return
         }
 
