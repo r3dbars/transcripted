@@ -376,6 +376,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeDeleteFailure: HomeDeleteFailure?
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeShowsAllFailedMeetings = false
+    @State private var homeShowsStatsDetails = false
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
@@ -446,6 +447,15 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $homeShowsStatsDetails) {
+            HomeStatsDetailSheet(
+                stats: homeStatItems,
+                streak: homeStreak,
+                onDone: {
+                    homeShowsStatsDetails = false
+                }
+            )
+        }
         .task(id: navigation.presentationID) {
             refreshState()
             expandGeneralDisclosureForPresentedPage()
@@ -624,7 +634,13 @@ struct TranscriptedSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                HomeStatsBadge(stats: stats, streak: homeStreak)
+                HomeStatsBadge(
+                    stats: stats,
+                    streak: homeStreak,
+                    onViewStats: {
+                        homeShowsStatsDetails = true
+                    }
+                )
                     .layoutPriority(0)
             }
 
