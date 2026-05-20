@@ -250,6 +250,13 @@ enum HotkeyPreferences {
         case kVK_F10: return "F10"
         case kVK_F11: return "F11"
         case kVK_F12: return "F12"
+        case kVK_F13: return "F13"
+        case kVK_F14: return "F14"
+        case kVK_F15: return "F15"
+        case kVK_F16: return "F16"
+        case kVK_F17: return "F17"
+        case kVK_F18: return "F18"
+        case kVK_F19: return "F19"
         // Punctuation
         case kVK_ANSI_Minus:        return "-"
         case kVK_ANSI_Equal:        return "="
