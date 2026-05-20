@@ -41,18 +41,18 @@ private struct SettingsSidebarRow: View {
 
 private struct GeneralSettingsHeader: View {
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             Image(systemName: "gearshape.fill")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color.primary)
-                .frame(width: 44, height: 44)
+                .frame(width: 24, height: 24)
                 .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.primary.opacity(0.20))
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.14))
                 )
 
             Text("General")
-                .font(.system(size: 31, weight: .semibold))
+                .font(.system(size: 24, weight: .semibold))
         }
     }
 }
@@ -64,14 +64,14 @@ private struct GeneralSettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: 680, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.primary.opacity(0.11), lineWidth: 1)
         )
     }
@@ -83,27 +83,27 @@ private struct GeneralToggleRow: View {
     var help: String
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             Text(title)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 10)
 
             Toggle(title, isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.large)
+                .controlSize(.regular)
                 .tint(.accentColor)
                 .help(help)
                 .accessibilityLabel(Text(title))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityHint(Text(help))
         }
-        .padding(.horizontal, 22)
-        .frame(minHeight: 72)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 44)
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -121,28 +121,28 @@ private struct GeneralActionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.primary)
 
-                Spacer(minLength: 16)
+                Spacer(minLength: 10)
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if let systemImage {
                         Image(systemName: systemImage)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                     }
                     Text(value)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
                 }
                 .foregroundStyle(Color.secondary)
             }
-            .padding(.horizontal, 22)
-            .frame(minHeight: 72)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .background(isHovering ? Color.primary.opacity(0.035) : Color.clear)
@@ -163,6 +163,7 @@ private struct GeneralDisclosureRow: View {
     let title: String
     let value: String
     @Binding var isExpanded: Bool
+    let help: String
     let action: () -> Void
 
     @State private var isHovering = false
@@ -174,38 +175,40 @@ private struct GeneralDisclosureRow: View {
             }
             action()
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.primary)
 
-                Spacer(minLength: 16)
+                Spacer(minLength: 10)
 
                 Text(value)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 20, height: 20)
                     .background(
                         Circle()
                             .fill(Color.primary.opacity(isHovering ? 0.10 : 0.06))
                     )
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
-            .padding(.horizontal, 22)
-            .frame(minHeight: 72)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .background(isHovering ? Color.primary.opacity(0.035) : Color.clear)
         }
         .buttonStyle(.plain)
+        .help(help)
         .onHover { isHovering = $0 }
         .accessibilityLabel(Text(title))
-        .accessibilityValue(Text(value))
+        .accessibilityValue(Text("\(value), \(isExpanded ? "expanded" : "collapsed")"))
+        .accessibilityHint(Text(help))
     }
 }
 
@@ -213,10 +216,10 @@ private struct GeneralExpandedContent<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             content
         }
-        .padding(18)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.025))
         .overlay(alignment: .top) {
@@ -232,25 +235,25 @@ private struct GeneralHotkeyGroup: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 6) {
             if isEnabled {
                 ForEach(keys) { key in
                     GeneralHotkeyKeycap(key: key)
                 }
             } else {
-                Text("Shortcuts off")
-                    .font(.system(size: 18, weight: .semibold))
+                Text("Dictation shortcut off")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(height: 62)
+                    .frame(height: 32)
             }
 
-            Spacer(minLength: 14)
+            Spacer(minLength: 8)
 
             Button(action: action) {
                 Text("Edit")
                     .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
             }
                 .buttonStyle(SettingsHoverButtonStyle(
                     tone: .neutral,
@@ -259,15 +262,16 @@ private struct GeneralHotkeyGroup: View {
                     normalStroke: Color.primary.opacity(0.08)
                 ))
                 .help("Edit \(title.lowercased()) shortcut")
+                .accessibilityLabel(Text("Edit \(title.lowercased()) shortcut"))
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .frame(maxWidth: 680, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color.primary.opacity(0.11), lineWidth: 1)
         )
     }
@@ -277,31 +281,31 @@ private struct GeneralHotkeyKeycap: View {
     let key: GeneralHotkeyKey
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(key.symbol)
-                .font(.system(size: key.label == nil ? 24 : 22, weight: .semibold))
+                .font(.system(size: key.label == nil ? 15 : 14, weight: .semibold))
                 .foregroundStyle(Color.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             if let label = key.label {
                 Text(label)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(minWidth: 78, maxWidth: 112, minHeight: 62, alignment: .center)
+        .padding(.horizontal, 8)
+        .frame(minWidth: 42, maxWidth: 64, minHeight: 32, alignment: .center)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.16), radius: 2, x: 0, y: 1)
+        .shadow(color: Color.black.opacity(0.12), radius: 1, x: 0, y: 1)
         .accessibilityLabel(key.accessibilityLabel)
     }
 }
@@ -1451,7 +1455,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalPage: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 16) {
             GeneralSettingsHeader()
 
             GeneralSettingsGroup {
@@ -1467,7 +1471,7 @@ struct TranscriptedSettingsView: View {
                 )
 
                 GeneralToggleRow(
-                    title: "Show Dock icon",
+                    title: "Show in Dock",
                     isOn: Binding(
                         get: { showTranscriptedInDock },
                         set: { newValue in
@@ -1478,11 +1482,11 @@ struct TranscriptedSettingsView: View {
                     ),
                     help: showTranscriptedInDock
                         ? "Transcripted is visible in the Dock."
-                        : "Transcripted is menu-bar-only while idle."
+                        : "Transcripted only appears in the menu bar."
                 )
 
                 GeneralToggleRow(
-                    title: "Feedback sounds",
+                    title: "Dictation sounds",
                     isOn: Binding(
                         get: { uiSoundsEnabled },
                         set: { newValue in
@@ -1492,12 +1496,12 @@ struct TranscriptedSettingsView: View {
                         }
                     ),
                     help: uiSoundsEnabled
-                        ? "Play start, finish, and no-speech cues."
-                        : "No dictation cues."
+                        ? "Play sounds when dictation starts and finishes."
+                        : "No dictation sounds."
                 )
 
                 GeneralToggleRow(
-                    title: "Clean up dictation",
+                    title: "Clean up pasted text",
                     isOn: Binding(
                         get: { dictationCleanupEnabled },
                         set: { newValue in
@@ -1507,16 +1511,16 @@ struct TranscriptedSettingsView: View {
                         }
                     ),
                     help: dictationCleanupEnabled
-                        ? "Remove fillers, repeated words, and spacing issues before paste."
+                        ? "Remove filler words, repeats, and spacing mistakes before pasting."
                         : "Paste the raw local transcript."
                 )
             }
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Hotkey")
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Dictation shortcut")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 16)
+                    .padding(.leading, 10)
 
                 GeneralHotkeyGroup(
                     title: "Dictation",
@@ -1528,18 +1532,18 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text("More")
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tools")
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 16)
+                    .padding(.leading, 10)
 
                 GeneralSettingsGroup {
                     GeneralActionRow(
-                        title: "Audio files",
-                        value: "Choose File",
+                        title: "Transcribe audio file",
+                        value: "Choose",
                         systemImage: "waveform",
-                        help: "Choose a WAV, MP3, M4A, AAC, or AIFF audio file to transcribe"
+                        help: "Choose an audio file to transcribe."
                     ) {
                         trackSettingsAction("import_recording", page: .general)
                         actions.importAudioFile()
@@ -1548,7 +1552,8 @@ struct TranscriptedSettingsView: View {
                     GeneralDisclosureRow(
                         title: "Corrections",
                         value: customDictionaryStatusLine,
-                        isExpanded: $showGeneralCorrections
+                        isExpanded: $showGeneralCorrections,
+                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings."
                     ) {
                         trackSettingsAction("toggle_corrections", page: .general)
                     }
@@ -1564,19 +1569,19 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalCorrectionsEditor: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Add what Transcripted heard, then what you want instead.")
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add the mistake on the left and the fix on the right.")
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
-                    Text("Heard as")
+                    Text("Mistake")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Text("Replace with")
+                    Text("Fix")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1629,7 +1634,7 @@ struct TranscriptedSettingsView: View {
                 .disabled(!hasCustomDictionaryContent)
             }
 
-            DisclosureGroup("Test a phrase", isExpanded: $showCorrectionPreview) {
+            DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
                 VStack(alignment: .leading, spacing: 8) {
                     TextField("Type a sample phrase", text: $customDictionaryPreviewInput)
                         .textFieldStyle(.roundedBorder)
@@ -1652,14 +1657,14 @@ struct TranscriptedSettingsView: View {
                 .padding(.top, 8)
             }
 
-            DisclosureGroup("Advanced text format", isExpanded: $showAdvancedCorrectionsText) {
-                VStack(alignment: .leading, spacing: 10) {
+            DisclosureGroup("Edit as text", isExpanded: $showAdvancedCorrectionsText) {
+                VStack(alignment: .leading, spacing: 8) {
                     TextEditor(text: Binding(
                         get: { customDictionaryText },
                         set: { updateCustomDictionaryText($0) }
                     ))
                     .font(.body.monospaced())
-                    .frame(minHeight: 130)
+                    .frame(minHeight: 100)
                     .padding(8)
                     .scrollContentBackground(.hidden)
                     .background(
@@ -1671,7 +1676,7 @@ struct TranscriptedSettingsView: View {
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
 
-                    Text("One per line. Old lists like `spoken -> preferred` still work here.")
+                    Text("Use one per line: wrong -> right.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -3282,16 +3287,19 @@ private struct CorrectionEditorRow: View {
         HStack(alignment: .center, spacing: 12) {
             TextField("okay ours", text: $spoken)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel(Text("Mistake"))
 
             TextField("OKRs", text: $replacement)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityLabel(Text("Fix"))
 
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(SettingsHoverButtonStyle(tone: .destructive, cornerRadius: 7))
+            .accessibilityLabel(Text("Remove correction"))
             .help("Remove this correction.")
         }
     }

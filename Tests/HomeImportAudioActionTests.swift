@@ -12,7 +12,7 @@ func testHomeImportAudioAction() {
         )) ?? ""
 
         assertTrue(
-            settingsSource.contains("title: \"Audio files\""),
+            settingsSource.contains("title: \"Transcribe audio file\""),
             "general settings should include an audio-file row"
         )
         assertTrue(
@@ -20,13 +20,13 @@ func testHomeImportAudioAction() {
             "general settings import action should call the existing audio import flow"
         )
         assertTrue(
-            settingsSource.contains("title: \"Audio files\"")
-                && settingsSource.contains("value: \"Choose File\""),
+            settingsSource.contains("title: \"Transcribe audio file\"")
+                && settingsSource.contains("value: \"Choose\""),
             "general settings should expose a visible choose-file control"
         )
         assertTrue(
-            settingsSource.contains("WAV, MP3, M4A, AAC, or AIFF"),
-            "general settings should name common supported audio formats"
+            settingsSource.contains("help: \"Choose an audio file to transcribe.\""),
+            "general settings should keep imported-audio help simple"
         )
         assertTrue(
             !homeSource.contains("HomeMeetingImportActionRow")
