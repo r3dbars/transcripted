@@ -947,7 +947,6 @@ struct TranscriptedSettingsView: View {
             return
         }
 
-        AppSoundPlayer.shared.play(.feedbackSubmitted, respectingPreferences: false)
         homeFeedbackTarget = nil
         NSWorkspace.shared.open(url)
     }

@@ -31,7 +31,7 @@ func testDictationSounds() {
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.bundledFileName, "dictation-delivered.m4a", "delivery cue file")
         assertEqual(AppSoundPlayer.Cue.noSpeech.bundledFileName, "dictation-delivered.m4a", "no speech cue file")
         assertEqual(AppSoundPlayer.Cue.meetingTranscriptComplete.bundledFileName, "meeting-transcript-complete.mp3", "meeting cue file")
-        assertEqual(AppSoundPlayer.Cue.feedbackSubmitted.bundledFileName, "wilhelm-scream.mp3", "feedback cue file")
+        assertNil(AppSoundPlayer.Cue.feedbackSubmitted.bundledFileName, "feedback should open email silently")
         assertNil(AppSoundPlayer.Cue.dictationCancelled.bundledFileName, "cancel cue should skip playback instead of using system sounds")
         assertEqual(AppSoundPlayer.Cue.dictationStart.volumeMultiplier, 1.0, "start cue volume")
         assertEqual(AppSoundPlayer.Cue.dictationDelivered.volumeMultiplier, TranscriptedConstants.deliveredCueVolumeMultiplier, "delivery cue volume")
@@ -47,7 +47,6 @@ func testDictationSounds() {
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("dictation-start.mp3").path), "dictation-start.mp3 should exist")
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("dictation-delivered.m4a").path), "dictation-delivered.m4a should exist")
         assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("meeting-transcript-complete.mp3").path), "meeting-transcript-complete.mp3 should exist")
-        assertTrue(FileManager.default.fileExists(atPath: soundsDirectory.appendingPathComponent("wilhelm-scream.mp3").path), "wilhelm-scream.mp3 should exist")
     }
 
     runSuite("AppSoundPlayer playback entrypoints are best effort") {
