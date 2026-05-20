@@ -818,6 +818,27 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Agent setup details has an explicit toggle") {
+        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+
+        assertTrue(
+            contents.contains("AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup)"),
+            "Agent settings should use the explicit setup-details toggle row"
+        )
+        assertTrue(
+            contents.contains("private struct AgentSetupDetailsDisclosure<Content: View>"),
+            "Agent setup-details disclosure should stay owned by a dedicated view"
+        )
+        assertTrue(
+            contents.contains("withAnimation(.snappy(duration: 0.18)) {\n                    isExpanded.toggle()"),
+            "Agent setup-details disclosure should toggle its expansion state directly"
+        )
+        assertFalse(
+            contents.contains("DisclosureGroup(\"Show setup details\", isExpanded: $showAdvancedAgentSetup)"),
+            "Agent setup details should not rely on the macOS DisclosureGroup click path"
+        )
+    }
+
     runSuite("Repo command contract - settings permissions refresh after async grants") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
