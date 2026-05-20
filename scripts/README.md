@@ -33,7 +33,7 @@ not have to carry the full operational logic:
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
-- `scripts/release/register-sentry-release.sh` — create and finalize the matching Sentry release after a GitHub release is published
+- `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release and upload release dSYMs after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
 ## Operational health probes

@@ -383,12 +383,16 @@ func testRepoCommandContract() {
             registerSentry.contains("sentry-cli releases new")
                 && registerSentry.contains("--finalize")
                 && registerSentry.contains("sentry-cli releases set-commits")
+                && registerSentry.contains("sentry-cli debug-files upload")
+                && registerSentry.contains("--no-sources")
+                && registerSentry.contains("SENTRY_DEBUG_FILES_PATH")
+                && registerSentry.contains("SENTRY_REQUIRE_DEBUG_FILES")
                 && registerSentry.contains("SENTRY_REPOSITORY")
                 && registerSentry.contains("v${APP_VERSION}")
                 && registerSentry.contains("--commit \"$COMMIT_SPEC\"")
                 && registerSentry.contains("Skipping finalize so reruns do not change the existing release date.")
                 && registerSentry.contains("scripts/release/sentry-release-metadata.py"),
-            "Sentry release registration should create the matching finalized release and pin commits to the matching release tag"
+            "Sentry release registration should create the matching finalized release, pin commits, and upload debug symbols"
         )
 
         let localBuildScript = readRepoTextFile("scripts/entrypoints/build.sh")
@@ -406,8 +410,16 @@ func testRepoCommandContract() {
         assertTrue(
             betaBuildScript.contains("sentry-release-metadata.py --format shell Info.plist")
                 && betaBuildScript.contains("REGISTER_SENTRY_RELEASE")
+                && betaBuildScript.contains("APP_DSYM")
+                && betaBuildScript.contains("SWIFTC_TEMP_DIR")
+                && betaBuildScript.contains("dsymutil")
+                && betaBuildScript.contains("-gline-tables-only")
+                && betaBuildScript.contains("-debug-prefix-map \"$REPO_ROOT=.\"")
+                && betaBuildScript.contains("-save-temps")
+                && betaBuildScript.contains("SENTRY_DEBUG_FILES_PATH")
+                && betaBuildScript.contains("SENTRY_REQUIRE_DEBUG_FILES")
                 && betaBuildScript.contains("register-sentry-release.sh \"$APP_VERSION\""),
-            "distribution builds should surface the Sentry release/dist and support explicit registration"
+            "distribution builds should surface the Sentry release/dist, generate dSYMs, and support explicit registration"
         )
     }
 

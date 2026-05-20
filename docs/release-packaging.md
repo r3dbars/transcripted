@@ -33,6 +33,9 @@ stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
 The same `Info.plist` metadata also drives Sentry release reporting:
 `transcripted@<CFBundleShortVersionString>` with dist set to
 `CFBundleVersion`.
+Distribution builds also generate `build/Transcripted.app.dSYM` so production
+crashes can be symbolicated in Sentry. Keep that dSYM beside the release build
+until Sentry registration has uploaded it.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
@@ -113,16 +116,20 @@ inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
 
 After the release is published on GitHub, register the matching Sentry release
-so Sentry sees a real finalized release before production events arrive:
+so Sentry sees a real finalized release before production events arrive. This
+also uploads `build/Transcripted.app.dSYM` when it is present:
 
 ```bash
 bash scripts/release/register-sentry-release.sh <version>
 ```
 
 The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
-Sentry project and associates commits when Sentry can resolve the repo. It sends
-only release metadata and commit refs; runtime crash/event payloads still flow
-through the existing Sentry sanitizers and allowlists.
+Sentry project, associates commits when Sentry can resolve the repo, and uploads
+debug symbol files through `sentry-cli debug-files upload --no-sources`. If the
+dSYM was moved, set `SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM`. If
+symbols are intentionally unavailable for a one-off local registration, set
+`SENTRY_UPLOAD_DEBUG_FILES=0`; shipped releases should not skip this because
+crash reports may lose app frames.
 
 If you expect `brew install` or `brew upgrade` to pick up the new version, do
 not stop after the GitHub release is published. You must also refresh and push

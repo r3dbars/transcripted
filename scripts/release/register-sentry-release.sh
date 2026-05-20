@@ -24,6 +24,9 @@ SENTRY_ORG="${SENTRY_ORG:-r3dbars}"
 SENTRY_PROJECT="${SENTRY_PROJECT:-apple-macos}"
 SENTRY_REPOSITORY="${SENTRY_REPOSITORY:-r3dbars/transcripted}"
 SENTRY_SET_COMMITS="${SENTRY_SET_COMMITS:-1}"
+SENTRY_UPLOAD_DEBUG_FILES="${SENTRY_UPLOAD_DEBUG_FILES:-1}"
+SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-0}"
+SENTRY_DEBUG_FILES_PATH="${SENTRY_DEBUG_FILES_PATH:-build/Transcripted.app.dSYM}"
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "Missing sentry-cli."
@@ -105,6 +108,27 @@ if [ "$SENTRY_SET_COMMITS" = "1" ]; then
         "$SENTRY_RELEASE"
 else
     echo "Skipping Sentry commit association because SENTRY_SET_COMMITS=$SENTRY_SET_COMMITS."
+fi
+
+if [ "$SENTRY_UPLOAD_DEBUG_FILES" = "1" ]; then
+    if [ -e "$SENTRY_DEBUG_FILES_PATH" ]; then
+        echo "Uploading Sentry debug files: $SENTRY_DEBUG_FILES_PATH"
+        sentry-cli debug-files upload \
+            --org "$SENTRY_ORG" \
+            --project "$SENTRY_PROJECT" \
+            --type dsym \
+            --no-sources \
+            "$SENTRY_DEBUG_FILES_PATH"
+    elif [ "$SENTRY_REQUIRE_DEBUG_FILES" = "1" ]; then
+        echo "Missing Sentry debug files: $SENTRY_DEBUG_FILES_PATH" >&2
+        echo "Build with build-beta.sh first, or set SENTRY_DEBUG_FILES_PATH to the release dSYM." >&2
+        exit 1
+    else
+        echo "Sentry debug files not found: $SENTRY_DEBUG_FILES_PATH"
+        echo "Skipping debug-file upload. Crash reports may be missing app frames."
+    fi
+else
+    echo "Skipping Sentry debug-file upload because SENTRY_UPLOAD_DEBUG_FILES=$SENTRY_UPLOAD_DEBUG_FILES."
 fi
 
 echo "Sentry release registration complete."
