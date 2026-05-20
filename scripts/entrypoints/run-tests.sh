@@ -197,6 +197,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
