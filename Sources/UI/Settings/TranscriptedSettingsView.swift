@@ -309,143 +309,6 @@ private struct GeneralExpandedContent<Content: View>: View {
     }
 }
 
-private struct GeneralHotkeyGroup: View {
-    let title: String
-    let keys: [GeneralHotkeyKey]
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if isEnabled {
-                ForEach(keys) { key in
-                    GeneralHotkeyKeycap(key: key)
-                }
-            } else {
-                Text("Dictation shortcut off")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(height: 32)
-            }
-
-            Spacer(minLength: 8)
-
-            Button(action: action) {
-                Text("Edit")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-            }
-                .buttonStyle(SettingsHoverButtonStyle(
-                    tone: .neutral,
-                    cornerRadius: 8,
-                    normalFill: Color.primary.opacity(0.035),
-                    normalStroke: Color.primary.opacity(0.08)
-                ))
-                .help("Edit \(title.lowercased()) shortcut")
-                .accessibilityLabel(Text("Edit \(title.lowercased()) shortcut"))
-        }
-        .padding(8)
-        .frame(maxWidth: 680, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
-        )
-    }
-}
-
-private struct GeneralHotkeyKeycap: View {
-    let key: GeneralHotkeyKey
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(key.symbol)
-                .font(.system(size: key.label == nil ? 15 : 14, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            if let label = key.label {
-                Text(label)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(minWidth: 42, maxWidth: 64, minHeight: 32, alignment: .center)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.12), radius: 1, x: 0, y: 1)
-        .accessibilityLabel(key.accessibilityLabel)
-    }
-}
-
-private struct GeneralHotkeyKey: Identifiable {
-    let id: String
-    let symbol: String
-    let label: String?
-    let accessibilityLabel: String
-
-    static func keys(for binding: PhysicalDictationTriggerBinding) -> [GeneralHotkeyKey] {
-        var keys = modifierKeys(for: binding.modifiers)
-        keys.append(key(for: PhysicalDictationTriggerPreferences.keyName(for: binding.keyCode)))
-        return keys
-    }
-
-    private static func modifierKeys(for modifiers: UInt32) -> [GeneralHotkeyKey] {
-        var keys: [GeneralHotkeyKey] = []
-        if modifiers & PhysicalDictationTriggerModifiers.shift != 0 {
-            keys.append(GeneralHotkeyKey(id: "shift", symbol: "⇧", label: "shift", accessibilityLabel: "Shift"))
-        }
-        if modifiers & PhysicalDictationTriggerModifiers.control != 0 {
-            keys.append(GeneralHotkeyKey(id: "control", symbol: "⌃", label: "ctrl", accessibilityLabel: "Control"))
-        }
-        if modifiers & PhysicalDictationTriggerModifiers.option != 0 {
-            keys.append(GeneralHotkeyKey(id: "option", symbol: "⌥", label: "opt", accessibilityLabel: "Option"))
-        }
-        if modifiers & PhysicalDictationTriggerModifiers.command != 0 {
-            keys.append(GeneralHotkeyKey(id: "command", symbol: "⌘", label: "cmd", accessibilityLabel: "Command"))
-        }
-        if modifiers & PhysicalDictationTriggerModifiers.function != 0 {
-            keys.append(GeneralHotkeyKey(id: "function", symbol: "fn", label: nil, accessibilityLabel: "Function"))
-        }
-        if modifiers & PhysicalDictationTriggerModifiers.capsLock != 0 {
-            keys.append(GeneralHotkeyKey(id: "caps-lock", symbol: "caps", label: nil, accessibilityLabel: "Caps Lock"))
-        }
-        return keys
-    }
-
-    private static func key(for keyName: String) -> GeneralHotkeyKey {
-        switch keyName {
-        case "Left ⇧", "Right ⇧":
-            return GeneralHotkeyKey(id: keyName, symbol: "⇧", label: "shift", accessibilityLabel: keyName)
-        case "Left ⌃", "Right ⌃":
-            return GeneralHotkeyKey(id: keyName, symbol: "⌃", label: "ctrl", accessibilityLabel: keyName)
-        case "Left ⌥", "Right ⌥":
-            return GeneralHotkeyKey(id: keyName, symbol: "⌥", label: "opt", accessibilityLabel: keyName)
-        case "Left ⌘", "Right ⌘":
-            return GeneralHotkeyKey(id: keyName, symbol: "⌘", label: "cmd", accessibilityLabel: keyName)
-        case "Fn":
-            return GeneralHotkeyKey(id: keyName, symbol: "fn", label: nil, accessibilityLabel: "Function")
-        case "Caps Lock":
-            return GeneralHotkeyKey(id: keyName, symbol: "caps", label: nil, accessibilityLabel: "Caps Lock")
-        default:
-            return GeneralHotkeyKey(id: keyName, symbol: keyName, label: nil, accessibilityLabel: keyName)
-        }
-    }
-}
-
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -1677,27 +1540,6 @@ struct TranscriptedSettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 GeneralSectionHeading(
-                    title: "Dictation shortcut",
-                    info: GeneralInfo(
-                        title: "Dictation shortcut",
-                        message: "This shows the shortcut Transcripted listens for. Use Edit to change push-to-talk or hands-free dictation shortcuts."
-                    )
-                )
-
-                GeneralHotkeyGroup(
-                    title: "Dictation",
-                    keys: generalDictationHotkeyKeys,
-                    isEnabled: dictationShortcutsEnabled
-                ) {
-                    trackSettingsAction("edit_dictation_hotkey", page: .general)
-                    withAnimation(.snappy(duration: 0.18)) {
-                        showGeneralShortcutSettings = true
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
                     title: "Tools",
                     info: GeneralInfo(
                         title: "Tools",
@@ -2165,13 +2007,6 @@ struct TranscriptedSettingsView: View {
             }
             .padding(.top, 4)
         }
-    }
-
-    private var generalDictationHotkeyKeys: [GeneralHotkeyKey] {
-        let binding = HotkeyPreferences.dictationShortcutMode() == .pushToTalk
-            ? PhysicalDictationTriggerPreferences.pushToTalkBinding()
-            : PhysicalDictationTriggerPreferences.handsFreeBinding()
-        return GeneralHotkeyKey.keys(for: binding)
     }
 
     private var modelsPage: some View {
