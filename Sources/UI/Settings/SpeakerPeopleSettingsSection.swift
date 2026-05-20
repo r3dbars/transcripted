@@ -76,6 +76,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
     @Published var profileFilter: SpeakerPeopleProfileFilter = .all
+    @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = []
     @Published private(set) var hasLoadedProfiles = false
 
     private let speakerDatabase: SpeakerDatabase
@@ -95,6 +96,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCountsByProfileID: [UUID: Int]
         let mergeTargetsByProfileID: [UUID: [SpeakerProfile]]
         let clipURLsByProfileID: [UUID: URL]
+        let reviewQueueItems: [SpeakerPendingReviewItem]
     }
 
     init(
@@ -147,6 +149,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCandidates.count
     }
 
+    var reviewQueueCount: Int {
+        reviewQueueItems.count
+    }
+
     var totalMeetingCount: Int {
         profiles.reduce(0) { $0 + $1.callCount }
     }
@@ -177,6 +183,38 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     func playSample(for speakerId: UUID) {
         guard let url = clipURL(for: speakerId) else { return }
         SpeakerClipPlayback.play(url)
+    }
+
+    func playSample(for item: SpeakerPendingReviewItem) {
+        guard let url = item.clipURL else { return }
+        SpeakerClipPlayback.play(url)
+    }
+
+    func openTranscript(for item: SpeakerPendingReviewItem) {
+        NSWorkspace.shared.open(item.transcriptURL)
+    }
+
+    func namePendingReviewItem(_ item: SpeakerPendingReviewItem, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let speakerId = item.speakerId
+        let speakerDatabase = self.speakerDatabase
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)
+            speakerDatabase.resetDisputeCount(id: speakerId)
+            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: speakerId, newName: trimmed)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
+            DispatchQueue.main.async {
+                self?.applySnapshot(snapshot)
+            }
+        }
     }
 
     func rename(profile: SpeakerProfile, to newName: String) {
@@ -286,6 +324,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
         mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
         clipURLsByProfileID = snapshot.clipURLsByProfileID
+        reviewQueueItems = snapshot.reviewQueueItems
         hasLoadedProfiles = true
         profiles = snapshot.profiles
     }
@@ -345,13 +384,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             }
         }
 
+        let reviewQueueItems = SpeakerReviewQueueScanner.loadPendingItems(
+            profiles: profiles,
+            clipURLsByProfileID: clipURLsByProfileID
+        )
+
         return Snapshot(
             profiles: profiles,
             duplicateCandidates: duplicateCandidates,
             duplicateProfileIDs: duplicateProfileIDs,
             duplicateCountsByProfileID: duplicateCountsByProfileID,
             mergeTargetsByProfileID: mergeTargetsByProfileID,
-            clipURLsByProfileID: clipURLsByProfileID
+            clipURLsByProfileID: clipURLsByProfileID,
+            reviewQueueItems: reviewQueueItems
         )
     }
 
@@ -585,6 +630,24 @@ struct SpeakerPeopleSettingsSection: View {
             )
         }
 
+        if !model.reviewQueueItems.isEmpty {
+            SettingsSection(
+                title: "Please Name These Speakers",
+                detail: reviewQueueDetail
+            ) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(model.reviewQueueItems.enumerated()), id: \.element.id) { index, item in
+                        SpeakerPendingReviewRow(item: item, model: model)
+
+                        if index < model.reviewQueueItems.count - 1 {
+                            Divider()
+                                .padding(.vertical, 10)
+                        }
+                    }
+                }
+            }
+        }
+
         if !model.duplicateCandidates.isEmpty {
             SettingsSection(
                 title: "Possible Duplicates",
@@ -628,6 +691,9 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     private var actionSectionTitle: String {
+        if model.reviewQueueCount > 0 {
+            return "Speaker Queue"
+        }
         if model.needsReviewCount > 0 {
             return "Needs Review"
         }
@@ -635,10 +701,20 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     private var actionSectionDetail: String {
+        if model.reviewQueueCount > 0 {
+            return "Deferred speaker reviews are ready to finish."
+        }
         if model.needsReviewCount > 0 {
             return "Start here when a speaker needs a name or a duplicate needs merging."
         }
         return "A quick check before browsing saved speakers."
+    }
+
+    private var reviewQueueDetail: String {
+        let count = model.reviewQueueCount
+        return count == 1
+            ? "1 voice from a saved call still needs a name."
+            : "\(count) voices from saved calls still need names."
     }
 
     private var allSpeakersDetail: String {
@@ -665,6 +741,136 @@ struct SpeakerPeopleSettingsSection: View {
 
     private static func meetingCountText(_ count: Int) -> String {
         count == 1 ? "1 meeting" : "\(count) meetings"
+    }
+}
+
+private struct SpeakerPendingReviewRow: View {
+    let item: SpeakerPendingReviewItem
+    @ObservedObject var model: SpeakerPeopleSettingsViewModel
+
+    @State private var nameDraft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 24, height: 24)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(item.speakerLabel)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+
+                        SpeakerStatusBadge(title: item.channelTitle)
+                    }
+
+                    Text(meetingLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+
+                    Text(sampleLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    nameField
+                    actionButtons
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    nameField
+                    actionButtons
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            if nameDraft.isEmpty {
+                nameDraft = item.profile.displayName ?? ""
+            }
+        }
+    }
+
+    private var nameField: some View {
+        TextField("Name this speaker", text: $nameDraft)
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 220)
+            .onSubmit(saveName)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
+            SettingsInlineActionButton(
+                title: item.clipURL == nil ? "No Sample" : "Sample",
+                symbolName: item.clipURL == nil ? "play.slash" : "play.circle.fill",
+                tone: item.clipURL == nil ? .neutral : .accent
+            ) {
+                model.playSample(for: item)
+            }
+            .disabled(item.clipURL == nil)
+
+            SettingsInlineActionButton(title: "Open Call", symbolName: "doc.text") {
+                model.openTranscript(for: item)
+            }
+
+            SettingsInlineActionButton(title: "Save Name", tone: .accent) {
+                saveName()
+            }
+            .disabled(!canSave)
+        }
+    }
+
+    private var meetingLine: String {
+        var parts = [item.meetingTitle]
+        if let dateText = Self.dateFormatter.stringIfAvailable(from: item.recordedAt ?? item.fallbackDate) {
+            parts.append(dateText)
+        }
+        let calls = item.callCount == 1 ? "1 call" : "\(item.callCount) calls"
+        parts.append(calls)
+        return parts.joined(separator: " - ")
+    }
+
+    private var sampleLine: String {
+        guard let sampleText = item.sampleText,
+              !sampleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "No transcript sample found for this voice."
+        }
+        return "\"\(sampleText)\""
+    }
+
+    private var canSave: Bool {
+        !nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func saveName() {
+        guard canSave else { return }
+        model.namePendingReviewItem(item, to: nameDraft)
+        nameDraft = ""
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
+private extension DateFormatter {
+    func stringIfAvailable(from date: Date) -> String? {
+        date == .distantPast ? nil : string(from: date)
     }
 }
 

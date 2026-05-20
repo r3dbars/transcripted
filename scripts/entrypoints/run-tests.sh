@@ -241,6 +241,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
+    "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
 )
 
 TEST_BINARY="$BUILD_DIR/tests"
