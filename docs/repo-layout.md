@@ -27,6 +27,8 @@ bash build-deps.sh
 bash build.sh
 bash run-tests.sh
 bash run-integration-smoke.sh
+bash run-e2e-smoke.sh
+bash run-live-capture-smoke.sh
 bash run-daily-audio-reliability.sh
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
@@ -42,6 +44,8 @@ Command ownership:
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
+- `run-e2e-smoke.sh` — thin root wrapper for deterministic release-critical artifact smoke
+- `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output
 - `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
