@@ -10,6 +10,13 @@ struct MeetingAudioPlaybackChoice: Equatable, Identifiable, Sendable {
 struct MeetingAudioAttachment: Equatable, Sendable {
     let directoryURL: URL
     let urls: [URL]
+    let retranscriptionURLs: [URL]
+
+    init(directoryURL: URL, urls: [URL], retranscriptionURLs: [URL]? = nil) {
+        self.directoryURL = directoryURL
+        self.urls = urls
+        self.retranscriptionURLs = retranscriptionURLs ?? urls
+    }
 
     static func retainedAudio(urls: [URL]) -> MeetingAudioAttachment? {
         guard let firstURL = urls.first else { return nil }
@@ -99,13 +106,46 @@ struct MeetingAudioAttachment: Equatable, Sendable {
             }
             .first
     }
+
+    var retranscriptionInput: MeetingRetranscriptionInput? {
+        MeetingRetranscriptionInput.make(from: retranscriptionURLs)
+    }
+}
+
+struct MeetingRetranscriptionInput: Equatable, Sendable {
+    let micURL: URL?
+    let systemURL: URL
+
+    static func make(from urls: [URL]) -> MeetingRetranscriptionInput? {
+        let filesByStem = urls.reduce(into: [String: URL]()) { result, url in
+            let stem = url.deletingPathExtension().lastPathComponent
+            result[stem] = result[stem] ?? url
+        }
+
+        if let playbackURL = filesByStem[MeetingAudioArchiveResolver.playbackStem] {
+            return MeetingRetranscriptionInput(micURL: nil, systemURL: playbackURL)
+        }
+
+        if let importedURL = filesByStem[MeetingAudioArchiveResolver.importedStem] {
+            return MeetingRetranscriptionInput(micURL: nil, systemURL: importedURL)
+        }
+
+        guard let systemURL = filesByStem[MeetingAudioArchiveResolver.systemStem] else {
+            return nil
+        }
+
+        return MeetingRetranscriptionInput(
+            micURL: filesByStem[MeetingAudioArchiveResolver.microphoneStem],
+            systemURL: systemURL
+        )
+    }
 }
 
 enum MeetingAudioArchiveResolver {
-    private static let playbackStem = "playback"
-    private static let importedStem = "recording"
-    private static let systemStem = "system_audio"
-    private static let microphoneStem = "microphone"
+    static let playbackStem = "playback"
+    static let importedStem = "recording"
+    static let systemStem = "system_audio"
+    static let microphoneStem = "microphone"
 
     static func attachment(
         forTranscript transcriptURL: URL,
@@ -131,18 +171,30 @@ enum MeetingAudioArchiveResolver {
             return values?.isRegularFile == true
         }
 
+        let systemURL = firstAudioFile(named: systemStem, in: regularFiles)
+        let microphoneURL = firstAudioFile(named: microphoneStem, in: regularFiles)
+        let liveURLs = [systemURL, microphoneURL].compactMap { $0 }
+        let splitRetranscriptionURLs: [URL]?
+        if let systemURL, let microphoneURL {
+            splitRetranscriptionURLs = [systemURL, microphoneURL]
+        } else {
+            splitRetranscriptionURLs = nil
+        }
+
         if let playbackURL = firstAudioFile(named: playbackStem, in: regularFiles) {
-            return MeetingAudioAttachment(directoryURL: directoryURL, urls: [playbackURL])
+            return MeetingAudioAttachment(
+                directoryURL: directoryURL,
+                urls: [playbackURL],
+                retranscriptionURLs: splitRetranscriptionURLs
+            )
         }
 
         if let importedURL = firstAudioFile(named: importedStem, in: regularFiles) {
-            return MeetingAudioAttachment(directoryURL: directoryURL, urls: [importedURL])
+            return MeetingAudioAttachment(
+                directoryURL: directoryURL,
+                urls: [importedURL]
+            )
         }
-
-        let liveURLs = [
-            firstAudioFile(named: systemStem, in: regularFiles),
-            firstAudioFile(named: microphoneStem, in: regularFiles)
-        ].compactMap { $0 }
 
         guard !liveURLs.isEmpty else { return nil }
         return MeetingAudioAttachment(directoryURL: directoryURL, urls: liveURLs)

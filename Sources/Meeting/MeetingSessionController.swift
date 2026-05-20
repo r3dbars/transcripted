@@ -36,6 +36,7 @@ final class MeetingSessionController: ObservableObject {
         case onboarding = "onboarding"
         case detectedPrompt = "detected_prompt"
         case fileImport = "file_import"
+        case savedMeetingRetranscription = "saved_meeting_retranscription"
         case unknown = "unknown"
     }
 
@@ -1123,6 +1124,76 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    @discardableResult
+    func retranscribeSavedMeeting(
+        micAudioURL: URL?,
+        systemAudioURL: URL,
+        title: String?
+    ) async -> Bool {
+        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
+            state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
+            return false
+        }
+        guard !isCaptureSessionActive else {
+            state = .error("Stop the current meeting before re-transcribing saved audio.")
+            return false
+        }
+        guard !hasBackgroundTranscriptionWork else {
+            state = .error("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.")
+            return false
+        }
+        guard !isSpeakerReviewPending else {
+            state = .error("Finish the speaker review window before re-transcribing saved audio.")
+            return false
+        }
+
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_saved_audio_retranscription_requested",
+            message: "Saved meeting audio retranscription requested",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "mic_stream_present": boolString(micAudioURL != nil),
+                    "trigger": StartTrigger.savedMeetingRetranscription.rawValue
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_saved_audio_retranscription_requested",
+            properties: [
+                "mic_stream_present": boolString(micAudioURL != nil),
+                "trigger": StartTrigger.savedMeetingRetranscription.rawValue
+            ]
+        )
+
+        if case .idle = state {
+            await prepareModels()
+        } else if case .loadingModels = state {
+            await prepareModels()
+        } else if case .error = state {
+            await prepareModels()
+        }
+        if case .ready = state, !isSpeechModelPreparedForSelection {
+            await prepareModels()
+        }
+
+        guard case .ready = state else {
+            return false
+        }
+
+        activeTranscriptionTrigger = .savedMeetingRetranscription
+        state = .transcribing
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "saved_audio_retranscribing")
+        taskManager.startSavedAudioRetranscription(
+            micURL: micAudioURL,
+            systemURL: systemAudioURL,
+            outputFolder: MeetingStoragePaths.transcriptsFolder,
+            meetingTitle: title,
+            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+        )
+        return true
+    }
+
     func dismissFailedMeeting(id: UUID) {
         retryingFailedMeetingIDs.remove(id)
         failedManager.removeFailedTranscription(id: id)
@@ -1668,7 +1739,8 @@ final class MeetingSessionController: ObservableObject {
         guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
         guard !isCaptureSessionActive else { return }
         if MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
-            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil
+            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil,
+            hasSpeakerReviewWork: snapshot.speakerNamingRequest != nil
         ) {
             activeTranscriptionTrigger = .unknown
         }
