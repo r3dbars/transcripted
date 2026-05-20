@@ -230,7 +230,8 @@ struct MeetingFailureExplanation: Equatable {
              .audioDeviceUnavailable,
              .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .retryableAfterUserAction
         default:
             return .permanent
@@ -272,7 +273,8 @@ struct MeetingFailureExplanation: Equatable {
         switch failureKind {
         case .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .recoverableFailure
         default:
             return .permanentFailure
