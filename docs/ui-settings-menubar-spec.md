@@ -156,6 +156,7 @@ Contents:
 - imported-audio transcription
 - dictated-text cleanup
 - custom words and spoken-text corrections
+- compact dictation hotkey summary with editing handoff to `Shortcuts`
 
 ### Models
 

@@ -39,6 +39,328 @@ private struct SettingsSidebarRow: View {
     }
 }
 
+private struct GeneralSettingsHeader: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .frame(width: 44, height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.primary.opacity(0.20))
+                )
+
+            Text("General")
+                .font(.system(size: 31, weight: .semibold))
+        }
+    }
+}
+
+private struct GeneralSettingsGroup<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
+        )
+    }
+}
+
+private struct GeneralToggleRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    var help: String
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            Spacer(minLength: 16)
+
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.large)
+                .tint(.accentColor)
+                .help(help)
+                .accessibilityLabel(Text(title))
+                .accessibilityValue(Text(isOn ? "On" : "Off"))
+                .accessibilityHint(Text(help))
+        }
+        .padding(.horizontal, 22)
+        .frame(minHeight: 72)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
+private struct GeneralActionRow: View {
+    let title: String
+    let value: String
+    let systemImage: String?
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Spacer(minLength: 16)
+
+                HStack(spacing: 8) {
+                    if let systemImage {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    Text(value)
+                        .font(.system(size: 17, weight: .semibold))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(Color.secondary)
+            }
+            .padding(.horizontal, 22)
+            .frame(minHeight: 72)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .background(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { isHovering = $0 }
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(value))
+        .accessibilityHint(Text(help))
+    }
+}
+
+private struct GeneralDisclosureRow: View {
+    let title: String
+    let value: String
+    @Binding var isExpanded: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                isExpanded.toggle()
+            }
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Spacer(minLength: 16)
+
+                Text(value)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(Color.primary.opacity(isHovering ? 0.10 : 0.06))
+                    )
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .padding(.horizontal, 22)
+            .frame(minHeight: 72)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .background(isHovering ? Color.primary.opacity(0.035) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(value))
+    }
+}
+
+private struct GeneralExpandedContent<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.025))
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+}
+
+private struct GeneralHotkeyGroup: View {
+    let title: String
+    let keys: [GeneralHotkeyKey]
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if isEnabled {
+                ForEach(keys) { key in
+                    GeneralHotkeyKeycap(key: key)
+                }
+            } else {
+                Text("Shortcuts off")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(height: 62)
+            }
+
+            Spacer(minLength: 14)
+
+            Button(action: action) {
+                Text("Edit")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+            }
+                .buttonStyle(SettingsHoverButtonStyle(
+                    tone: .neutral,
+                    cornerRadius: 8,
+                    normalFill: Color.primary.opacity(0.035),
+                    normalStroke: Color.primary.opacity(0.08)
+                ))
+                .help("Edit \(title.lowercased()) shortcut")
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.88))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.11), lineWidth: 1)
+        )
+    }
+}
+
+private struct GeneralHotkeyKeycap: View {
+    let key: GeneralHotkeyKey
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(key.symbol)
+                .font(.system(size: key.label == nil ? 24 : 22, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            if let label = key.label {
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minWidth: 78, maxWidth: 112, minHeight: 62, alignment: .center)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.16), radius: 2, x: 0, y: 1)
+        .accessibilityLabel(key.accessibilityLabel)
+    }
+}
+
+private struct GeneralHotkeyKey: Identifiable {
+    let id: String
+    let symbol: String
+    let label: String?
+    let accessibilityLabel: String
+
+    static func keys(for binding: PhysicalDictationTriggerBinding) -> [GeneralHotkeyKey] {
+        var keys = modifierKeys(for: binding.modifiers)
+        keys.append(key(for: PhysicalDictationTriggerPreferences.keyName(for: binding.keyCode)))
+        return keys
+    }
+
+    private static func modifierKeys(for modifiers: UInt32) -> [GeneralHotkeyKey] {
+        var keys: [GeneralHotkeyKey] = []
+        if modifiers & PhysicalDictationTriggerModifiers.shift != 0 {
+            keys.append(GeneralHotkeyKey(id: "shift", symbol: "⇧", label: "shift", accessibilityLabel: "Shift"))
+        }
+        if modifiers & PhysicalDictationTriggerModifiers.control != 0 {
+            keys.append(GeneralHotkeyKey(id: "control", symbol: "⌃", label: "ctrl", accessibilityLabel: "Control"))
+        }
+        if modifiers & PhysicalDictationTriggerModifiers.option != 0 {
+            keys.append(GeneralHotkeyKey(id: "option", symbol: "⌥", label: "opt", accessibilityLabel: "Option"))
+        }
+        if modifiers & PhysicalDictationTriggerModifiers.command != 0 {
+            keys.append(GeneralHotkeyKey(id: "command", symbol: "⌘", label: "cmd", accessibilityLabel: "Command"))
+        }
+        if modifiers & PhysicalDictationTriggerModifiers.function != 0 {
+            keys.append(GeneralHotkeyKey(id: "function", symbol: "fn", label: nil, accessibilityLabel: "Function"))
+        }
+        if modifiers & PhysicalDictationTriggerModifiers.capsLock != 0 {
+            keys.append(GeneralHotkeyKey(id: "caps-lock", symbol: "caps", label: nil, accessibilityLabel: "Caps Lock"))
+        }
+        return keys
+    }
+
+    private static func key(for keyName: String) -> GeneralHotkeyKey {
+        switch keyName {
+        case "Left ⇧", "Right ⇧":
+            return GeneralHotkeyKey(id: keyName, symbol: "⇧", label: "shift", accessibilityLabel: keyName)
+        case "Left ⌃", "Right ⌃":
+            return GeneralHotkeyKey(id: keyName, symbol: "⌃", label: "ctrl", accessibilityLabel: keyName)
+        case "Left ⌥", "Right ⌥":
+            return GeneralHotkeyKey(id: keyName, symbol: "⌥", label: "opt", accessibilityLabel: keyName)
+        case "Left ⌘", "Right ⌘":
+            return GeneralHotkeyKey(id: keyName, symbol: "⌘", label: "cmd", accessibilityLabel: keyName)
+        case "Fn":
+            return GeneralHotkeyKey(id: keyName, symbol: "fn", label: nil, accessibilityLabel: "Function")
+        case "Caps Lock":
+            return GeneralHotkeyKey(id: keyName, symbol: "caps", label: nil, accessibilityLabel: "Caps Lock")
+        default:
+            return GeneralHotkeyKey(id: keyName, symbol: keyName, label: nil, accessibilityLabel: keyName)
+        }
+    }
+}
+
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
@@ -61,6 +383,7 @@ struct TranscriptedSettingsView: View {
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
+    @State private var showGeneralCorrections = false
     @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
     @State private var showAdvancedCorrectionsText = false
@@ -1128,26 +1451,23 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(title: "General")
+        VStack(alignment: .leading, spacing: 28) {
+            GeneralSettingsHeader()
 
-            SettingsSection(title: "App") {
-                SettingsToggleRow(
-                    title: "Open at login",
-                    detail: launchAtLoginStatus,
+            GeneralSettingsGroup {
+                GeneralToggleRow(
+                    title: "Launch at login",
                     isOn: Binding(
                         get: { launchAtLoginEnabled },
                         set: { newValue in
                             updateLaunchAtLogin(newValue)
                         }
-                    )
+                    ),
+                    help: launchAtLoginStatus
                 )
 
-                SettingsToggleRow(
-                    title: "Show in Dock",
-                    detail: showTranscriptedInDock
-                        ? "Keep Transcripted visible in the Dock."
-                        : "Hide the Dock icon while idle. Recording can still bring Transcripted forward if needed.",
+                GeneralToggleRow(
+                    title: "Show Dock icon",
                     isOn: Binding(
                         get: { showTranscriptedInDock },
                         set: { newValue in
@@ -1155,16 +1475,14 @@ struct TranscriptedSettingsView: View {
                             trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
                             DockVisibilityPreferences.setVisible(newValue)
                         }
-                    )
+                    ),
+                    help: showTranscriptedInDock
+                        ? "Transcripted is visible in the Dock."
+                        : "Transcripted is menu-bar-only while idle."
                 )
-            }
 
-            SettingsSection(title: "Dictation") {
-                SettingsToggleRow(
+                GeneralToggleRow(
                     title: "Feedback sounds",
-                    detail: uiSoundsEnabled
-                        ? "Play start, finish, and no-speech cues."
-                        : "No dictation cues.",
                     isOn: Binding(
                         get: { uiSoundsEnabled },
                         set: { newValue in
@@ -1172,14 +1490,14 @@ struct TranscriptedSettingsView: View {
                             trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
                             UISoundPreferences.setEnabled(newValue)
                         }
-                    )
+                    ),
+                    help: uiSoundsEnabled
+                        ? "Play start, finish, and no-speech cues."
+                        : "No dictation cues."
                 )
 
-                SettingsToggleRow(
-                    title: "Clean up text before paste",
-                    detail: dictationCleanupEnabled
-                        ? "Remove clear fillers, repeated words, and spacing issues."
-                        : "Paste the raw local transcript.",
+                GeneralToggleRow(
+                    title: "Clean up dictation",
                     isOn: Binding(
                         get: { dictationCleanupEnabled },
                         set: { newValue in
@@ -1188,162 +1506,186 @@ struct TranscriptedSettingsView: View {
                             trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
                         }
                     ),
-                    help: "Clean up dictated text before paste"
+                    help: dictationCleanupEnabled
+                        ? "Remove fillers, repeated words, and spacing issues before paste."
+                        : "Paste the raw local transcript."
                 )
             }
 
-            SettingsSection(title: "Audio Files") {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Turn an existing recording into Markdown.")
-                            .font(.subheadline.weight(.medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("WAV, MP3, M4A, AAC, or AIFF")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Hotkey")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
 
-                    Spacer(minLength: 8)
+                GeneralHotkeyGroup(
+                    title: "Dictation",
+                    keys: generalDictationHotkeyKeys,
+                    isEnabled: dictationShortcutsEnabled
+                ) {
+                    trackSettingsAction("edit_dictation_hotkey", page: .general)
+                    navigation.selectedPage = .shortcuts
+                }
+            }
 
-                    SettingsInlineActionButton(
-                        title: "Choose File",
-                        symbolName: "waveform",
-                        tone: .accent
+            VStack(alignment: .leading, spacing: 14) {
+                Text("More")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
+
+                GeneralSettingsGroup {
+                    GeneralActionRow(
+                        title: "Audio files",
+                        value: "Choose File",
+                        systemImage: "waveform",
+                        help: "Choose a WAV, MP3, M4A, AAC, or AIFF audio file to transcribe"
                     ) {
                         trackSettingsAction("import_recording", page: .general)
                         actions.importAudioFile()
                     }
-                    .help("Choose a WAV, MP3, M4A, AAC, or AIFF audio file to transcribe")
-                }
-            }
 
-            SettingsSection(title: "Corrections") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Add what Transcripted heard, then what you want instead.")
-                        .font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 12) {
-                            Text("Heard as")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text("Replace with")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Color.clear
-                                .frame(width: 28, height: 1)
-                        }
-
-                        ForEach(customDictionaryRows) { row in
-                            CorrectionEditorRow(
-                                spoken: Binding(
-                                    get: { row.spoken },
-                                    set: { updateCorrectionSpoken($0, for: row.id) }
-                                ),
-                                replacement: Binding(
-                                    get: { row.replacement },
-                                    set: { updateCorrectionReplacement($0, for: row.id) }
-                                ),
-                                onRemove: {
-                                    trackSettingsAction("remove_correction", page: .general)
-                                    removeCorrectionRow(row.id)
-                                }
-                            )
-                        }
+                    GeneralDisclosureRow(
+                        title: "Corrections",
+                        value: customDictionaryStatusLine,
+                        isExpanded: $showGeneralCorrections
+                    ) {
+                        trackSettingsAction("toggle_corrections", page: .general)
                     }
 
-                    HStack {
-                        Button {
-                            trackSettingsAction("add_correction", page: .general)
-                            addCorrectionRow()
-                        } label: {
-                            Label("Add correction", systemImage: "plus")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                        }
-                        .buttonStyle(SettingsHoverButtonStyle(
-                            tone: .accent,
-                            cornerRadius: 8,
-                            normalFill: Color.accentColor.opacity(0.08),
-                            normalStroke: Color.accentColor.opacity(0.16)
-                        ))
-
-                        Spacer()
-
-                        SettingsInlineActionButton(title: "Clear all", tone: .destructive) {
-                            trackSettingsAction("clear_corrections", page: .general)
-                            clearCorrectionRows()
-                        }
-                        .disabled(!hasCustomDictionaryContent)
-                    }
-
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(customDictionaryStatusLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-                    }
-
-                    DisclosureGroup("Test a phrase", isExpanded: $showCorrectionPreview) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            TextField("Type a sample phrase", text: $customDictionaryPreviewInput)
-                                .textFieldStyle(.roundedBorder)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Result")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-
-                                Text(customDictionaryPreviewOutput)
-                                    .font(.body)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
-                                    )
-                            }
-                        }
-                        .padding(.top, 8)
-                    }
-
-                    DisclosureGroup("Advanced text format", isExpanded: $showAdvancedCorrectionsText) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TextEditor(text: Binding(
-                                get: { customDictionaryText },
-                                set: { updateCustomDictionaryText($0) }
-                            ))
-                            .font(.body.monospaced())
-                            .frame(minHeight: 130)
-                            .padding(8)
-                            .scrollContentBackground(.hidden)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                            )
-
-                            Text("One per line. Old lists like `spoken -> preferred` still work here.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                    if showGeneralCorrections {
+                        GeneralExpandedContent {
+                            generalCorrectionsEditor
                         }
                     }
-                    .padding(.top, 4)
                 }
             }
         }
+    }
+
+    private var generalCorrectionsEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Add what Transcripted heard, then what you want instead.")
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Text("Heard as")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Replace with")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Color.clear
+                        .frame(width: 28, height: 1)
+                }
+
+                ForEach(customDictionaryRows) { row in
+                    CorrectionEditorRow(
+                        spoken: Binding(
+                            get: { row.spoken },
+                            set: { updateCorrectionSpoken($0, for: row.id) }
+                        ),
+                        replacement: Binding(
+                            get: { row.replacement },
+                            set: { updateCorrectionReplacement($0, for: row.id) }
+                        ),
+                        onRemove: {
+                            trackSettingsAction("remove_correction", page: .general)
+                            removeCorrectionRow(row.id)
+                        }
+                    )
+                }
+            }
+
+            HStack {
+                Button {
+                    trackSettingsAction("add_correction", page: .general)
+                    addCorrectionRow()
+                } label: {
+                    Label("Add correction", systemImage: "plus")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(SettingsHoverButtonStyle(
+                    tone: .accent,
+                    cornerRadius: 8,
+                    normalFill: Color.accentColor.opacity(0.08),
+                    normalStroke: Color.accentColor.opacity(0.16)
+                ))
+
+                Spacer()
+
+                SettingsInlineActionButton(title: "Clear all", tone: .destructive) {
+                    trackSettingsAction("clear_corrections", page: .general)
+                    clearCorrectionRows()
+                }
+                .disabled(!hasCustomDictionaryContent)
+            }
+
+            DisclosureGroup("Test a phrase", isExpanded: $showCorrectionPreview) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Type a sample phrase", text: $customDictionaryPreviewInput)
+                        .textFieldStyle(.roundedBorder)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Result")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text(customDictionaryPreviewOutput)
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.55))
+                            )
+                    }
+                }
+                .padding(.top, 8)
+            }
+
+            DisclosureGroup("Advanced text format", isExpanded: $showAdvancedCorrectionsText) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextEditor(text: Binding(
+                        get: { customDictionaryText },
+                        set: { updateCustomDictionaryText($0) }
+                    ))
+                    .font(.body.monospaced())
+                    .frame(minHeight: 130)
+                    .padding(8)
+                    .scrollContentBackground(.hidden)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.72))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+
+                    Text("One per line. Old lists like `spoken -> preferred` still work here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var generalDictationHotkeyKeys: [GeneralHotkeyKey] {
+        let binding = HotkeyPreferences.dictationShortcutMode() == .pushToTalk
+            ? PhysicalDictationTriggerPreferences.pushToTalkBinding()
+            : PhysicalDictationTriggerPreferences.handsFreeBinding()
+        return GeneralHotkeyKey.keys(for: binding)
     }
 
     private var modelsPage: some View {

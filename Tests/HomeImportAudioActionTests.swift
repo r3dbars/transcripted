@@ -12,16 +12,16 @@ func testHomeImportAudioAction() {
         )) ?? ""
 
         assertTrue(
-            settingsSource.contains("SettingsSection(title: \"Audio Files\")"),
-            "general settings should include an audio-file section"
+            settingsSource.contains("title: \"Audio files\""),
+            "general settings should include an audio-file row"
         )
         assertTrue(
             settingsSource.contains("actions.importAudioFile()"),
             "general settings import action should call the existing audio import flow"
         )
         assertTrue(
-            settingsSource.contains("Turn an existing recording into Markdown.")
-                && settingsSource.contains("title: \"Choose File\""),
+            settingsSource.contains("title: \"Audio files\"")
+                && settingsSource.contains("value: \"Choose File\""),
             "general settings should expose a visible choose-file control"
         )
         assertTrue(
