@@ -22,6 +22,31 @@ extension TranscriptSaver {
         }
     }
 
+    /// Name one deferred review row in its saved transcript.
+    ///
+    /// Deferred rows can reuse labels across channels, e.g. both `Mic/Speaker 1`
+    /// and `System/Speaker 1` in the same meeting. This path scopes the rewrite
+    /// to the queued row's transcript, channel, diarizer id, and database id so
+    /// naming one row cannot rename its channel-local neighbor.
+    @discardableResult
+    public static func updateDeferredSpeakerName(
+        transcriptURL: URL,
+        dbId: UUID,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        newName: String
+    ) -> Bool {
+        fileUpdateQueue.sync {
+            _updateDeferredSpeakerNameImpl(
+                transcriptURL: transcriptURL,
+                dbId: dbId,
+                diarizerSpeakerId: diarizerSpeakerId,
+                channel: channel,
+                newName: newName
+            )
+        }
+    }
+
     /// After Settings merges two people, rewrite old source profile references to the
     /// kept profile id so future renames of the kept person still reach older transcripts.
     public static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String) {
@@ -98,6 +123,61 @@ extension TranscriptSaver {
         if updatedCount > 0 {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
+        }
+    }
+
+    private static func _updateDeferredSpeakerNameImpl(
+        transcriptURL: URL,
+        dbId: UUID,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        newName: String
+    ) -> Bool {
+        guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+            AppLogger.pipeline.error("Failed to read deferred speaker transcript", ["path": transcriptURL.path])
+            return false
+        }
+
+        guard let oldName = currentSpeakerName(
+            in: content,
+            diarizerSpeakerId: diarizerSpeakerId,
+            channel: channel,
+            matchingDbId: dbId
+        ) else {
+            AppLogger.pipeline.warning("Deferred speaker metadata no longer matches queued row", [
+                "path": transcriptURL.lastPathComponent,
+                "dbId": dbId.uuidString,
+                "diarizerSpeakerId": diarizerSpeakerId,
+                "channel": channel.rawValue
+            ])
+            return false
+        }
+
+        writeFrontmatterSpeakerMetadata(
+            in: &content,
+            diarizerSpeakerId: diarizerSpeakerId,
+            channel: channel,
+            persistentSpeakerId: dbId,
+            name: newName,
+            source: NameSource.userManual
+        )
+        applyScopedNameReplacement(
+            in: &content,
+            oldName: oldName,
+            newName: newName,
+            channel: channel
+        )
+
+        do {
+            try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            restrictTranscriptToOwnerOnly(transcriptURL)
+            return true
+        } catch {
+            AppLogger.pipeline.warning("Failed to update deferred speaker transcript", [
+                "file": transcriptURL.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 
@@ -645,6 +725,51 @@ extension TranscriptSaver {
         }
     }
 
+    private static func applyScopedNameReplacement(
+        in content: inout String,
+        oldName: String,
+        newName: String,
+        channel: UtteranceChannel
+    ) {
+        let prefix = channel == .mic ? "Mic" : "System"
+        content = content.replacingOccurrences(
+            of: "[\(prefix)/\(oldName)]",
+            with: "[\(prefix)/\(newName)]"
+        )
+        replaceSpeakerBreakdownName(
+            in: &content,
+            oldName: oldName,
+            newName: newName,
+            channel: channel
+        )
+    }
+
+    private static func replaceSpeakerBreakdownName(
+        in content: inout String,
+        oldName: String,
+        newName: String,
+        channel: UtteranceChannel
+    ) {
+        let header = channel == .mic
+            ? "#### Local Speaker Breakdown\n\n"
+            : "#### Remote Speaker Breakdown\n\n"
+        guard let headerRange = content.range(of: header) else { return }
+
+        let footerCandidates = [
+            "\n\n#### ",
+            "\n\n### ",
+            "\n\n## ",
+            "\n\n---\n\n",
+        ]
+        let footerStart = footerCandidates
+            .compactMap { content.range(of: $0, range: headerRange.upperBound..<content.endIndex)?.lowerBound }
+            .min() ?? content.endIndex
+        let breakdownRange = headerRange.upperBound..<footerStart
+        let replacement = String(content[breakdownRange])
+            .replacingOccurrences(of: "- **\(oldName):**", with: "- **\(newName):**")
+        content.replaceSubrange(breakdownRange, with: replacement)
+    }
+
     /// Parse a YAML double-quoted string value after a known key prefix.
     /// Handles backslash escape sequences (`\"`, `\\`, etc.) and returns the unescaped value.
     /// Returns nil if the prefix is not found or the closing quote is missing.
@@ -857,6 +982,52 @@ extension TranscriptSaver {
                     .dropFirst("name:".count)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            }
+
+            return nil
+        }
+
+        return nil
+    }
+
+    private static func currentSpeakerName(
+        in content: String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        matchingDbId dbId: UUID
+    ) -> String? {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
+
+        let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
+        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
+        let targetDbId = dbId.uuidString
+        var lineIndex = 0
+
+        while lineIndex < lines.count {
+            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- "), trimmed.contains(targetIdLine) else {
+                lineIndex += 1
+                continue
+            }
+
+            let nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: {
+                $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+            }) ?? lines.count
+
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: channel),
+                  block.contains(where: { line in
+                      let trimmed = line.trimmingCharacters(in: .whitespaces)
+                      return trimmed == #"db_id: "\#(targetDbId)""# || trimmed == "db_id: \(targetDbId)"
+                  }) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
+            for index in (lineIndex + 1)..<nextEntryIndex {
+                let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                guard candidate.hasPrefix("name:") else { continue }
+                return extractYAMLQuotedString(from: candidate, prefix: "name: ")
             }
 
             return nil

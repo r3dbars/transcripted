@@ -199,13 +199,22 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         let speakerId = item.speakerId
+        let diarizerSpeakerId = item.diarizerSpeakerId
+        let channel = item.channel
+        let transcriptURL = item.transcriptURL
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)
             speakerDatabase.resetDisputeCount(id: speakerId)
-            TranscriptSaver.retroactivelyUpdateSpeaker(dbId: speakerId, newName: trimmed)
+            TranscriptSaver.updateDeferredSpeakerName(
+                transcriptURL: transcriptURL,
+                dbId: speakerId,
+                diarizerSpeakerId: diarizerSpeakerId,
+                channel: channel,
+                newName: trimmed
+            )
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,

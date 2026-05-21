@@ -130,6 +130,61 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Speaker 1]"))
     }
 
+    func testUpdateDeferredSpeakerNameOnlyRenamesQueuedChannelSpeaker() throws {
+        let micId = UUID()
+        let systemId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("channel-collision.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(micId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "1"
+            channel: system
+            db_id: "\(systemId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        #### Local Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Speaker 1] remote hello
+        [00:01] [Mic/Speaker 1] room hello
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: systemId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"db_id: "\#(systemId.uuidString)""#))
+        XCTAssertTrue(updated.contains(#"name: "Taylor""#))
+        XCTAssertTrue(updated.contains("[System/Taylor]"))
+        XCTAssertTrue(updated.contains("- **Taylor:** 1 utterances, ~2 words, 00:01"))
+        XCTAssertTrue(updated.contains(#"db_id: "\#(micId.uuidString)""#))
+        XCTAssertTrue(updated.contains("[Mic/Speaker 1]"))
+        XCTAssertTrue(updated.contains("- **Speaker 1:** 1 utterances, ~2 words, 00:01"))
+        XCTAssertFalse(updated.contains("[Mic/Taylor]"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()
