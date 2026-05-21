@@ -229,6 +229,44 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(second.contains("[System/Speaker 2]"))
     }
 
+    func testUpdateDeferredSpeakerNameTreatsMissingChannelAsLegacySystemAudio() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("legacy-system.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Speaker 1] remote hello
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Taylor""#))
+        XCTAssertTrue(updated.contains("source: user_manual"))
+        XCTAssertTrue(updated.contains("[System/Taylor]"))
+        XCTAssertFalse(updated.contains("[System/Speaker 1]"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()

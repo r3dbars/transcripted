@@ -199,21 +199,27 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         let speakerId = item.speakerId
-        let matchingReviewItems = reviewQueueItems.filter { $0.speakerId == speakerId }
+        let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == speakerId }
+        let matchingReviewItems = queuedReviewItems.isEmpty ? [item] : queuedReviewItems
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)
-            speakerDatabase.resetDisputeCount(id: speakerId)
+            var allTranscriptUpdatesSucceeded = true
             for reviewItem in matchingReviewItems {
-                TranscriptSaver.updateDeferredSpeakerName(
+                let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
                     transcriptURL: reviewItem.transcriptURL,
                     dbId: speakerId,
                     diarizerSpeakerId: reviewItem.diarizerSpeakerId,
                     channel: reviewItem.channel,
                     newName: trimmed
                 )
+                allTranscriptUpdatesSucceeded = allTranscriptUpdatesSucceeded && didUpdate
+            }
+
+            if allTranscriptUpdatesSucceeded {
+                speakerDatabase.setDisplayName(id: speakerId, name: trimmed, source: NameSource.userManual)
+                speakerDatabase.resetDisputeCount(id: speakerId)
             }
             let snapshot = Self.snapshot(
                 from: speakerDatabase,

@@ -158,13 +158,13 @@ enum SpeakerReviewQueueScanner {
         func finishCurrent() {
             guard let current,
                   let id = current["id"],
-                  let rawChannel = current["channel"],
-                  let channel = UtteranceChannel(rawValue: rawChannel),
                   let name = current["name"],
                   let source = current["source"] else {
                 return
             }
 
+            let channel = current["channel"]
+                .flatMap { UtteranceChannel(rawValue: $0) } ?? .system
             speakers.append(FrontmatterSpeaker(
                 id: id,
                 channel: channel,

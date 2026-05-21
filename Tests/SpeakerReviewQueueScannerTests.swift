@@ -54,6 +54,44 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(items.count, 0, "named profiles should not keep stale db_pending rows in the queue")
     }
 
+    runSuite("SpeakerReviewQueueScanner treats missing channel as legacy system audio") {
+        let speakerId = UUID()
+        let transcriptURL = URL(fileURLWithPath: "/tmp/Legacy_Deferred.md")
+        let markdown = """
+        ---
+        title: "Legacy Deferred"
+        date: 2026-05-20
+        time: 09:30:00
+        speakers:
+          - id: "1"
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        # Legacy Deferred
+
+        ## Transcript
+
+        **00:01** [System/Speaker 1]
+        This old transcript should still be nameable.
+        """
+
+        let items = SpeakerReviewQueueScanner.pendingItems(
+            in: markdown,
+            transcriptURL: transcriptURL,
+            profilesById: [
+                speakerId: makeReviewQueueProfile(id: speakerId, name: nil)
+            ],
+            clipURLsByProfileID: [:]
+        )
+
+        assertEqual(items.count, 1, "legacy db_pending speakers without channel metadata should stay in the queue")
+        assertEqual(items.first?.channel, .system, "missing channel metadata should default to legacy system audio")
+        assertEqual(items.first?.sampleText, "This old transcript should still be nameable.", "legacy system rows should still find a sample")
+    }
+
     runSuite("SpeakerReviewQueueScanner sorts newest calls first") {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory
