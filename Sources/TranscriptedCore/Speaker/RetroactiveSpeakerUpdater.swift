@@ -732,9 +732,11 @@ extension TranscriptSaver {
         channel: UtteranceChannel
     ) {
         let prefix = channel == .mic ? "Mic" : "System"
-        content = content.replacingOccurrences(
-            of: "[\(prefix)/\(oldName)]",
-            with: "[\(prefix)/\(newName)]"
+        replaceTranscriptSpeakerLabels(
+            in: &content,
+            prefix: prefix,
+            oldName: oldName,
+            newName: newName
         )
         replaceSpeakerBreakdownName(
             in: &content,
@@ -742,6 +744,46 @@ extension TranscriptSaver {
             newName: newName,
             channel: channel
         )
+    }
+
+    private static func replaceTranscriptSpeakerLabels(
+        in content: inout String,
+        prefix: String,
+        oldName: String,
+        newName: String
+    ) {
+        let oldLabel = "[\(prefix)/\(oldName)]"
+        let newLabel = "[\(prefix)/\(newName)]"
+        var lines = content.components(separatedBy: "\n")
+        var changed = false
+
+        for index in lines.indices {
+            var line = lines[index]
+            guard let labelRange = line.range(of: oldLabel),
+                  isTranscriptLabelPrefix(line[..<labelRange.lowerBound]) else {
+                continue
+            }
+
+            line.replaceSubrange(labelRange, with: newLabel)
+            lines[index] = line
+            changed = true
+        }
+
+        if changed {
+            content = lines.joined(separator: "\n")
+        }
+    }
+
+    private static func isTranscriptLabelPrefix(_ prefix: Substring) -> Bool {
+        let normalized = String(prefix)
+            .replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let parts = normalized.split(separator: ":")
+        guard parts.count >= 2, parts.count <= 3 else { return false }
+        return parts.allSatisfy { part in
+            !part.isEmpty && part.allSatisfy { $0.isNumber }
+        }
     }
 
     private static func replaceSpeakerBreakdownName(

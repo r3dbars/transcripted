@@ -267,6 +267,43 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[System/Speaker 1]"))
     }
 
+    func testUpdateDeferredSpeakerNameDoesNotRewriteLiteralTextMentions() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("literal-token.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~10 words, 00:03
+
+        ---
+
+        [00:00] [System/Speaker 1] literal token [System/Speaker 1] should stay in spoken text
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains("[00:00] [System/Taylor] literal token [System/Speaker 1] should stay in spoken text"))
+        XCTAssertTrue(updated.contains("- **Taylor:** 1 utterances, ~10 words, 00:03"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()
