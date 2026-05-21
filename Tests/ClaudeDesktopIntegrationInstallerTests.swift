@@ -98,7 +98,40 @@ func testClaudeDesktopIntegrationInstaller() {
 
         assertEqual(status.state, .installed, "matching executable and config should be installed")
         assertTrue(status.isInstalled, "installed convenience flag should be true")
+        assertTrue(status.installedBinaryMatchesBundled, "installed helper should match bundled helper")
         assertEqual(status.configuredCommandPath, binaryURL.path, "status should expose configured command")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — detects stale installed helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeStaleHelperTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(commandPath: installedBinaryURL.path, configURL: configURL)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "stale installed helper should be repaired even when config points at it")
+        assertFalse(status.installedBinaryMatchesBundled, "status should expose stale helper mismatch")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL — uses Helpers bundle location only") {
