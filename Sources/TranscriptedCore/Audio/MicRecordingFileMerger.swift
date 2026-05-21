@@ -4,6 +4,7 @@ import Foundation
 enum MicRecordingFileMerger {
     private static let outputSampleRate: Double = 16_000
     private static let chunkSize = 16_000 * 30
+    private static let chunkDurationSeconds: Double = 30
 
     static func merge(primaryURL: URL?, segments: [MicRecordingSegment]) throws -> URL? {
         guard let primaryURL else { return segments.last?.url }
@@ -18,7 +19,7 @@ enum MicRecordingFileMerger {
             commonFormat: .pcmFormatFloat32,
             sampleRate: outputSampleRate,
             channels: 1,
-            interleaved: true
+            interleaved: false
         ) else {
             throw NSError(domain: "MicRecordingFileMerger", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Failed to create merged mic format"
@@ -44,11 +45,7 @@ enum MicRecordingFileMerger {
                     }
                 }
 
-                let samples = try AudioResampler.loadAndResample(
-                    url: segment.url,
-                    targetRate: outputSampleRate
-                )
-                try writeSamples(samples, to: mergedFile, format: outputFormat)
+                try appendSegment(segment.url, to: mergedFile, outputFormat: outputFormat)
             }
 
             FileManager.default.restrictToOwnerOnly(atPath: mergedURL.path)
@@ -62,38 +59,150 @@ enum MicRecordingFileMerger {
         }
     }
 
-    private static func writeSamples(
-        _ samples: [Float],
-        to file: AVAudioFile,
-        format: AVAudioFormat
+    private static func appendSegment(
+        _ url: URL,
+        to outputFile: AVAudioFile,
+        outputFormat: AVAudioFormat
     ) throws {
-        var offset = 0
+        let sourceFile = try AVAudioFile(forReading: url)
+        let sourceFormat = sourceFile.processingFormat
 
-        while offset < samples.count {
-            let count = min(chunkSize, samples.count - offset)
-            guard let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: AVAudioFrameCount(count)
+        guard sourceFile.length > 0 else {
+            throw PipelineError.emptyAudioFile
+        }
+        guard sourceFile.length <= Int64(AVAudioFrameCount.max) else {
+            throw NSError(domain: "MicRecordingFileMerger", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Audio segment is too large to merge safely"
+            ])
+        }
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sourceFormat.sampleRate),
+              AudioRecordingFormatPolicy.isUsableSampleRate(outputFormat.sampleRate),
+              sourceFormat.channelCount > 0 else {
+            throw NSError(domain: "MicRecordingFileMerger", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "Audio segment has an invalid sample rate or channel count"
+            ])
+        }
+        if formatsMatch(sourceFormat, outputFormat) {
+            try appendCompatibleSegment(sourceFile, to: outputFile, format: outputFormat)
+            return
+        }
+        guard let converter = AVAudioConverter(from: sourceFormat, to: outputFormat) else {
+            throw NSError(domain: "MicRecordingFileMerger", code: 6, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create segment converter"
+            ])
+        }
+
+        let outputCapacity = AVAudioFrameCount(outputFormat.sampleRate * chunkDurationSeconds)
+        let inputCapacity = AVAudioFrameCount(sourceFormat.sampleRate * chunkDurationSeconds)
+        var inputEnded = false
+        var inputBlockError: Error?
+        var noProgressIterations = 0
+
+        while true {
+            guard let outputBuffer = AVAudioPCMBuffer(
+                pcmFormat: outputFormat,
+                frameCapacity: outputCapacity
             ) else {
-                throw NSError(domain: "MicRecordingFileMerger", code: 2, userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to allocate merged mic buffer"
+                throw NSError(domain: "MicRecordingFileMerger", code: 7, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to allocate merged segment output buffer"
                 ])
             }
 
-            buffer.frameLength = AVAudioFrameCount(count)
-            if let channelData = buffer.floatChannelData?[0] {
-                samples.withUnsafeBufferPointer { pointer in
-                    // Security: guard against nil baseAddress — baseAddress is non-nil for
-                    // non-empty arrays, which is guaranteed by the loop condition (offset <
-                    // samples.count), but force-unwrapping here would crash the audio thread
-                    // if the invariant were ever violated.
-                    guard let base = pointer.baseAddress else { return }
-                    channelData.update(from: base + offset, count: count)
+            var conversionError: NSError?
+            let status = converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
+                guard !inputEnded, sourceFile.framePosition < sourceFile.length else {
+                    inputEnded = true
+                    outStatus.pointee = .endOfStream
+                    return nil
+                }
+
+                let remainingFrames = sourceFile.length - sourceFile.framePosition
+                let framesToRead = min(inputCapacity, AVAudioFrameCount(remainingFrames))
+                guard framesToRead > 0,
+                      let inputBuffer = AVAudioPCMBuffer(
+                        pcmFormat: sourceFormat,
+                        frameCapacity: framesToRead
+                      ) else {
+                    inputBlockError = NSError(domain: "MicRecordingFileMerger", code: 8, userInfo: [
+                        NSLocalizedDescriptionKey: "Failed to allocate merged segment input buffer"
+                    ])
+                    inputEnded = true
+                    outStatus.pointee = .endOfStream
+                    return nil
+                }
+
+                do {
+                    try sourceFile.read(into: inputBuffer, frameCount: framesToRead)
+                    outStatus.pointee = .haveData
+                    return inputBuffer
+                } catch {
+                    inputBlockError = error
+                    inputEnded = true
+                    outStatus.pointee = .endOfStream
+                    return nil
                 }
             }
 
-            try file.write(from: buffer)
-            offset += count
+            if let conversionError { throw conversionError }
+            if let inputBlockError { throw inputBlockError }
+
+            if outputBuffer.frameLength > 0 {
+                try outputFile.write(from: outputBuffer)
+                noProgressIterations = 0
+            } else {
+                noProgressIterations += 1
+            }
+
+            switch status {
+            case .haveData, .inputRanDry:
+                guard noProgressIterations < 32 else {
+                    throw NSError(domain: "MicRecordingFileMerger", code: 9, userInfo: [
+                        NSLocalizedDescriptionKey: "Segment conversion made no progress"
+                    ])
+                }
+                continue
+            case .endOfStream:
+                return
+            case .error:
+                throw conversionError ?? NSError(domain: "MicRecordingFileMerger", code: 10, userInfo: [
+                    NSLocalizedDescriptionKey: "Segment conversion failed"
+                ])
+            @unknown default:
+                throw NSError(domain: "MicRecordingFileMerger", code: 12, userInfo: [
+                    NSLocalizedDescriptionKey: "Segment conversion returned an unknown status"
+                ])
+            }
+        }
+    }
+
+    private static func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
+        lhs.commonFormat == rhs.commonFormat
+            && lhs.sampleRate == rhs.sampleRate
+            && lhs.channelCount == rhs.channelCount
+            && lhs.isInterleaved == rhs.isInterleaved
+    }
+
+    private static func appendCompatibleSegment(
+        _ sourceFile: AVAudioFile,
+        to outputFile: AVAudioFile,
+        format: AVAudioFormat
+    ) throws {
+        while sourceFile.framePosition < sourceFile.length {
+            let remainingFrames = sourceFile.length - sourceFile.framePosition
+            let framesToRead = min(AVAudioFrameCount(chunkSize), AVAudioFrameCount(remainingFrames))
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: framesToRead
+            ) else {
+                throw NSError(domain: "MicRecordingFileMerger", code: 13, userInfo: [
+                    NSLocalizedDescriptionKey: "Failed to allocate direct segment buffer"
+                ])
+            }
+
+            try sourceFile.read(into: buffer, frameCount: framesToRead)
+            if buffer.frameLength > 0 {
+                try outputFile.write(from: buffer)
+            }
         }
     }
 

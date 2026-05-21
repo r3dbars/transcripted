@@ -683,6 +683,25 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - bridge uses scaled meeting stop timeout") {
+        let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let stopBlock = sourceSlice(
+            bridgeContents,
+            from: "func stopAndAwaitFiles() async -> CaptureStopResult {",
+            to: "func stopAndDiscardFiles() async -> CaptureStopResult {"
+        )
+
+        assertTrue(
+            stopBlock.contains("TranscriptedConstants.meetingStopTimeout(")
+                && stopBlock.contains("forRecordingDuration: max(recordingDuration, audio.recordingDuration)"),
+            "meeting stop should scale the timeout from the observed recording duration"
+        )
+        assertTrue(
+            stopBlock.contains("Task.sleep(nanoseconds: stopTimeout)"),
+            "meeting stop should sleep on the scaled timeout, not the fixed base timeout"
+        )
+    }
+
     runSuite("Repo command contract - old failed meeting audio is pruned by age") {
         let constantsContents = readRepoTextFile("Sources/Support/TranscriptedConstants.swift")
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
@@ -739,6 +758,19 @@ func testRepoCommandContract() {
             ),
             1,
             "direct failed-queue writes in MeetingSessionController should stay centralized in the refresh helper"
+        )
+    }
+
+    runSuite("Repo command contract - mic recovery merge streams long segments") {
+        let mergerContents = readRepoTextFile("Sources/TranscriptedCore/Audio/MicRecordingFileMerger.swift")
+
+        assertFalse(
+            mergerContents.contains("AudioResampler.loadAndResample"),
+            "mic segment merge should not load full long recordings into memory during stop"
+        )
+        assertTrue(
+            mergerContents.contains("converter.convert(to: outputBuffer"),
+            "mic segment merge should stream conversion into bounded output buffers"
         )
     }
 

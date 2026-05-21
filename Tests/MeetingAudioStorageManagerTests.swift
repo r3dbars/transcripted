@@ -165,7 +165,7 @@ func testMeetingAudioStorageManager() async {
         )
     }
 
-    await runSuite("MeetingAudioStorageManager removes only stale Transcripted temp M4A files") {
+    await runSuite("MeetingAudioStorageManager removes only old Transcripted temp M4A files") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -173,23 +173,23 @@ func testMeetingAudioStorageManager() async {
         let transcriptURL = try! makeTranscript(named: "Temp Cleanup", in: directory, ageDays: 1)
         let audioDirectory = makeAudioDirectory(for: transcriptURL)
         let finalM4A = audioDirectory.appendingPathComponent("recording.m4a")
-        let staleTemp = audioDirectory.appendingPathComponent(".recording-092B8B54-B598-4796-9573-00E0D9FC9EE1.m4a")
-        let freshTemp = audioDirectory.appendingPathComponent(".recording-3F5531EE-C352-429F-A10F-EC978BBC2927.m4a")
+        let oldTemp = audioDirectory.appendingPathComponent(".recording-092B8B54-B598-4796-9573-00E0D9FC9EE1.m4a")
+        let longRunningTemp = audioDirectory.appendingPathComponent(".recording-3F5531EE-C352-429F-A10F-EC978BBC2927.m4a")
         let unrelatedHiddenFile = audioDirectory.appendingPathComponent(".user-note.m4a")
         try! Data("m4a".utf8).write(to: finalM4A)
-        try! Data("stale".utf8).write(to: staleTemp)
-        try! Data("fresh".utf8).write(to: freshTemp)
+        try! Data("old".utf8).write(to: oldTemp)
+        try! Data("active".utf8).write(to: longRunningTemp)
         try! Data("user".utf8).write(to: unrelatedHiddenFile)
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
-            ofItemAtPath: staleTemp.path
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
+            ofItemAtPath: oldTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-60)],
-            ofItemAtPath: freshTemp.path
+            [.modificationDate: now.addingTimeInterval(-2 * 60 * 60)],
+            ofItemAtPath: longRunningTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
             ofItemAtPath: unrelatedHiddenFile.path
         )
 
@@ -201,8 +201,8 @@ func testMeetingAudioStorageManager() async {
         )
 
         assertEqual(converted, 0, "temp cleanup should not count as a WAV conversion")
-        assertFalse(FileManager.default.fileExists(atPath: staleTemp.path), "stale app-owned temp file should be removed")
-        assertTrue(FileManager.default.fileExists(atPath: freshTemp.path), "recent temp file should not be removed")
+        assertFalse(FileManager.default.fileExists(atPath: oldTemp.path), "old app-owned temp file should be removed")
+        assertTrue(FileManager.default.fileExists(atPath: longRunningTemp.path), "long-running conversion temp files should not be removed too early")
         assertTrue(FileManager.default.fileExists(atPath: unrelatedHiddenFile.path), "unrelated hidden M4A should not be removed")
         assertTrue(FileManager.default.fileExists(atPath: finalM4A.path), "final M4A should stay")
     }
