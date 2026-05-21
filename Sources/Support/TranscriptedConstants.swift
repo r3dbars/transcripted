@@ -67,10 +67,10 @@ enum TranscriptedConstants {
     static let meetingStopTimeoutGrowthStep: UInt64 = 30_000_000_000  // 30 seconds
 
     static func meetingStopTimeout(forRecordingDuration duration: TimeInterval) -> UInt64 {
-        guard duration.isFinite, duration > 0 else { return meetingStopTimeout }
+        guard duration.isFinite, duration >= 3_600 else { return meetingStopTimeout }
 
         let maxGrowthSteps = (meetingMaximumStopTimeout - meetingStopTimeout) / meetingStopTimeoutGrowthStep
-        let recordedHours = UInt64(min(duration / 3_600, Double(maxGrowthSteps)))
+        let recordedHours = UInt64(min(ceil(duration / 3_600), Double(maxGrowthSteps)))
         guard recordedHours > 0 else { return meetingStopTimeout }
 
         let scaledTimeout = meetingStopTimeout + (recordedHours * meetingStopTimeoutGrowthStep)

@@ -34,10 +34,15 @@ func testTranscriptedConstants() async {
             TranscriptedConstants.meetingStopTimeout,
             "short meetings should keep the fast base stop timeout"
         )
-        assertTrue(
-            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 2 * 60 * 60)
-                > TranscriptedConstants.meetingStopTimeout,
-            "multi-hour meetings should get extra time to flush and merge audio"
+        assertEqual(
+            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 119 * 60),
+            TranscriptedConstants.meetingStopTimeout + (2 * TranscriptedConstants.meetingStopTimeoutGrowthStep),
+            "meetings close to two hours should get the two-hour stop budget"
+        )
+        assertEqual(
+            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 2 * 60 * 60),
+            TranscriptedConstants.meetingStopTimeout + (2 * TranscriptedConstants.meetingStopTimeoutGrowthStep),
+            "two-hour meetings should get extra time to flush and merge audio"
         )
         assertEqual(
             TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 12 * 60 * 60),

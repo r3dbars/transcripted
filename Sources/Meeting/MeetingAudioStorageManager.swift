@@ -56,7 +56,7 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
 
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
-    private static let staleTemporaryM4AAge: TimeInterval = 10 * 60
+    private static let staleTemporaryM4AAge: TimeInterval = 6 * 60 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
 
     @discardableResult
