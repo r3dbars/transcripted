@@ -112,7 +112,8 @@ func testSpeakerReviewQueueScanner() {
         let previewLimit = 256 * 1024
         let fillerByteCount = previewLimit - prefix.utf8.count - 1
         assertTrue(fillerByteCount > 0, "fixture should leave room to split a multi-byte character")
-        let content = prefix + String(repeating: "a", count: max(0, fillerByteCount)) + "💬"
+        let multibyteCharacter = String(UnicodeScalar(0x1F4AC)!)
+        let content = prefix + String(repeating: "a", count: max(0, fillerByteCount)) + multibyteCharacter
         try? content.write(to: transcriptURL, atomically: true, encoding: .utf8)
 
         let items = SpeakerReviewQueueScanner.loadPendingItems(
