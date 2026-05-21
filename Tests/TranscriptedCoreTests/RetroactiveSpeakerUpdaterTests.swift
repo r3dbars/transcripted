@@ -185,6 +185,50 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Taylor]"))
     }
 
+    func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {
+        let speakerId = UUID()
+        let firstURL = temporaryDirectory.appendingPathComponent("first-call.md")
+        let secondURL = temporaryDirectory.appendingPathComponent("second-call.md")
+        try pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "first call"
+        ).write(to: firstURL, atomically: true, encoding: .utf8)
+        try pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "2",
+            speakerName: "Speaker 2",
+            sample: "second call"
+        ).write(to: secondURL, atomically: true, encoding: .utf8)
+
+        let firstUpdated = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: firstURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+        let secondUpdated = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: secondURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "2",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(firstUpdated)
+        XCTAssertTrue(secondUpdated)
+        let first = try String(contentsOf: firstURL, encoding: .utf8)
+        let second = try String(contentsOf: secondURL, encoding: .utf8)
+        XCTAssertTrue(first.contains(#"name: "Taylor""#))
+        XCTAssertTrue(first.contains("[System/Taylor]"))
+        XCTAssertFalse(first.contains("[System/Speaker 1]"))
+        XCTAssertTrue(second.contains(#"name: "Taylor""#))
+        XCTAssertTrue(second.contains("[System/Taylor]"))
+        XCTAssertFalse(second.contains("[System/Speaker 2]"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()
@@ -480,6 +524,33 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         ---
 
         [00:00] [System/\(speakerName)] hello there
+        """
+    }
+
+    private func pendingSystemMarkdown(
+        speakerId: UUID,
+        diarizerSpeakerId: String,
+        speakerName: String,
+        sample: String
+    ) -> String {
+        """
+        ---
+        speakers:
+          - id: "\(diarizerSpeakerId)"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "\(speakerName)"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **\(speakerName):** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/\(speakerName)] \(sample)
         """
     }
 
