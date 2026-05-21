@@ -77,6 +77,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var meetingPromptDetector = MeetingPromptDetector()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var terminationCleanupStarted = false
+    private var terminationCleanupFinished = false
+    private var pendingTerminationReplyCount = 0
 
     /// Keeps NSApp in sync with the Dock visibility setting and promotes
     /// the app to `.regular` during active recording for force-quit
@@ -255,7 +257,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .terminateNow
         }
 
-        guard !terminationCleanupStarted else { return .terminateLater }
+        if terminationCleanupFinished {
+            return .terminateNow
+        }
+        guard !terminationCleanupStarted else {
+            pendingTerminationReplyCount += 1
+            return .terminateLater
+        }
         switch activeMeetingTerminationDecision() {
         case .keepRecording:
             return .terminateCancel
@@ -269,6 +277,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         terminationCleanupStarted = true
+        pendingTerminationReplyCount = 1
 
         Task { @MainActor [weak self, sender] in
             guard let self else {
@@ -282,10 +291,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             self.appState.shutdown()
             await EventReporter.shared.flushLocalEventsForShutdown()
-            sender.reply(toApplicationShouldTerminate: true)
+            self.terminationCleanupFinished = true
+            self.replyToPendingTerminationRequests(sender, shouldTerminate: true)
         }
 
         return .terminateLater
+    }
+
+    private func replyToPendingTerminationRequests(_ sender: NSApplication, shouldTerminate: Bool) {
+        let replyCount = max(pendingTerminationReplyCount, 1)
+        pendingTerminationReplyCount = 0
+
+        for _ in 0..<replyCount {
+            sender.reply(toApplicationShouldTerminate: shouldTerminate)
+        }
     }
 
     private func activeMeetingTerminationDecision() -> ActiveMeetingQuitDecision {
