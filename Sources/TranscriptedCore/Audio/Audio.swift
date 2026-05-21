@@ -101,13 +101,16 @@ enum AudioRecordingFormatPolicy {
 
 enum AudioInputTapTeardownStep: Equatable {
     case stopEngine
+    case waitForStoppedInputCallbacks
     case removeInputTap
 }
 
 enum AudioInputTapTeardownPolicy {
+    static let inputCallbackDrainDelay: TimeInterval = 0.05
+
     static func steps(engineIsRunning: Bool) -> [AudioInputTapTeardownStep] {
         engineIsRunning
-            ? [.stopEngine, .removeInputTap]
+            ? [.stopEngine, .waitForStoppedInputCallbacks, .removeInputTap]
             : [.removeInputTap]
     }
 }
@@ -341,6 +344,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     "operation": operation
                 ])
                 engine.stop()
+            case .waitForStoppedInputCallbacks:
+                Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
             case .removeInputTap:
                 inputNode.removeTap(onBus: 0)
             }
