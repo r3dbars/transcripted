@@ -309,4 +309,35 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertFalse(audio.systemAudioFailed)
         XCTAssertTrue(audio.micSegments.isEmpty)
     }
+
+    func testSuccessfulStartRestoresHealthySystemAudioStatusAfterEarlyNilUpdate() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+
+        let audio = Audio(paths: paths)
+        audio.prepareForNewRecordingStart()
+        audio.systemAudioFileURL = root.appendingPathComponent("system.wav")
+
+        audio.updateSystemAudioStatus(fromError: nil)
+        XCTAssertEqual(audio.systemAudioStatus, .unknown)
+
+        audio.restoreSystemAudioHealthyStatusAfterSuccessfulStart()
+
+        XCTAssertEqual(
+            audio.systemAudioStatus,
+            .healthy,
+            "a clean system-audio file should not stay unknown after the meeting start succeeds"
+        )
+    }
 }

@@ -887,6 +887,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         isRecording = true
         isStarting = false
+        restoreSystemAudioHealthyStatusAfterSuccessfulStart()
+    }
+
+    func restoreSystemAudioHealthyStatusAfterSuccessfulStart() {
+        guard systemAudioFileURL != nil,
+              !systemAudioFailed,
+              systemAudioStatus == .unknown else {
+            return
+        }
+
+        systemAudioStatus = .healthy
     }
 
     // MARK: - Stop Recording
