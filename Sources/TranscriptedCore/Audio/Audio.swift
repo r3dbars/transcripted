@@ -900,6 +900,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStatus = .healthy
     }
 
+    func assignSystemAudioFileURLIfCurrent(_ fileURL: URL, sessionGeneration: UInt64) {
+        guard recordingSessionGeneration == sessionGeneration else { return }
+
+        systemAudioFileURL = fileURL
+        restoreSystemAudioHealthyStatusAfterSuccessfulStart()
+    }
+
     // MARK: - Stop Recording
 
     public func stop() {
