@@ -93,6 +93,39 @@ func testSpeakerReviewQueueScanner() {
 
         assertEqual(items.map(\.meetingTitle), ["Newer Call", "Older Call"], "newer deferred speaker work should appear first")
     }
+
+    runSuite("SpeakerReviewQueueScanner tolerates UTF-8 split at preview limit") {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory
+            .appendingPathComponent("SpeakerReviewQueueScannerTests-\(UUID().uuidString)", isDirectory: true)
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+
+        let speakerId = UUID()
+        let transcriptURL = directory.appendingPathComponent("SplitPreview.md")
+        let prefix = deferredMarkdown(
+            speakerId: speakerId,
+            title: "Split Preview",
+            speakerName: "Speaker 3",
+            sampleText: "This should survive a split preview."
+        )
+        let previewLimit = 256 * 1024
+        let fillerByteCount = previewLimit - prefix.utf8.count - 1
+        assertTrue(fillerByteCount > 0, "fixture should leave room to split a multi-byte character")
+        let content = prefix + String(repeating: "a", count: max(0, fillerByteCount)) + "💬"
+        try? content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let items = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: directory,
+            profiles: [
+                makeReviewQueueProfile(id: speakerId, name: nil)
+            ],
+            clipURLsByProfileID: [:]
+        )
+
+        assertEqual(items.count, 1, "split UTF-8 at the preview limit should not make the scanner skip the transcript")
+        assertEqual(items.first?.meetingTitle, "Split Preview", "scanner should still parse frontmatter from the preview")
+    }
 }
 
 private func deferredMarkdown(

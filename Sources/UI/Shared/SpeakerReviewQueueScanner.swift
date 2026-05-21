@@ -297,6 +297,6 @@ enum SpeakerReviewQueueScanner {
         defer { try? handle.close() }
 
         guard let data = try? handle.read(upToCount: reviewPreviewByteLimit) else { return nil }
-        return String(data: data, encoding: .utf8)
+        return String(decoding: data, as: UTF8.self)
     }
 }
