@@ -12,6 +12,15 @@ protocol MeetingAudioFileValidating {
     func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool
 }
 
+protocol MeetingAudioPlaybackMixing {
+    func createPlaybackWAV(
+        microphoneURL: URL,
+        systemURL: URL,
+        destinationURL: URL,
+        fileManager: FileManager
+    ) async throws
+}
+
 struct AVFoundationMeetingAudioConverter: MeetingAudioFileConverting {
     func convertWAVToM4A(sourceURL: URL, destinationURL: URL) async throws {
         let asset = AVURLAsset(url: sourceURL)
@@ -22,6 +31,376 @@ struct AVFoundationMeetingAudioConverter: MeetingAudioFileConverting {
         session.shouldOptimizeForNetworkUse = false
 
         try await session.export(to: destinationURL, as: .m4a)
+    }
+}
+
+struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
+    private static let chunkFrames: AVAudioFrameCount = 4096
+    private static let gateWindowFrames = 1024
+    private static let micActiveThreshold: Float = 0.012
+    private static let systemActiveThreshold: Float = 0.012
+    private static let systemGain: Float = 0.95
+    private static let micGainQuietSystem: Float = 0.90
+    private static let micGainLikelySpeech: Float = 0.75
+    private static let micGainAmbiguous: Float = 0.12
+
+    func createPlaybackWAV(
+        microphoneURL: URL,
+        systemURL: URL,
+        destinationURL: URL,
+        fileManager: FileManager
+    ) async throws {
+        try mix(
+            microphoneURL: microphoneURL,
+            systemURL: systemURL,
+            destinationURL: destinationURL,
+            fileManager: fileManager
+        )
+    }
+
+    private func mix(
+        microphoneURL: URL,
+        systemURL: URL,
+        destinationURL: URL,
+        fileManager: FileManager
+    ) throws {
+        let microphoneFile = try AVAudioFile(forReading: microphoneURL)
+        let systemFile = try AVAudioFile(forReading: systemURL)
+        let microphoneFormat = microphoneFile.processingFormat
+        let systemFormat = systemFile.processingFormat
+
+        let outputChannelCount = max(
+            1,
+            Int(max(microphoneFormat.channelCount, systemFormat.channelCount))
+        )
+        guard let outputFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: systemFormat.sampleRate,
+            channels: AVAudioChannelCount(outputChannelCount),
+            interleaved: false
+        ) else {
+            throw MeetingAudioStorageError.mixBufferAllocationFailed
+        }
+
+        try? fileManager.removeItem(at: destinationURL)
+        do {
+            let outputFile = try AVAudioFile(
+                forWriting: destinationURL,
+                settings: outputFormat.settings,
+                commonFormat: outputFormat.commonFormat,
+                interleaved: outputFormat.isInterleaved
+            )
+
+            var microphoneDone = false
+            var systemDone = false
+            let microphoneReader = try MixInputReader(file: microphoneFile, outputFormat: outputFormat)
+            let systemReader = try MixInputReader(file: systemFile, outputFormat: outputFormat)
+
+            while !microphoneDone || !systemDone {
+                let microphoneBuffer = try microphoneReader.read(maximumFrames: Self.chunkFrames)
+                let systemBuffer = try systemReader.read(maximumFrames: Self.chunkFrames)
+
+                microphoneDone = microphoneBuffer == nil
+                systemDone = systemBuffer == nil
+
+                let frameCount = max(
+                    Int(microphoneBuffer?.frameLength ?? 0),
+                    Int(systemBuffer?.frameLength ?? 0)
+                )
+                guard frameCount > 0 else { continue }
+
+                guard let outputBuffer = AVAudioPCMBuffer(
+                    pcmFormat: outputFormat,
+                    frameCapacity: AVAudioFrameCount(frameCount)
+                ) else {
+                    throw MeetingAudioStorageError.mixBufferAllocationFailed
+                }
+                outputBuffer.frameLength = AVAudioFrameCount(frameCount)
+
+                mix(
+                    microphoneBuffer: microphoneBuffer,
+                    systemBuffer: systemBuffer,
+                    outputBuffer: outputBuffer,
+                    frameCount: frameCount,
+                    outputChannelCount: outputChannelCount
+                )
+                try outputFile.write(from: outputBuffer)
+            }
+
+            fileManager.restrictFileToOwnerOnly(at: destinationURL)
+        } catch {
+            try? fileManager.removeItem(at: destinationURL)
+            throw error
+        }
+    }
+
+    private func mix(
+        microphoneBuffer: AVAudioPCMBuffer?,
+        systemBuffer: AVAudioPCMBuffer?,
+        outputBuffer: AVAudioPCMBuffer,
+        frameCount: Int,
+        outputChannelCount: Int
+    ) {
+        var startFrame = 0
+        while startFrame < frameCount {
+            let blockFrameCount = min(Self.gateWindowFrames, frameCount - startFrame)
+            let microphoneRMS = rms(
+                in: microphoneBuffer,
+                startFrame: startFrame,
+                frameCount: blockFrameCount
+            )
+            let systemRMS = rms(
+                in: systemBuffer,
+                startFrame: startFrame,
+                frameCount: blockFrameCount
+            )
+            let microphoneGain = gainForMicrophone(
+                microphoneRMS: microphoneRMS,
+                systemRMS: systemRMS
+            )
+
+            for frame in startFrame..<(startFrame + blockFrameCount) {
+                for channel in 0..<outputChannelCount {
+                    let systemSample = sample(
+                        from: systemBuffer,
+                        channel: channel,
+                        frame: frame
+                    )
+                    let microphoneSample = sample(
+                        from: microphoneBuffer,
+                        channel: channel,
+                        frame: frame
+                    )
+                    let mixedSample = (systemSample * Self.systemGain)
+                        + (microphoneSample * microphoneGain)
+                    write(
+                        limited(mixedSample),
+                        to: outputBuffer,
+                        channel: channel,
+                        frame: frame
+                    )
+                }
+            }
+
+            startFrame += blockFrameCount
+        }
+    }
+
+    private func gainForMicrophone(microphoneRMS: Float, systemRMS: Float) -> Float {
+        guard microphoneRMS >= Self.micActiveThreshold else { return 0 }
+        guard systemRMS >= Self.systemActiveThreshold else { return Self.micGainQuietSystem }
+
+        if microphoneRMS >= systemRMS * 1.25 {
+            return Self.micGainLikelySpeech
+        }
+
+        if microphoneRMS >= systemRMS * 0.75 {
+            return Self.micGainAmbiguous
+        }
+
+        return 0
+    }
+
+    private func rms(
+        in buffer: AVAudioPCMBuffer?,
+        startFrame: Int,
+        frameCount: Int
+    ) -> Float {
+        guard let buffer else { return 0 }
+        let endFrame = min(startFrame + frameCount, Int(buffer.frameLength))
+        guard startFrame < endFrame else { return 0 }
+
+        let channels = max(1, Int(buffer.format.channelCount))
+        var sum: Float = 0
+        var sampleCount = 0
+
+        for frame in startFrame..<endFrame {
+            for channel in 0..<channels {
+                let value = sample(from: buffer, channel: channel, frame: frame)
+                sum += value * value
+                sampleCount += 1
+            }
+        }
+
+        guard sampleCount > 0 else { return 0 }
+        return sqrt(sum / Float(sampleCount))
+    }
+
+    private func sample(
+        from buffer: AVAudioPCMBuffer?,
+        channel: Int,
+        frame: Int
+    ) -> Float {
+        guard let buffer,
+              frame >= 0,
+              frame < Int(buffer.frameLength),
+              let channelData = buffer.floatChannelData else {
+            return 0
+        }
+
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        let sourceChannel = channelCount == 1 ? 0 : min(channel, channelCount - 1)
+        if buffer.format.isInterleaved {
+            return channelData[0][frame * channelCount + sourceChannel]
+        }
+
+        return channelData[sourceChannel][frame]
+    }
+
+    private func write(
+        _ sample: Float,
+        to buffer: AVAudioPCMBuffer,
+        channel: Int,
+        frame: Int
+    ) {
+        guard let channelData = buffer.floatChannelData,
+              frame >= 0,
+              frame < Int(buffer.frameLength) else {
+            return
+        }
+
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        let destinationChannel = min(channel, channelCount - 1)
+        if buffer.format.isInterleaved {
+            channelData[0][frame * channelCount + destinationChannel] = sample
+        } else {
+            channelData[destinationChannel][frame] = sample
+        }
+    }
+
+    private func limited(_ sample: Float) -> Float {
+        min(0.98, max(-0.98, sample))
+    }
+
+    private final class MixInputReader {
+        private let file: AVAudioFile
+        private let outputFormat: AVAudioFormat
+        private let converter: AVAudioConverter?
+        private var didReachInputEnd = false
+        private var didReachOutputEnd = false
+
+        init(file: AVAudioFile, outputFormat: AVAudioFormat) throws {
+            self.file = file
+            self.outputFormat = outputFormat
+            if Self.formatsMatch(file.processingFormat, outputFormat) {
+                self.converter = nil
+            } else {
+                guard let converter = AVAudioConverter(from: file.processingFormat, to: outputFormat) else {
+                    throw MeetingAudioStorageError.unsupportedPlaybackMixFormat
+                }
+                self.converter = converter
+            }
+        }
+
+        func read(maximumFrames: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
+            guard !didReachOutputEnd else { return nil }
+            guard let converter else {
+                return try readDirect(maximumFrames: maximumFrames)
+            }
+            return try readConverted(maximumFrames: maximumFrames, converter: converter)
+        }
+
+        private func readDirect(maximumFrames: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
+            let remainingFrames = file.length - file.framePosition
+            guard remainingFrames > 0 else {
+                didReachOutputEnd = true
+                return nil
+            }
+
+            let framesToRead = min(AVAudioFramePosition(maximumFrames), remainingFrames)
+            guard framesToRead > 0,
+                  let buffer = AVAudioPCMBuffer(
+                    pcmFormat: outputFormat,
+                    frameCapacity: AVAudioFrameCount(framesToRead)
+                  ) else {
+                return nil
+            }
+
+            try file.read(into: buffer, frameCount: AVAudioFrameCount(framesToRead))
+            if buffer.frameLength == 0 {
+                didReachOutputEnd = true
+                return nil
+            }
+            return buffer
+        }
+
+        private func readConverted(
+            maximumFrames: AVAudioFrameCount,
+            converter: AVAudioConverter
+        ) throws -> AVAudioPCMBuffer? {
+            guard let outputBuffer = AVAudioPCMBuffer(
+                pcmFormat: outputFormat,
+                frameCapacity: maximumFrames
+            ) else {
+                throw MeetingAudioStorageError.mixBufferAllocationFailed
+            }
+
+            var conversionError: NSError?
+            let status = converter.convert(to: outputBuffer, error: &conversionError) { packetCount, outStatus in
+                if self.didReachInputEnd {
+                    outStatus.pointee = .endOfStream
+                    return nil
+                }
+
+                do {
+                    let sourceBuffer = try self.readSourceBuffer(maximumFrames: packetCount)
+                    guard let sourceBuffer else {
+                        self.didReachInputEnd = true
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    outStatus.pointee = .haveData
+                    return sourceBuffer
+                } catch {
+                    conversionError = error as NSError
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+            }
+
+            if let conversionError {
+                throw conversionError
+            }
+
+            switch status {
+            case .haveData, .inputRanDry:
+                if outputBuffer.frameLength > 0 {
+                    return outputBuffer
+                }
+                return try read(maximumFrames: maximumFrames)
+            case .endOfStream:
+                didReachOutputEnd = true
+                return outputBuffer.frameLength > 0 ? outputBuffer : nil
+            case .error:
+                throw MeetingAudioStorageError.unsupportedPlaybackMixFormat
+            @unknown default:
+                throw MeetingAudioStorageError.unsupportedPlaybackMixFormat
+            }
+        }
+
+        private func readSourceBuffer(maximumFrames: AVAudioFrameCount) throws -> AVAudioPCMBuffer? {
+            let remainingFrames = file.length - file.framePosition
+            guard remainingFrames > 0 else { return nil }
+
+            let framesToRead = min(AVAudioFramePosition(maximumFrames), remainingFrames)
+            guard framesToRead > 0,
+                  let buffer = AVAudioPCMBuffer(
+                    pcmFormat: file.processingFormat,
+                    frameCapacity: AVAudioFrameCount(framesToRead)
+                  ) else {
+                return nil
+            }
+
+            try file.read(into: buffer, frameCount: AVAudioFrameCount(framesToRead))
+            return buffer.frameLength > 0 ? buffer : nil
+        }
+
+        private static func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
+            lhs.commonFormat == rhs.commonFormat
+                && lhs.sampleRate == rhs.sampleRate
+                && lhs.channelCount == rhs.channelCount
+                && lhs.isInterleaved == rhs.isInterleaved
+        }
     }
 }
 
@@ -46,6 +425,8 @@ enum MeetingAudioStorageError: Error {
     case exportSessionUnavailable
     case conversionFailed
     case emptyConvertedFile
+    case unsupportedPlaybackMixFormat
+    case mixBufferAllocationFailed
 }
 
 struct MeetingAudioStorageMaintenanceResult: Equatable {
@@ -56,7 +437,7 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
 
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
-    private static let staleTemporaryM4AAge: TimeInterval = 10 * 60
+    private static let staleTemporaryAudioAge: TimeInterval = 10 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
 
     @discardableResult
@@ -66,7 +447,8 @@ enum MeetingAudioStorageManager {
         now: Date = Date(),
         fileManager: FileManager = .default,
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
-        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
+        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
     ) async -> MeetingAudioStorageMaintenanceResult {
         let prunedDirectories = pruneRetainedAudio(
             in: meetingsFolder,
@@ -82,6 +464,13 @@ enum MeetingAudioStorageManager {
 
         var convertedFiles = 0
         for directory in directories {
+            await createPlaybackMixIfNeeded(
+                in: directory,
+                now: now,
+                fileManager: fileManager,
+                validator: validator,
+                playbackMixer: playbackMixer
+            )
             convertedFiles += await compressWAVAudio(
                 in: directory,
                 now: now,
@@ -104,9 +493,17 @@ enum MeetingAudioStorageManager {
         now: Date = Date(),
         fileManager: FileManager = .default,
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
-        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
+        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
     ) async {
         let audioDirectory = audioDirectoryURL(forTranscript: transcriptURL)
+        await createPlaybackMixIfNeeded(
+            in: audioDirectory,
+            now: now,
+            fileManager: fileManager,
+            validator: validator,
+            playbackMixer: playbackMixer
+        )
         await compressWAVAudio(
             in: audioDirectory,
             now: now,
@@ -173,7 +570,7 @@ enum MeetingAudioStorageManager {
 
         var removedAny = false
         for file in files where isManagedRetainedAudioFile(file, fileManager: fileManager)
-            || isTranscriptedTemporaryM4AFileName(file) {
+            || isTranscriptedTemporaryAudioFileName(file) {
             do {
                 try fileManager.removeItem(at: file)
                 removedAny = true
@@ -197,6 +594,62 @@ enum MeetingAudioStorageManager {
     }
 
     @discardableResult
+    static func createPlaybackMixIfNeeded(
+        in audioDirectory: URL,
+        now: Date = Date(),
+        fileManager: FileManager = .default,
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
+        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
+    ) async -> Bool {
+        guard isSafeNonSymlinkDirectory(audioDirectory, fileManager: fileManager) else { return false }
+        removeStaleTemporaryAudioFiles(in: audioDirectory, now: now, fileManager: fileManager)
+
+        let playbackWAVURL = audioDirectory.appendingPathComponent("playback.wav")
+        let playbackM4AURL = audioDirectory.appendingPathComponent("playback.m4a")
+        if validator.isUsableAudioFile(at: playbackM4AURL, fileManager: fileManager)
+            || validator.isUsableAudioFile(at: playbackWAVURL, fileManager: fileManager) {
+            return false
+        }
+
+        guard let microphoneURL = firstRetainedAudioFile(
+            named: "microphone",
+            in: audioDirectory,
+            fileManager: fileManager
+        ), let systemURL = firstRetainedAudioFile(
+            named: "system_audio",
+            in: audioDirectory,
+            fileManager: fileManager
+        ) else {
+            return false
+        }
+
+        let tempURL = audioDirectory
+            .appendingPathComponent(".playback-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+
+        do {
+            try await playbackMixer.createPlaybackWAV(
+                microphoneURL: microphoneURL,
+                systemURL: systemURL,
+                destinationURL: tempURL,
+                fileManager: fileManager
+            )
+            guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
+                throw MeetingAudioStorageError.emptyConvertedFile
+            }
+            if fileManager.fileExists(atPath: playbackWAVURL.path) {
+                try fileManager.removeItem(at: playbackWAVURL)
+            }
+            try fileManager.moveItem(at: tempURL, to: playbackWAVURL)
+            fileManager.restrictFileToOwnerOnly(at: playbackWAVURL)
+            return true
+        } catch {
+            try? fileManager.removeItem(at: tempURL)
+            return false
+        }
+    }
+
+    @discardableResult
     static func compressWAVAudio(
         in audioDirectory: URL,
         now: Date = Date(),
@@ -205,7 +658,7 @@ enum MeetingAudioStorageManager {
         validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator()
     ) async -> Int {
         guard isSafeNonSymlinkDirectory(audioDirectory, fileManager: fileManager) else { return 0 }
-        removeStaleTemporaryM4AFiles(in: audioDirectory, now: now, fileManager: fileManager)
+        removeStaleTemporaryAudioFiles(in: audioDirectory, now: now, fileManager: fileManager)
 
         guard let files = try? fileManager.contentsOfDirectory(
             at: audioDirectory,
@@ -257,7 +710,22 @@ enum MeetingAudioStorageManager {
     static func removeStaleTemporaryM4AFiles(
         in audioDirectory: URL,
         now: Date = Date(),
-        minimumAge: TimeInterval = staleTemporaryM4AAge,
+        minimumAge: TimeInterval = staleTemporaryAudioAge,
+        fileManager: FileManager = .default
+    ) -> Int {
+        removeStaleTemporaryAudioFiles(
+            in: audioDirectory,
+            now: now,
+            minimumAge: minimumAge,
+            fileManager: fileManager
+        )
+    }
+
+    @discardableResult
+    static func removeStaleTemporaryAudioFiles(
+        in audioDirectory: URL,
+        now: Date = Date(),
+        minimumAge: TimeInterval = staleTemporaryAudioAge,
         fileManager: FileManager = .default
     ) -> Int {
         guard isSafeNonSymlinkDirectory(audioDirectory, fileManager: fileManager) else { return 0 }
@@ -270,7 +738,7 @@ enum MeetingAudioStorageManager {
         }
 
         var removedCount = 0
-        for file in files where isStaleTemporaryM4AFile(
+        for file in files where isStaleTemporaryAudioFile(
             file,
             now: now,
             minimumAge: minimumAge,
@@ -396,6 +864,43 @@ enum MeetingAudioStorageManager {
         }
     }
 
+    private static func firstRetainedAudioFile(
+        named stem: String,
+        in audioDirectory: URL,
+        fileManager: FileManager
+    ) -> URL? {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: audioDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        return files
+            .filter { url in
+                url.deletingPathExtension().lastPathComponent == stem
+                    && isManagedRetainedAudioFile(url, fileManager: fileManager)
+            }
+            .sorted { lhs, rhs in
+                retainedAudioFileSortKey(lhs) < retainedAudioFileSortKey(rhs)
+            }
+            .first
+    }
+
+    private static func retainedAudioFileSortKey(_ url: URL) -> String {
+        let extensionRank: String
+        switch url.pathExtension.lowercased() {
+        case "wav":
+            extensionRank = "0"
+        case "m4a":
+            extensionRank = "1"
+        default:
+            extensionRank = "2"
+        }
+        return "\(extensionRank)-\(url.lastPathComponent)"
+    }
+
     private static func restrictRetainedM4AFiles(_ files: [URL], fileManager: FileManager) {
         for file in files where file.pathExtension.localizedCaseInsensitiveCompare("m4a") == .orderedSame
             && isManagedRetainedAudioFile(file, fileManager: fileManager) {
@@ -409,7 +914,21 @@ enum MeetingAudioStorageManager {
         minimumAge: TimeInterval,
         fileManager: FileManager
     ) -> Bool {
-        guard isTranscriptedTemporaryM4AFileName(url) else { return false }
+        isStaleTemporaryAudioFile(
+            url,
+            now: now,
+            minimumAge: minimumAge,
+            fileManager: fileManager
+        )
+    }
+
+    private static func isStaleTemporaryAudioFile(
+        _ url: URL,
+        now: Date,
+        minimumAge: TimeInterval,
+        fileManager: FileManager
+    ) -> Bool {
+        guard isTranscriptedTemporaryAudioFileName(url) else { return false }
         guard !isSymbolicLink(url, fileManager: fileManager) else { return false }
         let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
         guard values?.isRegularFile == true, let modified = values?.contentModificationDate else {
@@ -419,7 +938,13 @@ enum MeetingAudioStorageManager {
     }
 
     private static func isTranscriptedTemporaryM4AFileName(_ url: URL) -> Bool {
-        guard url.pathExtension.localizedCaseInsensitiveCompare("m4a") == .orderedSame else { return false }
+        isTranscriptedTemporaryAudioFileName(url)
+    }
+
+    private static func isTranscriptedTemporaryAudioFileName(_ url: URL) -> Bool {
+        guard ["m4a", "wav"].contains(where: { url.pathExtension.localizedCaseInsensitiveCompare($0) == .orderedSame }) else {
+            return false
+        }
         let hiddenStem = url.deletingPathExtension().lastPathComponent
         guard hiddenStem.hasPrefix(".") else { return false }
         let stem = String(hiddenStem.dropFirst())

@@ -2,13 +2,11 @@ import Foundation
 
 func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
-        testResolverKeepsLiveMeetingAudioPairButPrefersSystemPlayback()
+        testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource()
         testResolverFallsBackToMicrophonePlayback()
         testAttachmentPlaybackPrefersSystemForFailedMeetingAudio()
         testRetainedAudioFactoryPreservesFailedMeetingSources()
         testPlaybackLoadingPolicyUsesDefaultSourceOnly()
-        testPlaybackLoadingPolicyUsesSelectedSourceOnly()
-        testPlaybackLoadingPolicyAllowsExplicitFullMix()
         testResolverPrefersImportedRecording()
         testResolverUsesPlaybackMixForPlaybackOnlyArchive()
         testResolverPrefersPlaybackMix()
@@ -19,7 +17,7 @@ func testMeetingAudioArchiveResolver() {
     }
 }
 
-private func testResolverKeepsLiveMeetingAudioPairButPrefersSystemPlayback() {
+private func testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource() {
     let directory = makeMeetingAudioResolverTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -50,13 +48,13 @@ private func testResolverKeepsLiveMeetingAudioPairButPrefersSystemPlayback() {
     )
     assertEqual(
         attachment?.playbackURLCandidates.map { $0.map(\.lastPathComponent).joined(separator: "+") },
-        ["system_audio.wav", "system_audio.wav+microphone.wav", "microphone.wav"],
-        "Live meeting playback should default to one source while keeping full playback available"
+        ["system_audio.wav"],
+        "Live meeting fallback playback should not expose a raw mic+system composite"
     )
     assertEqual(
         attachment?.playbackChoices.map(\.title),
-        ["System", "Full", "Mic"],
-        "Live meeting playback should make full and mic playback selectable when system is the default"
+        ["System"],
+        "Live meeting fallback playback should keep the normal UI to one source"
     )
     assertTrue(attachment?.isCompositePlayback == false, "Live playback should not layer mic and system audio by default")
 }
@@ -111,13 +109,13 @@ private func testAttachmentPlaybackPrefersSystemForFailedMeetingAudio() {
     )
     assertEqual(
         attachment.playbackURLCandidates.map { $0.map(\.lastPathComponent).joined(separator: "+") },
-        ["system_audio.wav", "system_audio.wav+microphone.wav", "microphone.wav"],
-        "Failed-meeting playback should default to one source while keeping full playback available"
+        ["system_audio.wav"],
+        "Failed-meeting playback should not expose a raw mic+system composite"
     )
     assertEqual(
         attachment.playbackChoices.map(\.title),
-        ["System", "Full", "Mic"],
-        "Failed-meeting playback should make full and mic playback selectable when system is the default"
+        ["System"],
+        "Failed-meeting playback should keep the normal UI to one source"
     )
     assertTrue(attachment.isCompositePlayback == false, "Failed-meeting playback should default to one source")
 }
@@ -175,66 +173,6 @@ private func testPlaybackLoadingPolicyUsesDefaultSourceOnly() {
         choices.flatMap(\.urls).map(\.lastPathComponent),
         ["system_audio.wav"],
         "Default playback should not hand both retained files to NSSound"
-    )
-}
-
-private func testPlaybackLoadingPolicyUsesSelectedSourceOnly() {
-    let directory = makeMeetingAudioResolverTestDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-
-    let attachment = MeetingAudioAttachment(
-        directoryURL: directory,
-        urls: [
-            directory.appendingPathComponent("microphone.wav"),
-            directory.appendingPathComponent("system_audio.wav")
-        ]
-    )
-    let micChoice = attachment.playbackChoices.first { $0.title == "Mic" }
-
-    let choices = MeetingAudioPlaybackLoadingPolicy.choices(
-        for: attachment,
-        preferredChoice: micChoice
-    )
-
-    assertEqual(
-        choices.map(\.title),
-        ["Mic"],
-        "When the user chooses Mic, the player should load Mic without also adding System"
-    )
-    assertEqual(
-        choices.flatMap(\.urls).map(\.lastPathComponent),
-        ["microphone.wav"],
-        "Selected mic playback should stay single-source"
-    )
-}
-
-private func testPlaybackLoadingPolicyAllowsExplicitFullMix() {
-    let directory = makeMeetingAudioResolverTestDirectory()
-    defer { try? FileManager.default.removeItem(at: directory) }
-
-    let attachment = MeetingAudioAttachment(
-        directoryURL: directory,
-        urls: [
-            directory.appendingPathComponent("microphone.wav"),
-            directory.appendingPathComponent("system_audio.wav")
-        ]
-    )
-    let fullChoice = attachment.playbackChoices.first { $0.title == "Full" }
-
-    let choices = MeetingAudioPlaybackLoadingPolicy.choices(
-        for: attachment,
-        preferredChoice: fullChoice
-    )
-
-    assertEqual(
-        choices.map(\.title),
-        ["Full"],
-        "Headphone or clean-room playback should still allow the complete system plus mic mix"
-    )
-    assertEqual(
-        choices.flatMap(\.urls).map(\.lastPathComponent),
-        ["system_audio.wav", "microphone.wav"],
-        "Full playback should deliberately load both retained streams only when selected"
     )
 }
 

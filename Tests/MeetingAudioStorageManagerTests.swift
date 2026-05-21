@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 func testMeetingAudioStorageManager() async {
@@ -142,6 +143,156 @@ func testMeetingAudioStorageManager() async {
         assertEqual(posixPermissions(at: m4aURL), 0o600, "existing retained M4A should be owner-only")
     }
 
+    await runSuite("MeetingAudioStorageManager creates playback mix before compressing live split audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Live Split Call", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        let micWAV = audioDirectory.appendingPathComponent("microphone.wav")
+        let systemWAV = audioDirectory.appendingPathComponent("system_audio.wav")
+        try! Data("mic".utf8).write(to: micWAV)
+        try! Data("system".utf8).write(to: systemWAV)
+
+        await MeetingAudioStorageManager.processSavedTranscript(
+            at: transcriptURL,
+            retentionWindow: .never,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer()
+        )
+
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("playback.m4a").path),
+            "saved live meetings should get one derived playback file"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("microphone.m4a").path),
+            "raw microphone audio should remain available after playback mix generation"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("system_audio.m4a").path),
+            "raw system audio should remain available after playback mix generation"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: micWAV.path), "raw mic WAV should still follow normal compression")
+        assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "raw system WAV should still follow normal compression")
+    }
+
+    await runSuite("MeetingAudioStorageManager keeps raw split audio when playback mix generation fails") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Mixer Failed Call", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        try! Data("mic".utf8).write(to: audioDirectory.appendingPathComponent("microphone.wav"))
+        try! Data("system".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.wav"))
+
+        await MeetingAudioStorageManager.processSavedTranscript(
+            at: transcriptURL,
+            retentionWindow: .never,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer(shouldFail: true)
+        )
+
+        assertFalse(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("playback.m4a").path),
+            "a failed playback mix should not leave a fake final playback file"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("microphone.m4a").path),
+            "mic audio should survive playback mix failure"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("system_audio.m4a").path),
+            "system audio should survive playback mix failure"
+        )
+    }
+
+    await runSuite("MeetingAudioStorageManager does not overwrite an existing playback mix") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Existing Mix Call", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        let playbackM4A = audioDirectory.appendingPathComponent("playback.m4a")
+        try! Data("m4a".utf8).write(to: playbackM4A)
+        try! Data("mic".utf8).write(to: audioDirectory.appendingPathComponent("microphone.wav"))
+        try! Data("system".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.wav"))
+
+        await MeetingAudioStorageManager.processSavedTranscript(
+            at: transcriptURL,
+            retentionWindow: .never,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer(shouldFail: true)
+        )
+
+        assertEqual(
+            try? Data(contentsOf: playbackM4A),
+            Data("m4a".utf8),
+            "existing usable playback audio should not be regenerated"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("microphone.m4a").path),
+            "raw microphone audio should still be compressed normally"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("system_audio.m4a").path),
+            "raw system audio should still be compressed normally"
+        )
+    }
+
+    await runSuite("MeetingAudioPlaybackMixer suppresses likely speaker bleed without clipping") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let playbackURL = directory.appendingPathComponent("playback.wav")
+        try! writeFloatWAV(samples: Array(repeating: 0.40, count: 4096), to: systemURL)
+        try! writeFloatWAV(samples: Array(repeating: 0.08, count: 4096), to: micURL)
+
+        try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
+            microphoneURL: micURL,
+            systemURL: systemURL,
+            destinationURL: playbackURL,
+            fileManager: .default
+        )
+
+        let samples = try! readFloatWAVSamples(from: playbackURL)
+        let maximum = samples.map { abs($0) }.max() ?? 0
+        let average = samples.reduce(Float(0), +) / Float(max(samples.count, 1))
+        assertTrue(maximum <= 0.98, "generated playback audio should be limited")
+        assertTrue(
+            average < 0.43,
+            "likely speaker bleed from the mic should not be mixed at full volume"
+        )
+    }
+
+    await runSuite("MeetingAudioPlaybackMixer resamples split streams with different sample rates") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let playbackURL = directory.appendingPathComponent("playback.wav")
+        try! writeFloatWAV(samples: Array(repeating: 0.25, count: 4096), to: systemURL, sampleRate: 48_000)
+        try! writeFloatWAV(samples: Array(repeating: 0.18, count: 2048), to: micURL, sampleRate: 16_000)
+
+        try! await AVFoundationMeetingAudioPlaybackMixer().createPlaybackWAV(
+            microphoneURL: micURL,
+            systemURL: systemURL,
+            destinationURL: playbackURL,
+            fileManager: .default
+        )
+
+        let samples = try! readFloatWAVSamples(from: playbackURL)
+        let maximum = samples.map { abs($0) }.max() ?? 0
+        assertTrue(samples.count >= 4096, "generated playback should contain the system stream after resampling")
+        assertTrue(maximum <= 0.98, "resampled playback audio should be limited")
+    }
+
     await runSuite("MeetingAudioStorageManager ignores unrelated WAV files") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -165,7 +316,7 @@ func testMeetingAudioStorageManager() async {
         )
     }
 
-    await runSuite("MeetingAudioStorageManager removes only stale Transcripted temp M4A files") {
+    await runSuite("MeetingAudioStorageManager removes only stale Transcripted temp audio files") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -175,11 +326,17 @@ func testMeetingAudioStorageManager() async {
         let finalM4A = audioDirectory.appendingPathComponent("recording.m4a")
         let staleTemp = audioDirectory.appendingPathComponent(".recording-092B8B54-B598-4796-9573-00E0D9FC9EE1.m4a")
         let freshTemp = audioDirectory.appendingPathComponent(".recording-3F5531EE-C352-429F-A10F-EC978BBC2927.m4a")
+        let stalePlaybackTemp = audioDirectory.appendingPathComponent(".playback-86CE71C0-7B0D-43BC-8A3F-68C36195C8C6.wav")
+        let freshPlaybackTemp = audioDirectory.appendingPathComponent(".playback-196F0C64-898B-41E1-8062-7B2F3A2ED03E.wav")
         let unrelatedHiddenFile = audioDirectory.appendingPathComponent(".user-note.m4a")
+        let unrelatedHiddenWAV = audioDirectory.appendingPathComponent(".user-note.wav")
         try! Data("m4a".utf8).write(to: finalM4A)
         try! Data("stale".utf8).write(to: staleTemp)
         try! Data("fresh".utf8).write(to: freshTemp)
+        try! Data("stale playback".utf8).write(to: stalePlaybackTemp)
+        try! Data("fresh playback".utf8).write(to: freshPlaybackTemp)
         try! Data("user".utf8).write(to: unrelatedHiddenFile)
+        try! Data("user wav".utf8).write(to: unrelatedHiddenWAV)
         try! FileManager.default.setAttributes(
             [.modificationDate: now.addingTimeInterval(-11 * 60)],
             ofItemAtPath: staleTemp.path
@@ -190,7 +347,19 @@ func testMeetingAudioStorageManager() async {
         )
         try! FileManager.default.setAttributes(
             [.modificationDate: now.addingTimeInterval(-11 * 60)],
+            ofItemAtPath: stalePlaybackTemp.path
+        )
+        try! FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-60)],
+            ofItemAtPath: freshPlaybackTemp.path
+        )
+        try! FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-11 * 60)],
             ofItemAtPath: unrelatedHiddenFile.path
+        )
+        try! FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-11 * 60)],
+            ofItemAtPath: unrelatedHiddenWAV.path
         )
 
         let converted = await MeetingAudioStorageManager.compressWAVAudio(
@@ -202,8 +371,17 @@ func testMeetingAudioStorageManager() async {
 
         assertEqual(converted, 0, "temp cleanup should not count as a WAV conversion")
         assertFalse(FileManager.default.fileExists(atPath: staleTemp.path), "stale app-owned temp file should be removed")
+        assertFalse(
+            FileManager.default.fileExists(atPath: stalePlaybackTemp.path),
+            "stale playback temp WAV should be removed"
+        )
         assertTrue(FileManager.default.fileExists(atPath: freshTemp.path), "recent temp file should not be removed")
+        assertTrue(
+            FileManager.default.fileExists(atPath: freshPlaybackTemp.path),
+            "recent playback temp WAV should not be removed"
+        )
         assertTrue(FileManager.default.fileExists(atPath: unrelatedHiddenFile.path), "unrelated hidden M4A should not be removed")
+        assertTrue(FileManager.default.fileExists(atPath: unrelatedHiddenWAV.path), "unrelated hidden WAV should not be removed")
         assertTrue(FileManager.default.fileExists(atPath: finalM4A.path), "final M4A should stay")
     }
 
@@ -483,6 +661,22 @@ private struct FakeMeetingAudioConverter: MeetingAudioFileConverting {
     }
 }
 
+private struct FakeMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
+    var shouldFail = false
+
+    func createPlaybackWAV(
+        microphoneURL: URL,
+        systemURL: URL,
+        destinationURL: URL,
+        fileManager: FileManager
+    ) async throws {
+        if shouldFail {
+            throw MeetingAudioStorageError.conversionFailed
+        }
+        try Data("m4a".utf8).write(to: destinationURL)
+    }
+}
+
 private struct FakeMeetingAudioValidator: MeetingAudioFileValidating {
     func isUsableAudioFile(at url: URL, fileManager: FileManager) -> Bool {
         guard fileManager.fileExists(atPath: url.path) else { return false }
@@ -550,4 +744,48 @@ private func makeAudioDirectory(for transcriptURL: URL) -> URL {
         .appendingPathComponent("\(transcriptURL.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
+}
+
+private func writeFloatWAV(samples: [Float], to url: URL, sampleRate: Double = 48_000) throws {
+    guard let format = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: sampleRate,
+        channels: 1,
+        interleaved: false
+    ), let buffer = AVAudioPCMBuffer(
+        pcmFormat: format,
+        frameCapacity: AVAudioFrameCount(samples.count)
+    ) else {
+        throw MeetingAudioStorageError.mixBufferAllocationFailed
+    }
+
+    buffer.frameLength = AVAudioFrameCount(samples.count)
+    samples.withUnsafeBufferPointer { pointer in
+        guard let base = pointer.baseAddress,
+              let destination = buffer.floatChannelData?[0] else {
+            return
+        }
+        destination.update(from: base, count: samples.count)
+    }
+
+    let file = try AVAudioFile(
+        forWriting: url,
+        settings: format.settings,
+        commonFormat: format.commonFormat,
+        interleaved: format.isInterleaved
+    )
+    try file.write(from: buffer)
+}
+
+private func readFloatWAVSamples(from url: URL) throws -> [Float] {
+    let file = try AVAudioFile(forReading: url)
+    guard let buffer = AVAudioPCMBuffer(
+        pcmFormat: file.processingFormat,
+        frameCapacity: AVAudioFrameCount(file.length)
+    ) else {
+        throw MeetingAudioStorageError.mixBufferAllocationFailed
+    }
+    try file.read(into: buffer)
+    guard let data = buffer.floatChannelData?[0] else { return [] }
+    return Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength)))
 }
