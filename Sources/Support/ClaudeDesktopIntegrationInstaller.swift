@@ -14,6 +14,7 @@ struct ClaudeDesktopIntegrationStatus: Equatable {
     let configuredCommandPath: String?
     let installedBinaryExists: Bool
     let bundledBinaryExists: Bool
+    let installedBinaryMatchesBundled: Bool
     let configExists: Bool
     let configIsReadable: Bool
     let claudeDesktopLikelyInstalled: Bool
@@ -121,9 +122,16 @@ enum ClaudeDesktopIntegrationInstaller {
         let configuredCommandPath = configRead.config.flatMap(transcriptedCommandPath(in:))
         let configIsReadable = !configExists || configRead.config != nil
         let isConfiguredForInstalledBinary = configuredCommandPath == installedBinaryURL.path
+        let installedBinaryMatchesBundled = installedBinaryMatchesBundled(
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryExists: installedBinaryExists,
+            bundledBinaryExists: bundledBinaryExists,
+            fileManager: fileManager
+        )
 
         let state: ClaudeDesktopIntegrationStatus.State
-        if installedBinaryExists && isConfiguredForInstalledBinary {
+        if installedBinaryExists && isConfiguredForInstalledBinary && installedBinaryMatchesBundled {
             state = .installed
         } else if !configExists && !installedBinaryExists {
             state = .notInstalled
@@ -139,6 +147,7 @@ enum ClaudeDesktopIntegrationInstaller {
             configuredCommandPath: configuredCommandPath,
             installedBinaryExists: installedBinaryExists,
             bundledBinaryExists: bundledBinaryExists,
+            installedBinaryMatchesBundled: installedBinaryMatchesBundled,
             configExists: configExists,
             configIsReadable: configIsReadable,
             claudeDesktopLikelyInstalled: claudeDesktopLikelyInstalled(fileManager: fileManager)
@@ -312,6 +321,26 @@ enum ClaudeDesktopIntegrationInstaller {
         }
 
         return transcripted["command"] as? String
+    }
+
+    private static func installedBinaryMatchesBundled(
+        installedBinaryURL: URL,
+        bundledBinaryURL: URL?,
+        installedBinaryExists: Bool,
+        bundledBinaryExists: Bool,
+        fileManager: FileManager
+    ) -> Bool {
+        guard installedBinaryExists,
+              bundledBinaryExists,
+              let bundledBinaryURL else {
+            return true
+        }
+
+        if installedBinaryURL.standardizedFileURL.path == bundledBinaryURL.standardizedFileURL.path {
+            return true
+        }
+
+        return fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path)
     }
 
     private static func backupConfig(at configURL: URL, fileManager: FileManager) throws -> URL? {

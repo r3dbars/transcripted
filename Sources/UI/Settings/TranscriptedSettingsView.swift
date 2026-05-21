@@ -4568,6 +4568,9 @@ private struct ClaudeDesktopStatusRow: View {
             if !status.installedBinaryExists {
                 return "The server file is missing. Install will copy a fresh one and update Claude Desktop."
             }
+            if !status.installedBinaryMatchesBundled {
+                return "The installed server is from an older app build. Install will copy the current one."
+            }
             return "Claude Desktop points at another Transcripted server. Install will update it."
         }
     }
