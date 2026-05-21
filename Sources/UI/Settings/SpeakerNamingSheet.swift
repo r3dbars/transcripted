@@ -131,11 +131,11 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 @MainActor
 final class SpeakerNamingContentView: NSView {
 
-    private let titleLabel = NSTextField(labelWithString: "Name the speakers from this meeting")
-    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name speakers now, or review them later in Settings > People.")
+    private let titleLabel = NSTextField(labelWithString: "Review meeting speakers")
+    private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name unknown voices, confirm suggested matches, or review later in Settings > People.")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
-    private let saveButton = NSButton(title: "Save names", target: nil, action: nil)
+    private let saveButton = NSButton(title: "Save Names", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Review Later", target: nil, action: nil)
 
     // Local (mic) section header + "Keep as You" batch toggle
@@ -191,18 +191,21 @@ final class SpeakerNamingContentView: NSView {
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(handleCancel)
-        cancelButton.toolTip = "Keep the transcript generic and finish speaker names later in Settings > People"
+        cancelButton.toolTip = "Keep unresolved speaker labels for now and finish them later in Settings > People"
         addSubview(cancelButton)
 
         // Section headers live inside the document view so they scroll with rows.
+        localSectionLabel.stringValue = "Local mic voices"
         localSectionLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         localSectionLabel.textColor = NSColor.labelColor
+        remoteSectionLabel.stringValue = "Remote participants"
         remoteSectionLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         remoteSectionLabel.textColor = NSColor.labelColor
 
         keepAsYouButton.bezelStyle = .rounded
         keepAsYouButton.controlSize = .small
         keepAsYouButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        keepAsYouButton.toolTip = "Use one \"You\" label for everyone picked up by the local microphone"
         keepAsYouButton.target = self
         keepAsYouButton.action = #selector(handleKeepAsYouToggle)
     }
@@ -222,7 +225,7 @@ final class SpeakerNamingContentView: NSView {
         if hasMicSection {
             documentView.addSubview(localSectionLabel)
             documentView.addSubview(keepAsYouButton)
-            keepAsYouButton.title = "Keep mic as You"
+            keepAsYouButton.title = "Keep Local Mic as You"
             for entry in micEntries {
                 let row = SpeakerRowView(entry: entry, knownPeople: request.knownPeople)
                 documentView.addSubview(row)
@@ -391,7 +394,7 @@ final class SpeakerNamingContentView: NSView {
 
     @objc private func handleKeepAsYouToggle() {
         localCollapsedToMe.toggle()
-        keepAsYouButton.title = localCollapsedToMe ? "Split mic speakers" : "Keep mic as You"
+        keepAsYouButton.title = localCollapsedToMe ? "Review Local Mic Voices" : "Keep Local Mic as You"
         for row in micRows {
             row.setCollapsedToMe(localCollapsedToMe)
         }
@@ -437,8 +440,8 @@ final class SpeakerRowView: NSView {
     private let sampleField = NSTextField(wrappingLabelWithString: "")
     private let nameField = SpeakerNameComboBox(frame: .zero)
     private let playButton = NSButton(title: "Play sample", target: nil, action: nil)
-    private let confirmButton = NSButton(title: "Use Suggested", target: nil, action: nil)
-    private let discardButton = NSButton(title: "Discard", target: nil, action: nil)
+    private let confirmButton = NSButton(title: "Confirm Match", target: nil, action: nil)
+    private let discardButton = NSButton(title: "Discard Voice", target: nil, action: nil)
 
     private var userConfirmed: Bool = false
     private var isDiscarded: Bool = false
@@ -504,11 +507,7 @@ final class SpeakerRowView: NSView {
         layer?.borderWidth = 1
         updateSurfaceColors()
 
-        if let current = entry.currentName, !current.isEmpty {
-            labelField.stringValue = "Suggested match: \(current)"
-        } else {
-            labelField.stringValue = "Speaker \(entry.diarizerSpeakerId)"
-        }
+        labelField.stringValue = reviewTitle
         labelField.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         labelField.textColor = NSColor.labelColor
         Self.disableExpansionFrame(for: labelField)
@@ -535,17 +534,15 @@ final class SpeakerRowView: NSView {
         nameField.completes = true
         nameField.numberOfVisibleItems = min(max(knownPeopleLabels.count, 4), 8)
         nameField.font = NSFont.systemFont(ofSize: 12)
-        if entry.currentName != nil {
-            nameField.placeholderString = "Use the suggestion or choose a different person"
-        } else {
-            nameField.placeholderString = "Type a new name or choose an existing person"
-        }
+        nameField.placeholderString = namePlaceholder
+        nameField.toolTip = "Type a new name, choose an existing person, or leave it blank to skip this row"
         nameField.onTextAreaClick = { [weak self] in
             self?.openNameTray()
         }
         addSubview(nameField)
 
         playButton.bezelStyle = .rounded
+        playButton.toolTip = "Play this short speaker sample"
         playButton.target = self
         playButton.action = #selector(handlePlaySample)
         addSubview(playButton)
@@ -555,14 +552,15 @@ final class SpeakerRowView: NSView {
         confirmButton.action = #selector(handleConfirm)
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
         if let current = entry.currentName, !current.isEmpty {
-            confirmButton.title = "Confirm \(current)"
+            confirmButton.title = "Confirm Match"
+            confirmButton.toolTip = "Use \(current) as the speaker for this row"
         }
         addSubview(confirmButton)
 
         discardButton.bezelStyle = .inline
         discardButton.target = self
         discardButton.action = #selector(handleDiscardToggle)
-        discardButton.toolTip = "Leave this voice out of the speaker database"
+        discardButton.toolTip = "Do not save this voice to People. The transcript stays saved."
         addSubview(discardButton)
 
         statusOverlay.font = NSFont.systemFont(ofSize: 11, weight: .medium)
@@ -667,7 +665,7 @@ final class SpeakerRowView: NSView {
         if let current = entry.currentName {
             nameField.stringValue = current
         }
-        confirmButton.title = "Confirmed"
+        confirmButton.title = "Match Confirmed"
         updateStatePresentation()
     }
 
@@ -732,14 +730,14 @@ final class SpeakerRowView: NSView {
         statusOverlay.isHidden = !locked
 
         if isCollapsedToMe {
-            statusOverlay.stringValue = "Will be saved as \u{201C}You\u{201D}"
+            statusOverlay.stringValue = "Will be saved as \"You\""
         } else if isDiscarded {
-            statusOverlay.stringValue = "Will be left out of the speaker database"
+            statusOverlay.stringValue = "Will not be saved to People"
         }
 
         confirmButton.isEnabled = !locked
         discardButton.isEnabled = !isCollapsedToMe
-        discardButton.title = isDiscarded ? "Undo discard" : "Discard"
+        discardButton.title = isDiscarded ? "Undo Discard" : "Discard Voice"
         alphaValue = locked ? 0.62 : 1.0
         needsLayout = true
     }
@@ -846,10 +844,42 @@ final class SpeakerRowView: NSView {
             let calls = entry.callCount == 1 ? "1 call" : "\(entry.callCount) calls"
             parts.append("seen in \(calls)")
         }
-        if parts.isEmpty {
-            return entry.needsNaming ? "New speaker" : "Review this match"
+        let evidence = parts.joined(separator: " • ")
+        if evidence.isEmpty { return reviewInstruction }
+        return "\(reviewInstruction) \(evidence)."
+    }
+
+    private var reviewTitle: String {
+        let voiceLabel = entry.channel == .mic ? "local mic speaker" : "remote speaker"
+        guard let currentName else {
+            return "Unknown \(voiceLabel) \(entry.diarizerSpeakerId)"
         }
-        return parts.joined(separator: " • ")
+        return "Suggested \(voiceLabel): \(currentName)"
+    }
+
+    private var reviewInstruction: String {
+        if let currentName {
+            return "Confirm this is \(currentName), or type the correct person."
+        }
+        if entry.channel == .mic {
+            return "Name this local voice, choose You, or discard it."
+        }
+        return "Name this remote voice, choose a saved person, or discard it."
+    }
+
+    private var namePlaceholder: String {
+        if entry.channel == .mic, currentName == nil {
+            return "Type a name, choose You, or pick a saved person"
+        }
+        if currentName != nil {
+            return "Wrong match? Type the correct person"
+        }
+        return "Type a name or choose a saved person"
+    }
+
+    private var currentName: String? {
+        let trimmed = entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
