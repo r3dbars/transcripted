@@ -304,6 +304,66 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(updated.contains("- **Taylor:** 1 utterances, ~10 words, 00:03"))
     }
 
+    func testUpdateDeferredSpeakerNameConsolidatesDuplicateRemoteBreakdownRows() throws {
+        let pendingSpeakerId = UUID()
+        let existingSpeakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("duplicate-breakdown.md")
+        try """
+        ---
+        system_speakers: 2
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(pendingSpeakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(existingSpeakerId.uuidString)"
+            name: "Alex"
+            confidence: high
+            source: db
+        ---
+
+        ## Speaker Analytics
+
+        - **Speakers Detected:** 2
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+        - **Alex:** 2 utterances, ~4 words, 00:03
+
+        ---
+
+        [00:00] [System/Speaker 1] first fragment
+        [00:01] [System/Alex] second fragment
+
+        ---
+
+        *2 channels | 3 speakers*
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: pendingSpeakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Alex"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains("system_speakers: 1"))
+        XCTAssertTrue(updated.contains("- **Speakers Detected:** 1"))
+        XCTAssertTrue(updated.contains("- **Alex:** 3 utterances, ~6 words, 00:04"))
+        XCTAssertTrue(updated.contains("[00:00] [System/Alex] first fragment"))
+        XCTAssertTrue(updated.contains("*2 channels | 2 speakers*"))
+        XCTAssertFalse(updated.contains("- **Speaker 1:**"))
+        XCTAssertFalse(updated.contains("- **Alex:** 2 utterances, ~4 words, 00:03"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()

@@ -167,6 +167,7 @@ extension TranscriptSaver {
             newName: newName,
             channel: channel
         )
+        content = SpeakerBreakdownConsolidator.consolidate(content)
 
         do {
             try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
