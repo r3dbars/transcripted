@@ -2,6 +2,7 @@ import Foundation
 
 enum UpdateFailureKind: String {
     case badAppcast = "bad_appcast"
+    case checkTimedOut = "check_timed_out"
     case downloadFailed = "download_failed"
     case feedUnreachable = "feed_unreachable"
     case installFailed = "install_failed"
