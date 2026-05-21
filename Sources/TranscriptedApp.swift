@@ -3,6 +3,7 @@
 
 import SwiftUI
 import AppKit
+import AVFoundation
 import Carbon
 import Combine
 import TranscriptedCore
@@ -53,7 +54,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         actions: settingsActions
     )
     private lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
-        makeView: { [unowned self] in self.makeOnboardingView() }
+        makeView: { [unowned self] in self.makeOnboardingView() },
+        onPresent: { [weak self] entrypoint in
+            self?.trackOnboardingShown(entrypoint: entrypoint)
+        }
     )
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
@@ -223,7 +227,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         if !PermissionsOnboardingPreferences.hasCompleted() {
             _ = resolvedSourceApp()
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "dock_icon")
             return false
         }
 
@@ -357,7 +361,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         closePopover()
 
         if !PermissionsOnboardingPreferences.hasCompleted() {
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "single_instance_reopen")
         } else {
             showSettingsWindow(page: .home, source: "single_instance_reopen")
         }
@@ -368,7 +372,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @objc func togglePopover() {
         if !PermissionsOnboardingPreferences.hasCompleted() {
             _ = resolvedSourceApp()
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "status_item")
             return
         }
 
@@ -504,7 +508,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }
-            self.onboardingWindowController.present()
+            self.onboardingWindowController.present(entrypoint: "initial_launch")
         }
     }
 
@@ -536,21 +540,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func trackMenuBarOpened(entrypoint: String) {
-        let modelState: String
-        switch appState.sttRouter.modelDownloadState {
-        case .notLoaded:
-            modelState = "not_loaded"
-        case .downloading:
-            modelState = "downloading"
-        case .cached:
-            modelState = "cached"
-        case .loading:
-            modelState = "loading"
-        case .ready:
-            modelState = "ready"
-        case .failed:
-            modelState = "failed"
-        }
+        let modelState = modelStateAnalyticsName(appState.sttRouter.modelDownloadState)
 
         let updateState: String
         switch appState.sparkleUpdater.updateStatus.state {
@@ -582,6 +572,54 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "update_state": updateState,
             ]
         )
+    }
+
+    private func trackOnboardingShown(entrypoint: String) {
+        AnalyticsReporter.track(
+            "onboarding_shown",
+            properties: [
+                "analytics_available": AnalyticsReporter.isAvailable ? "true" : "false",
+                "crash_reporting_available": CrashReporter.isAvailable ? "true" : "false",
+                "entrypoint": entrypoint,
+                "has_target": lastExternalApplication == nil ? "false" : "true",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
+                "model_state": modelStateAnalyticsName(appState.sttRouter.modelDownloadState),
+                "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
+            ]
+        )
+    }
+
+    private func modelStateAnalyticsName(_ state: ParakeetModelState) -> String {
+        switch state {
+        case .notLoaded:
+            return "not_loaded"
+        case .downloading:
+            return "downloading"
+        case .cached:
+            return "cached"
+        case .loading:
+            return "loading"
+        case .ready:
+            return "ready"
+        case .failed:
+            return "failed"
+        }
+    }
+
+    private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined:
+            return "not_determined"
+        case .restricted:
+            return "restricted"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
