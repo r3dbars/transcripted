@@ -43,6 +43,10 @@ struct MeetingAudioAttachment: Equatable, Sendable {
             return urls.map { playbackChoice(for: $0) }
         }
 
+        if let splitChoices = splitStreamPlaybackChoices(in: urls) {
+            return splitChoices
+        }
+
         let preferredURLs = preferredAudioFiles(in: urls)
         if !preferredURLs.isEmpty {
             return preferredURLs.map { playbackChoice(for: $0) }
@@ -70,6 +74,34 @@ struct MeetingAudioAttachment: Equatable, Sendable {
         let preferredPaths = Set(preferredURLs.map { $0.standardizedFileURL.path })
         let remainingURLs = urls.filter { !preferredPaths.contains($0.standardizedFileURL.path) }
         return preferredURLs + remainingURLs
+    }
+
+    private func splitStreamPlaybackChoices(in urls: [URL]) -> [MeetingAudioPlaybackChoice]? {
+        guard let systemURL = firstAudioFile(named: "system_audio", in: urls),
+              let microphoneURL = firstAudioFile(named: "microphone", in: urls) else {
+            return nil
+        }
+
+        let sourcePaths = Set([systemURL, microphoneURL].map { $0.standardizedFileURL.path })
+        let remainingURLs = urls.filter { !sourcePaths.contains($0.standardizedFileURL.path) }
+
+        return [
+            playbackChoice(for: systemURL),
+            compositePlaybackChoice(systemURL: systemURL, microphoneURL: microphoneURL),
+            playbackChoice(for: microphoneURL)
+        ] + remainingURLs.map { playbackChoice(for: $0) }
+    }
+
+    private func compositePlaybackChoice(
+        systemURL: URL,
+        microphoneURL: URL
+    ) -> MeetingAudioPlaybackChoice {
+        MeetingAudioPlaybackChoice(
+            id: "full:\(systemURL.standardizedFileURL.path)|\(microphoneURL.standardizedFileURL.path)",
+            title: "Full",
+            symbolName: "person.2.wave.2.fill",
+            urls: [systemURL, microphoneURL]
+        )
     }
 
     private func playbackChoice(for url: URL) -> MeetingAudioPlaybackChoice {
