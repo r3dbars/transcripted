@@ -21,6 +21,29 @@ func testTranscriptedConstants() async {
             TranscriptedConstants.meetingTerminationFinishWaitTimeout > meetingStopTimeoutSeconds,
             "termination wait should outlast meeting stop timeout so retained audio can be queued before quit"
         )
+        let maximumStopTimeoutSeconds = TimeInterval(TranscriptedConstants.meetingMaximumStopTimeout) / 1_000_000_000
+        assertTrue(
+            TranscriptedConstants.meetingTerminationFinishWaitTimeout > maximumStopTimeoutSeconds,
+            "termination wait should outlast the longest scaled stop timeout"
+        )
+    }
+
+    runSuite("TranscriptedConstants scales meeting stop timeout for long recordings") {
+        assertEqual(
+            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 10 * 60),
+            TranscriptedConstants.meetingStopTimeout,
+            "short meetings should keep the fast base stop timeout"
+        )
+        assertTrue(
+            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 2 * 60 * 60)
+                > TranscriptedConstants.meetingStopTimeout,
+            "multi-hour meetings should get extra time to flush and merge audio"
+        )
+        assertEqual(
+            TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 12 * 60 * 60),
+            TranscriptedConstants.meetingMaximumStopTimeout,
+            "very long meetings should cap the stop wait"
+        )
     }
 
     runSuite("TranscriptedConstants keeps failed meeting audio cleanup conservative") {

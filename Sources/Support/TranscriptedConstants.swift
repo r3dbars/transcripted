@@ -53,15 +53,35 @@ enum TranscriptedConstants {
     /// neither the success nor error publisher has fired.
     static let meetingStartTimeout: UInt64 = 5_000_000_000  // 5 seconds
 
-    /// Timeout for waiting on meeting capture file-close callbacks after stop.
-    /// The bridge falls back to the best URLs it has instead of leaving the UI
-    /// stuck forever if CoreAudio cleanup never calls completion.
+    /// Base timeout for waiting on meeting capture file-close callbacks after
+    /// stop. Long recordings can need more time to flush and merge audio, so
+    /// call `meetingStopTimeout(forRecordingDuration:)` for live capture.
     static let meetingStopTimeout: UInt64 = 30_000_000_000  // 30 seconds
 
+    /// Maximum stop wait for long recordings. This keeps 2h+ meetings from
+    /// being failed while audio finalization is still making progress.
+    static let meetingMaximumStopTimeout: UInt64 = 120_000_000_000  // 120 seconds
+
+    /// Adds this much stop-wait budget for each recorded hour, capped by
+    /// `meetingMaximumStopTimeout`.
+    static let meetingStopTimeoutGrowthStep: UInt64 = 30_000_000_000  // 30 seconds
+
+    static func meetingStopTimeout(forRecordingDuration duration: TimeInterval) -> UInt64 {
+        guard duration.isFinite, duration > 0 else { return meetingStopTimeout }
+
+        let maxGrowthSteps = (meetingMaximumStopTimeout - meetingStopTimeout) / meetingStopTimeoutGrowthStep
+        let recordedHours = UInt64(min(duration / 3_600, Double(maxGrowthSteps)))
+        guard recordedHours > 0 else { return meetingStopTimeout }
+
+        let scaledTimeout = meetingStopTimeout + (recordedHours * meetingStopTimeoutGrowthStep)
+        return min(scaledTimeout, meetingMaximumStopTimeout)
+    }
+
     /// Max time app termination waits for an in-flight meeting stop to finish.
-    /// This must stay above `meetingStopTimeout` so quit preservation does not
-    /// give up before the bridge returns retained audio URLs.
-    static let meetingTerminationFinishWaitTimeout: TimeInterval = 35.0
+    /// This must stay above the maximum scaled stop timeout so quit
+    /// preservation does not give up before the bridge returns retained audio
+    /// URLs.
+    static let meetingTerminationFinishWaitTimeout: TimeInterval = 125.0
 
     /// Failed meeting audio is recoverable, but old unretried files should not grow forever.
     static let failedMeetingAudioRetentionDays = 30
