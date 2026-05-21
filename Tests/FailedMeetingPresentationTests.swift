@@ -85,7 +85,7 @@ func testFailedMeetingPresentation() {
         assertFalse(presentation.canShowRetryAction, "non-retryable failures should not show Try again")
     }
 
-    runSuite("HomeFailedMeetingInlinePresentation keeps retryable rows minimal") {
+    runSuite("HomeFailedMeetingInlinePresentation explains retryable saved audio") {
         let presentation = HomeFailedMeetingInlinePresentation.make(
             isRetryable: true,
             isRetrying: false,
@@ -93,8 +93,12 @@ func testFailedMeetingPresentation() {
             detail: "Model was not ready."
         )
 
-        assertEqual(presentation.statusText, "Needs retry", "retryable rows should keep the simple retry label")
-        assertNil(presentation.inlineDetail, "retryable rows do not need extra inline copy")
+        assertEqual(presentation.statusText, "Retry ready", "retryable rows should show that recovery is available")
+        assertEqual(
+            presentation.inlineDetail,
+            "Saved audio is still here. Try again will transcribe it.",
+            "retryable rows should make saved audio preservation visible"
+        )
         assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
     }
 

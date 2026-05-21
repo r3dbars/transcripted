@@ -21,8 +21,8 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
 
         if isRetryable, hasAudioFiles {
             return HomeFailedMeetingInlinePresentation(
-                statusText: "Needs retry",
-                inlineDetail: nil,
+                statusText: "Retry ready",
+                inlineDetail: "Saved audio is still here. Try again will transcribe it.",
                 canShowRetryAction: true
             )
         }
