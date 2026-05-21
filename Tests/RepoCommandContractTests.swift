@@ -694,6 +694,15 @@ func testRepoCommandContract() {
                 && controllerContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
             "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
+        let startQueuedBlock = sourceSlice(
+            controllerContents,
+            from: "private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {",
+            to: "private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {"
+        )
+        assertTrue(
+            startQueuedBlock.contains("recordSession(kind: \"meeting\", stage: \"transcribing\")"),
+            "each queued meeting start should refresh runtime diagnostics away from the previous terminal outcome"
+        )
         assertTrue(
             downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
                 && downloaderContents.contains("stt.prepare(model: sttModel)"),

@@ -1553,6 +1553,7 @@ final class MeetingSessionController: ObservableObject {
         if !isCaptureSessionActive {
             state = .transcribing
         }
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
 
         displayStatus = .gettingReady
         queuedTranscriptionStartTask?.cancel()
