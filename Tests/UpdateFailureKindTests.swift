@@ -7,6 +7,11 @@ func testUpdateFailureKind() {
             .sparkleBusy,
             "callers with known context should be able to keep a non-unknown fallback"
         )
+        assertEqual(
+            UpdateFailureKind.classify(nil, fallback: .checkTimedOut),
+            .checkTimedOut,
+            "observed update-check timeouts should keep their concrete failure kind"
+        )
     }
 
     runSuite("UpdateFailureKind classifies offline and unreachable network errors") {

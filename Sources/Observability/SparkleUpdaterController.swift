@@ -287,7 +287,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         markUpdateCheckFailed(from: updater, error: nil)
     }
 
-    private func markUpdateCheckFailed(from updater: SPUUpdater, error: (any Error)?) {
+    private func markUpdateCheckFailed(
+        from updater: SPUUpdater,
+        error: (any Error)?,
+        fallback: UpdateFailureKind = .unknown
+    ) {
         cancelObservedUpdateCheckTimeout()
         if error != nil {
             didTrackCurrentUpdateCycleFailure = true
@@ -302,7 +306,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             result: "error",
             state: updateStatus.state,
             version: updateStatus.availableUpdateVersion,
-            failureKind: UpdateFailureKind.classify(error).rawValue
+            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue
         )
     }
 
@@ -326,7 +330,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         observedUpdateCheckTimeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.observedUpdateCheckTimeoutNanoseconds)
             guard let self, !Task.isCancelled, self.updateStatus.state == .checking else { return }
-            self.markUpdateCheckFailed(from: self.updaterController.updater, error: nil)
+            self.markUpdateCheckFailed(
+                from: self.updaterController.updater,
+                error: nil,
+                fallback: .checkTimedOut
+            )
         }
     }
 
