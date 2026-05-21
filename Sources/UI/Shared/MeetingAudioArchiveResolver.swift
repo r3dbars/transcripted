@@ -43,6 +43,10 @@ struct MeetingAudioAttachment: Equatable, Sendable {
             return urls.map { playbackChoice(for: $0) }
         }
 
+        if let splitChoice = splitStreamPlaybackChoice(in: urls) {
+            return [splitChoice]
+        }
+
         let preferredURLs = preferredAudioFiles(in: urls)
         if !preferredURLs.isEmpty {
             return preferredURLs.map { playbackChoice(for: $0) }
@@ -70,6 +74,15 @@ struct MeetingAudioAttachment: Equatable, Sendable {
         let preferredPaths = Set(preferredURLs.map { $0.standardizedFileURL.path })
         let remainingURLs = urls.filter { !preferredPaths.contains($0.standardizedFileURL.path) }
         return preferredURLs + remainingURLs
+    }
+
+    private func splitStreamPlaybackChoice(in urls: [URL]) -> MeetingAudioPlaybackChoice? {
+        guard let systemURL = firstAudioFile(named: "system_audio", in: urls),
+              firstAudioFile(named: "microphone", in: urls) != nil else {
+            return nil
+        }
+
+        return playbackChoice(for: systemURL)
     }
 
     private func playbackChoice(for url: URL) -> MeetingAudioPlaybackChoice {
