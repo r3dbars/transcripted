@@ -257,6 +257,24 @@ func testRepoCommandContract() {
         }
     }
 
+    runSuite("Repo command contract - update check timeout marks the cycle failed") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let failureBlock = sourceSlice(
+            controller,
+            from: "private func markUpdateCheckFailed(",
+            to: "private func markUpdaterIdle("
+        )
+
+        assertTrue(
+            failureBlock.contains("didTrackCurrentUpdateCycleFailure = true"),
+            "tracked update-check failures should suppress duplicate finish-cycle error telemetry"
+        )
+        assertFalse(
+            failureBlock.contains("if error != nil {\n            didTrackCurrentUpdateCycleFailure = true\n        }"),
+            "timeout fallback failures have nil errors but still count as tracked failures"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")

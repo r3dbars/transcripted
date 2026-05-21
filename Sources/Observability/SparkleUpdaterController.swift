@@ -293,9 +293,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         fallback: UpdateFailureKind = .unknown
     ) {
         cancelObservedUpdateCheckTimeout()
-        if error != nil {
-            didTrackCurrentUpdateCycleFailure = true
-        }
+        didTrackCurrentUpdateCycleFailure = true
 
         if updateStatus.availableUpdateVersion == nil {
             let state: UpdateStatus.State = updater.canCheckForUpdates ? .readyToCheck : .unknown
