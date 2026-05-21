@@ -870,6 +870,34 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - onboarding shown telemetry stays coarse") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+        let windowContents = readRepoTextFile("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
+
+        assertTrue(
+            appContents.contains("AnalyticsReporter.track(\n            \"onboarding_shown\""),
+            "showing first-run onboarding should emit the existing activation funnel denominator"
+        )
+        assertTrue(
+            appContents.contains("\"entrypoint\": entrypoint")
+                && appContents.contains("\"has_target\": lastExternalApplication == nil ? \"false\" : \"true\"")
+                && appContents.contains("\"model_state\": modelStateAnalyticsName(appState.sttRouter.modelDownloadState)")
+                && appContents.contains("\"pasteback_status\": TranscriptedPermissionAccess.isGranted(.accessibility) ? \"granted\" : \"not_granted\""),
+            "onboarding_shown should stay limited to coarse setup state"
+        )
+        assertTrue(
+            windowContents.contains("let wasVisible = window.isVisible")
+                && windowContents.contains("if !wasVisible {")
+                && windowContents.contains("onPresent(entrypoint)"),
+            "onboarding_shown should not fire repeatedly while the onboarding window is already visible"
+        )
+        assertFalse(
+            appContents.contains("\"source_app_name\"")
+                || appContents.contains("\"source_app_bundle_id\""),
+            "onboarding_shown telemetry should not include source app names or bundle ids"
+        )
+    }
+
     runSuite("Repo command contract - home stats action uses parent presenter") {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
