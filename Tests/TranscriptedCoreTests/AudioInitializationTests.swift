@@ -85,13 +85,13 @@ final class AudioInitializationTests: XCTestCase {
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: true),
-            [.stopEngine, .removeInputTap],
-            "Running AVAudioEngine graphs must be stopped before the input tap is removed so CoreAudio never receives input with tap == nil"
+            [.stopEngine, .waitForStoppedInputCallbacks, .removeInputTap],
+            "Running AVAudioEngine graphs must stop and drain input callbacks before removing the tap so CoreAudio never receives input with tap == nil"
         )
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: false),
             [.removeInputTap],
-            "Stopped engines can remove the tap directly"
+            "Stopped engines can remove the tap directly without the drain delay"
         )
     }
 

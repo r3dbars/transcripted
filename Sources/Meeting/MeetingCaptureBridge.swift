@@ -104,13 +104,16 @@ final class MeetingCaptureBridge: ObservableObject {
         guard audio.isRecording else {
             return currentStopResult()
         }
+        let stopTimeout = TranscriptedConstants.meetingStopTimeout(
+            forRecordingDuration: max(recordingDuration, audio.recordingDuration)
+        )
 
         return await withCheckedContinuation { continuation in
             let attemptID = completionAttempt.begin(continuation)
             audio.stop()
 
             completionAttempt.setTimeoutTask(Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.meetingStopTimeout)
+                try? await Task.sleep(nanoseconds: stopTimeout)
                 guard let self,
                       let continuation = self.completionAttempt.resetIfCurrent(attemptID) else { return }
 
@@ -123,6 +126,7 @@ final class MeetingCaptureBridge: ObservableObject {
                         [
                             "mic_file_available": "\(self.audio.micAudioFileURL != nil)",
                             "system_file_available": "\(self.audio.systemAudioFileURL != nil)",
+                            "stop_timeout_seconds": "\(stopTimeout / 1_000_000_000)",
                         ],
                         uniquingKeysWith: { _, new in new }
                     )

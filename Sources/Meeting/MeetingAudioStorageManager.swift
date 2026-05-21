@@ -437,7 +437,7 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
 
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
-    private static let staleTemporaryAudioAge: TimeInterval = 10 * 60
+    private static let staleTemporaryAudioAge: TimeInterval = 6 * 60 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
 
     @discardableResult
@@ -614,10 +614,12 @@ enum MeetingAudioStorageManager {
         guard let microphoneURL = firstRetainedAudioFile(
             named: "microphone",
             in: audioDirectory,
+            validator: validator,
             fileManager: fileManager
         ), let systemURL = firstRetainedAudioFile(
             named: "system_audio",
             in: audioDirectory,
+            validator: validator,
             fileManager: fileManager
         ) else {
             return false
@@ -867,6 +869,7 @@ enum MeetingAudioStorageManager {
     private static func firstRetainedAudioFile(
         named stem: String,
         in audioDirectory: URL,
+        validator: MeetingAudioFileValidating,
         fileManager: FileManager
     ) -> URL? {
         guard let files = try? fileManager.contentsOfDirectory(
@@ -877,7 +880,7 @@ enum MeetingAudioStorageManager {
             return nil
         }
 
-        return files
+        let candidates = files
             .filter { url in
                 url.deletingPathExtension().lastPathComponent == stem
                     && isManagedRetainedAudioFile(url, fileManager: fileManager)
@@ -885,7 +888,10 @@ enum MeetingAudioStorageManager {
             .sorted { lhs, rhs in
                 retainedAudioFileSortKey(lhs) < retainedAudioFileSortKey(rhs)
             }
-            .first
+
+        return candidates.first { url in
+            validator.isUsableAudioFile(at: url, fileManager: fileManager)
+        } ?? candidates.first
     }
 
     private static func retainedAudioFileSortKey(_ url: URL) -> String {

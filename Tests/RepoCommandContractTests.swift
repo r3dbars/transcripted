@@ -257,6 +257,24 @@ func testRepoCommandContract() {
         }
     }
 
+    runSuite("Repo command contract - update check timeout marks the cycle failed") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let failureBlock = sourceSlice(
+            controller,
+            from: "private func markUpdateCheckFailed(",
+            to: "private func markUpdaterIdle("
+        )
+
+        assertTrue(
+            failureBlock.contains("didTrackCurrentUpdateCycleFailure = true"),
+            "tracked update-check failures should suppress duplicate finish-cycle error telemetry"
+        )
+        assertFalse(
+            failureBlock.contains("if error != nil {\n            didTrackCurrentUpdateCycleFailure = true\n        }"),
+            "timeout fallback failures have nil errors but still count as tracked failures"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")
@@ -683,6 +701,25 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - bridge uses scaled meeting stop timeout") {
+        let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let stopBlock = sourceSlice(
+            bridgeContents,
+            from: "func stopAndAwaitFiles() async -> CaptureStopResult {",
+            to: "func stopAndDiscardFiles() async -> CaptureStopResult {"
+        )
+
+        assertTrue(
+            stopBlock.contains("TranscriptedConstants.meetingStopTimeout(")
+                && stopBlock.contains("forRecordingDuration: max(recordingDuration, audio.recordingDuration)"),
+            "meeting stop should scale the timeout from the observed recording duration"
+        )
+        assertTrue(
+            stopBlock.contains("Task.sleep(nanoseconds: stopTimeout)"),
+            "meeting stop should sleep on the scaled timeout, not the fixed base timeout"
+        )
+    }
+
     runSuite("Repo command contract - old failed meeting audio is pruned by age") {
         let constantsContents = readRepoTextFile("Sources/Support/TranscriptedConstants.swift")
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
@@ -739,6 +776,19 @@ func testRepoCommandContract() {
             ),
             1,
             "direct failed-queue writes in MeetingSessionController should stay centralized in the refresh helper"
+        )
+    }
+
+    runSuite("Repo command contract - mic recovery merge streams long segments") {
+        let mergerContents = readRepoTextFile("Sources/TranscriptedCore/Audio/MicRecordingFileMerger.swift")
+
+        assertFalse(
+            mergerContents.contains("AudioResampler.loadAndResample"),
+            "mic segment merge should not load full long recordings into memory during stop"
+        )
+        assertTrue(
+            mergerContents.contains("converter.convert(to: outputBuffer"),
+            "mic segment merge should stream conversion into bounded output buffers"
         )
     }
 
@@ -867,6 +917,34 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("AgentConnectionGuide.starterPrompt(filename: nil)\n        AnalyticsReporter.track"),
             "onboarding telemetry should not send copied prompt text"
+        )
+    }
+
+    runSuite("Repo command contract - onboarding shown telemetry stays coarse") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+        let windowContents = readRepoTextFile("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
+
+        assertTrue(
+            appContents.contains("AnalyticsReporter.track(\n            \"onboarding_shown\""),
+            "showing first-run onboarding should emit the existing activation funnel denominator"
+        )
+        assertTrue(
+            appContents.contains("\"entrypoint\": entrypoint")
+                && appContents.contains("\"has_target\": lastExternalApplication == nil ? \"false\" : \"true\"")
+                && appContents.contains("\"model_state\": modelStateAnalyticsName(appState.sttRouter.modelDownloadState)")
+                && appContents.contains("\"pasteback_status\": TranscriptedPermissionAccess.isGranted(.accessibility) ? \"granted\" : \"not_granted\""),
+            "onboarding_shown should stay limited to coarse setup state"
+        )
+        assertTrue(
+            windowContents.contains("let wasVisible = window.isVisible")
+                && windowContents.contains("if !wasVisible {")
+                && windowContents.contains("onPresent(entrypoint)"),
+            "onboarding_shown should not fire repeatedly while the onboarding window is already visible"
+        )
+        assertFalse(
+            appContents.contains("\"source_app_name\"")
+                || appContents.contains("\"source_app_bundle_id\""),
+            "onboarding_shown telemetry should not include source app names or bundle ids"
         )
     }
 

@@ -178,6 +178,33 @@ func testMeetingAudioStorageManager() async {
         assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "raw system WAV should still follow normal compression")
     }
 
+    await runSuite("MeetingAudioStorageManager falls back to usable compressed split audio for playback mix") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Compressed Split Call", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        try! Data("corrupt mic".utf8).write(to: audioDirectory.appendingPathComponent("microphone.wav"))
+        try! Data("m4a".utf8).write(to: audioDirectory.appendingPathComponent("microphone.m4a"))
+        try! Data("corrupt system".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.wav"))
+        try! Data("m4a".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.m4a"))
+
+        let created = await MeetingAudioStorageManager.createPlaybackMixIfNeeded(
+            in: audioDirectory,
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer(
+                expectedMicrophoneLastPathComponent: "microphone.m4a",
+                expectedSystemLastPathComponent: "system_audio.m4a"
+            )
+        )
+
+        assertTrue(created, "usable compressed split audio should be enough to create playback")
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("playback.wav").path),
+            "playback mix should be written even when stale WAV siblings are unusable"
+        )
+    }
+
     await runSuite("MeetingAudioStorageManager keeps raw split audio when playback mix generation fails") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -316,7 +343,7 @@ func testMeetingAudioStorageManager() async {
         )
     }
 
-    await runSuite("MeetingAudioStorageManager removes only stale Transcripted temp audio files") {
+    await runSuite("MeetingAudioStorageManager removes only old Transcripted temp audio files") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -324,41 +351,41 @@ func testMeetingAudioStorageManager() async {
         let transcriptURL = try! makeTranscript(named: "Temp Cleanup", in: directory, ageDays: 1)
         let audioDirectory = makeAudioDirectory(for: transcriptURL)
         let finalM4A = audioDirectory.appendingPathComponent("recording.m4a")
-        let staleTemp = audioDirectory.appendingPathComponent(".recording-092B8B54-B598-4796-9573-00E0D9FC9EE1.m4a")
-        let freshTemp = audioDirectory.appendingPathComponent(".recording-3F5531EE-C352-429F-A10F-EC978BBC2927.m4a")
-        let stalePlaybackTemp = audioDirectory.appendingPathComponent(".playback-86CE71C0-7B0D-43BC-8A3F-68C36195C8C6.wav")
-        let freshPlaybackTemp = audioDirectory.appendingPathComponent(".playback-196F0C64-898B-41E1-8062-7B2F3A2ED03E.wav")
+        let oldTemp = audioDirectory.appendingPathComponent(".recording-092B8B54-B598-4796-9573-00E0D9FC9EE1.m4a")
+        let longRunningTemp = audioDirectory.appendingPathComponent(".recording-3F5531EE-C352-429F-A10F-EC978BBC2927.m4a")
+        let oldPlaybackTemp = audioDirectory.appendingPathComponent(".playback-86CE71C0-7B0D-43BC-8A3F-68C36195C8C6.wav")
+        let longRunningPlaybackTemp = audioDirectory.appendingPathComponent(".playback-196F0C64-898B-41E1-8062-7B2F3A2ED03E.wav")
         let unrelatedHiddenFile = audioDirectory.appendingPathComponent(".user-note.m4a")
         let unrelatedHiddenWAV = audioDirectory.appendingPathComponent(".user-note.wav")
         try! Data("m4a".utf8).write(to: finalM4A)
-        try! Data("stale".utf8).write(to: staleTemp)
-        try! Data("fresh".utf8).write(to: freshTemp)
-        try! Data("stale playback".utf8).write(to: stalePlaybackTemp)
-        try! Data("fresh playback".utf8).write(to: freshPlaybackTemp)
+        try! Data("old".utf8).write(to: oldTemp)
+        try! Data("active".utf8).write(to: longRunningTemp)
+        try! Data("old playback".utf8).write(to: oldPlaybackTemp)
+        try! Data("active playback".utf8).write(to: longRunningPlaybackTemp)
         try! Data("user".utf8).write(to: unrelatedHiddenFile)
         try! Data("user wav".utf8).write(to: unrelatedHiddenWAV)
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
-            ofItemAtPath: staleTemp.path
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
+            ofItemAtPath: oldTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-60)],
-            ofItemAtPath: freshTemp.path
+            [.modificationDate: now.addingTimeInterval(-2 * 60 * 60)],
+            ofItemAtPath: longRunningTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
-            ofItemAtPath: stalePlaybackTemp.path
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
+            ofItemAtPath: oldPlaybackTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-60)],
-            ofItemAtPath: freshPlaybackTemp.path
+            [.modificationDate: now.addingTimeInterval(-2 * 60 * 60)],
+            ofItemAtPath: longRunningPlaybackTemp.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
             ofItemAtPath: unrelatedHiddenFile.path
         )
         try! FileManager.default.setAttributes(
-            [.modificationDate: now.addingTimeInterval(-11 * 60)],
+            [.modificationDate: now.addingTimeInterval(-7 * 60 * 60)],
             ofItemAtPath: unrelatedHiddenWAV.path
         )
 
@@ -370,15 +397,15 @@ func testMeetingAudioStorageManager() async {
         )
 
         assertEqual(converted, 0, "temp cleanup should not count as a WAV conversion")
-        assertFalse(FileManager.default.fileExists(atPath: staleTemp.path), "stale app-owned temp file should be removed")
+        assertFalse(FileManager.default.fileExists(atPath: oldTemp.path), "old app-owned temp file should be removed")
         assertFalse(
-            FileManager.default.fileExists(atPath: stalePlaybackTemp.path),
-            "stale playback temp WAV should be removed"
+            FileManager.default.fileExists(atPath: oldPlaybackTemp.path),
+            "old playback temp WAV should be removed"
         )
-        assertTrue(FileManager.default.fileExists(atPath: freshTemp.path), "recent temp file should not be removed")
+        assertTrue(FileManager.default.fileExists(atPath: longRunningTemp.path), "long-running conversion temp files should not be removed too early")
         assertTrue(
-            FileManager.default.fileExists(atPath: freshPlaybackTemp.path),
-            "recent playback temp WAV should not be removed"
+            FileManager.default.fileExists(atPath: longRunningPlaybackTemp.path),
+            "long-running playback temp WAV should not be removed too early"
         )
         assertTrue(FileManager.default.fileExists(atPath: unrelatedHiddenFile.path), "unrelated hidden M4A should not be removed")
         assertTrue(FileManager.default.fileExists(atPath: unrelatedHiddenWAV.path), "unrelated hidden WAV should not be removed")
@@ -663,6 +690,8 @@ private struct FakeMeetingAudioConverter: MeetingAudioFileConverting {
 
 private struct FakeMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
     var shouldFail = false
+    var expectedMicrophoneLastPathComponent: String?
+    var expectedSystemLastPathComponent: String?
 
     func createPlaybackWAV(
         microphoneURL: URL,
@@ -672,6 +701,20 @@ private struct FakeMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
     ) async throws {
         if shouldFail {
             throw MeetingAudioStorageError.conversionFailed
+        }
+        if let expectedMicrophoneLastPathComponent {
+            assertEqual(
+                microphoneURL.lastPathComponent,
+                expectedMicrophoneLastPathComponent,
+                "playback mixer should receive the selected microphone file"
+            )
+        }
+        if let expectedSystemLastPathComponent {
+            assertEqual(
+                systemURL.lastPathComponent,
+                expectedSystemLastPathComponent,
+                "playback mixer should receive the selected system audio file"
+            )
         }
         try Data("m4a".utf8).write(to: destinationURL)
     }
