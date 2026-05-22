@@ -1189,7 +1189,7 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+            splitLocalSpeakers: true
         )
         return true
     }

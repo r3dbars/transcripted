@@ -852,6 +852,23 @@ func testRepoCommandContract() {
             controllerContents.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing)"),
             "saved meeting re-transcription should enforce the dictation-active guard at the controller entry point"
         )
+        guard
+            let functionStart = controllerContents.range(of: "func retranscribeSavedMeeting("),
+            let functionEnd = controllerContents.range(of: "func dismissFailedMeeting", range: functionStart.upperBound..<controllerContents.endIndex)
+        else {
+            assertionFailure("MeetingSessionController should keep a saved-meeting re-transcription entry point")
+            return
+        }
+
+        let functionBody = String(controllerContents[functionStart.lowerBound..<functionEnd.lowerBound])
+        assertTrue(
+            functionBody.contains("splitLocalSpeakers: true"),
+            "saved meeting re-transcription should force the speaker-ID pass instead of depending on the global local-speaker preference"
+        )
+        assertFalse(
+            functionBody.contains("splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()"),
+            "the saved-meeting Identify speakers action should not silently do a single-speaker mic retry when the preference is off"
+        )
     }
 
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
