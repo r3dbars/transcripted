@@ -705,7 +705,7 @@ func testRepoCommandContract() {
         let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
         let stopBlock = sourceSlice(
             bridgeContents,
-            from: "func stopAndAwaitFiles() async -> CaptureStopResult {",
+            from: "func stopAndAwaitFiles(",
             to: "func stopAndDiscardFiles() async -> CaptureStopResult {"
         )
 
@@ -717,6 +717,11 @@ func testRepoCommandContract() {
         assertTrue(
             stopBlock.contains("Task.sleep(nanoseconds: stopTimeout)"),
             "meeting stop should sleep on the scaled timeout, not the fixed base timeout"
+        )
+        assertTrue(
+            stopBlock.contains("onTimedOutCompletion")
+                && stopBlock.contains("timedOutStopCompletionHandler"),
+            "late audio finalization after a stop timeout should be surfaced to repair retry paths"
         )
     }
 
@@ -753,6 +758,15 @@ func testRepoCommandContract() {
             "stop timeouts should route retained audio through the refresh helper before returning"
         )
         assertTrue(
+            timeoutBlock.contains("archiveAudio: false"),
+            "stop timeouts should keep scratch audio in place because WAV finalization may still be running"
+        )
+        assertTrue(
+            controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
+                && controllerContents.contains("updateFailedTranscriptionAudio("),
+            "late WAV finalization should refresh the failed queue so retries do not point at deleted mic recovery segments"
+        )
+        assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
             "stop-timeout diagnostics should state whether the retained audio reached the retry queue"
         )
@@ -776,6 +790,24 @@ func testRepoCommandContract() {
             ),
             1,
             "direct failed-queue writes in MeetingSessionController should stay centralized in the refresh helper"
+        )
+    }
+
+    runSuite("Repo command contract - Home attention summary includes failed meetings") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let needsAttentionBlock = sourceSlice(
+            settingsContents,
+            from: "private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {",
+            to: "private var homeMeetingDaySections:"
+        )
+
+        assertTrue(
+            needsAttentionBlock.contains("!meetingSession.failedMeetings.isEmpty"),
+            "failed meetings should contribute to the Home Needs Attention summary"
+        )
+        assertTrue(
+            needsAttentionBlock.contains("destination: .failedMeetings"),
+            "the Home Needs Attention failed-meeting issue should jump to the failed meetings section"
         )
     }
 

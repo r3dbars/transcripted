@@ -41,6 +41,7 @@ final class MeetingCaptureBridge: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
+    private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
 
     init(audio: Audio = Audio()) {
         self.audio = audio
@@ -100,7 +101,9 @@ final class MeetingCaptureBridge: ObservableObject {
     /// expiry (`didTimeOut == true`). On timeout the WAV header may not be
     /// fully patched, so the caller should treat the audio as failed-but-
     /// recoverable rather than enqueuing it for transcription directly.
-    func stopAndAwaitFiles() async -> CaptureStopResult {
+    func stopAndAwaitFiles(
+        onTimedOutCompletion: ((CaptureStopResult) -> Void)? = nil
+    ) async -> CaptureStopResult {
         guard audio.isRecording else {
             return currentStopResult()
         }
@@ -131,6 +134,7 @@ final class MeetingCaptureBridge: ObservableObject {
                         uniquingKeysWith: { _, new in new }
                     )
                 )
+                self.timedOutStopCompletionHandler = onTimedOutCompletion
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
         }
@@ -184,11 +188,20 @@ final class MeetingCaptureBridge: ObservableObject {
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.completionAttempt.reset()?.resume(returning: CaptureStopResult(
+                let result = CaptureStopResult(
                     micURL: micURL,
                     systemURL: systemURL,
                     didTimeOut: false
-                ))
+                )
+                if let continuation = self.completionAttempt.reset() {
+                    self.timedOutStopCompletionHandler = nil
+                    continuation.resume(returning: result)
+                    return
+                }
+
+                let handler = self.timedOutStopCompletionHandler
+                self.timedOutStopCompletionHandler = nil
+                handler?(result)
             }
         }
 
