@@ -234,7 +234,8 @@ public class TranscriptionTaskManager: ObservableObject {
     public func startImportedTranscription(
         audioURL: URL,
         outputFolder: URL,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -279,7 +280,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     audioURL: audioURL,
                     outputFolder: outputFolder,
                     taskId: taskId,
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 )
 
                 await MainActor.run {

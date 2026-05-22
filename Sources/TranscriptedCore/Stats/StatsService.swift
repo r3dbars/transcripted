@@ -289,14 +289,15 @@ extension StatsService {
         from result: TranscriptionResult,
         captureId: UUID,
         transcriptPath: String?,
-        title: String?
+        title: String?,
+        date: Date = Date()
     ) -> RecordingMetadata {
         let totalWordCount = result.micWordCount + result.systemWordCount
         let totalSpeakers = result.micSpeakerCount + result.systemSpeakerCount
 
         return RecordingMetadata(
             id: captureId.uuidString,
-            date: Date(),
+            date: date,
             durationSeconds: Int(result.duration),
             wordCount: totalWordCount,
             speakerCount: totalSpeakers,

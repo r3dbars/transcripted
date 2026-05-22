@@ -1,9 +1,11 @@
 import Foundation
+import AVFoundation
 import UniformTypeIdentifiers
 
 struct PreparedImportedMeetingAudio: Sendable {
     let copiedAudioURL: URL
     let suggestedTitle: String
+    let recordingDate: Date
 }
 
 enum MeetingImportedAudioPreparationError: LocalizedError, Equatable {
@@ -51,7 +53,7 @@ enum MeetingImportedAudioPreparer {
     static func prepareImportedAudio(
         from sourceURL: URL,
         scratchDirectory: URL = MeetingStoragePaths.recordingsScratch
-    ) throws -> PreparedImportedMeetingAudio {
+    ) async throws -> PreparedImportedMeetingAudio {
         let fileManager = FileManager.default
         fileManager.ensurePrivateDirectory(
             at: scratchDirectory,
@@ -116,8 +118,122 @@ enum MeetingImportedAudioPreparer {
 
         return PreparedImportedMeetingAudio(
             copiedAudioURL: destinationURL,
-            suggestedTitle: suggestedTitle(from: resolvedSourceURL)
+            suggestedTitle: suggestedTitle(from: resolvedSourceURL),
+            recordingDate: await recordingDate(
+                from: resolvedSourceURL,
+                sourceAttributes: sourceAttributes
+            )
         )
+    }
+
+    private static func recordingDate(
+        from sourceURL: URL,
+        sourceAttributes: [FileAttributeKey: Any]
+    ) async -> Date {
+        if let embeddedDate = await embeddedRecordingDate(from: sourceURL) {
+            return embeddedDate
+        }
+
+        if let creationDate = sourceAttributes[.creationDate] as? Date {
+            return creationDate
+        }
+
+        if let resourceDate = try? sourceURL.resourceValues(forKeys: [.creationDateKey]).creationDate {
+            return resourceDate
+        }
+
+        if let modificationDate = sourceAttributes[.modificationDate] as? Date {
+            return modificationDate
+        }
+
+        return Date()
+    }
+
+    private static func embeddedRecordingDate(from sourceURL: URL) async -> Date? {
+        let asset = AVURLAsset(url: sourceURL)
+        let metadata = (try? await asset.load(.metadata)) ?? []
+        var dates: [Date] = []
+        for item in metadata where isRecordingDateMetadata(item) {
+            if let date = await metadataDate(item) {
+                dates.append(date)
+            }
+        }
+        return dates.sorted().first
+    }
+
+    private static func isRecordingDateMetadata(_ item: AVMetadataItem) -> Bool {
+        let fields = [
+            item.identifier?.rawValue,
+            item.commonKey?.rawValue,
+            item.keySpace?.rawValue,
+            item.key.map { String(describing: $0) }
+        ]
+        let joined = fields
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+
+        return joined.contains("creation")
+            || joined.contains("created")
+            || joined.contains("recorded")
+            || joined.contains("recordingdate")
+            || joined.contains("date")
+    }
+
+    private static func metadataDate(_ item: AVMetadataItem) async -> Date? {
+        if let date = try? await item.load(.dateValue) {
+            return date
+        }
+
+        if let value = try? await item.load(.value) {
+            if let date = value as? Date {
+                return date
+            }
+            if let string = value as? String,
+               let date = parseMetadataDate(string) {
+                return date
+            }
+        }
+
+        if let string = try? await item.load(.stringValue) {
+            return parseMetadataDate(string)
+        }
+
+        return nil
+    }
+
+    private static func parseMetadataDate(_ value: String) -> Date? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date
+        }
+
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: trimmed) {
+            return date
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in [
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ssZ",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd"
+        ] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) {
+                return date
+            }
+        }
+
+        return nil
     }
 
     private static func uniqueScratchURL(

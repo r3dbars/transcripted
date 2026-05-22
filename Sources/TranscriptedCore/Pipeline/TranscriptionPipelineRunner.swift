@@ -43,7 +43,8 @@ extension TranscriptionTaskManager {
         audioURL: URL,
         outputFolder: URL,
         taskId: UUID,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) async throws -> URL {
         try await transcribeMultichannelPipeline(
             micURL: nil,
@@ -52,7 +53,8 @@ extension TranscriptionTaskManager {
             taskId: taskId,
             healthInfo: nil,
             splitLocalSpeakers: false,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
         )
     }
 
@@ -68,6 +70,7 @@ extension TranscriptionTaskManager {
         healthInfo: RecordingHealthInfo?,
         splitLocalSpeakers: Bool = false,
         meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
         removeSourceAudioAfterArchive: Bool = true
     ) async throws -> URL {
@@ -285,6 +288,7 @@ extension TranscriptionTaskManager {
             notifier: notifier,
             speakerStore: speakerDB,
             statsStore: statsStore,
+            recordingDate: recordingDate,
             transcriptionEngine: speechEngine
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")

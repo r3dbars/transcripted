@@ -392,7 +392,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
         let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
         XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
-        let markdown = try String(contentsOf: transcriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(markdown.contains("Recovered Customer Call"))
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }
@@ -506,6 +506,65 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
+    func testStartImportedTranscriptionUsesSourceRecordingDateForSavedMetadata() async throws {
+        let sourceRecordingDate = localDate(
+            year: 2025,
+            month: 2,
+            day: 3,
+            hour: 4,
+            minute: 5,
+            second: 6
+        )
+        let statsStore = MetadataCapturingStatsStore()
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),
+            diarization: MetadataStubDiarizationEngine(segments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 0,
+                    endTime: 2,
+                    embedding: [Float](repeating: 0.42, count: 256),
+                    qualityScore: 0.95
+                )
+            ]),
+            statsStore: statsStore
+        )
+        let externalURL = tempDirectory.appendingPathComponent("source-recorded-date.wav")
+        try writeMonoWAV(to: externalURL, duration: 2.5)
+
+        manager.startImportedTranscription(
+            audioURL: externalURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Imported customer call",
+            recordingDate: sourceRecordingDate
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(
+            transcriptURL.lastPathComponent.hasPrefix("Call_\(DateFormattingHelper.formatFilename(sourceRecordingDate))"),
+            "imported-audio filenames should use the source recording date"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ndate: \(frontmatterDateString(sourceRecordingDate))\n"),
+            "frontmatter date should use the source recording date"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ntime: \(frontmatterTimeString(sourceRecordingDate))\n"),
+            "frontmatter time should use the source recording time"
+        )
+        let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
+        XCTAssertLessThan(
+            abs(metadata.date.timeIntervalSince(sourceRecordingDate)),
+            0.001,
+            "recording metadata should use the source recording date"
+        )
     }
 
     func testStartImportedTranscriptionSurfacesNoSpeechWhenNoUtterances() async throws {
@@ -1015,7 +1074,8 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         speechToText: (any SpeechToTextEngine)? = nil,
         diarization: (any DiarizationEngine)? = nil,
         retainedAudioDirectory: URL? = nil,
-        retainedAudioDirectoryProvider: (() -> URL?)? = nil
+        retainedAudioDirectoryProvider: (() -> URL?)? = nil,
+        statsStore: (any StatsStore)? = nil
     ) -> TranscriptionTaskManager {
         let paths = CoreStoragePaths(
             transcripts: tempDirectory.appendingPathComponent("transcripts"),
@@ -1043,7 +1103,8 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             speakerClipsDirectory: paths.speakerClips,
             cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
             retainedAudioDirectory: retainedAudioDirectory,
-            retainedAudioDirectoryProvider: retainedAudioDirectoryProvider
+            retainedAudioDirectoryProvider: retainedAudioDirectoryProvider,
+            statsStore: statsStore
         )
     }
 
@@ -1093,6 +1154,71 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         XCTFail("Timed out waiting for condition")
+    }
+
+    private func localDate(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        second: Int
+    ) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar.date(from: DateComponents(
+            timeZone: .current,
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute,
+            second: second
+        ))!
+    }
+
+    private func frontmatterDateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private func frontmatterTimeString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+@available(macOS 14.0, *)
+private final class MetadataCapturingStatsStore: StatsStore {
+    private let lock = NSLock()
+    private var sessions: [RecordingMetadata] = []
+
+    var recordedSessions: [RecordingMetadata] {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessions
+    }
+
+    func recordSession(_ metadata: RecordingMetadata) {
+        lock.lock()
+        sessions.append(metadata)
+        lock.unlock()
+    }
+
+    func getTotalRecordingsCount() -> Int {
+        recordedSessions.count
+    }
+
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+        recordedSessions.filter { $0.date >= startDate && $0.date <= endDate }
+    }
+
+    func recordingExists(transcriptPath: String) -> Bool {
+        recordedSessions.contains { $0.transcriptPath == transcriptPath }
     }
 }
 

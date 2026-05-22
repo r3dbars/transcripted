@@ -158,6 +158,7 @@ public class TranscriptSaver {
         notifier: TranscriptNotifier? = nil,
         speakerStore: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil,
+        recordingDate: Date? = nil,
         transcriptionEngine: SpeechTranscriptionEngineDescriptor
     ) -> URL? {
         let saveDir = directory ?? defaultSaveDirectory
@@ -177,7 +178,8 @@ public class TranscriptSaver {
             return nil
         }
 
-        let timestamp = DateFormattingHelper.formatFilename(Date())
+        let transcriptDate = recordingDate ?? Date()
+        let timestamp = DateFormattingHelper.formatFilename(transcriptDate)
         var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
         var counter = 1
         while FileManager.default.fileExists(atPath: fileURL.path) {
@@ -191,7 +193,7 @@ public class TranscriptSaver {
             speakerMappings: speakerMappings,
             speakerSources: speakerSources,
             speakerDbIds: speakerDbIds,
-            date: Date(),
+            date: transcriptDate,
             meetingTitle: meetingTitle,
             healthInfo: healthInfo,
             transcriptionEngine: transcriptionEngine
@@ -224,7 +226,8 @@ public class TranscriptSaver {
                 from: result,
                 captureId: transcriptId,
                 transcriptPath: savedURL.path,
-                title: meetingTitle
+                title: meetingTitle,
+                date: transcriptDate
             )
             (statsStore ?? StatsDatabase.shared).recordSession(metadata)
         }
