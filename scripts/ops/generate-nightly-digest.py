@@ -1665,12 +1665,6 @@ def render_html(payload: dict[str, Any]) -> str:
     if dau_unknown:
         hero_title = "DAU is unknown"
         hero_subtitle = f"Goal: {dau['goal']}. Fix measurement first."
-    elif hard_blocked_count:
-        hero_title = "A nightly lane is blocked"
-        hero_subtitle = (
-            f"{counts['active_lanes']} jobs ran. {blocked_detail}. "
-            f"{counts['open_nightly_prs']} {pr_word}. {counts['needs_human']} human {action_word}."
-        )
     else:
         hero_title = "What happened last night"
         hero_subtitle = (
