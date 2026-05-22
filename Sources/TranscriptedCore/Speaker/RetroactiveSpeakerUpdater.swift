@@ -357,57 +357,55 @@ extension TranscriptSaver {
             }
 
             let obsidianEnabled = isObsidianFormatted(content)
-            let updatesByChannelKey = Dictionary(uniqueKeysWithValues: updates.map {
-                (
-                    $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId),
-                    (
-                        oldName: currentSpeakerName(
-                            in: content,
-                            diarizerSpeakerId: $0.diarizerSpeakerId,
-                            channel: $0.channel
-                        )
-                            ?? "Speaker \($0.diarizerSpeakerId)",
-                        newName: $0.newName
-                    )
-                )
-            })
+            let updatesByChannelKey = makeSpeakerNameChangesByChannelKey(
+                updates: updates,
+                content: content
+            )
 
             for update in updates {
                 updateFrontmatterSpeakerMetadata(in: &content, update: update)
             }
 
-            guard rewriteFullTranscriptSection(
+            if !rewriteFullTranscriptSection(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite transcript body for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped transcript label updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                applyScopedNameReplacements(in: &content, updatesByChannelKey: updatesByChannelKey)
             }
 
-            guard rewriteRemoteSpeakerBreakdown(
+            if !rewriteRemoteSpeakerBreakdown(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite speaker breakdown for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped remote speaker breakdown updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                applyScopedNameReplacements(
+                    in: &content,
+                    updatesByChannelKey: updatesByChannelKey,
+                    channels: [.system]
+                )
             }
 
-            guard rewriteLocalSpeakerBreakdownIfPresent(
+            if !rewriteLocalSpeakerBreakdownIfPresent(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite local speaker breakdown for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped local speaker breakdown updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                applyScopedNameReplacements(
+                    in: &content,
+                    updatesByChannelKey: updatesByChannelKey,
+                    channels: [.mic]
+                )
             }
 
             // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
@@ -803,6 +801,10 @@ extension TranscriptSaver {
             "\n\n### ",
             "\n\n## ",
             "\n\n---\n\n",
+            "\n#### ",
+            "\n### ",
+            "\n## ",
+            "\n---\n",
         ]
         let footerStart = footerCandidates
             .compactMap { content.range(of: $0, range: headerRange.upperBound..<content.endIndex)?.lowerBound }
@@ -811,6 +813,44 @@ extension TranscriptSaver {
         let replacement = String(content[breakdownRange])
             .replacingOccurrences(of: "- **\(oldName):**", with: "- **\(newName):**")
         content.replaceSubrange(breakdownRange, with: replacement)
+    }
+
+    private static func makeSpeakerNameChangesByChannelKey(
+        updates: [SpeakerNameUpdate],
+        content: String
+    ) -> [String: (oldName: String, newName: String)] {
+        var changes: [String: (oldName: String, newName: String)] = [:]
+        for update in updates {
+            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            changes[key] = (
+                oldName: currentSpeakerName(
+                    in: content,
+                    diarizerSpeakerId: update.diarizerSpeakerId,
+                    channel: update.channel
+                )
+                    ?? "Speaker \(update.diarizerSpeakerId)",
+                newName: update.newName
+            )
+        }
+        return changes
+    }
+
+    private static func applyScopedNameReplacements(
+        in content: inout String,
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
+        channels: Set<UtteranceChannel>? = nil
+    ) {
+        for key in updatesByChannelKey.keys.sorted() {
+            guard let update = updatesByChannelKey[key] else { continue }
+            let channel: UtteranceChannel = key.hasPrefix("mic_") ? .mic : .system
+            if let channels, !channels.contains(channel) { continue }
+            applyScopedNameReplacement(
+                in: &content,
+                oldName: update.oldName,
+                newName: update.newName,
+                channel: channel
+            )
+        }
     }
 
     /// Parse a YAML double-quoted string value after a known key prefix.
@@ -1186,6 +1226,10 @@ extension TranscriptSaver {
             "\n\n### ",
             "\n\n## ",
             "\n\n---\n\n",
+            "\n#### ",
+            "\n### ",
+            "\n## ",
+            "\n---\n",
         ]
         guard let footerRange = footerCandidates.compactMap({
             content.range(of: $0, range: headerRange.upperBound..<content.endIndex)
@@ -1418,7 +1462,16 @@ extension TranscriptSaver {
 
 enum SpeakerBreakdownConsolidator {
     private static let breakdownHeader = "#### Remote Speaker Breakdown\n\n"
-    private static let breakdownFooter = "\n---\n"
+    private static let breakdownFooters = [
+        "\n\n#### ",
+        "\n\n### ",
+        "\n\n## ",
+        "\n\n---\n\n",
+        "\n#### ",
+        "\n### ",
+        "\n## ",
+        "\n---\n",
+    ]
     private static let speakerCountPrefix = "- **Speakers Detected:** "
     private static let lineRegex = try? NSRegularExpression(
         pattern: #"- \*\*(.+?):\*\* (\d+) utterances?, ~(\d+) words?, (\d+):(\d+)"#
@@ -1446,7 +1499,9 @@ enum SpeakerBreakdownConsolidator {
 
     static func consolidate(_ content: String) -> String {
         guard let breakdownStart = content.range(of: breakdownHeader),
-              let breakdownEnd = content.range(of: breakdownFooter, range: breakdownStart.upperBound..<content.endIndex) else {
+              let breakdownEnd = breakdownFooters.compactMap({
+                content.range(of: $0, range: breakdownStart.upperBound..<content.endIndex)
+              }).min(by: { $0.lowerBound < $1.lowerBound }) else {
             return content
         }
 
