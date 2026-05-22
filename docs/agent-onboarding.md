@@ -121,6 +121,10 @@ Rule of thumb:
   Global trigger and hotkey routing behavior.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone local-context and offline diarization CLI.
+- `Tools/TranscriptedMCP/CLAUDE.md`
+  Read-only MCP server for saved meetings and dictations.
+- `Tools/TranscriptedQA/CLAUDE.md`
+  Standalone artifact validation and QA CLI.
 
 ## Historical Zones
 
