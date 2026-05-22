@@ -779,6 +779,32 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - no-speech meetings stay out of Sentry failures") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "if failureKind == .speakerFinalizationFailed"
+        )
+
+        assertTrue(
+            failureBlock.contains("if failureKind.shouldReportAsSkippedTranscript"),
+            "empty/no-speech meeting outcomes should use the canonical skipped-outcome gate"
+        )
+        assertTrue(
+            failureBlock.contains("event: \"meeting_transcript_skipped\""),
+            "expected empty/no-speech outcomes should emit the local skipped event"
+        )
+        assertTrue(
+            failureBlock.contains("Self.runtimeDiagnosticsRecorder?.clearSession(kind: \"meeting\", outcome: failureKind.rawValue)"),
+            "runtime diagnostics should preserve the concrete skipped failure kind"
+        )
+        assertFalse(
+            failureBlock.contains("event: \"meeting_transcript_failed\""),
+            "the skipped-outcome branch should return before the Sentry-allowlisted failure event"
+        )
+    }
+
     runSuite("Repo command contract - mic recovery merge streams long segments") {
         let mergerContents = readRepoTextFile("Sources/TranscriptedCore/Audio/MicRecordingFileMerger.swift")
 

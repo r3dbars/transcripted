@@ -50,6 +50,10 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "meeting_transcript_failed"
         )
+        let meetingTranscriptSkipped = SentryEventPolicy.policy(
+            forEngine: "meeting",
+            event: "meeting_transcript_skipped"
+        )
         let speakerFinalizationFailed = SentryEventPolicy.policy(
             forEngine: "meeting",
             event: "speaker_finalization_failed"
@@ -87,6 +91,7 @@ func testSentryEventPolicy() {
         assertEqual(meetingCaptureDegraded?.summary, "Meeting capture health degraded.", "degraded meeting capture should be visible without raw device names")
         assertEqual(meetingStopTimeout?.summary, "Meeting recording stop timed out.", "stop timeouts should be visible without raw device names")
         assertEqual(meetingTranscriptFailed?.summary, "Meeting transcription failed.", "meeting transcript failures should be visible with sanitized context")
+        assertNil(meetingTranscriptSkipped, "expected empty/no-speech meeting outcomes should stay out of Sentry")
         assertEqual(speakerFinalizationFailed?.summary, "Meeting speaker naming finalization failed.", "speaker finalization failures should not masquerade as full transcript failures")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
         assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
@@ -149,6 +154,19 @@ func testSentryEventPolicy() {
         assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
         assertEqual(tags["system_status"], "healthy", "system capture status should be queryable")
         assertEqual(tags["trigger"], "hotkey", "trigger should be queryable")
+    }
+
+    runSuite("SentryEventPolicy diagnosticTags ignores skipped meeting transcripts") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "meeting_transcript_skipped",
+            context: [
+                "failure_kind": "no_speech_detected",
+                "trigger": "menu",
+            ]
+        )
+
+        assertTrue(tags.isEmpty, "skipped empty/no-speech meeting outcomes should not create Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags keeps speaker finalization failure separate") {
