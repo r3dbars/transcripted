@@ -294,6 +294,7 @@ extension TranscriptionTaskManager {
         var resolvedUpdates: [SpeakerNameUpdate] = []
         resolvedUpdates.reserveCapacity(updates.count)
         var mutations: [PlannedSpeakerMutation] = []
+        var manualNameTargets: [String: UUID] = [:]
 
         for update in updates {
             let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
@@ -305,9 +306,25 @@ extension TranscriptionTaskManager {
                 return nil
             }
 
+            var resolvedPersistentSpeakerId = plan.resolvedPersistentSpeakerId
+            var plannedMutations = plan.mutations
+            if case .named = update.action {
+                let nameKey = normalizeSpeakerName(update.newName)
+                if !nameKey.isEmpty, let existingTarget = manualNameTargets[nameKey] {
+                    resolvedPersistentSpeakerId = existingTarget
+                    plannedMutations = []
+                    if update.persistentSpeakerId != existingTarget {
+                        plannedMutations.append(.merge(sourceId: update.persistentSpeakerId, into: existingTarget))
+                    }
+                    plannedMutations.append(.resetDisputeCount(existingTarget))
+                } else if !nameKey.isEmpty {
+                    manualNameTargets[nameKey] = plan.resolvedPersistentSpeakerId
+                }
+            }
+
             AppLogger.speakers.info("Speaker named", [
                 "originalId": update.persistentSpeakerId.uuidString,
-                "resolvedId": plan.resolvedPersistentSpeakerId.uuidString,
+                "resolvedId": resolvedPersistentSpeakerId.uuidString,
                 "name": update.newName,
                 "action": "\(update.action)"
             ])
@@ -319,9 +336,9 @@ extension TranscriptionTaskManager {
                 newName: update.newName,
                 previousName: update.previousName,
                 action: update.action,
-                resolvedPersistentSpeakerId: plan.resolvedPersistentSpeakerId
+                resolvedPersistentSpeakerId: resolvedPersistentSpeakerId
             ))
-            mutations.append(contentsOf: plan.mutations)
+            mutations.append(contentsOf: plannedMutations)
         }
 
         return PlannedNamingChanges(
