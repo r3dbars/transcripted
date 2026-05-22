@@ -2,13 +2,13 @@
 
 ## Summary
 
-Transcripted 1.1.43 is a candidate reliability and first-run polish release
+Transcripted 1.1.43 is the approved reliability and first-run polish release
 for meeting capture, dictation transcription, app quitting, Settings, and the
 release pipeline.
 
-Do not publish this candidate yet. Version, Sparkle, and Homebrew metadata
-still point at the real shipped `1.1.42` release until an approved release
-artifact exists.
+This release is ready to publish once the notarized `Transcripted-1.1.43.dmg`
+is attached to GitHub Releases and the Sparkle, Homebrew, and public download
+surfaces all point at that artifact.
 
 ## User-visible changes
 
@@ -36,20 +36,19 @@ artifact exists.
 - Extends release smoke coverage to catch packaging and release-gate failures
   before publication.
 
-## Known caveats
+## Watch items
 
-- `1.1.42` shipped less than a day before this candidate note was prepared, so
-  wait for more live usage before publishing.
-- Sentry still has one unresolved latest-release `APPLE-MACOS-S` fatal crash;
-  the merged CoreML lifetime fix targets that shape, but the next release needs
-  monitoring to prove it.
+- Sentry should be checked after live `1.1.43` usage lands to confirm the
+  CoreML lifetime and speaker-finalization fixes cover the production shapes.
 - Open issue `#500` remains the manual audio-output-volume watch item.
-- Existing installs will not see `1.1.43` in-app unless a real GitHub release
-  artifact is approved and `docs/appcast.xml` is updated for that artifact.
+- Existing installs will not see `1.1.43` in-app until `docs/appcast.xml` is
+  updated and pushed for the published GitHub release artifact.
 
 ## Current verification snapshot
 
-- `bash scripts/release/verify-sparkle-release.sh 1.1.42`
-- `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
-- Nightly build memory at `617b6d24` is green across dependency rebuild, app
-  build, fast tests, integration smoke, and Swift package tests.
+- `bash build-deps.sh --force`
+- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash build.sh --no-open`
+- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-tests.sh`
+- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-integration-smoke.sh`
+- `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test`
+- `NOTARY_PROFILE=Transcripted bash build-beta.sh transcripted-public-1.1.43 Transcripted`
