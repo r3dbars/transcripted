@@ -870,6 +870,31 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - repeated quit requests get AppKit replies") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+
+        assertTrue(
+            appContents.contains("private var pendingTerminationReplyCount = 0"),
+            "termination cleanup should track every deferred quit request"
+        )
+        assertTrue(
+            appContents.contains("pendingTerminationReplyCount += 1\n            return .terminateLater"),
+            "repeat quit requests during cleanup should be deferred with a later reply"
+        )
+        assertTrue(
+            appContents.contains("pendingTerminationReplyCount = 1"),
+            "the first deferred quit request should be counted before cleanup starts"
+        )
+        assertTrue(
+            appContents.contains("replyToPendingTerminationRequests(sender, shouldTerminate: true)"),
+            "termination cleanup should reply to every deferred quit request"
+        )
+        assertTrue(
+            appContents.contains("if terminationCleanupFinished {\n            return .terminateNow\n        }"),
+            "quit requests after cleanup should complete immediately"
+        )
+    }
+
     runSuite("Repo command contract - consolidated settings deep links expand their General section") {
         let windowControllerContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
         let navigationContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsNavigationModel.swift")
