@@ -294,7 +294,7 @@ extension TranscriptionTaskManager {
         var resolvedUpdates: [SpeakerNameUpdate] = []
         resolvedUpdates.reserveCapacity(updates.count)
         var mutations: [PlannedSpeakerMutation] = []
-        var manualNameTargets: [String: UUID] = [:]
+        var manualNameTargets: [String: (id: UUID, displayName: String)] = [:]
 
         for update in updates {
             let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
@@ -308,24 +308,28 @@ extension TranscriptionTaskManager {
 
             var resolvedPersistentSpeakerId = plan.resolvedPersistentSpeakerId
             var plannedMutations = plan.mutations
-            if case .named = update.action {
+            var resolvedName = update.newName
+            if Self.shouldCoalesceManualName(update.action) {
                 let nameKey = normalizeSpeakerName(update.newName)
                 if !nameKey.isEmpty, let existingTarget = manualNameTargets[nameKey] {
-                    resolvedPersistentSpeakerId = existingTarget
-                    plannedMutations = []
-                    if update.persistentSpeakerId != existingTarget {
-                        plannedMutations.append(.merge(sourceId: update.persistentSpeakerId, into: existingTarget))
-                    }
-                    plannedMutations.append(.resetDisputeCount(existingTarget))
+                    resolvedPersistentSpeakerId = existingTarget.id
+                    resolvedName = existingTarget.displayName
+                    plannedMutations = Self.coalescedManualNameMutations(
+                        for: update,
+                        entry: entry,
+                        existingTarget: existingTarget.id,
+                        canonicalName: existingTarget.displayName,
+                        plannedMutations: plannedMutations
+                    )
                 } else if !nameKey.isEmpty {
-                    manualNameTargets[nameKey] = plan.resolvedPersistentSpeakerId
+                    manualNameTargets[nameKey] = (plan.resolvedPersistentSpeakerId, update.newName)
                 }
             }
 
             AppLogger.speakers.info("Speaker named", [
                 "originalId": update.persistentSpeakerId.uuidString,
                 "resolvedId": resolvedPersistentSpeakerId.uuidString,
-                "name": update.newName,
+                "name": resolvedName,
                 "action": "\(update.action)"
             ])
 
@@ -333,7 +337,7 @@ extension TranscriptionTaskManager {
                 persistentSpeakerId: update.persistentSpeakerId,
                 diarizerSpeakerId: update.diarizerSpeakerId,
                 channel: update.channel,
-                newName: update.newName,
+                newName: resolvedName,
                 previousName: update.previousName,
                 action: update.action,
                 resolvedPersistentSpeakerId: resolvedPersistentSpeakerId
@@ -345,6 +349,52 @@ extension TranscriptionTaskManager {
             resolvedUpdates: resolvedUpdates,
             mutations: mutations
         )
+    }
+
+    nonisolated private static func shouldCoalesceManualName(_ action: SpeakerNameUpdate.NamingAction) -> Bool {
+        switch action {
+        case .named, .corrected:
+            return true
+        case .confirmed, .merged, .collapsedToMe, .discardedFromDatabase:
+            return false
+        }
+    }
+
+    nonisolated private static func coalescedManualNameMutations(
+        for update: SpeakerNameUpdate,
+        entry: SpeakerNamingEntry?,
+        existingTarget: UUID,
+        canonicalName: String,
+        plannedMutations: [PlannedSpeakerMutation]
+    ) -> [PlannedSpeakerMutation] {
+        switch update.action {
+        case .named:
+            var mutations: [PlannedSpeakerMutation] = []
+            if update.persistentSpeakerId != existingTarget {
+                mutations.append(.merge(sourceId: update.persistentSpeakerId, into: existingTarget))
+            }
+            mutations.append(.resetDisputeCount(existingTarget))
+            return mutations
+
+        case .corrected:
+            var mutations = plannedMutations.compactMap { mutation -> PlannedSpeakerMutation? in
+                switch mutation {
+                case .restoreProfile, .incrementDisputeCount:
+                    return mutation
+                case .merge, .setDisplayName, .addOrUpdateEmbedding, .resetDisputeCount:
+                    return nil
+                }
+            }
+            if let embedding = entry?.sessionEmbedding {
+                mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: existingTarget))
+            }
+            mutations.append(.setDisplayName(id: existingTarget, name: canonicalName))
+            mutations.append(.resetDisputeCount(existingTarget))
+            return mutations
+
+        case .confirmed, .merged, .collapsedToMe, .discardedFromDatabase:
+            return plannedMutations
+        }
     }
 
     nonisolated private static func planPersistentSpeakerResolution(
