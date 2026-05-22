@@ -47,7 +47,9 @@ struct PermissionsOnboardingView: View {
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var pollTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
+    @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
+    @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
     init(onComplete: @escaping () -> Void) {
@@ -106,8 +108,12 @@ struct PermissionsOnboardingView: View {
             if flowStartedAt == nil {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
-            checkAllPermissions()
+            checkAllPermissions(trackChanges: false)
+            trackCurrentStepViewed()
             startPolling()
+        }
+        .onChange(of: currentStepIndex) { _, _ in
+            trackCurrentStepViewed()
         }
         .onDisappear {
             stopPolling()
@@ -252,8 +258,7 @@ struct PermissionsOnboardingView: View {
                 BodyCopy("Transcripted needs two audio streams to write the whole conversation: your microphone for you, and system audio for everyone else.")
                 BulletList(["macOS calls this Screen Recording", "Used only to hear meeting audio", "Everything stays on your Mac"])
                 Button(screenRecordingGranted ? "System audio enabled" : "Enable system audio") {
-                    TranscriptedPermissionAccess.openSettings(for: .systemAudioRecording)
-                    checkAllPermissions()
+                    requestPermission(.systemAudioRecording, required: false)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted))
                 .padding(.top, 12)
@@ -291,8 +296,7 @@ struct PermissionsOnboardingView: View {
                     }
                 }
                 Button(calendarGranted ? "Calendar connected" : "Allow calendar access") {
-                    TranscriptedPermissionAccess.openSettings(for: .calendar)
-                    checkAllPermissions()
+                    requestPermission(.calendar, required: false)
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
                 .disabled(!meetingPromptsEnabled)
@@ -379,8 +383,7 @@ struct PermissionsOnboardingView: View {
                 granted: micGranted,
                 actionTitle: "Allow"
             ) {
-                TranscriptedPermissionAccess.openSettings(for: .microphone)
-                checkAllPermissions()
+                requestPermission(.microphone, required: true)
             }
 
             switch selectedUseCase {
@@ -392,8 +395,7 @@ struct PermissionsOnboardingView: View {
                     granted: screenRecordingGranted,
                     actionTitle: "Allow"
                 ) {
-                    TranscriptedPermissionAccess.openSettings(for: .systemAudioRecording)
-                    checkAllPermissions()
+                    requestPermission(.systemAudioRecording, required: true)
                 }
             case .dictation:
                 PermissionGrantRow(
@@ -403,8 +405,7 @@ struct PermissionsOnboardingView: View {
                     granted: accessibilityGranted,
                     actionTitle: "Allow"
                 ) {
-                    TranscriptedPermissionAccess.openSettings(for: .accessibility)
-                    checkAllPermissions()
+                    requestPermission(.accessibility, required: true)
                 }
             }
         }
@@ -440,6 +441,7 @@ struct PermissionsOnboardingView: View {
 
     private func goNextOrComplete() {
         guard !primaryButtonDisabled else { return }
+        trackPrimaryCTAClicked()
         if currentStepIndex == steps.count - 1 {
             completeOnboarding()
         } else {
@@ -493,11 +495,19 @@ struct PermissionsOnboardingView: View {
         }
     }
 
-    private func checkAllPermissions() {
+    private func checkAllPermissions(trackChanges: Bool = false) {
+        let previousStatuses = lastPermissionStatuses
+
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
+
+        let updatedStatuses = currentPermissionStatuses()
+        if trackChanges && !previousStatuses.isEmpty {
+            trackPermissionStatusChanges(from: previousStatuses, to: updatedStatuses)
+        }
+        lastPermissionStatuses = updatedStatuses
     }
 
     private func startPolling() {
@@ -508,7 +518,7 @@ struct PermissionsOnboardingView: View {
             // user has the System Settings menu open. A Task-driven loop keeps
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
-                checkAllPermissions()
+                checkAllPermissions(trackChanges: true)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -542,6 +552,102 @@ struct PermissionsOnboardingView: View {
                 elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
             )
         )
+    }
+
+    private func requestPermission(_ kind: TranscriptedPermissionKind, required: Bool) {
+        AnalyticsReporter.track(
+            "onboarding_permission_cta_clicked",
+            properties: [
+                "permission_kind": kind.analyticsValue,
+                "prior_status": permissionStatus(for: kind),
+                "required": required ? "true" : "false",
+                "step_id": currentStep.kind.analyticsID,
+            ]
+        )
+
+        TranscriptedPermissionAccess.openSettings(for: kind)
+        checkAllPermissions(trackChanges: false)
+    }
+
+    private func trackCurrentStepViewed() {
+        let now = CFAbsoluteTimeGetCurrent()
+        stepStartedAt = now
+
+        AnalyticsReporter.track(
+            "onboarding_step_viewed",
+            properties: [
+                "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "step_id": currentStep.kind.analyticsID,
+                "step_index": String(currentStepIndex),
+            ]
+        )
+    }
+
+    private func trackPrimaryCTAClicked() {
+        let now = CFAbsoluteTimeGetCurrent()
+        AnalyticsReporter.track(
+            "onboarding_primary_cta_clicked",
+            properties: [
+                "cta": primaryCTAAnalyticsID,
+                "cta_type": "primary",
+                "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "step_elapsed_bucket": stepElapsedBucket(now: now),
+                "step_id": currentStep.kind.analyticsID,
+            ]
+        )
+    }
+
+    private func trackPermissionStatusChanges(
+        from previousStatuses: [TranscriptedPermissionKind: String],
+        to updatedStatuses: [TranscriptedPermissionKind: String]
+    ) {
+        for kind in TranscriptedPermissionKind.allCases {
+            guard let previous = previousStatuses[kind],
+                  let updated = updatedStatuses[kind],
+                  previous != updated else {
+                continue
+            }
+
+            AnalyticsReporter.track(
+                "onboarding_permission_status_changed",
+                properties: [
+                    "from_status": previous,
+                    "permission_kind": kind.analyticsValue,
+                    "step_id": currentStep.kind.analyticsID,
+                    "to_status": updated,
+                ]
+            )
+        }
+    }
+
+    private var primaryCTAAnalyticsID: String {
+        if currentStepIndex == 0 { return "begin" }
+        if currentStep.kind == .useCase {
+            return selectedUseCase == .meetings ? "set_up_meetings" : "set_up_dictation"
+        }
+        if currentStepIndex == steps.count - 1 { return "open_transcripted" }
+        return "continue"
+    }
+
+    private func flowElapsedBucket(now: CFAbsoluteTime) -> String {
+        AnalyticsReporter.durationBucket(seconds: now - (flowStartedAt ?? now))
+    }
+
+    private func stepElapsedBucket(now: CFAbsoluteTime) -> String {
+        AnalyticsReporter.durationBucket(seconds: now - (stepStartedAt ?? now))
+    }
+
+    private func currentPermissionStatuses() -> [TranscriptedPermissionKind: String] {
+        [
+            .microphone: micGranted ? "granted" : "not_granted",
+            .accessibility: accessibilityGranted ? "granted" : "not_granted",
+            .systemAudioRecording: screenRecordingGranted ? "granted" : "not_granted",
+            .calendar: calendarGranted ? "granted" : "not_granted",
+        ]
+    }
+
+    private func permissionStatus(for kind: TranscriptedPermissionKind) -> String {
+        currentPermissionStatuses()[kind] ?? "unknown"
     }
 
     static var hasCompleted: Bool {
@@ -611,6 +717,41 @@ private enum OnboardingStepKind: Hashable {
     case connectAgent
     case diagnostics
     case done
+
+    var analyticsID: String {
+        switch self {
+        case .welcome:
+            return "welcome"
+        case .privacy:
+            return "privacy"
+        case .useCase:
+            return "use_case"
+        case .permissions:
+            return "permissions"
+        case .dictation:
+            return "dictation_intro"
+        case .shortcut:
+            return "dictation_test"
+        case .meetingStart:
+            return "meeting_start"
+        case .systemAudio:
+            return "system_audio"
+        case .meeting:
+            return "meeting_value"
+        case .calendar:
+            return "calendar"
+        case .memory:
+            return "memory"
+        case .agentDemo:
+            return "agent_demo"
+        case .connectAgent:
+            return "connect_agent"
+        case .diagnostics:
+            return "diagnostics"
+        case .done:
+            return "done"
+        }
+    }
 }
 
 private enum OnboardingUseCase: Hashable {
