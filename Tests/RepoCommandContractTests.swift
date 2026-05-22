@@ -1080,6 +1080,45 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - onboarding funnel telemetry is wired from the active view") {
+        let contents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+
+        assertTrue(
+            contents.contains("trackCurrentStepViewed()")
+                && contents.contains("onboarding_step_viewed")
+                && contents.contains("\"step_id\": currentStep.kind.analyticsID")
+                && contents.contains("\"step_index\": String(currentStepIndex)"),
+            "active onboarding should emit coarse step views so first-run funnel drop-off is measurable"
+        )
+        assertTrue(
+            contents.contains("onboarding_primary_cta_clicked")
+                && contents.contains("\"cta\": primaryCTAAnalyticsID")
+                && contents.contains("\"cta_type\": \"primary\"")
+                && contents.contains("\"step_elapsed_bucket\": stepElapsedBucket(now: now)"),
+            "active onboarding should emit coarse primary CTA clicks without raw button copy"
+        )
+        assertTrue(
+            contents.contains("onboarding_permission_cta_clicked")
+                && contents.contains("kind.analyticsValue")
+                && contents.contains("\"prior_status\": permissionStatus(for: kind)")
+                && contents.contains("\"required\": required ? \"true\" : \"false\""),
+            "active onboarding permission CTAs should keep only permission enum and coarse status"
+        )
+        assertTrue(
+            contents.contains("onboarding_permission_status_changed")
+                && contents.contains("\"from_status\": previous")
+                && contents.contains("\"to_status\": updated"),
+            "active onboarding should emit permission status changes after macOS grants are observed"
+        )
+        assertFalse(
+            contents.contains("\"source_app_name\"")
+                || contents.contains("\"source_app_bundle_id\"")
+                || contents.contains("\"transcript\"")
+                || contents.contains("\"audio_path\""),
+            "onboarding funnel telemetry should not include sensitive app, transcript, or audio fields"
+        )
+    }
+
     runSuite("Repo command contract - home stats action uses parent presenter") {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
