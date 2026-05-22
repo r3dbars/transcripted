@@ -214,6 +214,51 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted.first?.meetingTitle, "Design review")
     }
 
+    func testUpdateFailedTranscriptionAudioPreservesRetryMetadata() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let firstMicURL = paths.audioCaptures.appendingPathComponent("timeout-segment.wav")
+        let finalMicURL = paths.audioCaptures.appendingPathComponent("timeout-merged.wav")
+        let systemURL = paths.audioCaptures.appendingPathComponent("timeout-system.wav")
+        FileManager.default.createFile(atPath: firstMicURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: finalMicURL.path, contents: Data("merged".utf8))
+        FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedId = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedId,
+            micAudioURL: firstMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            meetingTitle: "Design review"
+        ))
+        manager.incrementRetryCount(id: failedId)
+
+        XCTAssertTrue(manager.updateFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: finalMicURL,
+            systemAudioURL: systemURL
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertEqual(failed.micAudioURL, finalMicURL)
+        XCTAssertEqual(failed.systemAudioURL, systemURL)
+        XCTAssertEqual(failed.errorMessage, "Recording stop timed out before audio files were finalized.")
+        XCTAssertEqual(failed.meetingTitle, "Design review")
+        XCTAssertEqual(failed.retryCount, 1)
+        XCTAssertNotNil(failed.lastRetryDate)
+
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(persisted.first?.micAudioURL, finalMicURL)
+        XCTAssertEqual(persisted.first?.systemAudioURL, systemURL)
+    }
+
     func testAddFailedTranscriptionRollsBackMemoryWhenPersistenceFails() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

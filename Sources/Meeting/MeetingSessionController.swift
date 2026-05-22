@@ -557,7 +557,13 @@ final class MeetingSessionController: ObservableObject {
             )
         )
 
-        let stopResult = await capture.stopAndAwaitFiles()
+        let stopTimeoutFailedTaskId = UUID()
+        let stopResult = await capture.stopAndAwaitFiles { [weak self] lateResult in
+            self?.refreshTimedOutFailedMeetingAudio(
+                id: stopTimeoutFailedTaskId,
+                result: lateResult
+            )
+        }
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         let stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
@@ -675,10 +681,12 @@ final class MeetingSessionController: ObservableObject {
                 ]
             )
             let preserved = preserveFailedMeetingForRetry(
+                taskId: stopTimeoutFailedTaskId,
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
-                meetingTitle: recordingSnapshot.suggestedTitle
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                archiveAudio: false
             )
             DiagnosticsTrail.record(
                 level: .warning,
@@ -2121,21 +2129,57 @@ final class MeetingSessionController: ObservableObject {
 
     @discardableResult
     private func preserveFailedMeetingForRetry(
+        taskId: UUID = UUID(),
         micAudioURL: URL?,
         systemAudioURL: URL?,
         errorMessage: String,
-        meetingTitle: String?
+        meetingTitle: String?,
+        archiveAudio: Bool = true
     ) -> Bool {
         let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle
+            taskId: taskId,
+            meetingTitle: meetingTitle,
+            archiveAudio: archiveAudio
         )
         if preserved {
             refreshFailedMeetings()
         }
         return preserved
+    }
+
+    private func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
+        guard let micURL = result.micURL else { return }
+        let existingSystemURL = failedManager.failedTranscriptions
+            .first(where: { $0.id == id })?
+            .systemAudioURL
+        let systemURL = result.systemURL ?? existingSystemURL
+
+        let updated = failedManager.updateFailedTranscriptionAudio(
+            id: id,
+            micAudioURL: micURL,
+            systemAudioURL: systemURL
+        )
+        DiagnosticsTrail.record(
+            level: updated ? .info : .warning,
+            engine: "meeting",
+            event: "meeting_recording_stop_timeout_audio_finalized",
+            message: updated
+                ? "Timed-out meeting audio finalized and failed queue was refreshed"
+                : "Timed-out meeting audio finalized but failed queue entry was not found",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "failed_id": id.uuidString,
+                    "mic_file_present": boolString(FileManager.default.fileExists(atPath: micURL.path)),
+                    "system_file_present": boolString(systemURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                ]
+            )
+        )
+        if updated {
+            refreshFailedMeetings()
+        }
     }
 
     private func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {

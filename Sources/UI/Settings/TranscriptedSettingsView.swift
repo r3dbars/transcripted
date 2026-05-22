@@ -1256,6 +1256,22 @@ struct TranscriptedSettingsView: View {
             )
         }
 
+        if !meetingSession.failedMeetings.isEmpty {
+            let count = meetingSession.failedMeetings.count
+            issues.append(
+                HomeNeedsAttentionCard.Issue(
+                    id: "failed-meetings",
+                    symbolName: "waveform.badge.exclamationmark",
+                    title: count == 1 ? "Meeting needs attention" : "Meetings need attention",
+                    detail: count == 1
+                        ? "Saved audio is waiting for review or retry."
+                        : "\(count) saved recordings are waiting for review or retry.",
+                    destination: .failedMeetings,
+                    actionTitle: "Review"
+                )
+            )
+        }
+
         let modelCard = FirstRunExperience.modelCard(
             for: FirstRunLocalModelState(sttRouter.modelDownloadState),
             model: effectiveTranscriptionModel

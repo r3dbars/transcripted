@@ -8,6 +8,8 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreservesExplicitTitle()
         testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
+        testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart()
+        testMeetingTranscriptStylerPreviewReadsOversizedMeetingFrontmatter()
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
@@ -120,6 +122,67 @@ private func testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata() {
 
     assertEqual(preview?.title, "Customer Interview April", "Preview should derive the same title without requiring a full restyle pass")
     assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite the transcript")
+}
+
+private func testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Legacy_Call.md")
+    let raw = """
+    ---
+    title: "Legacy Meeting"
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "0"
+    system_utterances: "1"
+    ---
+    ## Transcript
+
+    [00:00] [System/Speaker 1] Hello.
+    """
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let preview = MeetingTranscriptStyler.displayTranscriptPreview(at: transcriptURL)
+
+    assertEqual(preview?.title, "Legacy Meeting", "Preview should include legacy meeting transcripts when the body starts with the transcript heading")
+    assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite legacy meeting transcripts")
+}
+
+private func testMeetingTranscriptStylerPreviewReadsOversizedMeetingFrontmatter() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Long_Call_2026-04-07_09-14-00.md")
+    let gapEvents = (0..<3_000)
+        .map { "  - \"gap \($0) \(String(repeating: "x", count: 24))\"" }
+        .joined(separator: "\n")
+    let raw = """
+    ---
+    capture_type: meeting
+    title: "Long Customer Call"
+    date: 2026-04-07
+    time: 09:14:00
+    duration: "120:00"
+    mic_utterances: 1
+    system_utterances: 24
+    total_word_count: 5000
+    gap_events:
+    \(gapEvents)
+    ---
+
+    ## Full Transcript
+
+    [00:00] [System/Speaker 1] Hello.
+    """
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let preview = MeetingTranscriptStyler.displayTranscriptPreview(at: transcriptURL)
+
+    assertEqual(preview?.title, "Long Customer Call", "Preview should include long meetings even when frontmatter exceeds the first preview chunk")
+    assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite oversized meeting transcripts")
 }
 
 private func testMeetingTranscriptStylerPreviewRejectsPlainMarkdown() {
