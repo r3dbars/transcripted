@@ -84,7 +84,8 @@ final class MeetingSessionController: ObservableObject {
             )
             case imported(
                 audioURL: URL,
-                suggestedTitle: String
+                suggestedTitle: String,
+                recordingDate: Date
             )
         }
 
@@ -885,7 +886,7 @@ final class MeetingSessionController: ObservableObject {
         let preparedAudio: PreparedImportedMeetingAudio
         do {
             preparedAudio = try await Task.detached(priority: .utility) {
-                try MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
+                try await MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
             }.value
         } catch {
             let failureKind = importPreparationFailureKind(for: error)
@@ -918,6 +919,7 @@ final class MeetingSessionController: ObservableObject {
         let outcome = enqueueImportedAudioJob(
             audioURL: preparedAudio.copiedAudioURL,
             suggestedTitle: preparedAudio.suggestedTitle,
+            recordingDate: preparedAudio.recordingDate,
             startTrigger: .fileImport
         )
 
@@ -984,7 +986,7 @@ final class MeetingSessionController: ObservableObject {
                     errorMessage: "Transcription cancelled",
                     meetingTitle: meetingTitle
                 )
-            case .imported(let audioURL, _):
+            case .imported(let audioURL, _, _):
                 try? FileManager.default.removeItem(at: audioURL)
             }
         }
@@ -1092,7 +1094,7 @@ final class MeetingSessionController: ObservableObject {
                 ) {
                     preservedCount += 1
                 }
-            case .imported(let audioURL, _):
+            case .imported(let audioURL, _, _):
                 try? FileManager.default.removeItem(at: audioURL)
             }
         }
@@ -1528,12 +1530,14 @@ final class MeetingSessionController: ObservableObject {
     private func enqueueImportedAudioJob(
         audioURL: URL,
         suggestedTitle: String,
+        recordingDate: Date,
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             kind: .imported(
                 audioURL: audioURL,
-                suggestedTitle: suggestedTitle
+                suggestedTitle: suggestedTitle,
+                recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
             sttModel: sttRouter.selectedModel
@@ -1659,11 +1663,12 @@ final class MeetingSessionController: ObservableObject {
                 meetingTitle: meetingTitle,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
             )
-        case .imported(let audioURL, let suggestedTitle):
+        case .imported(let audioURL, let suggestedTitle, let recordingDate):
             taskManager.startImportedTranscription(
                 audioURL: audioURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
-                meetingTitle: suggestedTitle
+                meetingTitle: suggestedTitle,
+                recordingDate: recordingDate
             )
         }
     }
@@ -1682,7 +1687,7 @@ final class MeetingSessionController: ObservableObject {
                 errorMessage: message,
                 meetingTitle: meetingTitle
             )
-        case .imported(let audioURL, _):
+        case .imported(let audioURL, _, _):
             try? FileManager.default.removeItem(at: audioURL)
         }
     }
