@@ -151,6 +151,15 @@ enum MeetingImportedAudioPreparer {
 
     private static func embeddedRecordingDate(from sourceURL: URL) async -> Date? {
         let asset = AVURLAsset(url: sourceURL)
+        return await embeddedRecordingDate(from: asset)
+    }
+
+    static func embeddedRecordingDate(from asset: AVURLAsset) async -> Date? {
+        if let creationDate = try? await asset.load(.creationDate),
+           let date = await metadataDate(creationDate) {
+            return date
+        }
+
         let metadata = (try? await asset.load(.metadata)) ?? []
         var dates: [Date] = []
         for item in metadata where isRecordingDateMetadata(item) {
@@ -180,8 +189,12 @@ enum MeetingImportedAudioPreparer {
             || joined.contains("date")
     }
 
-    private static func metadataDate(_ item: AVMetadataItem) async -> Date? {
-        if let date = try? await item.load(.dateValue) {
+    static func metadataDate(
+        _ item: AVMetadataItem,
+        defaultTimeZone: TimeZone = .current
+    ) async -> Date? {
+        if let string = try? await item.load(.stringValue),
+           let date = parseMetadataDate(string, defaultTimeZone: defaultTimeZone) {
             return date
         }
 
@@ -190,19 +203,26 @@ enum MeetingImportedAudioPreparer {
                 return date
             }
             if let string = value as? String,
-               let date = parseMetadataDate(string) {
+               let date = parseMetadataDate(string, defaultTimeZone: defaultTimeZone) {
+                return date
+            }
+            if let string = value as? NSString,
+               let date = parseMetadataDate(String(string), defaultTimeZone: defaultTimeZone) {
                 return date
             }
         }
 
-        if let string = try? await item.load(.stringValue) {
-            return parseMetadataDate(string)
+        if let date = try? await item.load(.dateValue) {
+            return date
         }
 
         return nil
     }
 
-    private static func parseMetadataDate(_ value: String) -> Date? {
+    static func parseMetadataDate(
+        _ value: String,
+        defaultTimeZone: TimeZone = .current
+    ) -> Date? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -222,8 +242,17 @@ enum MeetingImportedAudioPreparer {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         for format in [
             "yyyy-MM-dd'T'HH:mm:ssZ",
-            "yyyy-MM-dd'T'HH:mm:ss",
             "yyyy-MM-dd HH:mm:ssZ",
+        ] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: trimmed) {
+                return date
+            }
+        }
+
+        formatter.timeZone = defaultTimeZone
+        for format in [
+            "yyyy-MM-dd'T'HH:mm:ss",
             "yyyy-MM-dd HH:mm:ss",
             "yyyy-MM-dd"
         ] {
