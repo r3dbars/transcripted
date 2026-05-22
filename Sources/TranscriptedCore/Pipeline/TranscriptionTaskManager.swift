@@ -621,14 +621,16 @@ public class TranscriptionTaskManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         taskId: UUID = UUID(),
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        archiveAudio: Bool = true
     ) {
         _ = addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
             taskId: taskId,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            archiveAudio: archiveAudio
         )
     }
 
@@ -638,7 +640,8 @@ public class TranscriptionTaskManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         taskId: UUID = UUID(),
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        archiveAudio: Bool = true
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -647,27 +650,33 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        let retainedAudio = archiveFailedRecordingAudioIfConfigured(
-            micURL: micAudioURL,
-            systemURL: systemAudioURL,
-            taskId: taskId
-        )
+        let retainedAudio = archiveAudio
+            ? archiveFailedRecordingAudioIfConfigured(
+                micURL: micAudioURL,
+                systemURL: systemAudioURL,
+                taskId: taskId
+            )
+            : nil
         return enqueueFailedTranscriptionAfterRetainingAudio(
+            taskId: taskId,
             retainedAudio: retainedAudio,
             originalMicURL: micAudioURL,
             originalSystemURL: systemAudioURL,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            removeOriginalsAfterArchive: archiveAudio
         )
     }
 
     @discardableResult
     private func enqueueFailedTranscriptionAfterRetainingAudio(
+        taskId: UUID,
         retainedAudio: RetainedRecordingAudio?,
         originalMicURL: URL?,
         originalSystemURL: URL?,
         errorMessage: String,
-        meetingTitle: String?
+        meetingTitle: String?,
+        removeOriginalsAfterArchive: Bool
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
@@ -681,12 +690,14 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let didPersist = failedTranscriptionManager.addFailedTranscription(
+            id: taskId,
             micAudioURL: failedMicURL,
             systemAudioURL: failedSystemURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle
         )
         guard didPersist else { return false }
+        guard removeOriginalsAfterArchive else { return true }
 
         if retainedAudio?.micURL != nil {
             removeManagedCleanupFile(originalMicURL, label: "archived failed mic scratch")

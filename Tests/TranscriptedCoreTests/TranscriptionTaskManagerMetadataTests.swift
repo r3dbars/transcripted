@@ -363,6 +363,72 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
     }
 
+    func testLiveMeetingDurationUsesLongestReadableTrack() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 3.5,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: tempDirectory
+                .appendingPathComponent("transcripts", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true)
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("short-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("long-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 4.0)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Long system call"
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
+
+        XCTAssertEqual(values["duration"], "0:04", "meeting metadata should use the longest readable track, not a short mic placeholder")
+    }
+
+    func testStopTimeoutFailedQueueCanKeepScratchAudioUntilItFinalizes() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("timeout-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("timeout-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            archiveAudio: false
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+
+        XCTAssertEqual(failed.micAudioURL, micURL)
+        XCTAssertEqual(failed.systemAudioURL, systemURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "timeout scratch mic audio should stay in place so late WAV finalization can complete")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "timeout scratch system audio should stay in place so late WAV finalization can complete")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedAudioDirectory.path), "stop-timeout preservation should not copy possibly unfinished WAVs into the retained archive")
+    }
+
     func testRetryFailedTranscriptionSuccessCreatesMarkdownAndClearsFailedQueue() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact.")
@@ -392,7 +458,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
         let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
         XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
-        let markdown = try String(contentsOf: transcriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(markdown.contains("Recovered Customer Call"))
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }

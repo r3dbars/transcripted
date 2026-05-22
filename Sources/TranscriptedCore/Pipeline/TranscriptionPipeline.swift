@@ -44,9 +44,7 @@ extension Transcription {
         let processingStartTime = Date()
 
         do {
-            let durationFileURL = micURL ?? systemURL
-            let durationFile = try AVAudioFile(forReading: durationFileURL)
-            let duration = Double(durationFile.length) / durationFile.processingFormat.sampleRate
+            let duration = try Self.longestAudioDuration(micURL: micURL, systemURL: systemURL)
 
             onProgress?(0.0)
 
@@ -571,6 +569,19 @@ extension Transcription {
             }
             throw error
         }
+    }
+
+    nonisolated private static func longestAudioDuration(micURL: URL?, systemURL: URL) throws -> TimeInterval {
+        var durations = [try audioDuration(at: systemURL)]
+        if let micURL {
+            durations.append(try audioDuration(at: micURL))
+        }
+        return durations.max() ?? 0
+    }
+
+    nonisolated private static func audioDuration(at url: URL) throws -> TimeInterval {
+        let file = try AVAudioFile(forReading: url)
+        return Double(file.length) / file.processingFormat.sampleRate
     }
 
     // MARK: - Mic Channel Diarization

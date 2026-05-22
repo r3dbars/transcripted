@@ -110,6 +110,7 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Adds a new failed transcription to the queue
     @discardableResult
     public func addFailedTranscription(
+        id: UUID = UUID(),
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
@@ -128,6 +129,7 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let failed = FailedTranscription(
+            id: id,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
@@ -142,6 +144,44 @@ public class FailedTranscriptionManager: ObservableObject {
 
         AppLogger.pipeline.info("Added failed transcription", [
             "id": "\(failed.id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
+    }
+
+    @discardableResult
+    public func updateFailedTranscriptionAudio(
+        id: UUID,
+        micAudioURL: URL,
+        systemAudioURL: URL?
+    ) -> Bool {
+        guard isSafeAudioURL(micAudioURL), systemAudioURL.map(isSafeAudioURL) ?? true else {
+            AppLogger.pipeline.error("Rejected failed transcription audio update with out-of-sandbox path", [
+                "id": id.uuidString,
+                "micURL": micAudioURL.path,
+                "systemURL": systemAudioURL?.path ?? "none"
+            ])
+            return false
+        }
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let existing = failedTranscriptions[index]
+        failedTranscriptions[index] = FailedTranscription(
+            id: existing.id,
+            timestamp: existing.timestamp,
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: existing.errorMessage,
+            meetingTitle: existing.meetingTitle,
+            retryCount: existing.retryCount,
+            lastRetryDate: existing.lastRetryDate
+        )
+
+        let didPersist = saveFailedTranscriptions()
+        AppLogger.pipeline.info("Updated failed transcription audio", [
+            "id": "\(id)",
             "persisted": "\(didPersist)"
         ])
         return didPersist
