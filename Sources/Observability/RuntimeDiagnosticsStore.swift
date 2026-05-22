@@ -190,6 +190,7 @@ enum RuntimeDiagnosticsStore {
         "meeting_cancelled",
         "meeting_empty_audio",
         "meeting_file_import_failed",
+        "meeting_model_recovery_failed",
         "meeting_models_unavailable",
         "meeting_no_speech_detected",
         "meeting_recording_too_short",

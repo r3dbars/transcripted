@@ -183,6 +183,7 @@ final class MeetingSessionController: ObservableObject {
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
     private var queuedTranscriptionStartTask: Task<Void, Never>?
+    private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeRecordingSuggestedTitle: String?
@@ -1565,6 +1566,7 @@ final class MeetingSessionController: ObservableObject {
         if !isCaptureSessionActive {
             state = .transcribing
         }
+        recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)
 
         displayStatus = .gettingReady
         queuedTranscriptionStartTask?.cancel()
@@ -1652,6 +1654,7 @@ final class MeetingSessionController: ObservableObject {
 
     private func runPreparedQueuedTranscription(_ job: QueuedTranscriptionJob) {
         sttAdapter.selectPreparedModel(job.sttModel)
+        queuedRuntimeDiagnosticsJobIDs.remove(job.id)
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle):
@@ -1690,6 +1693,24 @@ final class MeetingSessionController: ObservableObject {
         case .imported(let audioURL, _, _):
             try? FileManager.default.removeItem(at: audioURL)
         }
+        clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: "model_recovery_failed")
+    }
+
+    private func recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for job: QueuedTranscriptionJob) {
+        guard !isCaptureSessionActive else { return }
+        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }
+        queuedRuntimeDiagnosticsJobIDs.insert(job.id)
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
+    }
+
+    private func clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(
+        for job: QueuedTranscriptionJob,
+        outcome: String
+    ) {
+        guard queuedRuntimeDiagnosticsJobIDs.remove(job.id) != nil else { return }
+        guard !isCaptureSessionActive else { return }
+        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }
+        Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: outcome)
     }
 
     private func canStartQueuedTranscriptionImmediately(

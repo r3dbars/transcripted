@@ -287,6 +287,29 @@ func testRuntimeDiagnosticsStore() {
         }
     }
 
+    runSuite("RuntimeDiagnosticsStore suppresses queued model recovery terminal event") {
+        let marker = RuntimeDiagnosticsMarker(
+            launchID: "queued-model-recovery-failed",
+            appVersion: "1.2.3",
+            buildVersion: "456",
+            osMajor: 26,
+            cleanShutdown: false,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_100),
+            lastEvent: "meeting_model_recovery_failed",
+            sessionKind: "none",
+            sessionStage: "idle",
+            sessionActive: false
+        )
+
+        let shouldReport = RuntimeDiagnosticsStore.shouldReportUncleanShutdown(
+            previous: marker,
+            now: Date(timeIntervalSince1970: 1_260)
+        )
+
+        assertEqual(shouldReport, false, "queued model recovery failures are terminal once the session is cleared")
+    }
+
     runSuite("RuntimeDiagnosticsStore clears inactive session context on heartbeat") {
         var marker = RuntimeDiagnosticsMarker(
             launchID: "completed-dictation",

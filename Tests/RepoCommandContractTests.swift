@@ -694,6 +694,38 @@ func testRepoCommandContract() {
                 && controllerContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
             "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
+        let startQueuedBlock = sourceSlice(
+            controllerContents,
+            from: "private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {",
+            to: "private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {"
+        )
+        assertTrue(
+            startQueuedBlock.contains("recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)")
+                && controllerContents.contains("recordSession(kind: \"meeting\", stage: \"transcribing\")"),
+            "each queued meeting start should refresh runtime diagnostics away from the previous terminal outcome"
+        )
+        assertTrue(
+            controllerContents.contains("queuedRuntimeDiagnosticsJobIDs")
+                && controllerContents.contains("recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)")
+                && controllerContents.contains("guard !isCaptureSessionActive else { return }"),
+            "queued meeting diagnostics should not clobber foreground recording diagnostics"
+        )
+        assertTrue(
+            controllerContents.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }"),
+            "queued meeting diagnostics should not clobber foreground dictation diagnostics"
+        )
+        let queuedRecoveryFailureBlock = sourceSlice(
+            controllerContents,
+            from: "private func failQueuedTranscriptionJobAfterModelRecovery(_ job: QueuedTranscriptionJob) {",
+            to: "private func canStartQueuedTranscriptionImmediately("
+        )
+        assertTrue(
+            queuedRecoveryFailureBlock.contains("clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: \"model_recovery_failed\")")
+                && controllerContents.contains("queuedRuntimeDiagnosticsJobIDs.remove(job.id)")
+                && queuedRecoveryFailureBlock.contains("guard !isCaptureSessionActive else { return }")
+                && queuedRecoveryFailureBlock.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }"),
+            "queued model recovery failures should clear only the runtime diagnostics session started before recovery"
+        )
         assertTrue(
             downloaderContents.contains("func ensureModelsReady(sttModel: TranscriptionModelChoice) async throws")
                 && downloaderContents.contains("stt.prepare(model: sttModel)"),
