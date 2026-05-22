@@ -1812,11 +1812,11 @@ final class MeetingSessionController: ObservableObject {
             let transcriptionTrigger = activeTranscriptionTrigger
             let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
             let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
-            if failureKind == .recordingTooShort {
+            if failureKind.shouldReportAsSkippedTranscript {
                 DiagnosticsTrail.record(
                     engine: "meeting",
                     event: "meeting_transcript_skipped",
-                    message: "Meeting transcription skipped because the recording was too short",
+                    message: "Meeting transcription skipped because the recording had no transcriptable speech",
                     context: baseDiagnosticsContext(
                         extra: [
                             "failure_kind": failureKind.rawValue,
@@ -1836,7 +1836,7 @@ final class MeetingSessionController: ObservableObject {
                         uniquingKeysWith: { _, new in new }
                     )
                 )
-                Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "recording_too_short")
+                Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
                 finalizeBackgroundTranscriptionStateIfNeeded()
                 return
             }

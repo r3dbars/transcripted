@@ -26,6 +26,15 @@ enum MeetingFailureKind: String {
     case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
+    var shouldReportAsSkippedTranscript: Bool {
+        switch self {
+        case .recordingTooShort, .emptyAudio, .noSpeechDetected:
+            return true
+        default:
+            return false
+        }
+    }
+
     static func isRecordingTooShortMessage(_ message: String) -> Bool {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let mentionsAudioMinimum = (

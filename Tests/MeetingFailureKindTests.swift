@@ -57,6 +57,29 @@ func testMeetingFailureKind() {
         assertEqual(kind, .noSpeechDetected, "audio with no spoken content should get a direct user-facing bucket")
     }
 
+    runSuite("MeetingFailureKind marks expected empty transcript outcomes as skipped") {
+        assertTrue(
+            MeetingFailureKind.recordingTooShort.shouldReportAsSkippedTranscript,
+            "short recordings should be reported as expected skips"
+        )
+        assertTrue(
+            MeetingFailureKind.emptyAudio.shouldReportAsSkippedTranscript,
+            "empty audio should be reported as an expected skip"
+        )
+        assertTrue(
+            MeetingFailureKind.noSpeechDetected.shouldReportAsSkippedTranscript,
+            "audio with no speech should be reported as an expected skip"
+        )
+        assertFalse(
+            MeetingFailureKind.transcriptionInferenceFailed.shouldReportAsSkippedTranscript,
+            "model failures should still report as transcript failures"
+        )
+        assertFalse(
+            MeetingFailureKind.pipelineFailed.shouldReportAsSkippedTranscript,
+            "pipeline failures should still report as transcript failures"
+        )
+    }
+
     runSuite("MeetingFailureKind classifies save failures") {
         let kind = MeetingFailureKind.classify(
             message: "Failed to save transcript: Could not write transcript to meetings"
