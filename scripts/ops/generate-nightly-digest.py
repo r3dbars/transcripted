@@ -511,7 +511,11 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             signal = "Product health produced a score and watchlist."
             action = "Review the score delta"
     elif automation.id == "transcripted-nightly-code-review":
-        if contains_any(lower, ("no new high-confidence", "no pr opened", "green/watch")):
+        if "opened draft pr" in lower:
+            status = "needs_review"
+            signal = "Review lane opened a verified draft PR."
+            action = "Review code-review PR"
+        elif contains_any(lower, ("no new high-confidence", "no pr opened", "green/watch")):
             status = "green"
             signal = "Recent risk areas were reviewed; no new high-confidence repo bug was found."
             action = "No action"
@@ -590,10 +594,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             signal = "Comparison lane found a sharper market wedge plus claims to avoid."
             action = "Choose positioning angle"
     elif automation.id == "transcripted-nightly-retention-agent":
-        if "retention score" in lower or "top churn hypothesis" in lower:
+        if contains_any(
+            lower,
+            ("retention score", "top churn hypothesis", "strongest repeat-use predictor", "highest-leverage retention move"),
+        ):
             status = "needs_review"
-            signal = "Retention lane says the repeat-use loop is promising but under-measured."
-            action = "Define activation endpoint"
+            signal = "Retention lane found the clearest repeat-use habit loop."
+            action = "Review retention habit loop"
     elif automation.id == "transcripted-nightly-launch-agent":
         if "launch recommendation: prepare" in lower or "launch score" in lower:
             status = "needs_review"
@@ -611,7 +618,7 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            if "issue #500" in lower:
+            if "issue #500" in lower or "#500" in lower:
                 signal = "Reviewer kept issue #500 as the real user-trust blocker."
                 action = "Run the issue #500 audio matrix"
             else:
@@ -819,7 +826,10 @@ def human_next_steps(
 
     if blocked_lanes:
         lane = blocked_lanes[0]
-        steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+        if lane.human_action == "Run the issue #500 audio matrix":
+            steps.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        else:
+            steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
 
     if open_prs:
         if len(open_prs) == 1:
@@ -1251,7 +1261,10 @@ def build_recommendations(
         recommendations.append("Fix DAU visibility: set PostHog read credentials, then rerun this report.")
     if blocked_lanes:
         lane = blocked_lanes[0]
-        recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+        if lane.human_action == "Run the issue #500 audio matrix":
+            recommendations.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        else:
+            recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
     if open_prs:
         pr = open_prs[0]
         recommendations.append(f"Review {pr_display_id(pr)} first: {pr.get('title')}.")
@@ -2069,15 +2082,6 @@ a:hover {{ text-decoration: underline; }}
     </div>
   </section>
 
-  <section class="summary-strip">
-    <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
-    <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
-    <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
-    <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
-    <div><span>Blocked</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
-    <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
-  </section>
-
   <section class="section focus-section">
     <h2>What happened last night</h2>
     <ul class="plain-list">
@@ -2089,6 +2093,15 @@ a:hover {{ text-decoration: underline; }}
   <section class="section actions-section">
     <h2>Recommended actions</h2>
     <ol>{recommendation_items}</ol>
+  </section>
+
+  <section class="summary-strip">
+    <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
+    <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
+    <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
+    <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
+    <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
+    <div><span>Blocked</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
   </section>
 
   <details class="more-detail">
