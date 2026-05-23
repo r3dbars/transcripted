@@ -275,6 +275,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - downloaded Sparkle state emits ready telemetry") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let readyHelper = sourceSlice(
+            controller,
+            from: "private func markUpdateReadyToInstall(",
+            to: "private func baseUpdateTelemetryProperties("
+        )
+        let userDriverBlock = sourceSlice(
+            controller,
+            from: "nonisolated func standardUserDriverWillHandleShowingUpdate(",
+            to: "\n    }\n}"
+        )
+
+        assertTrue(
+            readyHelper.contains("lastTrackedReadyToInstallVersion != version"),
+            "ready-to-install telemetry should stay one event per version"
+        )
+        assertTrue(
+            readyHelper.contains("update_ready_to_install"),
+            "ready-to-install helper should emit the update funnel event"
+        )
+        assertTrue(
+            userDriverBlock.contains("markUpdateReadyToInstall"),
+            "Sparkle downloaded-state UI should not skip ready-to-install telemetry"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")

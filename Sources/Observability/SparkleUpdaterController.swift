@@ -70,6 +70,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var hasPerformedStartupCheck = false
     private var pendingImmediateInstallHandler: (() -> Void)?
     private var pendingImmediateInstallVersion: String?
+    private var lastTrackedReadyToInstallVersion: String?
     private var didTrackCurrentUpdateCycleFailure = false
     private var observedUpdateCheckTimeoutTask: Task<Void, Never>?
     private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
@@ -423,6 +424,15 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         AnalyticsReporter.track(event, properties: properties)
     }
 
+    private func markUpdateReadyToInstall(from updater: SPUUpdater, version: String) {
+        let state = UpdateStatus.State.readyToInstall(version: version)
+        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
+
+        guard lastTrackedReadyToInstallVersion != version else { return }
+        lastTrackedReadyToInstallVersion = version
+        trackUpdateLifecycleEvent("update_ready_to_install", state: state, version: version)
+    }
+
     private func baseUpdateTelemetryProperties(state: UpdateStatus.State, version: String?) -> [String: String] {
         var properties = [
             "automatic_downloads_enabled": automaticUpdateSettings.automaticDownloadsEnabled ? "true" : "false",
@@ -523,11 +533,9 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
     ) -> Bool {
         let version = versionString(for: item)
-        let state = UpdateStatus.State.readyToInstall(version: version)
         pendingImmediateInstallHandler = immediateInstallHandler
         pendingImmediateInstallVersion = version
-        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
-        trackUpdateLifecycleEvent("update_ready_to_install", state: state, version: version)
+        markUpdateReadyToInstall(from: updater, version: version)
         return true
     }
 
@@ -590,10 +598,15 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.setUpdateStatus(
-                updateState,
-                canCheckForUpdates: self.updaterController.updater.canCheckForUpdates
-            )
+            switch updateState {
+            case .readyToInstall(let version):
+                self.markUpdateReadyToInstall(from: self.updaterController.updater, version: version)
+            case .unknown, .readyToCheck, .checking, .noUpdateAvailable, .updateAvailable, .downloading:
+                self.setUpdateStatus(
+                    updateState,
+                    canCheckForUpdates: self.updaterController.updater.canCheckForUpdates
+                )
+            }
         }
     }
 }
