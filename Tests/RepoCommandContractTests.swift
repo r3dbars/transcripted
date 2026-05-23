@@ -733,6 +733,30 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - imported audio clears runtime diagnostics when models are unavailable") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let importBlock = sourceSlice(
+            controllerContents,
+            from: "func importAudioFile(from sourceURL: URL) async -> Bool {",
+            to: "private func importPreparationFailureKind"
+        )
+        let readinessBlock = sourceSlice(
+            importBlock,
+            from: "switch state {",
+            to: "let preparedAudio: PreparedImportedMeetingAudio"
+        )
+
+        assertTrue(
+            importBlock.contains("Self.runtimeDiagnosticsRecorder?.recordSession(kind: \"meeting\", stage: \"file_import_requested\")"),
+            "imported audio should mark runtime diagnostics while it prepares models and scratch audio"
+        )
+        assertTrue(
+            readinessBlock.contains("case .ready, .transcribing:")
+                && readinessBlock.contains("Self.runtimeDiagnosticsRecorder?.clearSession(kind: \"meeting\", outcome: \"models_unavailable\")"),
+            "failed imported-audio model prep should clear runtime diagnostics instead of leaving a false active session"
+        )
+    }
+
     runSuite("Repo command contract - bridge uses scaled meeting stop timeout") {
         let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
         let stopBlock = sourceSlice(
