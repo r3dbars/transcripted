@@ -881,6 +881,7 @@ final class MeetingSessionController: ObservableObject {
         case .ready, .transcribing:
             break
         default:
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "models_unavailable")
             return false
         }
 
