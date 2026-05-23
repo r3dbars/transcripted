@@ -709,21 +709,6 @@ enum MeetingAudioStorageManager {
     }
 
     @discardableResult
-    static func removeStaleTemporaryM4AFiles(
-        in audioDirectory: URL,
-        now: Date = Date(),
-        minimumAge: TimeInterval = staleTemporaryAudioAge,
-        fileManager: FileManager = .default
-    ) -> Int {
-        removeStaleTemporaryAudioFiles(
-            in: audioDirectory,
-            now: now,
-            minimumAge: minimumAge,
-            fileManager: fileManager
-        )
-    }
-
-    @discardableResult
     static func removeStaleTemporaryAudioFiles(
         in audioDirectory: URL,
         now: Date = Date(),
@@ -914,20 +899,6 @@ enum MeetingAudioStorageManager {
         }
     }
 
-    private static func isStaleTemporaryM4AFile(
-        _ url: URL,
-        now: Date,
-        minimumAge: TimeInterval,
-        fileManager: FileManager
-    ) -> Bool {
-        isStaleTemporaryAudioFile(
-            url,
-            now: now,
-            minimumAge: minimumAge,
-            fileManager: fileManager
-        )
-    }
-
     private static func isStaleTemporaryAudioFile(
         _ url: URL,
         now: Date,
@@ -941,10 +912,6 @@ enum MeetingAudioStorageManager {
             return false
         }
         return now.timeIntervalSince(modified) >= max(0, minimumAge)
-    }
-
-    private static func isTranscriptedTemporaryM4AFileName(_ url: URL) -> Bool {
-        isTranscriptedTemporaryAudioFileName(url)
     }
 
     private static func isTranscriptedTemporaryAudioFileName(_ url: URL) -> Bool {
