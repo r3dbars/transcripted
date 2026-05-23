@@ -41,6 +41,49 @@ func testDictationTranscriptWriter() {
         assertTrue(contents.contains("second note from the afternoon"), "second dictation text should be present")
     }
 
+    runSuite("DictationTranscriptWriter.save — keeps daily markdown owner-only") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let createdAt = isoDate("2026-04-07T09:15:00-0500")
+        let saved = try? DictationTranscriptWriter.save(
+            text: "private dictation artifact",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: createdAt,
+            directory: outputDir
+        )
+
+        guard let dayFile = saved?.url else {
+            assertionFailure("Expected dictation transcript file")
+            return
+        }
+
+        assertEqual(
+            dictationWriterFilePermissions(of: dayFile),
+            NSNumber(value: 0o600),
+            "new dictation markdown should be restricted to the owner"
+        )
+
+        try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dayFile.path)
+        _ = try? DictationTranscriptWriter.save(
+            text: "second private dictation artifact",
+            sourceApp: nil,
+            delivery: .copied,
+            createdAt: isoDate("2026-04-07T16:45:00-0500"),
+            directory: outputDir
+        )
+
+        assertEqual(
+            dictationWriterFilePermissions(of: dayFile),
+            NSNumber(value: 0o600),
+            "append path should restore owner-only permissions"
+        )
+    }
+
     runSuite("DictationTranscriptWriter.save — separates different days") {
         let fm = FileManager.default
         let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
@@ -76,6 +119,11 @@ private func temporaryDictationWriterTestRoot(fileManager: FileManager) -> URL {
         "TranscriptedDictationWriterTests-\(UUID().uuidString)",
         isDirectory: true
     )
+}
+
+private func dictationWriterFilePermissions(of url: URL) -> NSNumber? {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return attributes?[.posixPermissions] as? NSNumber
 }
 
 private func isoDate(_ string: String) -> Date {
