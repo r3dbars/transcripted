@@ -51,7 +51,8 @@ func testMeetingImportedAudioPreparer() async {
         try! FileManager.default.setAttributes(
             [
                 .creationDate: sourceRecordingDate,
-                .modificationDate: sourceRecordingDate.addingTimeInterval(86_400)
+                .modificationDate: sourceRecordingDate.addingTimeInterval(86_400),
+                .posixPermissions: 0o644
             ],
             ofItemAtPath: sourceURL.path
         )
@@ -70,6 +71,16 @@ func testMeetingImportedAudioPreparer() async {
         assertTrue(
             abs(prepared.recordingDate.timeIntervalSince(sourceRecordingDate)) < 1,
             "import metadata should use the source file creation date instead of the scratch-copy date"
+        )
+        assertEqual(
+            importedAudioFilePermissions(of: prepared.copiedAudioURL),
+            NSNumber(value: 0o600),
+            "scratch copy should be restricted to the owner"
+        )
+        assertEqual(
+            importedAudioFilePermissions(of: sourceURL),
+            NSNumber(value: 0o644),
+            "preparing imported audio should not mutate the user's source file permissions"
         )
     }
 
@@ -143,4 +154,9 @@ private func temporaryImportAudioPreparerRoot() -> URL {
         "MeetingImportedAudioPreparerTests-\(UUID().uuidString)",
         isDirectory: true
     )
+}
+
+private func importedAudioFilePermissions(of url: URL) -> NSNumber? {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return attributes?[.posixPermissions] as? NSNumber
 }
