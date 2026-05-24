@@ -33,6 +33,12 @@ Then it safely merges this entry into Claude Desktop's config:
 Existing MCP servers are preserved. If the config is invalid JSON,
 Transcripted backs it up before writing a clean config.
 
+If the installed helper's `--self-test` prints many `[transcripted-mcp] Indexed`
+lines before the JSON payload, the helper copied into Application Support is
+stale. Click `Install for Claude Desktop` again from Transcripted Settings to
+replace it with the current bundled helper. The current helper should print only
+the JSON self-test payload.
+
 Current `transcripted-mcp` capabilities:
 
 - `recent_context`
