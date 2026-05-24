@@ -37,7 +37,7 @@ Only report aggregate counts, status codes, deployment IDs, and issue titles. Fo
 
 ### PostHog Probe Shape
 
-The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. First-value events are limited to `onboarding_first_dictation_saved`, `meeting_transcript_saved`, and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
+The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `onboarding_first_dictation_saved`, `meeting_transcript_saved`, and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
 
 ## Quick Start
 
