@@ -13,10 +13,11 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (54 Swift files)
+## Files (60 Swift files)
 
 ### Overlay/
 
+- `Overlay/DictationCancelHintPolicy.swift` — decides when the compact dictation overlay should show the cancel hint instead of only the shortcut hint
 - `Overlay/DictationMeterPolicy.swift` — tiny presentation policy that decides when the dictation waveform meter should render and clamps its displayed level
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts
@@ -48,6 +49,7 @@ into a taller loading or error state.
 - `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
+- `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
 - `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
@@ -72,11 +74,14 @@ The current agent-connect surfaces should keep one simple mental model:
 
 ### Settings/
 
+- `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
+- `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, meeting-audio playback, failed-meeting recovery, summary stats, and lightweight copy/feedback/delete affordances
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
+- `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
@@ -98,6 +103,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
+- `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
 - `Shared/SupportDiagnosticsBundle.swift` — privacy-safe support summary used for copied diagnostics and manual diagnostic events, including recent coarse reliability packet summaries
 - `Shared/TranscriptedSupportActions.swift` — support flows for feedback, copied diagnostics, and manually queued diagnostic events
 
