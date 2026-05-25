@@ -1810,14 +1810,13 @@ class ParakeetEngine: ObservableObject {
 
                 if self.liveDisplayEnabled, let eou = self.eouManager {
                     let resampled = AudioResampler.resample(monoSamples, from: effectiveSampleRate, to: 16000)
-                    self.streamingSamplesLock.lock()
-                    self.streamingSampleBuffer.append(contentsOf: resampled)
-                    var chunk: [Float]? = nil
-                    if self.streamingSampleBuffer.count >= self.eouChunkSamples {
-                        chunk = self.streamingSampleBuffer
+                    let chunk: [Float]? = self.streamingSamplesLock.withLock {
+                        self.streamingSampleBuffer.append(contentsOf: resampled)
+                        guard self.streamingSampleBuffer.count >= self.eouChunkSamples else { return nil }
+                        let ready = self.streamingSampleBuffer
                         self.streamingSampleBuffer = []
+                        return ready
                     }
-                    self.streamingSamplesLock.unlock()
                     if let chunk = chunk, let pcm = self.makePCMBuffer(from: chunk) {
                         Task {
                             do { _ = try await eou.process(audioBuffer: pcm) }
@@ -1827,17 +1826,17 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
-                self.pendingSamplesLock.lock()
-                self.pendingSamples.append(contentsOf: monoSamples)
-                let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
-                    sampleRate: effectiveSampleRate,
-                    seconds: TranscriptedConstants.audioBufferCapacitySeconds
-                )
-                let overflowMargin = Int(effectiveSampleRate)
-                if self.pendingSamples.count > maxSamples + overflowMargin {
-                    self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+                self.pendingSamplesLock.withLock {
+                    self.pendingSamples.append(contentsOf: monoSamples)
+                    let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+                        sampleRate: effectiveSampleRate,
+                        seconds: TranscriptedConstants.audioBufferCapacitySeconds
+                    )
+                    let overflowMargin = Int(effectiveSampleRate)
+                    if self.pendingSamples.count > maxSamples + overflowMargin {
+                        self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+                    }
                 }
-                self.pendingSamplesLock.unlock()
 
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }

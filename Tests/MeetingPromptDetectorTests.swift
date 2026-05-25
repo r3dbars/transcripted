@@ -76,6 +76,7 @@ func testMeetingPromptDetector() async {
         let detector = MeetingPromptDetector()
         let candidate = makeMeetingPromptCandidate(id: "calendar:not-now", source: .calendarEvent)
 
+        let before = Date()
         let decision = detector.dismiss(candidate: candidate)
 
         assertEqual(
@@ -84,7 +85,7 @@ func testMeetingPromptDetector() async {
             "calendar dismissal should keep using the normal Not now backoff"
         )
         assertTrue(
-            decision.until.timeIntervalSince(Date()) > 25 * 60,
+            decision.until.timeIntervalSince(before) > 25 * 60,
             "Not now should remain meaningfully longer than Remind me soon"
         )
     }

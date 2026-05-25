@@ -14,7 +14,7 @@ For day-to-day agent work, start with `AGENT_START.md` and treat `AGENTS.md` as 
 - optional local-speaker review for people sharing the room mic
 - agent-readable Markdown output saved to disk
 
-The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main` — `DictationSessionController.cancelSession()` is the only remaining hook from that removed routing.
+The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main`; `DictationSessionController.cancelSession()` is the only remaining compatibility hook from that removed routing.
 
 ## First reads
 
