@@ -11,6 +11,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart()
         testMeetingTranscriptStylerPreviewReadsOversizedMeetingFrontmatter()
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
+        testMeetingTranscriptStylerSkipsNonMeetingFrontmatter()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
@@ -193,6 +194,35 @@ private func testMeetingTranscriptStylerPreviewRejectsPlainMarkdown() {
     try? "# Notes\n\nNot a Transcripted meeting.".write(to: noteURL, atomically: true, encoding: .utf8)
 
     assertNil(MeetingTranscriptStyler.displayTranscriptPreview(at: noteURL), "Preview should skip non-meeting markdown files")
+}
+
+private func testMeetingTranscriptStylerSkipsNonMeetingFrontmatter() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let noteURL = directory.appendingPathComponent("notes.md")
+    let raw = """
+    ---
+    title: "Project Note"
+    date: "2026-04-07"
+    ---
+
+    # Project Note
+
+    This is not a Transcripted meeting.
+    """
+    try? raw.write(to: noteURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: noteURL)
+    let updated = try? String(contentsOf: noteURL, encoding: .utf8)
+
+    assertEqual(styled.url, noteURL, "Styler should leave non-meeting notes at their original path")
+    assertEqual(styled.title, "Project Note", "Styler may display the explicit title without taking ownership")
+    assertEqual(updated, raw, "Styler should not rewrite Markdown that is not a Transcripted meeting")
+    assertFalse(
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("Project Note.md").path),
+        "Styler should not rename non-meeting notes"
+    )
 }
 
 private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {

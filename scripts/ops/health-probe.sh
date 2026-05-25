@@ -20,6 +20,45 @@ skip_lane() {
   return 0
 }
 
+posthog_api_host() {
+  local host="${POSTHOG_APP_HOST:-${POSTHOG_HOST:-https://us.posthog.com}}"
+  host="${host%/}"
+
+  case "$host" in
+    https://us.i.posthog.com)
+      host="https://us.posthog.com"
+      ;;
+    https://eu.i.posthog.com)
+      host="https://eu.posthog.com"
+      ;;
+  esac
+
+  echo "$host"
+}
+
+validate_posthog_api_host() {
+  local host="$1"
+
+  if [[ "$host" != https://* ]]; then
+    echo "PostHog: refusing to send API key because host must use HTTPS: $host"
+    return 1
+  fi
+
+  if [[ "${POSTHOG_ALLOW_UNTRUSTED_HOST:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  case "$host" in
+    https://app.posthog.com|https://eu.posthog.com|https://posthog.com|https://us.posthog.com)
+      return 0
+      ;;
+  esac
+
+  echo "PostHog: refusing to send API key to untrusted host: $host"
+  echo "PostHog: set POSTHOG_ALLOW_UNTRUSTED_HOST=1 only for a trusted self-hosted endpoint"
+  return 1
+}
+
 probe_github() {
   if ! command -v gh &> /dev/null; then
     echo "SKIP github: gh CLI not found"
@@ -91,20 +130,31 @@ probe_posthog() {
   first_value_events="'onboarding_first_dictation_saved','meeting_transcript_saved','onboarding_agent_cta_clicked'"
   query="select uniq(distinct_id) as devices_7d, sum(case when event in ($workflow_events) then 1 else 0 end) as workflow_events_7d, sum(case when event in ($onboarding_events) then 1 else 0 end) as onboarding_events_7d, sum(case when event in ($first_value_events) then 1 else 0 end) as first_value_events_7d from events where timestamp >= now() - interval 7 day"
   daily_query="select toDate(timestamp) as day, uniq(distinct_id) as active_devices from events where timestamp >= now() - interval 7 day and event in ($workflow_events) group by day order by day asc"
-  payload=$(jq -cn --arg query "$query" '{query: $query}')
-  daily_payload=$(jq -cn --arg query "$daily_query" '{query: $query}')
+  payload=$(jq -cn --arg query "$query" '{query: {kind: "HogQLQuery", query: $query}, refresh: "blocking"}')
+  daily_payload=$(jq -cn --arg query "$daily_query" '{query: {kind: "HogQLQuery", query: $query}, refresh: "blocking"}')
 
-  local response daily_response
-  response=$(curl -s -f -X POST \
+  local posthog_host response daily_response
+  posthog_host="$(posthog_api_host)"
+  if ! validate_posthog_api_host "$posthog_host"; then
+    return 1
+  fi
+
+  if ! response=$(curl -s -f -X POST \
     -H "Authorization: Bearer $POSTHOG_PERSONAL_API_KEY" \
     -H "Content-Type: application/json" \
-    "https://us.i.posthog.com/api/projects/$POSTHOG_PROJECT_ID/query/" \
-    -d "$payload")
-  daily_response=$(curl -s -f -X POST \
+    "$posthog_host/api/projects/$POSTHOG_PROJECT_ID/query/" \
+    -d "$payload"); then
+    echo "PostHog: query failed"
+    return 1
+  fi
+  if ! daily_response=$(curl -s -f -X POST \
     -H "Authorization: Bearer $POSTHOG_PERSONAL_API_KEY" \
     -H "Content-Type: application/json" \
-    "https://us.i.posthog.com/api/projects/$POSTHOG_PROJECT_ID/query/" \
-    -d "$daily_payload")
+    "$posthog_host/api/projects/$POSTHOG_PROJECT_ID/query/" \
+    -d "$daily_payload"); then
+    echo "PostHog: daily query failed"
+    return 1
+  fi
 
   if [[ -z "$response" ]] || [[ -z "$daily_response" ]]; then
     echo "PostHog: query failed"
@@ -112,10 +162,10 @@ probe_posthog() {
   fi
 
   local devices events onboarding first_value daily_devices
-  devices=$(echo "$response" | jq -r '.data[0][0]')
-  events=$(echo "$response" | jq -r '.data[0][1]')
-  onboarding=$(echo "$response" | jq -r '.data[0][2] // 0')
-  first_value=$(echo "$response" | jq -r '.data[0][3] // 0')
+  devices=$(echo "$response" | jq -r '(.data // .results)[0][0]')
+  events=$(echo "$response" | jq -r '(.data // .results)[0][1]')
+  onboarding=$(echo "$response" | jq -r '(.data // .results)[0][2] // 0')
+  first_value=$(echo "$response" | jq -r '(.data // .results)[0][3] // 0')
   daily_devices=$(echo "$daily_response" | jq -r '((.data // .results // []) | map("\(.[0])=\(.[1])") | join(", "))')
   if [[ -z "$daily_devices" ]]; then
     daily_devices="none"

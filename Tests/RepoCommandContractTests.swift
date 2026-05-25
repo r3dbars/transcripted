@@ -47,6 +47,58 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - PostHog health probe uses the query API") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("posthog_api_host()"),
+            "PostHog probe should normalize app/ingest hosts before querying"
+        )
+        assertTrue(
+            contents.contains("https://us.i.posthog.com)") && contents.contains("https://us.posthog.com"),
+            "PostHog probe should translate the US ingest host to the API host"
+        )
+        assertTrue(
+            contents.contains("kind: \"HogQLQuery\"") && contents.contains("refresh: \"blocking\""),
+            "PostHog probe should use the current HogQL query API payload"
+        )
+        assertTrue(
+            contents.contains("(.data // .results)"),
+            "PostHog probe should parse both old and current query response shapes"
+        )
+        assertFalse(
+            contents.contains("https://us.i.posthog.com/api/projects"),
+            "PostHog probe should not send API queries to the ingest host"
+        )
+        assertTrue(
+            contents.contains("validate_posthog_api_host") && contents.contains("POSTHOG_ALLOW_UNTRUSTED_HOST"),
+            "PostHog probe should validate hosts before sending the personal API key"
+        )
+    }
+
+    runSuite("Repo command contract - PostHog health probe keeps aggregate daily active-device trend") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("daily_query=")
+                && contents.contains("toDate(timestamp) as day")
+                && contents.contains("uniq(distinct_id) as active_devices")
+                && contents.contains("group by day order by day asc"),
+            "PostHog probe should keep the daily aggregate active-device trend query"
+        )
+        assertTrue(
+            contents.contains("daily_payload=")
+                && contents.contains("daily_response=")
+                && contents.contains("daily_devices=")
+                && contents.contains("PostHog daily active devices:"),
+            "PostHog probe should print the daily aggregate trend alongside 7-day totals"
+        )
+        assertFalse(
+            contents.contains("PostHog daily active device ids"),
+            "PostHog probe should not print user or device identifiers"
+        )
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(

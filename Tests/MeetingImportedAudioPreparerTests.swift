@@ -123,6 +123,55 @@ func testMeetingImportedAudioPreparer() async {
         assertEqual(calendar.component(.month, from: parsed), 2, "string metadata should preserve the month")
         assertEqual(calendar.component(.day, from: parsed), 3, "string metadata should preserve the local day")
     }
+
+    runSuite("MeetingImportedAudioPreparer parses ISO8601 metadata with fractional seconds and Z suffix") {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+
+        let parsed = MeetingImportedAudioPreparer.parseMetadataDate(
+            "2025-02-03T09:15:00.500Z",
+            defaultTimeZone: utc
+        )!
+
+        assertEqual(calendar.component(.year, from: parsed), 2025, "fractional ISO date should parse the year")
+        assertEqual(calendar.component(.month, from: parsed), 2, "fractional ISO date should parse the month")
+        assertEqual(calendar.component(.day, from: parsed), 3, "fractional ISO date should parse the day")
+        assertEqual(calendar.component(.hour, from: parsed), 9, "fractional ISO date should parse the UTC hour")
+        assertEqual(calendar.component(.minute, from: parsed), 15, "fractional ISO date should parse the minute")
+    }
+
+    runSuite("MeetingImportedAudioPreparer honors explicit ISO8601 timezone offsets") {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+
+        // 2025-02-03 09:15:00 at -05:00 is 2025-02-03 14:15:00 UTC.
+        let parsed = MeetingImportedAudioPreparer.parseMetadataDate(
+            "2025-02-03T09:15:00-0500",
+            defaultTimeZone: utc
+        )!
+
+        assertEqual(calendar.component(.day, from: parsed), 3, "explicit-offset ISO date should keep the calendar day in UTC")
+        assertEqual(calendar.component(.hour, from: parsed), 14, "explicit-offset ISO date should resolve into UTC, not the default timezone")
+    }
+
+    runSuite("MeetingImportedAudioPreparer rejects empty and unparseable metadata strings") {
+        let utc = TimeZone(secondsFromGMT: 0)!
+
+        assertNil(
+            MeetingImportedAudioPreparer.parseMetadataDate("", defaultTimeZone: utc),
+            "empty metadata strings should not produce a date"
+        )
+        assertNil(
+            MeetingImportedAudioPreparer.parseMetadataDate("   \n\t  ", defaultTimeZone: utc),
+            "whitespace-only metadata should not produce a date"
+        )
+        assertNil(
+            MeetingImportedAudioPreparer.parseMetadataDate("banana", defaultTimeZone: utc),
+            "unrecognized tokens should not produce a date so the resolver falls back to the file system"
+        )
+    }
 }
 
 private func assertImportedAudioPreparationError(
