@@ -1579,12 +1579,15 @@ final class MeetingSessionController: ObservableObject {
 
     private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {
         let modelsReady = await ensureModelsReadyForQueuedTranscription(job)
+
+        // A cancelled task must not touch shared state: a newer
+        // startQueuedTranscription has already taken ownership of
+        // queuedTranscriptionStartTask / preparingQueuedTranscriptionJob.
+        guard !Task.isCancelled else { return }
         guard preparingQueuedTranscriptionJob?.id == job.id else { return }
 
         queuedTranscriptionStartTask = nil
         preparingQueuedTranscriptionJob = nil
-
-        guard !Task.isCancelled else { return }
 
         guard modelsReady else {
             failQueuedTranscriptionJobAfterModelRecovery(job)
