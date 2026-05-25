@@ -47,6 +47,29 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - PostHog health probe keeps aggregate daily active-device trend") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("daily_query=")
+                && contents.contains("toDate(timestamp) as day")
+                && contents.contains("uniq(distinct_id) as active_devices")
+                && contents.contains("group by day order by day asc"),
+            "PostHog probe should keep the daily aggregate active-device trend query"
+        )
+        assertTrue(
+            contents.contains("daily_payload=")
+                && contents.contains("daily_response=")
+                && contents.contains("daily_devices=")
+                && contents.contains("PostHog daily active devices:"),
+            "PostHog probe should print the daily aggregate trend alongside 7-day totals"
+        )
+        assertFalse(
+            contents.contains("PostHog daily active device ids"),
+            "PostHog probe should not print user or device identifiers"
+        )
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
