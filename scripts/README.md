@@ -16,9 +16,9 @@ stable and the docs can keep pointing at the same commands:
 - `run-live-capture-smoke.sh` — local hardware/TCC smoke for app launch plus mic and system-audio capture
 - `run-daily-audio-reliability.sh` — interactive or synthetic daily audio reliability check
 
-## Entrypoint implementations
+## Wrapper implementations
 
-The actual script bodies live under `scripts/entrypoints/` so the repo root does
+Most root wrapper bodies live under `scripts/entrypoints/` so the repo root does
 not have to carry the full operational logic:
 
 - `scripts/entrypoints/build-deps.sh`
@@ -28,6 +28,9 @@ not have to carry the full operational logic:
 - `scripts/entrypoints/run-tests.sh`
 - `scripts/entrypoints/run-integration-smoke.sh`
 - `scripts/entrypoints/run-live-capture-smoke.sh`
+
+`run-daily-audio-reliability.sh` is the exception: it keeps its implementation
+with the operational health probes at `scripts/ops/daily-audio-reliability-check.sh`.
 
 ## Active helper scripts
 
