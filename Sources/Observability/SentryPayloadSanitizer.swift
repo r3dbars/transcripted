@@ -78,14 +78,7 @@ enum SentryPayloadSanitizer {
     }
 
     static func sanitizeText(_ text: String) -> String {
-        let result = ObservabilityTextRedactor.redact(text)
-        guard !result.isEmpty else { return "" }
-
-        if result.count > maxValueLength {
-            return String(result.prefix(maxValueLength)) + "..."
-        }
-
-        return result
+        PayloadSanitizationCore.redactAndCap(text, maxValueLength: maxValueLength)
     }
 
     private static func sanitizeAnyValue(_ value: Any) -> Any? {
@@ -108,7 +101,6 @@ enum SentryPayloadSanitizer {
     }
 
     private static func shouldDrop(key: String) -> Bool {
-        let normalized = key.lowercased()
-        return sensitiveKeyFragments.contains(where: { normalized.contains($0) })
+        PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
     }
 }

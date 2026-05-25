@@ -51,6 +51,7 @@ SWIFT_SOURCES=(
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
+    "Sources/Observability/PayloadSanitizationCore.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/DataDirectories.swift"
