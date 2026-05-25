@@ -58,6 +58,17 @@ extension TranscriptionTaskManager {
             else if case .discardedFromDatabase = update.action { discardedUpdates.append(update) }
             else { regularUpdates.append(update) }
         }
+        let skippedNoDialogUpdates = regularUpdates.filter {
+            Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) == 0
+        }
+        if !skippedNoDialogUpdates.isEmpty {
+            AppLogger.speakers.warning("Skipping speaker-name updates with no transcript dialog", [
+                "count": "\(skippedNoDialogUpdates.count)"
+            ])
+        }
+        regularUpdates = regularUpdates.filter {
+            Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
+        }
         let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -649,6 +660,20 @@ extension TranscriptionTaskManager {
         (name ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    nonisolated private static func visibleTranscriptUtteranceCount(
+        for update: SpeakerNameUpdate,
+        in result: TranscriptionResult
+    ) -> Int {
+        guard let diarizerSpeakerId = Int(update.diarizerSpeakerId) else { return 0 }
+        let utterances = update.channel == .mic
+            ? result.micUtterances
+            : result.systemUtterances
+        return utterances.filter {
+            $0.speakerId == diarizerSpeakerId
+                && !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
     }
 
     @MainActor private func finishNamingFlow(

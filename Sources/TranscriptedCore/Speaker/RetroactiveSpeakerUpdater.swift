@@ -398,7 +398,8 @@ extension TranscriptSaver {
                 guard applyScopedBreakdownNameReplacements(
                     in: &content,
                     updatesByChannelKey: updatesByChannelKey,
-                    channels: [.system]
+                    channels: [.system],
+                    result: transcriptionResult
                 ) else {
                     AppLogger.pipeline.error("Scoped remote speaker breakdown fallback was ambiguous", [
                         "path": transcriptURL.lastPathComponent
@@ -418,7 +419,8 @@ extension TranscriptSaver {
                 guard applyScopedBreakdownNameReplacements(
                     in: &content,
                     updatesByChannelKey: updatesByChannelKey,
-                    channels: [.mic]
+                    channels: [.mic],
+                    result: transcriptionResult
                 ) else {
                     AppLogger.pipeline.error("Scoped local speaker breakdown fallback was ambiguous", [
                         "path": transcriptURL.lastPathComponent
@@ -926,13 +928,21 @@ extension TranscriptSaver {
             guard update.oldName != update.newName else { continue }
             guard let target = channelAndDiarizerID(forSpeakerKey: key) else { return false }
             let prefix = target.channel == .mic ? "Mic" : "System"
-            let expectedCount = expectedUtteranceCount(
+            let expectedCount = expectedVisibleUtteranceCount(
                 in: result,
                 channel: target.channel,
                 diarizerSpeakerId: target.diarizerSpeakerId
             )
-            guard expectedCount > 0,
-                  countTranscriptSpeakerLabels(in: content, prefix: prefix, oldName: update.oldName) == expectedCount else {
+            let labelCount = countTranscriptSpeakerLabels(
+                in: content,
+                prefix: prefix,
+                oldName: update.oldName
+            )
+            if expectedCount == 0 {
+                guard labelCount == 0 else { return false }
+                continue
+            }
+            guard labelCount == expectedCount else {
                 return false
             }
             replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName))
@@ -973,7 +983,8 @@ extension TranscriptSaver {
     private static func applyScopedBreakdownNameReplacements(
         in content: inout String,
         updatesByChannelKey: [String: (oldName: String, newName: String)],
-        channels: Set<UtteranceChannel>
+        channels: Set<UtteranceChannel>,
+        result: TranscriptionResult
     ) -> Bool {
         var replacementPlans: [(prefix: String, oldName: String, newName: String, channel: UtteranceChannel)] = []
         for key in updatesByChannelKey.keys.sorted() {
@@ -984,6 +995,21 @@ extension TranscriptSaver {
             }
             let prefix = target.channel == .mic ? "Mic" : "System"
             guard update.oldName != update.newName else { continue }
+            let expectedCount = expectedVisibleUtteranceCount(
+                in: result,
+                channel: target.channel,
+                diarizerSpeakerId: target.diarizerSpeakerId
+            )
+            if expectedCount == 0 {
+                guard countSpeakerBreakdownRows(
+                    in: content,
+                    oldName: update.oldName,
+                    channel: target.channel
+                ) == 0 else {
+                    return false
+                }
+                continue
+            }
             replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName, channel: target.channel))
         }
 
@@ -1025,13 +1051,16 @@ extension TranscriptSaver {
         return nil
     }
 
-    private static func expectedUtteranceCount(
+    private static func expectedVisibleUtteranceCount(
         in result: TranscriptionResult,
         channel: UtteranceChannel,
         diarizerSpeakerId: Int
     ) -> Int {
         let utterances = channel == .mic ? result.micUtterances : result.systemUtterances
-        return utterances.filter { $0.speakerId == diarizerSpeakerId }.count
+        return utterances.filter {
+            $0.speakerId == diarizerSpeakerId
+                && !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
     }
 
     /// Parse a YAML double-quoted string value after a known key prefix.
@@ -1524,7 +1553,9 @@ extension TranscriptSaver {
         let chunks = String(content[range])
             .components(separatedBy: "\n\n")
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let utterances = result.allUtterances
+        let utterances = result.allUtterances.filter {
+            !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         guard chunks.count == utterances.count else { return false }
 
         var rewrittenChunks: [String] = []
