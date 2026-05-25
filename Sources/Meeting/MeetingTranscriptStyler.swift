@@ -83,7 +83,24 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
         }
 
-        guard let document = parseDocument(raw, fallbackURL: url) else {
+        guard let frontmatter = TranscriptFrontmatter.document(in: raw) else {
+            return StyledMeetingTranscript(
+                url: url,
+                title: fallbackTitle(for: url)
+            )
+        }
+        guard isMeetingTranscript(frontmatter) else {
+            let explicitTitle = frontmatter.values["title"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = explicitTitle?.isEmpty == false
+                ? explicitTitle ?? fallbackTitle(for: url)
+                : fallbackTitle(for: url)
+            return StyledMeetingTranscript(
+                url: url,
+                title: title
+            )
+        }
+        guard let document = parseDocument(frontmatter, fallbackURL: url) else {
             return StyledMeetingTranscript(
                 url: url,
                 title: fallbackTitle(for: url)
@@ -95,9 +112,9 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: title)
         }
 
-        let frontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
+        let renderedFrontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
         let body = renderBody(document: document, title: title)
-        let updated = frontmatter + "\n\n" + body + "\n"
+        let updated = renderedFrontmatter + "\n\n" + body + "\n"
         let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title)
 
         if updated != raw {
