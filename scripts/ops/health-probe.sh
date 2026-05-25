@@ -36,6 +36,29 @@ posthog_api_host() {
   echo "$host"
 }
 
+validate_posthog_api_host() {
+  local host="$1"
+
+  if [[ "$host" != https://* ]]; then
+    echo "PostHog: refusing to send API key because host must use HTTPS: $host"
+    return 1
+  fi
+
+  if [[ "${POSTHOG_ALLOW_UNTRUSTED_HOST:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  case "$host" in
+    https://app.posthog.com|https://eu.posthog.com|https://posthog.com|https://us.posthog.com)
+      return 0
+      ;;
+  esac
+
+  echo "PostHog: refusing to send API key to untrusted host: $host"
+  echo "PostHog: set POSTHOG_ALLOW_UNTRUSTED_HOST=1 only for a trusted self-hosted endpoint"
+  return 1
+}
+
 probe_github() {
   if ! command -v gh &> /dev/null; then
     echo "SKIP github: gh CLI not found"
@@ -112,6 +135,10 @@ probe_posthog() {
 
   local posthog_host response daily_response
   posthog_host="$(posthog_api_host)"
+  if ! validate_posthog_api_host "$posthog_host"; then
+    return 1
+  fi
+
   if ! response=$(curl -s -f -X POST \
     -H "Authorization: Bearer $POSTHOG_PERSONAL_API_KEY" \
     -H "Content-Type: application/json" \

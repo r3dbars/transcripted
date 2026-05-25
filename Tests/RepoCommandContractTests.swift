@@ -70,6 +70,10 @@ func testRepoCommandContract() {
             contents.contains("https://us.i.posthog.com/api/projects"),
             "PostHog probe should not send API queries to the ingest host"
         )
+        assertTrue(
+            contents.contains("validate_posthog_api_host") && contents.contains("POSTHOG_ALLOW_UNTRUSTED_HOST"),
+            "PostHog probe should validate hosts before sending the personal API key"
+        )
     }
 
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
