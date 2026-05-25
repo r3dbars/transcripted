@@ -24,6 +24,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
+- `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` helpers used by both sanitizers so redaction rules stay in one place while each destination keeps its own length cap and sensitive-key list
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
