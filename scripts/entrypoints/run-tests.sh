@@ -202,6 +202,7 @@ APP_SOURCES=(
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
+    "Sources/Observability/PayloadSanitizationCore.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
