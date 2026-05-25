@@ -58,16 +58,20 @@ extension TranscriptionTaskManager {
             else if case .discardedFromDatabase = update.action { discardedUpdates.append(update) }
             else { regularUpdates.append(update) }
         }
-        let skippedNoDialogUpdates = regularUpdates.filter {
+        let visibleRegularUpdates = regularUpdates.filter {
+            Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
+        }
+        let noDialogUpdates = regularUpdates.filter {
             Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) == 0
         }
-        if !skippedNoDialogUpdates.isEmpty {
-            AppLogger.speakers.warning("Skipping speaker-name updates with no transcript dialog", [
-                "count": "\(skippedNoDialogUpdates.count)"
+        if !noDialogUpdates.isEmpty {
+            AppLogger.speakers.warning("Skipping transcript rewrites for speaker updates with no dialog", [
+                "count": "\(noDialogUpdates.count)"
             ])
         }
         regularUpdates = regularUpdates.filter {
             Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
+                || Self.shouldApplyNoDialogDatabaseMutation($0.action)
         }
         let newlyCreatedMicProfileIds = transcriptionResult.newlyCreatedMicProfileIds
 
@@ -123,9 +127,12 @@ extension TranscriptionTaskManager {
                 ? Self.planDeferredReview(clips)
                 : nil
 
-            var didFinalizeTranscript = regularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
+            let transcriptUpdates = plannedChanges.resolvedUpdates.filter {
+                Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
+            }
+            var didFinalizeTranscript = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                 transcriptURL: resolvedURL,
-                updates: plannedChanges.resolvedUpdates,
+                updates: transcriptUpdates,
                 transcriptionResult: transcriptionResult,
                 speakerStore: speakerDB
             )
@@ -367,6 +374,15 @@ extension TranscriptionTaskManager {
         case .named, .corrected:
             return true
         case .confirmed, .merged, .collapsedToMe, .discardedFromDatabase:
+            return false
+        }
+    }
+
+    nonisolated private static func shouldApplyNoDialogDatabaseMutation(_ action: SpeakerNameUpdate.NamingAction) -> Bool {
+        switch action {
+        case .confirmed, .corrected, .merged:
+            return true
+        case .named, .collapsedToMe, .discardedFromDatabase:
             return false
         }
     }

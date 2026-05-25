@@ -315,6 +315,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             embedding: [Float](repeating: 0.43, count: 256),
             existingId: nil
         ).id
+        let emptySpeakerTargetId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.44, count: 256),
+            existingId: nil
+        ).id
+        harness.speakerDB.setDisplayName(id: emptySpeakerTargetId, name: "Known Phantom")
+        let emptySpeakerTargetBefore = harness.speakerDB.getSpeaker(id: emptySpeakerTargetId)
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Split_With_No_Dialog.md")
         let micURL = harness.paths.audioCaptures.appendingPathComponent("split-empty-mic.wav")
         let systemURL = harness.paths.audioCaptures.appendingPathComponent("split-empty-system.wav")
@@ -404,7 +410,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             updates: [
                 SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
                 SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: emptySpeakerId, diarizerSpeakerId: "3", newName: "Phantom Speaker", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: emptySpeakerId, diarizerSpeakerId: "3", newName: "Known Phantom", action: .merged(targetProfileId: emptySpeakerTargetId)),
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
@@ -426,13 +432,16 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Grigory]"), savedTranscript)
         XCTAssertTrue(savedTranscript.contains("**00:05**  [System/Grigory]"), savedTranscript)
-        XCTAssertFalse(savedTranscript.contains("[System/Phantom Speaker]"), savedTranscript)
-        XCTAssertFalse(savedTranscript.contains(#"name: "Phantom Speaker""#), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/Known Phantom]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains(#"name: "Known Phantom""#), savedTranscript)
 
         let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
         XCTAssertEqual(namedProfiles.count, 1)
         XCTAssertNil(harness.speakerDB.getSpeaker(id: secondSpeakerId))
-        XCTAssertNil(harness.speakerDB.getSpeaker(id: emptySpeakerId)?.displayName)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: emptySpeakerId))
+        let emptySpeakerTarget = harness.speakerDB.getSpeaker(id: emptySpeakerTargetId)
+        XCTAssertEqual(emptySpeakerTarget?.displayName, "Known Phantom")
+        XCTAssertGreaterThan(emptySpeakerTarget?.callCount ?? 0, emptySpeakerTargetBefore?.callCount ?? 0)
     }
 
     @MainActor
