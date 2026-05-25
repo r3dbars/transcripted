@@ -46,13 +46,20 @@ bash build-beta.sh <token> <user>  # signed beta/distribution build; SKIP_NOTARI
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
 ```
 
-Verification rules (mirror `.agents/test-matrix.yml`):
+Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
-- Any Swift source change → `bash build.sh` + `bash run-tests.sh`
-- Touched `Sources/Meeting/` or `Sources/TranscriptedCore/` → also `bash run-integration-smoke.sh`
-- Touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam → also `swift test`
-- Touched `Tools/TranscriptedCLI/`, `Tools/TranscriptedMCP/`, or `Tools/TranscriptedQA/` → `swift test --package-path Tools/<Name>`
-- Touched release path (`build-beta.sh`, `scripts/release/**`, `Casks/**`, `docs/appcast.xml`) → also `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
+- Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh` + `bash run-tests.sh`
+- Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build.sh` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
+- Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `bash run-e2e-smoke.sh`
+- Touched QA bench/corpus files (`scripts/ops/transcripted-qa-bench.sh`, `scripts/ops/validate-meeting-corpus.py`, `scripts/ops/compare-meeting-corpus.py`, `docs/qa-test-bench.md`) → quick QA bench + Python compile checks
+- Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
+- Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build.sh` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
+- Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh` + `bash run-tests.sh`
+- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
+- Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
+- Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
+- Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
+- Touched docs/agent files (`README.md`, `AGENT_START.md`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/**`, `.agents/**`) → `scripts/dev/agent-preflight.sh`
 
 ### Fast-test gotchas
 
