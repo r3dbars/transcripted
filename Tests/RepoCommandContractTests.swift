@@ -47,6 +47,31 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - PostHog health probe uses the query API") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("posthog_api_host()"),
+            "PostHog probe should normalize app/ingest hosts before querying"
+        )
+        assertTrue(
+            contents.contains("https://us.i.posthog.com)") && contents.contains("https://us.posthog.com"),
+            "PostHog probe should translate the US ingest host to the API host"
+        )
+        assertTrue(
+            contents.contains("kind: \"HogQLQuery\"") && contents.contains("refresh: \"blocking\""),
+            "PostHog probe should use the current HogQL query API payload"
+        )
+        assertTrue(
+            contents.contains("(.data // .results)"),
+            "PostHog probe should parse both old and current query response shapes"
+        )
+        assertFalse(
+            contents.contains("https://us.i.posthog.com/api/projects"),
+            "PostHog probe should not send API queries to the ingest host"
+        )
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
