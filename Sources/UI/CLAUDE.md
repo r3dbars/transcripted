@@ -22,7 +22,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationMicrophoneLoadingPresentationPolicy.swift` — copy and timing policy for the microphone-starting / device-switching overlay state
 - `Overlay/DictationNoSpeechPresentationPolicy.swift` — user-facing no-speech copy for hotkey and non-hotkey dictation attempts
 - `Overlay/DictationRecordingStartOverlayPolicy.swift` — decides whether recording can skip the loading UI or should wait for microphone recovery
-- `Overlay/DictationSessionController.swift` — dictation session orchestration; only `cancelSession()` remains as the removed draft-mode compatibility hook
+- `Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
 - `Overlay/OverlayDraftingView.swift` — drafting/processing state view

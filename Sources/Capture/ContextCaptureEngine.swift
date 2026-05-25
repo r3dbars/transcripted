@@ -48,9 +48,6 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
     )
     if session.isDictating {
         session.stopDictationAndPaste(trigger: trigger)
-    } else if session.isInSession {
-        session.cancelSession()
-        session.startDictation(sourceApp: sourceApp, trigger: trigger)
     } else {
         session.startDictation(sourceApp: sourceApp, trigger: trigger)
     }
@@ -60,7 +57,6 @@ private func routeDictationToggle(sourceApp: NSRunningApplication?, trigger: Dic
 private func dictationSessionStateName(_ session: DictationSessionController?) -> String {
     guard let session else { return "idle" }
     if session.isDictating { return "dictating" }
-    if session.isInSession { return "drafting" }
     return "idle"
 }
 
@@ -669,9 +665,6 @@ class ContextCaptureEngine: ObservableObject {
         )
 
         guard !session.isDictating else { return }
-        if session.isInSession {
-            session.cancelSession()
-        }
         session.startDictation(sourceApp: frontApp, trigger: .physicalKey)
     }
 

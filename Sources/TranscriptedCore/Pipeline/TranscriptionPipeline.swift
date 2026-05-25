@@ -228,7 +228,10 @@ extension Transcription {
             var ghostSpeakerIdSet = Set<Int>()
             for ghostId in ghostSpeakerIds {
                 let bestSegment = speakerSegments
-                    .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                    .filter { segment in
+                        guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
+                        return !embedding.isEmpty
+                    }
                     .max(by: { $0.qualityScore < $1.qualityScore })
                 if let segment = bestSegment, let embedding = segment.embedding {
                     embeddingsPerSpeaker[ghostId] = [embedding]
@@ -650,7 +653,10 @@ extension Transcription {
         var ghostSpeakerIdSet = Set<Int>()
         for ghostId in ghostSpeakerIds {
             let bestSegment = speakerSegments
-                .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                .filter { segment in
+                    guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
+                    return !embedding.isEmpty
+                }
                 .max(by: { $0.qualityScore < $1.qualityScore })
             if let segment = bestSegment, let embedding = segment.embedding {
                 embeddingsPerSpeaker[ghostId] = [embedding]

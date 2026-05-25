@@ -17,7 +17,7 @@ The old standalone Transcripted app is preserved on:
 - branch `legacy/transcripted-standalone`
 - tag `pre-draft-takeover-2026-04-06`
 
-The older drafting / ghostwriting flow does not live on `main` anymore. `DictationSessionController` only keeps `cancelSession()` as a compatibility hook for interrupt paths left from the removed draft-mode routing.
+The older drafting / ghostwriting flow does not live on `main` anymore.
 
 ## First reads
 
