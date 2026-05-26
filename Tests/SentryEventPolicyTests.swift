@@ -106,27 +106,45 @@ func testSentryEventPolicy() {
             event: "microphone_start_timeout",
             context: [
                 "audio_device": "Justin's AirPods",
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
                 "failure_kind": "microphone_start_timeout",
                 "forced_readiness_recoveries": "2",
                 "format_ready": "false",
+                "hfp_suspected": "false",
                 "input_device_class": "bluetooth",
+                "output_device_class": "bluetooth",
                 "readiness_refreshes": "8",
                 "recovering": "false",
                 "recovery_start_attempts": "2",
                 "route_shape": "bluetooth_input_to_built_in_output",
+                "sample_flow_started": "false",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
                 "start_attempts": "4",
+                "stt_model": "parakeet-tdt-v3",
                 "transcript_text": "private words",
                 "trigger": "physical_key",
                 "wait_ms": "6000",
             ]
         )
 
+        assertEqual(tags["default_input_class"], "bluetooth", "default input class should be queryable")
+        assertEqual(tags["default_output_class"], "bluetooth", "default output class should be queryable")
         assertEqual(tags["failure_kind"], "microphone_start_timeout", "failure kind should be queryable")
         assertEqual(tags["format_ready"], "false", "format readiness should be queryable")
+        assertEqual(tags["hfp_suspected"], "false", "HFP suspicion should be queryable")
         assertEqual(tags["recovering"], "false", "recovery state should be queryable")
         assertEqual(tags["input_device_class"], "bluetooth", "coarse device class should be queryable")
+        assertEqual(tags["output_device_class"], "bluetooth", "coarse output class should be queryable")
         assertEqual(tags["route_shape"], "bluetooth_input_to_built_in_output", "coarse route shape should be queryable")
+        assertEqual(tags["sample_flow_started"], "false", "sample-flow state should be queryable")
+        assertEqual(tags["selected_input_class"], "built_in", "selected input class should be queryable")
+        assertEqual(tags["selection_overrode_default"], "true", "input override state should be queryable")
+        assertEqual(tags["selection_reason"], "preferredBuiltInForBluetoothHeadset", "selection reason should be queryable")
         assertEqual(tags["start_attempts"], "4", "bounded retry count should be queryable")
+        assertEqual(tags["stt_model"], "parakeet-tdt-v3", "selected STT model should be queryable")
         assertEqual(tags["readiness_refreshes"], "8", "readiness refresh count should be queryable")
         assertEqual(tags["recovery_start_attempts"], "2", "recovery start count should be queryable")
         assertEqual(tags["forced_readiness_recoveries"], "2", "forced recovery count should be queryable")
