@@ -24,7 +24,7 @@ Use these as the active command surface:
 ```bash
 bash scripts/dev/agent-preflight.sh
 bash build-deps.sh
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-e2e-smoke.sh
@@ -40,7 +40,7 @@ Command ownership:
 
 - `scripts/dev/agent-preflight.sh` — agent preflight and suggested verification map for the current branch
 - `build-deps.sh` — thin root wrapper for the dependency build entrypoint
-- `build.sh` — thin root wrapper for the authoritative local app build
+- `build.sh` — thin root wrapper for the authoritative local app build; use `--no-open` for agent verification
 - `build-beta.sh` — thin root wrapper for signed beta/distribution builds
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
@@ -58,6 +58,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 
 - `.agents/` — machine-readable agent maps, currently the path-to-verification matrix
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
+- `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
 - `Sources/Accessibility/` — AX helpers for overlay positioning
 - `Sources/Beta/` — beta-only configuration
@@ -88,6 +89,7 @@ Use these docs for these jobs:
 - `CONTRIBUTING.md` — contributor setup and contribution norms
 - `AGENTS.md` — Codex-specific workflow rules
 - `WORKFLOW.md` - local GitHub Issues to Codex agent workflow contract
+- `.github/` — GitHub issue templates, PR checklist, and workflow automation
 - `CLAUDE.md` — Claude-specific repo orientation
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
 - `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules

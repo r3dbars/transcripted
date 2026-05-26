@@ -80,17 +80,17 @@ matches_any() {
 if [ -n "$changed_paths" ]; then
     while IFS= read -r path; do
         if matches_any "$path" "Sources/*.swift" "Sources/*/*.swift" "Sources/*/*/*.swift" "Sources/*/*/*/*.swift" "Tests/*.swift" "Tests/*/*.swift" "Tests/*/*/*.swift" "Tests/FastTests.manifest"; then
-            add_command "bash build.sh"
+            add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
         fi
 
         if matches_any "$path" "Info.plist"; then
-            add_command "bash build.sh"
+            add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
         fi
 
         if matches_any "$path" "Sources/Meeting/*" "Sources/TranscriptedCore/*" "Tests/Integration/*"; then
-            add_command "bash build.sh"
+            add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
         fi
@@ -99,10 +99,52 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-e2e-smoke.sh"
         fi
 
+        if matches_any "$path" "build-deps.sh" "scripts/entrypoints/build-deps.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n build-deps.sh"
+            add_command "bash -n scripts/entrypoints/build-deps.sh"
+            add_command "bash build-deps.sh --force"
+        fi
+
+        if matches_any "$path" "build.sh" "scripts/entrypoints/build.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n build.sh"
+            add_command "bash -n scripts/entrypoints/build.sh"
+            add_command "bash build.sh --no-open"
+        fi
+
+        if matches_any "$path" "run-tests.sh" "scripts/entrypoints/run-tests.sh" "Tests/FastTests.manifest"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n run-tests.sh"
+            add_command "bash -n scripts/entrypoints/run-tests.sh"
+            add_command "bash run-tests.sh"
+        fi
+
+        if matches_any "$path" "run-integration-smoke.sh" "scripts/entrypoints/run-integration-smoke.sh" "Tests/Integration/*"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n run-integration-smoke.sh"
+            add_command "bash -n scripts/entrypoints/run-integration-smoke.sh"
+            add_command "bash run-integration-smoke.sh"
+        fi
+
+        if matches_any "$path" "run-daily-audio-reliability.sh" "scripts/ops/daily-audio-reliability-check.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n run-daily-audio-reliability.sh"
+            add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
+        fi
+
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/agent-todo-runner.rb" "scripts/ops/agent-todo-launchagent.sh" "scripts/ops/qa-gate-check.sh" "scripts/ops/qa-gate-closeout.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "ruby -c scripts/ops/agent-todo-runner.rb"
+            add_command "bash -n scripts/ops/agent-todo-launchagent.sh"
+            add_command "bash -n scripts/ops/qa-gate-check.sh"
+            add_command "bash -n scripts/ops/qa-gate-closeout.sh"
         fi
 
         if matches_any "$path" "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift" "run-live-capture-smoke.sh" "scripts/entrypoints/run-live-capture-smoke.sh"; then
@@ -110,7 +152,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Package.swift" "Sources/TranscriptedCore/*" "Tests/TranscriptedCoreTests/*"; then
-            add_command "bash build.sh"
+            add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
             add_command "swift test"
@@ -129,12 +171,12 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "build-beta.sh" "scripts/entrypoints/build-beta.sh" "scripts/release/*" "docs/release-packaging.md" "docs/sparkle-updates.md" "Casks/*" "docs/appcast.xml"; then
-            add_command "bash build.sh"
+            add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "docs/*" ".agents/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"

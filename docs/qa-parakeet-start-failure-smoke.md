@@ -74,8 +74,10 @@ Expected:
 
 ## QA Result Comment Format (for `#428`)
 
-The BET-88 gate automation reads the first non-empty line of your top-level
-comment on `#428`.
+The manual BET-88 gate helper reads the first non-empty line of your top-level
+comment on `#428`. The GitHub auto-close workflow is additionally gated by the
+`qa-gate-auto-close` label so old issue comments cannot mutate closed issues by
+accident.
 
 Use one of these exact first-line forms:
 

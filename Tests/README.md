@@ -12,7 +12,7 @@ This repo has six distinct verification layers:
    Deterministic release-critical artifact smoke without microphone/TCC
 4. `swift test`
    Swift Package tests for the standalone `TranscriptedCore` package surface
-5. `bash build.sh`
+5. `bash build.sh --no-open`
    Authoritative app build for the menubar target
 6. `bash run-live-capture-smoke.sh`
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture

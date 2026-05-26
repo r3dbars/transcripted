@@ -10,7 +10,7 @@ rules:
       - "Tests/*.swift"
       - "Tests/FastTests.manifest"
     checks:
-      - "bash build.sh"
+      - "bash build.sh --no-open"
       - "bash run-tests.sh"
 
   - paths:
@@ -18,7 +18,7 @@ rules:
       - "Sources/TranscriptedCore/**"
       - "Tests/Integration/**"
     checks:
-      - "bash build.sh"
+      - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "bash run-integration-smoke.sh"
 
@@ -30,6 +30,52 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "build-deps.sh"
+      - "scripts/entrypoints/build-deps.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n build-deps.sh"
+      - "bash -n scripts/entrypoints/build-deps.sh"
+      - "bash build-deps.sh --force"
+
+  - paths:
+      - "build.sh"
+      - "scripts/entrypoints/build.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n build.sh"
+      - "bash -n scripts/entrypoints/build.sh"
+      - "bash build.sh --no-open"
+
+  - paths:
+      - "run-tests.sh"
+      - "scripts/entrypoints/run-tests.sh"
+      - "Tests/FastTests.manifest"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n run-tests.sh"
+      - "bash -n scripts/entrypoints/run-tests.sh"
+      - "bash run-tests.sh"
+
+  - paths:
+      - "run-integration-smoke.sh"
+      - "scripts/entrypoints/run-integration-smoke.sh"
+      - "Tests/Integration/**"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n run-integration-smoke.sh"
+      - "bash -n scripts/entrypoints/run-integration-smoke.sh"
+      - "bash run-integration-smoke.sh"
+
+  - paths:
+      - "run-daily-audio-reliability.sh"
+      - "scripts/ops/daily-audio-reliability-check.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n run-daily-audio-reliability.sh"
+      - "bash -n scripts/ops/daily-audio-reliability-check.sh"
+
+  - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
@@ -38,6 +84,18 @@ rules:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
+
+  - paths:
+      - "scripts/ops/agent-todo-runner.rb"
+      - "scripts/ops/agent-todo-launchagent.sh"
+      - "scripts/ops/qa-gate-check.sh"
+      - "scripts/ops/qa-gate-closeout.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "ruby -c scripts/ops/agent-todo-runner.rb"
+      - "bash -n scripts/ops/agent-todo-launchagent.sh"
+      - "bash -n scripts/ops/qa-gate-check.sh"
+      - "bash -n scripts/ops/qa-gate-closeout.sh"
 
   - paths:
       - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"
@@ -51,7 +109,7 @@ rules:
       - "Sources/TranscriptedCore/**"
       - "Tests/TranscriptedCoreTests/**"
     checks:
-      - "bash build.sh"
+      - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "bash run-integration-smoke.sh"
       - "swift test"
@@ -62,7 +120,7 @@ rules:
       - "docs/sparkle-updates.md"
       - "docs/appcast.xml"
     checks:
-      - "bash build.sh"
+      - "bash build.sh --no-open"
       - "bash run-tests.sh"
 
   - paths:
@@ -74,7 +132,7 @@ rules:
       - "Casks/**"
       - "docs/appcast.xml"
     checks:
-      - "bash build.sh"
+      - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
 
@@ -99,8 +157,11 @@ rules:
       - "AGENTS.md"
       - "CLAUDE.md"
       - "CONTRIBUTING.md"
+      - "WORKFLOW.md"
       - "docs/**"
       - ".agents/**"
+      - ".github/**"
+      - "scripts/dev/agent-preflight.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
 

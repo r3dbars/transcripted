@@ -1,0 +1,51 @@
+name: Repo Hygiene
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repo-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Agent preflight
+        shell: bash
+        run: bash scripts/dev/agent-preflight.sh origin/main
+
+      - name: Shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n build-deps.sh
+          bash -n build-beta.sh
+          bash -n build.sh
+          bash -n run-tests.sh
+          bash -n run-integration-smoke.sh
+          bash -n run-e2e-smoke.sh
+          bash -n run-live-capture-smoke.sh
+          bash -n run-daily-audio-reliability.sh
+          find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Ruby syntax
+        shell: bash
+        run: ruby -c scripts/ops/agent-todo-runner.rb
+
+      - name: Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ops/validate-meeting-corpus.py
+          python3 -m py_compile scripts/ops/compare-meeting-corpus.py
+          python3 -m py_compile scripts/ops/nightly-security-check.py
+          python3 -m py_compile scripts/ops/generate-nightly-digest.py
+          python3 -m py_compile scripts/ops/build-codex-memory-index.py

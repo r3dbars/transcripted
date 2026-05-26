@@ -1,5 +1,7 @@
 # Draft + Transcripted Merge Plan (Phase 0 Deliverable)
 
+> Archived historical plan. Do not execute this as current guidance.
+
 **Authors:** draft-mapper (owner), transcripted-mapper (contributor)
 **Status:** v6 for human review — end of Phase 0. Phase 2 execution starts only after human sign-off.
 **Inputs:** [draft-inventory.md](draft-inventory.md), [transcripted-inventory.md](transcripted-inventory.md)

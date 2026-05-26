@@ -30,6 +30,8 @@ Any other approaches you've thought about.
 
 **Anything else?**
 Examples, screenshots, links, or things we should avoid.
+Please do not include private transcripts, audio, meeting titles, speaker names,
+emails, tokens, absolute paths, or customer data.
 
 If this request is specifically about the old standalone Transcripted app, say
 that explicitly so it can be triaged against the legacy branch/tag.

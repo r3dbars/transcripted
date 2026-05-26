@@ -36,6 +36,8 @@ What actually happened.
 
 **Diagnostics**
 If you have logs, screenshots, or exported diagnostics, attach them here.
+Please redact transcripts, audio, meeting titles, speaker names, emails, tokens,
+absolute paths, and private customer or meeting data before uploading.
 
 If this report is about the old standalone Transcripted app, say so explicitly
 and include the legacy ref you were using (`legacy/transcripted-standalone` or

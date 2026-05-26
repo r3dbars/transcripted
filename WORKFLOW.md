@@ -55,7 +55,7 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 7. Create or reuse a branch named like `codex/issue-{{ issue.number }}-short-slug`.
 8. If a draft PR already exists for this issue or branch, update that PR instead of opening a duplicate.
 9. Make the smallest change that satisfies the issue.
-10. Run the verification required by the files you changed.
+10. Run `scripts/dev/agent-preflight.sh`, then run the union of checks required by `.agents/test-matrix.yml` for the files you changed.
 11. Stage only your own changes, commit, and push.
 12. If the change touches UI, visual design, app copy, or user-facing flows, add sanitized visual evidence under `.agent-review/visuals/` before opening or updating the PR. Prefer a PNG screenshot; use a GIF only when motion or interaction matters. Never include private transcripts, customer data, tokens, absolute personal paths, or real user content in visuals.
 13. Open a draft PR against `main` with `gh pr create --draft`, unless you are updating an existing PR.
@@ -70,9 +70,7 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 - Never stage unrelated pre-existing changes.
 - Never edit files outside this workspace.
 - Preserve Transcripted privacy boundaries.
-- If you touch Swift source, run `bash build.sh` and `bash run-tests.sh`.
-- If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-- If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
+- Verification examples: Swift source usually needs `bash build.sh --no-open` and `bash run-tests.sh`; `Sources/Meeting/` or `Sources/TranscriptedCore/` also need `bash run-integration-smoke.sh`; package/core seam changes also need `swift test`.
 - For UI changes, make the PR reviewable without pulling the branch locally: include a screenshot or GIF in `.agent-review/visuals/` and note the manual check in the PR body.
 - For review follow-up, do not close the issue or create a new issue. Update the same branch and PR, then put the issue back in `human review`.
 

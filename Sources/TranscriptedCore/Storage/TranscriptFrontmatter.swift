@@ -89,7 +89,7 @@ public enum TranscriptFrontmatter {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
-        let readLimit = max(byteLimit, maximumFrontmatterByteLimit)
+        let readLimit = maximumFrontmatterByteLimit
         let chunkSize = max(1, min(byteLimit, previewByteLimit))
         var data = Data()
 

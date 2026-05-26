@@ -37,7 +37,7 @@ state already exists.
 
    ```bash
    bash build-deps.sh
-   bash build.sh
+   bash build.sh --no-open
    ```
 
 3. Run the test suite:
@@ -156,9 +156,9 @@ If you're changing meeting integration or `TranscriptedCore`, also run:
 bash run-integration-smoke.sh
 ```
 
-`run-tests.sh` is curated rather than discovery-based. If you add a new test
-file or move a source file that the test script compiles directly, update
-`run-tests.sh` in the same change.
+`run-tests.sh` is curated rather than discovery-based. If you add a new root
+fast-test file, register it in `Tests/FastTests.manifest`. Update
+`run-tests.sh` only when the compiled source list or runner behavior changes.
 
 ## Submitting a Pull Request
 

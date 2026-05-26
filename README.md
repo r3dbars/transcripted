@@ -14,7 +14,7 @@ later.
 
 ## Demo
 
-![Transcripted quick tour showing Home, Meetings, Dictation, and Home again](docs/assets/launch/transcripted-demo.gif)
+![Transcripted quick tour showing the Home dashboard, meeting capture, dictation, and recent activity](docs/assets/launch/transcripted-demo.gif)
 
 ![Transcripted dictation recording showing the listening control](docs/assets/launch/transcripted-dictation-recording.gif)
 
@@ -224,7 +224,7 @@ For contributors:
 
 ```bash
 bash build-deps.sh
-bash build.sh
+bash build.sh --no-open
 ```
 
 `build.sh` is the main app build. `Package.swift` exists for

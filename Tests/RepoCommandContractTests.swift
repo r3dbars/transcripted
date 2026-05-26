@@ -133,6 +133,71 @@ func testRepoCommandContract() {
             contents.contains("trap cleanup_generated_runner EXIT"),
             "temporary generated test runners should be removed on exit"
         )
+        assertTrue(
+            contents.contains("Unknown option: $arg") && contents.contains("exit 2"),
+            "run-tests.sh should reject unknown flags instead of silently ignoring typos"
+        )
+    }
+
+    runSuite("Repo command contract - agent verification stays non-interactive") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+        let agents = readRepoTextFile("AGENTS.md")
+        let agentStart = readRepoTextFile("AGENT_START.md")
+        let workflow = readRepoTextFile("WORKFLOW.md")
+
+        assertTrue(
+            matrix.contains("bash build.sh --no-open")
+                && !matrix.contains("\"bash build.sh\""),
+            "agent test matrix should use the non-opening build command"
+        )
+        assertTrue(
+            preflight.contains("add_command \"bash build.sh --no-open\"")
+                && !preflight.contains("add_command \"bash build.sh\""),
+            "agent preflight should suggest the non-opening build command"
+        )
+        assertTrue(
+            agents.contains("bash build.sh --no-open")
+                && agentStart.contains("bash build.sh --no-open")
+                && workflow.contains(".agents/test-matrix.yml"),
+            "agent-facing docs should keep verification non-interactive and defer unattended work to the matrix"
+        )
+    }
+
+    runSuite("Repo command contract - script edits map to syntax and owned checks") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+        let expectedChecks = [
+            "bash -n scripts/entrypoints/build-deps.sh",
+            "bash build-deps.sh --force",
+            "bash -n scripts/entrypoints/build.sh",
+            "bash -n scripts/entrypoints/run-tests.sh",
+            "bash -n scripts/entrypoints/run-integration-smoke.sh",
+            "bash -n scripts/ops/daily-audio-reliability-check.sh"
+        ]
+
+        for check in expectedChecks {
+            assertTrue(matrix.contains(check), "test matrix should include \(check)")
+            assertTrue(preflight.contains(check), "agent preflight should include \(check)")
+        }
+    }
+
+    runSuite("Repo command contract - integration smoke rejects stale Core deps") {
+        let contents = readRepoTextFile("scripts/entrypoints/run-integration-smoke.sh")
+        assertTrue(
+            contents.contains("newest_dependency_input")
+                && contents.contains("deps_build_stamp_info")
+                && contents.contains("Dependencies are stale for TranscriptedCore."),
+            "integration smoke should refuse stale TranscriptedCore dependency artifacts"
+        )
+    }
+
+    runSuite("Repo command contract - Audio preflight uses injected Core paths") {
+        let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
+        assertTrue(
+            contents.contains("RecordingValidator.validateRecordingConditions(paths: paths)"),
+            "Audio.start should validate the same CoreStoragePaths that the embedder injected"
+        )
     }
 
     runSuite("Repo command contract - deterministic E2E smoke stays on the release surface") {
@@ -1136,6 +1201,63 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("def unauthorized_active_issue?(issue)"),
             "runner should keep unauthorized active issue detection explicit"
+        )
+    }
+
+    runSuite("Repo command contract - GitHub agent surfaces stay preflight-visible") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+        let agentTemplate = readRepoTextFile(".github/ISSUE_TEMPLATE/agent_task.md")
+        let bugTemplate = readRepoTextFile(".github/ISSUE_TEMPLATE/bug_report.md")
+        let featureTemplate = readRepoTextFile(".github/ISSUE_TEMPLATE/feature_request.md")
+        let prTemplate = readRepoTextFile(".github/PULL_REQUEST_TEMPLATE.md")
+        let repoHygieneWorkflow = readRepoTextFile(".github/workflows/repo-hygiene.yml")
+        let qaGateAutoClose = readRepoTextFile(".github/workflows/qa-gate-auto-close-bet88.yml")
+
+        assertTrue(
+            matrix.contains("\".github/**\"")
+                && matrix.contains("\"WORKFLOW.md\"")
+                && matrix.contains("\"scripts/dev/agent-preflight.sh\"")
+                && matrix.contains("ruby -c scripts/ops/agent-todo-runner.rb")
+                && matrix.contains("bash -n scripts/ops/qa-gate-check.sh"),
+            "test matrix should treat GitHub templates, workflow contract, and preflight script as agent-contract surfaces"
+        )
+        assertTrue(
+            preflight.contains("\".github/*\"")
+                && preflight.contains("\"WORKFLOW.md\"")
+                && preflight.contains("\"scripts/dev/agent-preflight.sh\"")
+                && preflight.contains("ruby -c scripts/ops/agent-todo-runner.rb")
+                && preflight.contains("bash -n scripts/ops/qa-gate-check.sh"),
+            "agent preflight should suggest itself when GitHub templates or workflow docs change"
+        )
+        assertTrue(
+            agentTemplate.contains("does not start the local runner by itself")
+                && agentTemplate.contains("`agent todo` label"),
+            "agent issue template should make the manual queue label explicit"
+        )
+        assertTrue(
+            bugTemplate.contains("Please redact transcripts, audio, meeting titles, speaker names, emails, tokens")
+                && featureTemplate.contains("Please do not include private transcripts, audio, meeting titles, speaker names"),
+            "public issue templates should put privacy redaction guidance where users attach diagnostics"
+        )
+        assertTrue(
+            prTemplate.contains("`scripts/dev/agent-preflight.sh`")
+                && prTemplate.contains("`swift test` if I touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam")
+                && prTemplate.contains("Agent PRs link the issue/workpad")
+                && prTemplate.contains("No private transcripts, audio, tokens, personal paths, or customer data"),
+            "PR template should point reviewers at preflight, core package checks, agent review evidence, and privacy review"
+        )
+        assertTrue(
+            repoHygieneWorkflow.contains("on:\n  pull_request:")
+                && repoHygieneWorkflow.contains("bash scripts/dev/agent-preflight.sh origin/main")
+                && repoHygieneWorkflow.contains("ruby -c scripts/ops/agent-todo-runner.rb")
+                && repoHygieneWorkflow.contains("python3 -m py_compile scripts/ops/nightly-security-check.py"),
+            "repo should have a lightweight pull_request hygiene workflow for repo plumbing"
+        )
+        assertTrue(
+            qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")
+                && !qaGateAutoClose.contains("child_issue_number"),
+            "old BET-88 auto-close workflow should be label-gated and should not mutate a hard-coded child issue"
         )
     }
 

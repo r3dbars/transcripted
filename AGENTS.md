@@ -60,7 +60,7 @@ file taking precedence when there is any conflict.
 
 ```bash
 bash build-deps.sh
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 bash run-integration-smoke.sh
 swift test
@@ -68,7 +68,7 @@ swift test
 
 Rules:
 
-1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
+1. After changing Swift source, run `bash build.sh --no-open` and `bash run-tests.sh`.
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
@@ -100,7 +100,7 @@ Rules:
    - any automatic-check / automatic-download flags
 9. Preferred release verification for release-path changes:
    - `bash build-deps.sh --force` when dependency tooling changes
-   - `bash build.sh`
+   - `bash build.sh --no-open`
    - `bash run-tests.sh`
    - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
@@ -141,7 +141,7 @@ Rules:
    - Settings should still expose the anonymous analytics toggle
    - Settings should still expose the `Send Test Sentry Event` action when Sentry is configured
 12. Preferred verification for observability-related changes:
-   - `bash build.sh`
+   - `bash build.sh --no-open`
    - `bash run-tests.sh`
    - confirm Sentry, analytics, and observability preference tests still pass through `run-tests.sh`
 
