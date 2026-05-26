@@ -57,6 +57,29 @@ func testMeetingFailureKind() {
         assertEqual(kind, .noSpeechDetected, "audio with no spoken content should get a direct user-facing bucket")
     }
 
+    runSuite("MeetingFailureKind marks expected empty transcript outcomes as skipped") {
+        assertTrue(
+            MeetingFailureKind.recordingTooShort.shouldReportAsSkippedTranscript,
+            "short recordings should be reported as expected skips"
+        )
+        assertTrue(
+            MeetingFailureKind.emptyAudio.shouldReportAsSkippedTranscript,
+            "empty audio should be reported as an expected skip"
+        )
+        assertTrue(
+            MeetingFailureKind.noSpeechDetected.shouldReportAsSkippedTranscript,
+            "audio with no speech should be reported as an expected skip"
+        )
+        assertFalse(
+            MeetingFailureKind.transcriptionInferenceFailed.shouldReportAsSkippedTranscript,
+            "model failures should still report as transcript failures"
+        )
+        assertFalse(
+            MeetingFailureKind.pipelineFailed.shouldReportAsSkippedTranscript,
+            "pipeline failures should still report as transcript failures"
+        )
+    }
+
     runSuite("MeetingFailureKind classifies save failures") {
         let kind = MeetingFailureKind.classify(
             message: "Failed to save transcript: Could not write transcript to meetings"
@@ -71,6 +94,14 @@ func testMeetingFailureKind() {
         )
 
         assertEqual(kind, .speakerNameFinalizationFailed, "speaker-name save failures should stay out of generic transcript save failures")
+    }
+
+    runSuite("MeetingFailureKind classifies support-thread speaker-name save wording") {
+        let kind = MeetingFailureKind.classify(
+            message: "Couldnt save speaker names. Saved them all in preview window, then got failed to save need another pass."
+        )
+
+        assertEqual(kind, .speakerNameFinalizationFailed, "Grigory-style save-stage speaker-name failures should not become generic transcript save failures")
     }
 
     runSuite("MeetingFailureKind classifies pipeline-busy errors") {
@@ -129,6 +160,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .stopTimeout, "stop-timeout failures should keep their own bucket so retry copy can target them")
     }
 
+    runSuite("MeetingFailureKind classifies saved-before-quit recovery") {
+        let kind = MeetingFailureKind.classify(
+            message: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+        )
+
+        assertEqual(kind, .savedBeforeQuit, "intentional quit recovery should not look like a broken meeting")
+    }
+
     runSuite("MeetingFailureKind classifies imported-audio preparation failures") {
         assertEqual(
             MeetingFailureKind.classify(message: "The selected audio file could not be found. It may have been moved or deleted."),
@@ -165,6 +204,17 @@ func testMeetingFailureKind() {
         )
 
         assertEqual(copy.title, "Recording didn't close cleanly", "stop-timeout users should see specific copy, not generic retry phrasing")
+    }
+
+    runSuite("MeetingFailureCopy surfaces saved-before-quit recovery guidance") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+            shortErrorMessage: "Meeting saved before quit.",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "Meeting saved before quit", "quit recovery should not look like a failure")
+        assertTrue(copy.detail.contains("Audio is safe"), "quit recovery should reassure users that audio was kept")
     }
 
     runSuite("MeetingFailureKind falls back to an explicit unexpected bucket") {

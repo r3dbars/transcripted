@@ -24,6 +24,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
+- `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` helpers used by both sanitizers so redaction rules stay in one place while each destination keeps its own length cap and sensitive-key list
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
@@ -36,8 +37,9 @@ anonymous analytics, and Sparkle update plumbing.
 - Do not assume older draft/style/analysis event flows are still active just because they appear in historical docs or event logs
 - `build.sh` and beta behavior can affect logs, signing, and permissions during local testing
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1` disables `app.jsonl` writes for test and smoke runs so local production logs stay clean
-- Sentry runtime config is resolved by `SentryRuntimeConfiguration` from `Info.plist` (`TranscriptedSentryDSN`, `TranscriptedSentryEnvironment`) or process environment (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`), and crash reports must stay scrubbed of transcript/audio/title/path data
+- Sentry runtime config is resolved by `SentryRuntimeConfiguration` from `Info.plist` (`TranscriptedSentryDSN`, `TranscriptedSentryEnvironment`, `TranscriptedSentryReleasePrefix`) or process environment (`SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_DIST`), and crash reports must stay scrubbed of transcript/audio/title/path data
 - `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
+- Shipped builds should report releases as `transcripted@<CFBundleShortVersionString>` and dist as `CFBundleVersion`; release packaging registers that Sentry release explicitly through `scripts/release/register-sentry-release.sh`
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.

@@ -3,7 +3,7 @@
 
 import Combine
 import FluidAudio
-import SwiftUI
+import Foundation
 
 @MainActor
 class STTRouter: ObservableObject {

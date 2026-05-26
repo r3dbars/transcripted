@@ -72,16 +72,10 @@ func testSpeakerNamingPolicy() {
     }
 
     runSuite("SpeakerNamingPolicy keeps row-level You edits as normal mic renames") {
-        let entry = SpeakerNamingEntry(
-            id: UUID(),
-            diarizerSpeakerId: "1",
+        let entry = makeSpeakerNamingPolicyEntry(
             channel: .mic,
-            clipURL: URL(fileURLWithPath: "/tmp/speaker-row.wav"),
-            sampleText: "I am in the room.",
             currentName: "Speaker 1",
-            matchSimilarity: nil,
-            needsNaming: true,
-            needsConfirmation: false
+            needsNaming: true
         )
 
         let update = SpeakerNamingPolicy.typedNameUpdate(
@@ -98,4 +92,73 @@ func testSpeakerNamingPolicy() {
             assertTrue(false, "manually typing You should not collapse the whole local speaker set")
         }
     }
+
+    runSuite("SpeakerNamingPolicy skips blank row edits") {
+        let update = SpeakerNamingPolicy.typedNameUpdate(
+            entry: makeSpeakerNamingPolicyEntry(currentName: nil, needsNaming: true),
+            typedName: "   ",
+            optionsByLabel: [:]
+        )
+
+        assertNil(update, "blank speaker rows should stay unresolved instead of writing empty names")
+    }
+
+    runSuite("SpeakerNamingPolicy turns an explicit saved-person label into a merge") {
+        let target = SpeakerIdentityOption(id: UUID(), displayName: "Jordan Lee", callCount: 5)
+        let update = SpeakerNamingPolicy.typedNameUpdate(
+            entry: makeSpeakerNamingPolicyEntry(currentName: nil, needsNaming: true),
+            typedName: "Jordan Lee",
+            optionsByLabel: ["Jordan Lee": target]
+        )
+
+        assertEqual(update?.newName, "Jordan Lee", "selected saved-person labels should keep the saved display name")
+        if case .merged(let targetProfileId)? = update?.action {
+            assertEqual(targetProfileId, target.id, "selected saved-person labels should merge into that profile")
+        } else {
+            assertTrue(false, "selected saved-person labels should emit a merge action")
+        }
+    }
+
+    runSuite("SpeakerNamingPolicy separates new names from corrected suggestions") {
+        let named = SpeakerNamingPolicy.typedNameUpdate(
+            entry: makeSpeakerNamingPolicyEntry(currentName: nil, needsNaming: true),
+            typedName: "Riley",
+            optionsByLabel: [:]
+        )
+        if case .named? = named?.action {
+            assertTrue(true, "unknown voices should become named rows")
+        } else {
+            assertTrue(false, "unknown voices should emit .named")
+        }
+
+        let corrected = SpeakerNamingPolicy.typedNameUpdate(
+            entry: makeSpeakerNamingPolicyEntry(currentName: "Alex", needsConfirmation: true),
+            typedName: "Morgan",
+            optionsByLabel: [:]
+        )
+        if case .corrected? = corrected?.action {
+            assertTrue(true, "changing a suggested match should become a correction")
+        } else {
+            assertTrue(false, "changing a suggested match should emit .corrected")
+        }
+    }
+}
+
+private func makeSpeakerNamingPolicyEntry(
+    channel: UtteranceChannel = .system,
+    currentName: String?,
+    needsNaming: Bool = false,
+    needsConfirmation: Bool = false
+) -> SpeakerNamingEntry {
+    SpeakerNamingEntry(
+        id: UUID(),
+        diarizerSpeakerId: "1",
+        channel: channel,
+        clipURL: URL(fileURLWithPath: "/tmp/speaker-row.wav"),
+        sampleText: "Sample speaker audio.",
+        currentName: currentName,
+        matchSimilarity: nil,
+        needsNaming: needsNaming,
+        needsConfirmation: needsConfirmation
+    )
 }

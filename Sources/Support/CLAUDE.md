@@ -4,7 +4,7 @@
 
 `Sources/Support/` holds app-wide helpers that do not belong to a single UI or pipeline surface. These types mostly wrap persisted preferences, shared constants, permission access, storage paths, or low-level paste / launch behavior used across dictation and meetings.
 
-## Files (21 Swift files)
+## Files
 
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
@@ -21,6 +21,7 @@
 - `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, and meeting shortcuts, including migration from older right-Option settings
+- `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
 - `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
@@ -41,6 +42,7 @@
 - `ClaudeDesktopIntegrationInstaller` owns the Claude Desktop config merge. Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
+- `QuitConfirmationPreferences` should default on. Quitting during a live meeting stops capture, so the opt-out belongs in Settings instead of being hidden in the alert.
 - `MicrophoneProcessingPreferences` is the canonical switch for meeting-mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
@@ -67,6 +69,7 @@ Relevant direct coverage includes:
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`
 - `Tests/PhysicalDictationTriggerPreferencesTests.swift`
+- `Tests/QuitConfirmationPreferencesTests.swift`
 - `Tests/SpeakerNameSelectionPolicyTests.swift`
 - `Tests/TranscriptedConstantsTests.swift`
 - `Tests/TranscriptedPermissionAccessTests.swift`

@@ -11,7 +11,7 @@
 # compiles only Foundation/AppKit sources in ~2s and must stay that fast for
 # the tight edit loop. This script pays the full Core + FluidAudio link cost.
 
-set -e
+set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
@@ -20,10 +20,52 @@ cd "$REPO_ROOT"
 SMOKE_BIN="$REPO_ROOT/build/app-core-integration-smoke"
 WAKE_SMOKE_BIN="$REPO_ROOT/build/wake-recovery-integration-smoke"
 DEPS_FRAMEWORK_ROOT="$REPO_ROOT/deps-frameworks"
+DEPS_ARCHIVE="$REPO_ROOT/deps-libs/libDraftDeps.a"
+DEPS_BUILD_STAMP="$REPO_ROOT/deps-libs/.build-deps-stamp"
+DEPS_MODULE_ROOT="$REPO_ROOT/deps-modules"
+TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
+ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
+WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
 ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 
-if [ ! -f "$REPO_ROOT/deps-libs/libDraftDeps.a" ] || [ ! -d "$REPO_ROOT/deps-modules" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
+dependency_input_listing() {
+    {
+        printf '%s\n' "Package.swift"
+        printf '%s\n' "scripts/entrypoints/build-deps.sh"
+        find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
+    } | while IFS= read -r path; do
+        [ -e "$path" ] || continue
+        printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
+    done
+}
+
+newest_dependency_input() {
+    dependency_input_listing | awk 'NR == 1 || $1 > max { max = $1; line = $0 } END { if (line != "") print line }'
+}
+
+deps_build_stamp_info() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
+    fi
+}
+
+if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MODULE_ROOT" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
     echo "Dependencies not found — run build-deps.sh first."
+    exit 1
+fi
+
+newest_input="$(newest_dependency_input)"
+build_stamp="$(deps_build_stamp_info)"
+IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
+IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
+if [ -n "$newest_input_mtime" ] && [ -n "$build_stamp_mtime" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
+    echo "Dependencies are stale for TranscriptedCore."
+    echo "Newest input:"
+    echo "  $newest_input_path"
+    echo "Built deps stamp:"
+    echo "  $build_stamp_path"
+    echo ""
+    echo "Run: bash build-deps.sh --force"
     exit 1
 fi
 

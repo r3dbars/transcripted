@@ -122,7 +122,7 @@ final class WhisperEngine: ObservableObject {
             let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
 
-            print("✅ WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s: \"\(trimmed.prefix(80))...\"")
+            print("✅ WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
             EventReporter.shared.capture(
                 level: .info,
                 engine: model.engineName,

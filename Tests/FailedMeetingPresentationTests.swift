@@ -85,7 +85,7 @@ func testFailedMeetingPresentation() {
         assertFalse(presentation.canShowRetryAction, "non-retryable failures should not show Try again")
     }
 
-    runSuite("HomeFailedMeetingInlinePresentation keeps retryable rows minimal") {
+    runSuite("HomeFailedMeetingInlinePresentation explains retryable saved audio") {
         let presentation = HomeFailedMeetingInlinePresentation.make(
             isRetryable: true,
             isRetrying: false,
@@ -93,9 +93,46 @@ func testFailedMeetingPresentation() {
             detail: "Model was not ready."
         )
 
-        assertEqual(presentation.statusText, "Needs retry", "retryable rows should keep the simple retry label")
-        assertNil(presentation.inlineDetail, "retryable rows do not need extra inline copy")
+        assertEqual(presentation.statusText, "Retry ready", "retryable rows should show that recovery is available")
+        assertEqual(
+            presentation.inlineDetail,
+            "Saved audio is still here. Try again will transcribe it.",
+            "retryable rows should make saved audio preservation visible"
+        )
         assertTrue(presentation.canShowRetryAction, "retryable failures with audio should show Try again")
+    }
+
+    runSuite("HomeFailedMeetingInlinePresentation stop-timeout retained audio appears retry-ready in Home") {
+        let directory = makeFailedMeetingPresentationTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let micURL = directory.appendingPathComponent("microphone.wav")
+        let systemURL = directory.appendingPathComponent("system_audio.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+
+        let hasAudioFiles = FileManager.default.fileExists(atPath: micURL.path)
+            && FileManager.default.fileExists(atPath: systemURL.path)
+        let presentation = HomeFailedMeetingInlinePresentation.make(
+            isRetryable: true,
+            isRetrying: false,
+            hasAudioFiles: hasAudioFiles,
+            detail: "Recording stop timed out before audio files were finalized."
+        )
+
+        assertEqual(
+            MeetingFailureKind.classify(message: "Recording stop timed out before audio files were finalized."),
+            .stopTimeout,
+            "stop-timeout failures should keep their recovery category"
+        )
+        assertTrue(hasAudioFiles, "retained timeout audio should make the Home row retry-ready")
+        assertEqual(presentation.statusText, "Retry ready", "Home should show that saved audio can be retried")
+        assertEqual(
+            presentation.inlineDetail,
+            "Saved audio is still here. Try again will transcribe it.",
+            "Home should make the recovery path visible"
+        )
+        assertTrue(presentation.canShowRetryAction, "retained stop-timeout audio should show Try again")
     }
 
     runSuite("HomeFailedMeetingInlinePresentation blocks retries when audio is gone") {
@@ -145,4 +182,11 @@ func testFailedMeetingPresentation() {
             "partial retained audio should not enable the retry action"
         )
     }
+}
+
+private func makeFailedMeetingPresentationTestDirectory() -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FailedMeetingPresentationTests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
 }

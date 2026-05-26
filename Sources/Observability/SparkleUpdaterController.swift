@@ -70,6 +70,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var hasPerformedStartupCheck = false
     private var pendingImmediateInstallHandler: (() -> Void)?
     private var pendingImmediateInstallVersion: String?
+    private var lastTrackedReadyToInstallVersion: String?
     private var didTrackCurrentUpdateCycleFailure = false
     private var observedUpdateCheckTimeoutTask: Task<Void, Never>?
     private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
@@ -287,11 +288,13 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         markUpdateCheckFailed(from: updater, error: nil)
     }
 
-    private func markUpdateCheckFailed(from updater: SPUUpdater, error: (any Error)?) {
+    private func markUpdateCheckFailed(
+        from updater: SPUUpdater,
+        error: (any Error)?,
+        fallback: UpdateFailureKind = .unknown
+    ) {
         cancelObservedUpdateCheckTimeout()
-        if error != nil {
-            didTrackCurrentUpdateCycleFailure = true
-        }
+        didTrackCurrentUpdateCycleFailure = true
 
         if updateStatus.availableUpdateVersion == nil {
             let state: UpdateStatus.State = updater.canCheckForUpdates ? .readyToCheck : .unknown
@@ -302,7 +305,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             result: "error",
             state: updateStatus.state,
             version: updateStatus.availableUpdateVersion,
-            failureKind: UpdateFailureKind.classify(error).rawValue
+            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue
         )
     }
 
@@ -326,7 +329,11 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         observedUpdateCheckTimeoutTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.observedUpdateCheckTimeoutNanoseconds)
             guard let self, !Task.isCancelled, self.updateStatus.state == .checking else { return }
-            self.markUpdateCheckFailed(from: self.updaterController.updater, error: nil)
+            self.markUpdateCheckFailed(
+                from: self.updaterController.updater,
+                error: nil,
+                fallback: .checkTimedOut
+            )
         }
     }
 
@@ -415,6 +422,15 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             properties["failure_kind"] = failureKind
         }
         AnalyticsReporter.track(event, properties: properties)
+    }
+
+    private func markUpdateReadyToInstall(from updater: SPUUpdater, version: String) {
+        let state = UpdateStatus.State.readyToInstall(version: version)
+        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
+
+        guard lastTrackedReadyToInstallVersion != version else { return }
+        lastTrackedReadyToInstallVersion = version
+        trackUpdateLifecycleEvent("update_ready_to_install", state: state, version: version)
     }
 
     private func baseUpdateTelemetryProperties(state: UpdateStatus.State, version: String?) -> [String: String] {
@@ -517,11 +533,9 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
     ) -> Bool {
         let version = versionString(for: item)
-        let state = UpdateStatus.State.readyToInstall(version: version)
         pendingImmediateInstallHandler = immediateInstallHandler
         pendingImmediateInstallVersion = version
-        setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
-        trackUpdateLifecycleEvent("update_ready_to_install", state: state, version: version)
+        markUpdateReadyToInstall(from: updater, version: version)
         return true
     }
 
@@ -584,10 +598,15 @@ extension SparkleUpdaterController: SPUStandardUserDriverDelegate {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            self.setUpdateStatus(
-                updateState,
-                canCheckForUpdates: self.updaterController.updater.canCheckForUpdates
-            )
+            switch updateState {
+            case .readyToInstall(let version):
+                self.markUpdateReadyToInstall(from: self.updaterController.updater, version: version)
+            case .unknown, .readyToCheck, .checking, .noUpdateAvailable, .updateAvailable, .downloading:
+                self.setUpdateStatus(
+                    updateState,
+                    canCheckForUpdates: self.updaterController.updater.canCheckForUpdates
+                )
+            }
         }
     }
 }

@@ -168,7 +168,8 @@ struct MeetingFailureExplanation: Equatable {
             return .diarization
         case .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .save
         case .unexpectedError:
             return .activeCapture
@@ -229,7 +230,8 @@ struct MeetingFailureExplanation: Equatable {
              .audioDeviceUnavailable,
              .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .retryableAfterUserAction
         default:
             return .permanent
@@ -271,7 +273,8 @@ struct MeetingFailureExplanation: Equatable {
         switch failureKind {
         case .saveFailed,
              .speakerNameFinalizationFailed,
-             .speakerFinalizationFailed:
+             .speakerFinalizationFailed,
+             .savedBeforeQuit:
             return .recoverableFailure
         default:
             return .permanentFailure
@@ -311,5 +314,6 @@ struct MeetingFailureExplanation: Equatable {
         failureKind == .saveFailed
             || failureKind == .speakerNameFinalizationFailed
             || failureKind == .speakerFinalizationFailed
+            || failureKind == .savedBeforeQuit
     }
 }

@@ -58,14 +58,7 @@ enum AnalyticsPayloadSanitizer {
     }
 
     static func sanitizeText(_ text: String) -> String {
-        let redacted = redact(text)
-        guard !redacted.isEmpty else { return "" }
-
-        if redacted.count > maxValueLength {
-            return String(redacted.prefix(maxValueLength)) + "..."
-        }
-
-        return redacted
+        PayloadSanitizationCore.redactAndCap(text, maxValueLength: maxValueLength)
     }
 
     /// Apply regex-based redaction without the analytics length cap.
@@ -77,7 +70,6 @@ enum AnalyticsPayloadSanitizer {
     }
 
     private static func shouldDrop(key: String) -> Bool {
-        let normalized = key.lowercased()
-        return sensitiveKeyFragments.contains(where: { normalized.contains($0) })
+        PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
     }
 }

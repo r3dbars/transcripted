@@ -30,6 +30,12 @@ backwards-compatible invocations, but the value is no longer injected into the
 binary. See `Sources/Beta/BetaConfig.swift` for the rationale. The packaged
 release archive is versioned from `Info.plist`, so published artifacts keep the
 stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
+The same `Info.plist` metadata also drives Sentry release reporting:
+`transcripted@<CFBundleShortVersionString>` with dist set to
+`CFBundleVersion`.
+Distribution builds also generate `build/Transcripted.app.dSYM` so production
+crashes can be symbolicated in Sentry. Keep that dSYM beside the release build
+until Sentry registration has uploaded it.
 
 Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md`.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
@@ -70,23 +76,24 @@ xcrun notarytool store-credentials <profile-name> ...
 To force a specific certificate for either build flow:
 
 ```bash
-SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
+SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh --no-open
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 
-`build-beta.sh` bundles Parakeet by default for distribution builds. That keeps
-the first dictation/meeting path local after install.
+`build-beta.sh` bundles Parakeet and offline diarizer models by default for
+distribution builds. That keeps the first dictation/meeting path local after
+install.
 
 If you deliberately want a thin local test artifact, make both opt-outs explicit:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 For a thin packaging smoke that also skips notarization, keep every opt-out visible:
 
 ```bash
-SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
 ## Release Flow
@@ -99,6 +106,7 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 Before you publish a user-facing release note, sanity-check the release state:
 
 - compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
+- confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
 - if you want a clean starting point, use `docs/release-notes-template.md`
@@ -106,6 +114,22 @@ Before you publish a user-facing release note, sanity-check the release state:
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
+
+After the release is published on GitHub, register the matching Sentry release
+so Sentry sees a real finalized release before production events arrive. This
+also uploads `build/Transcripted.app.dSYM` when it is present:
+
+```bash
+bash scripts/release/register-sentry-release.sh <version>
+```
+
+The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
+Sentry project, associates commits when Sentry can resolve the repo, and uploads
+debug symbol files through `sentry-cli debug-files upload --no-sources`. If the
+dSYM was moved, set `SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM`. If
+symbols are intentionally unavailable for a one-off local registration, set
+`SENTRY_UPLOAD_DEBUG_FILES=0`; shipped releases should not skip this because
+crash reports may lose app frames.
 
 If you expect `brew install` or `brew upgrade` to pick up the new version, do
 not stop after the GitHub release is published. You must also refresh and push

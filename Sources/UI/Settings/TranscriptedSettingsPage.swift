@@ -23,6 +23,15 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
+    var consolidatedDestination: TranscriptedSettingsPage {
+        switch self {
+        case .models, .shortcuts, .privacy:
+            return .general
+        default:
+            return self
+        }
+    }
+
     var title: String {
         switch self {
         case .home: return "Home"
@@ -43,7 +52,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .home:
             return "Start capture and check setup."
         case .general:
-            return "Startup, audio imports, and corrections."
+            return "Basic app behavior."
         case .models:
             return "Local transcription model."
         case .shortcuts:

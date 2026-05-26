@@ -36,6 +36,11 @@ for arg in "$@"; do
             echo "Set FAST_TEST_COVERAGE=1 or pass --coverage to write LLVM coverage artifacts to $COVERAGE_DIR."
             exit 0
             ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Usage: bash run-tests.sh [--coverage]"
+            exit 2
+            ;;
     esac
 done
 
@@ -157,12 +162,15 @@ APP_SOURCES=(
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
+    "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
+    "Sources/Support/DictationCleanupPreferences.swift"
+    "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
@@ -194,10 +202,13 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/LockedFileAppender.swift"
+    "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
+    "Sources/Observability/PayloadSanitizationCore.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"
     "Sources/Observability/CrashReportingPreferences.swift"
@@ -237,6 +248,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
+    "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
 )
 
 TEST_BINARY="$BUILD_DIR/tests"

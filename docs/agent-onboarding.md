@@ -56,6 +56,8 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Verification surfaces and fast-test runner rules.
 - `.agents/test-matrix.yml`
   Machine-readable path-to-verification map for agents.
+- `.github/`
+  GitHub issue templates, PR checklist, and workflow automation.
 - `docs/storage-paths.md`
   Canonical app, tool, and fallback storage layout.
 - `docs/docs.md`
@@ -67,31 +69,38 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
 ## What To Trust Most
 
-When docs disagree, prefer:
+When docs disagree, split the decision:
 
-1. current repo-level docs
-2. current source files
-3. current local `CLAUDE.md` files whose file lists match the tree
-4. `docs/archive/` only as context
+- workflow contracts: `AGENTS.md`, `.agents/test-matrix.yml`, then `scripts/dev/agent-preflight.sh`
+- runtime behavior and file existence: current source files
+- subsystem intent: current local `CLAUDE.md` files whose file lists match the tree
+- historical context: `docs/archive/` only
 
 ## Validation Layers
 
-This repo has four different verification surfaces that agents should treat as
-distinct:
+This repo has multiple verification surfaces. Treat them as distinct, and use
+`Tests/README.md` plus `.agents/test-matrix.yml` as the full current map:
 
 - `bash build.sh`
-  The authoritative app build.
+  The authoritative app build. Use `bash build.sh --no-open` for agent verification.
 - `bash run-tests.sh`
   Curated fast tests for app-facing logic.
 - `bash run-integration-smoke.sh`
   App/Core integration smoke.
+- `bash run-e2e-smoke.sh`
+  Deterministic release-critical artifact smoke.
 - `swift test`
   SPM tests for `TranscriptedCore`.
+- `bash run-live-capture-smoke.sh`
+  Local hardware/TCC smoke for app launch plus production mic and system-audio capture.
+- `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
+  Orchestrated QA bench for broader local validation.
 
 Rule of thumb:
 
 - run `scripts/dev/agent-preflight.sh` when starting or handing off a branch
-- after Swift edits, run `bash build.sh` and `bash run-tests.sh`
+- follow the union of checks from `.agents/test-matrix.yml`
+- after Swift edits, run `bash build.sh --no-open` and `bash run-tests.sh`
 - if you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
   `bash run-integration-smoke.sh`
 - if you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public
@@ -121,6 +130,10 @@ Rule of thumb:
   Global trigger and hotkey routing behavior.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone local-context and offline diarization CLI.
+- `Tools/TranscriptedMCP/CLAUDE.md`
+  Read-only MCP server for saved meetings and dictations.
+- `Tools/TranscriptedQA/CLAUDE.md`
+  Standalone artifact validation and QA CLI.
 
 ## Historical Zones
 

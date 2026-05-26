@@ -16,6 +16,9 @@ PostHog controls described below.
 Sentry DSNs should stay on `https://`. Non-HTTPS overrides are ignored so local
 or bundled config cannot silently downgrade crash reports to plaintext
 transport.
+Sentry release registration is limited to build metadata: release name, dist,
+and commit refs. It must not include transcript text, audio
+references, meeting titles, speaker names, local paths, or user identifiers.
 
 ## Privacy contract
 
@@ -56,7 +59,7 @@ transport.
    have `~/Library/Application Support/Draft/observability-overrides.plist`.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
-6. Run `bash build.sh` and `bash run-tests.sh`.
+6. Run `bash build.sh --no-open` and `bash run-tests.sh`.
 7. In the app, verify onboarding shows two separate default-on questions for:
    - crash and error reports
    - anonymous usage statistics
@@ -131,6 +134,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
 - `meeting_transcript_skipped`
+- `meeting_saved_audio_retranscription_requested`
 
 ## Allowed property style
 

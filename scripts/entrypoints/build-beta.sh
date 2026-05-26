@@ -11,12 +11,6 @@
 
 set -euo pipefail
 
-plist_value() {
-    local plist_path="$1"
-    local key="$2"
-    /usr/libexec/PlistBuddy -c "Print :$key" "$plist_path" 2>/dev/null || true
-}
-
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -31,8 +25,13 @@ USER_NAME="${2:-beta}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 REQUIRE_BUNDLED_PARAKEET_MODELS="${REQUIRE_BUNDLED_PARAKEET_MODELS:-1}"
 BUNDLE_PARAKEET_MODELS="${BUNDLE_PARAKEET_MODELS:-1}"
+REQUIRE_BUNDLED_DIARIZER_MODELS="${REQUIRE_BUNDLED_DIARIZER_MODELS:-1}"
+BUNDLE_DIARIZER_MODELS="${BUNDLE_DIARIZER_MODELS:-1}"
+REGISTER_SENTRY_RELEASE="${REGISTER_SENTRY_RELEASE:-0}"
+GENERATE_DSYM="${GENERATE_DSYM:-1}"
 SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || printf '8')}"
-APP_VERSION="$(plist_value Info.plist CFBundleShortVersionString)"
+SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
+eval "$SENTRY_METADATA"
 
 if [ -n "$BETA_TOKEN" ]; then
     echo "ℹ️  BETA_TOKEN passed but no longer injected into the binary. Continuing."
@@ -52,10 +51,21 @@ if [ "$BUNDLE_PARAKEET_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" !
     exit 1
 fi
 
+if [ "$BUNDLE_DIARIZER_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" != "0" ]; then
+    echo "❌ BUNDLE_DIARIZER_MODELS=0 requires REQUIRE_BUNDLED_DIARIZER_MODELS=0"
+    echo "   Distribution builds bundle offline diarizer models by default so meetings"
+    echo "   do not depend on a runtime model download."
+    echo "   If you intentionally want a thin local test build, rerun with:"
+    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+    exit 1
+fi
+
 APP_NAME="Transcripted"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+APP_DSYM="$BUILD_DIR/$APP_NAME.app.dSYM"
+SWIFTC_TEMP_DIR="$BUILD_DIR/swiftc-temp"
 STAGED_APP_BINARY="$BUILD_DIR/$APP_NAME-beta-bin"
 DMG_NAME="Transcripted-${APP_VERSION}.dmg"
 DMG_VOLUME_NAME="Transcripted"
@@ -121,6 +131,18 @@ mask_secret() {
 
     printf '%s...%s' "${value:0:4}" "${value: -2}"
 }
+
+cleanup_swift_saved_temps() {
+    find "$REPO_ROOT" -maxdepth 1 -type f \( \
+        -name '*.bc' -o \
+        -name '*.ll' -o \
+        -name '*.s' -o \
+        -name '*.sil' \
+    \) -delete
+    rm -rf "$SWIFTC_TEMP_DIR"
+}
+
+trap cleanup_swift_saved_temps EXIT
 
 validate_signed_app() {
     echo "Validating app signature..."
@@ -361,9 +383,10 @@ if [ -n "${newest_input_mtime:-}" ] && [ -n "${build_stamp_mtime:-}" ] && [ "$ne
 fi
 
 echo "🔨 Building Transcripted Beta for $USER_NAME (token: $(mask_secret "$BETA_TOKEN"))..."
+echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
 
 # Clean app bundle only (preserve previously built DMGs)
-rm -rf "$APP_BUNDLE"
+rm -rf "$APP_BUNDLE" "$APP_DSYM" "$SWIFTC_TEMP_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
@@ -388,6 +411,30 @@ else
         echo "   distribution builds do not fall back to a runtime download on first launch."
         echo "   If you intentionally want a thin local test build, rerun with:"
         echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        exit 1
+    fi
+fi
+
+# Bundle offline diarizer CoreML models used by DiarizationService.
+DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml"
+DIARIZER_DEST="$APP_BUNDLE/Contents/Resources/offline-diarizer-models"
+if [ "$BUNDLE_DIARIZER_MODELS" = "0" ]; then
+    echo "⚠️  Skipping bundled offline diarizer models because BUNDLE_DIARIZER_MODELS=0"
+    echo "   Runtime model download may occur on first meeting."
+elif [ -d "$DIARIZER_SRC/speaker-diarization-offline" ] && [ -d "$DIARIZER_SRC/wespeaker_v2.mlmodelc" ]; then
+    echo "Bundling offline diarizer models..."
+    mkdir -p "$DIARIZER_DEST"
+    cp -R "$DIARIZER_SRC"/. "$DIARIZER_DEST/"
+else
+    if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
+        echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
+        echo "   Runtime model download may still occur on first meeting."
+    else
+        echo "❌ Missing local offline diarizer models: $DIARIZER_SRC"
+        echo "   build-beta.sh now requires bundled diarizer models by default so"
+        echo "   distribution builds do not fall back to a runtime download on first meeting."
+        echo "   If you intentionally want a thin local test build, rerun with:"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
         exit 1
     fi
 fi
@@ -429,9 +476,14 @@ cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 echo "Compiling (beta build)..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
 SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
+mkdir -p "$SWIFTC_TEMP_DIR"
 rm -f "$STAGED_APP_BINARY"
-swiftc \
+TMPDIR="$REPO_ROOT/$SWIFTC_TEMP_DIR/" swiftc \
     -O \
+    -gline-tables-only \
+    -debug-info-format=dwarf \
+    -debug-prefix-map "$REPO_ROOT=." \
+    -save-temps \
     -whole-module-optimization \
     -num-threads "$SWIFTC_NUM_THREADS" \
     -D BETA_BUILD \
@@ -465,6 +517,23 @@ mv "$STAGED_APP_BINARY" "$APP_BINARY"
 if [ ! -x "$APP_BINARY" ]; then
     echo "❌ Build finished without a runnable app binary: $APP_BINARY"
     exit 1
+fi
+
+if [ "$GENERATE_DSYM" = "1" ]; then
+    if ! command -v dsymutil >/dev/null 2>&1; then
+        echo "❌ dsymutil is required to generate Sentry debug symbols."
+        echo "   Install Xcode command line tools, or rerun with GENERATE_DSYM=0 for a local-only smoke."
+        exit 1
+    fi
+
+    echo "Generating app dSYM..."
+    dsymutil "$APP_BINARY" -o "$APP_DSYM"
+    if [ ! -d "$APP_DSYM" ]; then
+        echo "❌ dSYM generation finished without creating: $APP_DSYM"
+        exit 1
+    fi
+else
+    echo "⚠️  Skipping app dSYM generation because GENERATE_DSYM=$GENERATE_DSYM"
 fi
 
 SIGNING_MATCH="$(resolve_sign_identity "$SIGNING_IDENTITY")"
@@ -568,10 +637,25 @@ else
     echo "⚠️  Skipping notarization (using development cert — local testing only)"
 fi
 
+if [ "$REGISTER_SENTRY_RELEASE" = "1" ]; then
+    echo "Registering Sentry release..."
+    SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-1}" \
+        SENTRY_DEBUG_FILES_PATH="${SENTRY_DEBUG_FILES_PATH:-$APP_DSYM}" \
+        bash scripts/release/register-sentry-release.sh "$APP_VERSION"
+fi
+
 echo ""
 echo "✅ Done! DMG ready: $BUILD_DIR/$DMG_NAME"
 echo "   Size: $(du -sh "$BUILD_DIR/$DMG_NAME" | cut -f1)"
 echo "   User: $USER_NAME"
+echo "   Sentry release: $SENTRY_RELEASE"
+echo "   Sentry dist: $SENTRY_DIST"
+if [ "$GENERATE_DSYM" = "1" ]; then
+    echo "   Sentry debug symbols: $APP_DSYM"
+fi
+if [ "$REGISTER_SENTRY_RELEASE" != "1" ]; then
+    echo "   Sentry registration: bash scripts/release/register-sentry-release.sh $APP_VERSION"
+fi
 if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     echo "   Note: this build is not notarized yet, so Gatekeeper rejection is still expected."
 else

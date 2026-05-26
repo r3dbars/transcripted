@@ -198,6 +198,346 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteCoalescesSplitSpeakerRowsWithSameName() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let firstSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.21, count: 256),
+            existingId: nil
+        ).id
+        let secondSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.22, count: 256),
+            existingId: nil
+        ).id
+        let thirdSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.23, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Split_Speaker.md")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("split-mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("split-system.wav")
+        let clipURLs = [
+            harness.paths.speakerClips.appendingPathComponent("split-1.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-2.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-3.wav"),
+        ]
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstSpeakerId, name: "Speaker 1", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondSpeakerId, name: "Speaker 2", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "3", persistentSpeakerId: thirdSpeakerId, name: "Speaker 3", confidence: "unknown", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Speaker 1", text: "First fragment.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
+            MarkdownUtterance(timestamp: "00:09", source: "System", label: "Speaker 3", text: "Third fragment.", diarizerSpeakerId: 3),
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 2", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 3", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 6
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+        for clipURL in clipURLs {
+            try Data().write(to: clipURL)
+        }
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GRIGORY", action: .named),
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(id: firstSpeakerId, diarizerSpeakerId: "1", clipURL: clipURLs[0], sampleText: "First fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.21, count: 256)),
+                SpeakerNamingEntry(id: secondSpeakerId, diarizerSpeakerId: "2", clipURL: clipURLs[1], sampleText: "Second fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.22, count: 256)),
+                SpeakerNamingEntry(id: thirdSpeakerId, diarizerSpeakerId: "3", clipURL: clipURLs[2], sampleText: "Third fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.23, count: 256)),
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let dbIdLines = savedTranscript.components(separatedBy: "\n")
+            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("db_id:") }
+        XCTAssertEqual(Set(dbIdLines).count, 1, savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Grigory] First fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Grigory] Second fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:09] [System/Grigory] Third fragment."), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/grigory]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/GRIGORY]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 3 utterances, ~6 words, 00:09"), savedTranscript)
+
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        XCTAssertEqual(namedProfiles.count, 1)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: secondSpeakerId))
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: thirdSpeakerId))
+    }
+
+    @MainActor
+    func testHandleNamingCompleteCoalescesSplitRowsAndSkipsNoDialogSpeaker() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let firstSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.41, count: 256),
+            existingId: nil
+        ).id
+        let secondSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.42, count: 256),
+            existingId: nil
+        ).id
+        let emptySpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.43, count: 256),
+            existingId: nil
+        ).id
+        let emptySpeakerTargetId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.44, count: 256),
+            existingId: nil
+        ).id
+        harness.speakerDB.setDisplayName(id: emptySpeakerTargetId, name: "Known Phantom")
+        let emptySpeakerTargetBefore = harness.speakerDB.getSpeaker(id: emptySpeakerTargetId)
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Split_With_No_Dialog.md")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("split-empty-mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("split-empty-system.wav")
+        let clipURLs = [
+            harness.paths.speakerClips.appendingPathComponent("split-empty-1.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-empty-2.wav"),
+            harness.paths.speakerClips.appendingPathComponent("split-empty-3.wav"),
+        ]
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstSpeakerId, name: "Speaker 1", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondSpeakerId, name: "Speaker 2", confidence: "unknown", source: "db_pending"),
+            MarkdownSpeaker(id: "3", persistentSpeakerId: emptySpeakerId, name: "Speaker 3", confidence: "unknown", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Speaker 1", text: "First fragment.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
+            MarkdownUtterance(timestamp: "00:09", source: "System", label: "Speaker 3", text: "", diarizerSpeakerId: 3),
+        ]
+        let styledTranscript = """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        title: "Styled Meeting"
+        date: 2026-04-10
+        time: 15:01:23
+        duration: "1:30"
+        processing_time: "3.0s"
+        transcription_engine: parakeet_local
+        diarization_engine: pyannote_offline
+        sources: [mic, system_audio]
+        mic_utterances: 0
+        system_utterances: 3
+        mic_speakers: 0
+        system_speakers: 3
+        total_word_count: 4
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(firstSpeakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(secondSpeakerId.uuidString)"
+            name: "Speaker 2"
+            confidence: unknown
+            source: db_pending
+          - id: "3"
+            channel: system
+            db_id: "\(emptySpeakerId.uuidString)"
+            name: "Speaker 3"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        # Styled Meeting
+
+        Recorded Apr 10, 2026 at 3:01 PM  •  1:30  •  4 words  •  3 turns
+
+        ## Transcript
+
+        **00:01**  [System/Speaker 1]
+        First fragment.
+
+        **00:05**  [System/Speaker 2]
+        Second fragment.
+        """
+
+        try styledTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+        for clipURL in clipURLs {
+            try Data().write(to: clipURL)
+        }
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: emptySpeakerId, diarizerSpeakerId: "3", newName: "Known Phantom", action: .merged(targetProfileId: emptySpeakerTargetId)),
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(id: firstSpeakerId, diarizerSpeakerId: "1", clipURL: clipURLs[0], sampleText: "First fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.41, count: 256)),
+                SpeakerNamingEntry(id: secondSpeakerId, diarizerSpeakerId: "2", clipURL: clipURLs[1], sampleText: "Second fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.42, count: 256)),
+                SpeakerNamingEntry(id: emptySpeakerId, diarizerSpeakerId: "3", clipURL: clipURLs[2], sampleText: "", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.43, count: 256)),
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Grigory]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("**00:05**  [System/Grigory]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/Known Phantom]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains(#"name: "Known Phantom""#), savedTranscript)
+
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        XCTAssertEqual(namedProfiles.count, 1)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: secondSpeakerId))
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: emptySpeakerId))
+        let emptySpeakerTarget = harness.speakerDB.getSpeaker(id: emptySpeakerTargetId)
+        XCTAssertEqual(emptySpeakerTarget?.displayName, "Known Phantom")
+        XCTAssertGreaterThan(emptySpeakerTarget?.callCount ?? 0, emptySpeakerTargetBefore?.callCount ?? 0)
+    }
+
+    @MainActor
+    func testHandleNamingCompleteCoalescesCorrectedAndNamedRowsWithSameName() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let matchedSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.31, count: 256),
+            existingId: nil
+        ).id
+        harness.speakerDB.setDisplayName(id: matchedSpeakerId, name: "Matt Vlasach")
+        guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedSpeakerId) else {
+            XCTFail("Expected matched speaker snapshot")
+            return
+        }
+        let splitSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.32, count: 256),
+            existingId: nil
+        ).id
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Corrected_Split_Speaker.md")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("corrected-split-mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("corrected-split-system.wav")
+        let firstClipURL = harness.paths.speakerClips.appendingPathComponent("corrected-split-1.wav")
+        let secondClipURL = harness.paths.speakerClips.appendingPathComponent("corrected-split-2.wav")
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: matchedSpeakerId, name: "Matt Vlasach", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: splitSpeakerId, name: "Speaker 2", confidence: "unknown", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt Vlasach", text: "First fragment.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
+        ]
+
+        try sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Speaker 2", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 4
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+        try Data().write(to: firstClipURL)
+        try Data().write(to: secondClipURL)
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: matchedSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", previousName: "Matt Vlasach", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: splitSpeakerId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: transcriptionResult,
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(id: matchedSpeakerId, diarizerSpeakerId: "1", clipURL: firstClipURL, sampleText: "First fragment.", currentName: "Matt Vlasach", matchSimilarity: 0.86, needsNaming: false, needsConfirmation: true, sessionEmbedding: [Float](repeating: 0.33, count: 256), matchedProfileSnapshot: matchedSnapshot),
+                SpeakerNamingEntry(id: splitSpeakerId, diarizerSpeakerId: "2", clipURL: secondClipURL, sampleText: "Second fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.32, count: 256)),
+            ]
+        )
+
+        try await waitUntil {
+            harness.manager.speakerNamingRequest == nil
+                && harness.manager.displayStatus == .transcriptSaved
+        }
+
+        let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let dbIdLines = savedTranscript.components(separatedBy: "\n")
+            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("db_id:") }
+        XCTAssertEqual(Set(dbIdLines).count, 1, savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Grigory] First fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Grigory] Second fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 2 utterances, ~4 words, 00:06"), savedTranscript)
+
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        XCTAssertEqual(namedProfiles.count, 1)
+        XCTAssertNil(harness.speakerDB.getSpeaker(id: splitSpeakerId))
+        let restoredProfile = harness.speakerDB.getSpeaker(id: matchedSpeakerId)
+        XCTAssertEqual(restoredProfile?.displayName, "Matt Vlasach")
+        XCTAssertEqual(restoredProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
+    }
+
+    @MainActor
     func testHandleNamingCompleteDoesNotRepublishSavedStatusAfterRenamedTranscriptAlreadyPublished() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()

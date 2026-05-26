@@ -8,14 +8,13 @@ Transcripted is a local Mac app for meetings, dictation, and audio files. It
 turns the things you say out loud into clean Markdown files on your Mac, so
 Claude, Codex, and any agent can understand what happened and help you use it
 later.
-Transcripted saves local Markdown your agents can review later.
 
 [Download for macOS](https://transcripted.app/download/)
 · [Visit transcripted.app](https://transcripted.app)
 
 ## Demo
 
-![Transcripted quick tour showing Home, Meetings, Dictation, and Home again](docs/assets/launch/transcripted-demo.gif)
+![Transcripted quick tour showing the Home dashboard, meeting capture, dictation, and recent activity](docs/assets/launch/transcripted-demo.gif)
 
 ![Transcripted dictation recording showing the listening control](docs/assets/launch/transcripted-dictation-recording.gif)
 
@@ -225,7 +224,7 @@ For contributors:
 
 ```bash
 bash build-deps.sh
-bash build.sh
+bash build.sh --no-open
 ```
 
 `build.sh` is the main app build. `Package.swift` exists for

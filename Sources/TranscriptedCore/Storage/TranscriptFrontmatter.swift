@@ -19,6 +19,7 @@ public struct TranscriptFrontmatterDocument: Sendable {
 
 public enum TranscriptFrontmatter {
     public static let previewByteLimit = 64 * 1024
+    public static let maximumFrontmatterByteLimit = 512 * 1024
 
     private static let recordedAtFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -88,9 +89,26 @@ public enum TranscriptFrontmatter {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
-        let data = try handle.read(upToCount: byteLimit) ?? Data()
-        let raw = String(decoding: data, as: UTF8.self)
-        return document(in: raw)
+        let readLimit = maximumFrontmatterByteLimit
+        let chunkSize = max(1, min(byteLimit, previewByteLimit))
+        var data = Data()
+
+        while data.count < readLimit {
+            let remaining = readLimit - data.count
+            guard let chunk = try handle.read(upToCount: min(chunkSize, remaining)),
+                  !chunk.isEmpty else {
+                break
+            }
+            data.append(chunk)
+
+            let raw = String(decoding: data, as: UTF8.self)
+            guard raw.hasPrefix("---\n") else { return nil }
+            if let document = document(in: raw) {
+                return document
+            }
+        }
+
+        return nil
     }
 
     public static func readValues(

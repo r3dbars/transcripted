@@ -46,7 +46,7 @@ checks for the files changed.
 
 Default rules:
 
-- Swift app change: `bash build.sh` and `bash run-tests.sh`
+- Swift app change: `bash build.sh --no-open` and `bash run-tests.sh`
 - `Sources/Meeting/` or `Sources/TranscriptedCore/`: also `bash run-integration-smoke.sh`
 - `Package.swift` or public core seam: also `swift test`
 - release/update path: read `docs/release-packaging.md` and `docs/sparkle-updates.md`

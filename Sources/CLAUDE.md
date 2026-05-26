@@ -25,7 +25,7 @@ Important entry points:
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting hotkey routing, and hotkey error surfacing
-- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration; only `cancelSession()` remains as the removed draft-mode compatibility hook
+- `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter

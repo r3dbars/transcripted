@@ -33,8 +33,11 @@ struct AnalyticsEventPolicy: Equatable {
         "mic_processed_peak",
         "mic_raw_peak",
         "mic_recovering",
+        "output_ducking_detected",
         "output_device_class",
         "output_rate_hz",
+        "quiet_mic_recovered",
+        "quiet_mic_unrecovered",
         "realtime_agc",
         "recovery_attempt_bucket",
         "route_change_count_bucket",
@@ -518,6 +521,7 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "failure_kind",
                 "queue_depth_bucket",
+                "session_stage",
                 "trigger",
             ]
         ),
@@ -528,6 +532,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "queue_depth_bucket",
                 "trigger",
             ]))
+        ),
+        "meeting_saved_audio_retranscription_requested": .init(
+            name: "meeting_saved_audio_retranscription_requested",
+            allowedProperties: [
+                "mic_stream_present",
+                "trigger",
+            ]
         ),
         "meeting_file_imported": .init(
             name: "meeting_file_imported",

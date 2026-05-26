@@ -234,7 +234,8 @@ public class TranscriptionTaskManager: ObservableObject {
     public func startImportedTranscription(
         audioURL: URL,
         outputFolder: URL,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -279,7 +280,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     audioURL: audioURL,
                     outputFolder: outputFolder,
                     taskId: taskId,
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 )
 
                 await MainActor.run {
@@ -297,6 +299,101 @@ public class TranscriptionTaskManager: ObservableObject {
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
                         displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
+                        diagnosticMessage: diagnosticMessage
+                    )
+                    self.sendFailureNotification(errorMessage: error.localizedDescription)
+                    self.handleTaskCompletion(taskId: taskId)
+                    self.scheduleStatusReset(delay: 4)
+                }
+            }
+        }
+
+        activeTasks[taskId] = asyncTask
+    }
+
+    /// Re-transcribe audio retained beside an already-saved meeting transcript.
+    /// Unlike live-capture scratch audio, the source files are user-facing retained
+    /// artifacts, so this path never deletes them after success, failure, or rejection.
+    public func startSavedAudioRetranscription(
+        micURL: URL?,
+        systemURL: URL,
+        outputFolder: URL,
+        meetingTitle: String? = nil,
+        splitLocalSpeakers: Bool = false
+    ) {
+        if !activeTasks.isEmpty {
+            AppLogger.pipeline.warning("Rejecting saved-audio retranscription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
+            publishFailure(
+                displayMessage: "Another transcript is already running. Wait for it to finish, then try again.",
+                diagnosticMessage: "Transcription already in progress"
+            )
+            scheduleStatusReset(delay: 4)
+            return
+        }
+
+        let minDuration: TimeInterval = 2.0
+        let micDuration = micURL.flatMap { audioDuration(url: $0) }
+        let systemDuration = audioDuration(url: systemURL)
+        let hasUsableMicAudio = micDuration.map { $0 >= minDuration } ?? false
+        let hasUsableSystemAudio = systemDuration.map { $0 >= minDuration } ?? false
+        let hasUnknownDuration = systemDuration == nil || (micURL != nil && micDuration == nil)
+
+        guard hasUsableMicAudio || hasUsableSystemAudio || hasUnknownDuration else {
+            AppLogger.pipeline.info("Saved audio too short, skipping retranscription", [
+                "micDuration": micDuration.map { String(format: "%.1fs", $0) } ?? (micURL == nil ? "none" : "unknown"),
+                "systemDuration": systemDuration.map { String(format: "%.1fs", $0) } ?? "unknown"
+            ])
+            publishFailure(
+                displayMessage: "That saved audio is too short to transcribe again.",
+                diagnosticMessage: "Recording too short"
+            )
+            scheduleStatusReset(delay: 3)
+            return
+        }
+
+        let taskId = UUID()
+        activeCount += 1
+        backgroundTaskCount += 1
+        publishNonFailureStatus(.gettingReady)
+
+        AppLogger.pipeline.info("Starting saved-audio retranscription task", [
+            "taskId": taskId.uuidString,
+            "activeCount": "\(activeCount)",
+            "hasMic": "\(micURL != nil)",
+            "splitLocalSpeakers": "\(splitLocalSpeakers)"
+        ])
+
+        let asyncTask = Task {
+            do {
+                await MainActor.run {
+                    self.publishNonFailureStatus(.transcribing(progress: 0.0))
+                }
+
+                let transcriptURL = try await self.transcribeMultichannelPipeline(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    outputFolder: outputFolder,
+                    taskId: taskId,
+                    healthInfo: nil,
+                    splitLocalSpeakers: splitLocalSpeakers,
+                    meetingTitle: meetingTitle,
+                    removeSourceAudioAfterArchive: false
+                )
+
+                await MainActor.run {
+                    self.publishTranscriptSaved(from: transcriptURL)
+                    self.handleTaskCompletion(taskId: taskId)
+                }
+            } catch {
+                AppLogger.pipeline.error("Saved-audio retranscription task failed", [
+                    "taskId": taskId.uuidString,
+                    "error": error.localizedDescription
+                ])
+
+                await MainActor.run {
+                    let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
+                    self.publishFailure(
+                        displayMessage: Self.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
                         diagnosticMessage: diagnosticMessage
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
@@ -471,6 +568,40 @@ public class TranscriptionTaskManager: ObservableObject {
         return "Transcripted couldn't transcribe that audio file. Try converting it to WAV or M4A and import again."
     }
 
+    static func savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage message: String) -> String {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalized.contains("transcription already in progress") {
+            return "Another transcript is already running. Wait for it to finish, then try again."
+        }
+        if normalized.contains("recording too short") {
+            return "That saved audio is too short to transcribe again."
+        }
+        if normalized.contains("empty audio file") {
+            return "That saved audio has no readable audio. Try another saved recording."
+        }
+        if normalized.contains("no speech detected") {
+            return "No speech was found in that saved audio. Try a recording with clearer spoken audio."
+        }
+        if normalized.contains("invalid audio format") {
+            return "Transcripted couldn't read that saved audio. Try another retained recording."
+        }
+        if normalized.contains("failed to save transcript") {
+            return "Transcripted couldn't save the transcript. Check your capture folder and try again."
+        }
+        if normalized.contains("model not loaded") {
+            return "The local transcription model was not ready. Try again after Models finishes loading."
+        }
+        if normalized.contains("diarization failed") {
+            return "Transcripted couldn't separate speakers in that saved audio. Try again with the retained recording."
+        }
+        if normalized.contains("transcription inference failed") {
+            return "The local transcription model couldn't process that saved audio. Try again, or start a new recording if the retained audio is damaged."
+        }
+
+        return "Transcripted couldn't re-transcribe that saved audio. Try again, or start a new recording if the retained audio is damaged."
+    }
+
     private func publishFailure(displayMessage: String, diagnosticMessage: String) {
         lastFailureDiagnosticMessage = diagnosticMessage
         displayStatus = .failed(message: displayMessage)
@@ -492,14 +623,16 @@ public class TranscriptionTaskManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         taskId: UUID = UUID(),
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        archiveAudio: Bool = true
     ) {
         _ = addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
             taskId: taskId,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            archiveAudio: archiveAudio
         )
     }
 
@@ -509,7 +642,8 @@ public class TranscriptionTaskManager: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         taskId: UUID = UUID(),
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        archiveAudio: Bool = true
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -518,27 +652,33 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        let retainedAudio = archiveFailedRecordingAudioIfConfigured(
-            micURL: micAudioURL,
-            systemURL: systemAudioURL,
-            taskId: taskId
-        )
+        let retainedAudio = archiveAudio
+            ? archiveFailedRecordingAudioIfConfigured(
+                micURL: micAudioURL,
+                systemURL: systemAudioURL,
+                taskId: taskId
+            )
+            : nil
         return enqueueFailedTranscriptionAfterRetainingAudio(
+            taskId: taskId,
             retainedAudio: retainedAudio,
             originalMicURL: micAudioURL,
             originalSystemURL: systemAudioURL,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            removeOriginalsAfterArchive: archiveAudio
         )
     }
 
     @discardableResult
     private func enqueueFailedTranscriptionAfterRetainingAudio(
+        taskId: UUID,
         retainedAudio: RetainedRecordingAudio?,
         originalMicURL: URL?,
         originalSystemURL: URL?,
         errorMessage: String,
-        meetingTitle: String?
+        meetingTitle: String?,
+        removeOriginalsAfterArchive: Bool
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
@@ -552,12 +692,14 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let didPersist = failedTranscriptionManager.addFailedTranscription(
+            id: taskId,
             micAudioURL: failedMicURL,
             systemAudioURL: failedSystemURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle
         )
         guard didPersist else { return false }
+        guard removeOriginalsAfterArchive else { return true }
 
         if retainedAudio?.micURL != nil {
             removeManagedCleanupFile(originalMicURL, label: "archived failed mic scratch")

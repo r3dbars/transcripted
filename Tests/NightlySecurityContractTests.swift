@@ -9,6 +9,40 @@ func testNightlySecurityContract() {
         assertEqual(totalWeight, 100, "nightly scoring weights should add up to 100")
         assertNotNil(manifest["paths"]?.dictionaryValue?["sanitizer_corpus"]?.stringValue, "manifest should point at the shared sanitizer corpus")
         assertNotNil(manifest["expected_info_plist"]?.dictionaryValue?["SUFeedURL"]?.stringValue, "manifest should pin the Sparkle feed URL")
+        assertEqual(
+            manifest["expected_info_plist"]?.dictionaryValue?["TranscriptedSentryReleasePrefix"]?.stringValue,
+            "transcripted",
+            "manifest should pin the Sentry release prefix"
+        )
+    }
+
+    runSuite("Nightly security manifest preserves calendar access entitlement") {
+        let manifest = loadJSONFixture("config/security/nightly-security-manifest.json", as: [String: AnyDecodable].self)
+        let expectedEntitlements = manifest["expected_entitlements"]?.dictionaryValue ?? [:]
+        let calendarEntitlement = "com.apple.security.personal-information.calendars"
+        let localEntitlements = loadPlistDictionary("config/entitlements/local.plist")
+        let betaEntitlements = loadPlistDictionary("config/entitlements/beta.plist")
+
+        assertEqual(
+            expectedEntitlements["local"]?.dictionaryValue?[calendarEntitlement]?.boolValue,
+            true,
+            "local builds should be signed with the Calendar entitlement so EventKit can show the permission prompt"
+        )
+        assertEqual(
+            expectedEntitlements["beta"]?.dictionaryValue?[calendarEntitlement]?.boolValue,
+            true,
+            "beta builds should be signed with the Calendar entitlement so shipped apps appear in Calendar privacy settings"
+        )
+        assertEqual(
+            localEntitlements[calendarEntitlement] as? Bool,
+            true,
+            "local entitlement plist should keep Calendar personal-information access enabled"
+        )
+        assertEqual(
+            betaEntitlements[calendarEntitlement] as? Bool,
+            true,
+            "beta entitlement plist should keep Calendar personal-information access enabled"
+        )
     }
 
     runSuite("Nightly security sanitizer corpus stays shared and non-empty") {
@@ -27,6 +61,18 @@ func testNightlySecurityContract() {
         assertTrue(scriptsReadme.contains("nightly-security-check.py"), "scripts README should mention the nightly security checker")
         assertTrue(privacyDoc.contains("nightly-security-check.py"), "privacy observability doc should mention the nightly security checker")
     }
+}
+
+private func loadPlistDictionary(_ relativePath: String) -> [String: Any] {
+    let url = repoFixtureURL(relativePath)
+    guard let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+          let dictionary = plist as? [String: Any]
+    else {
+        return [:]
+    }
+
+    return dictionary
 }
 
 struct AnyDecodable: Decodable {

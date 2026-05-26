@@ -19,3 +19,8 @@ assignees: ""
 ## Verification
 
 - [ ]
+
+## Queue note
+
+This template does not start the local runner by itself. After checking the
+issue is ready for Codex, add the `agent todo` label.

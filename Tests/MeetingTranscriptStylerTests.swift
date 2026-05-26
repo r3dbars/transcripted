@@ -8,7 +8,10 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreservesExplicitTitle()
         testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
+        testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart()
+        testMeetingTranscriptStylerPreviewReadsOversizedMeetingFrontmatter()
         testMeetingTranscriptStylerPreviewRejectsPlainMarkdown()
+        testMeetingTranscriptStylerSkipsNonMeetingFrontmatter()
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
@@ -122,6 +125,67 @@ private func testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata() {
     assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite the transcript")
 }
 
+private func testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Legacy_Call.md")
+    let raw = """
+    ---
+    title: "Legacy Meeting"
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "0"
+    system_utterances: "1"
+    ---
+    ## Transcript
+
+    [00:00] [System/Speaker 1] Hello.
+    """
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let preview = MeetingTranscriptStyler.displayTranscriptPreview(at: transcriptURL)
+
+    assertEqual(preview?.title, "Legacy Meeting", "Preview should include legacy meeting transcripts when the body starts with the transcript heading")
+    assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite legacy meeting transcripts")
+}
+
+private func testMeetingTranscriptStylerPreviewReadsOversizedMeetingFrontmatter() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Long_Call_2026-04-07_09-14-00.md")
+    let gapEvents = (0..<3_000)
+        .map { "  - \"gap \($0) \(String(repeating: "x", count: 24))\"" }
+        .joined(separator: "\n")
+    let raw = """
+    ---
+    capture_type: meeting
+    title: "Long Customer Call"
+    date: 2026-04-07
+    time: 09:14:00
+    duration: "120:00"
+    mic_utterances: 1
+    system_utterances: 24
+    total_word_count: 5000
+    gap_events:
+    \(gapEvents)
+    ---
+
+    ## Full Transcript
+
+    [00:00] [System/Speaker 1] Hello.
+    """
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let preview = MeetingTranscriptStyler.displayTranscriptPreview(at: transcriptURL)
+
+    assertEqual(preview?.title, "Long Customer Call", "Preview should include long meetings even when frontmatter exceeds the first preview chunk")
+    assertEqual(preview?.url, transcriptURL, "Preview should not rename or rewrite oversized meeting transcripts")
+}
+
 private func testMeetingTranscriptStylerPreviewRejectsPlainMarkdown() {
     let directory = makeTemporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -130,6 +194,35 @@ private func testMeetingTranscriptStylerPreviewRejectsPlainMarkdown() {
     try? "# Notes\n\nNot a Transcripted meeting.".write(to: noteURL, atomically: true, encoding: .utf8)
 
     assertNil(MeetingTranscriptStyler.displayTranscriptPreview(at: noteURL), "Preview should skip non-meeting markdown files")
+}
+
+private func testMeetingTranscriptStylerSkipsNonMeetingFrontmatter() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let noteURL = directory.appendingPathComponent("notes.md")
+    let raw = """
+    ---
+    title: "Project Note"
+    date: "2026-04-07"
+    ---
+
+    # Project Note
+
+    This is not a Transcripted meeting.
+    """
+    try? raw.write(to: noteURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: noteURL)
+    let updated = try? String(contentsOf: noteURL, encoding: .utf8)
+
+    assertEqual(styled.url, noteURL, "Styler should leave non-meeting notes at their original path")
+    assertEqual(styled.title, "Project Note", "Styler may display the explicit title without taking ownership")
+    assertEqual(updated, raw, "Styler should not rewrite Markdown that is not a Transcripted meeting")
+    assertFalse(
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("Project Note.md").path),
+        "Styler should not rename non-meeting notes"
+    )
 }
 
 private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {

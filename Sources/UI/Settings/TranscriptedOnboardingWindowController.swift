@@ -4,10 +4,15 @@ import AppKit
 @MainActor
 final class TranscriptedOnboardingWindowController: NSWindowController {
     private let makeView: () -> PermissionsOnboardingView
+    private let onPresent: (String) -> Void
     private let hostingController: NSHostingController<PermissionsOnboardingView>
 
-    init(makeView: @escaping () -> PermissionsOnboardingView) {
+    init(
+        makeView: @escaping () -> PermissionsOnboardingView,
+        onPresent: @escaping (String) -> Void = { _ in }
+    ) {
         self.makeView = makeView
+        self.onPresent = onPresent
         self.hostingController = NSHostingController(
             rootView: makeView()
         )
@@ -43,12 +48,16 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window?.isVisible == true
     }
 
-    func present() {
+    func present(entrypoint: String = "unknown") {
         guard let window else { return }
+        let wasVisible = window.isVisible
         hostingController.rootView = makeView()
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if !wasVisible {
+            onPresent(entrypoint)
+        }
     }
 
     func dismiss() {

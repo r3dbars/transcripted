@@ -36,7 +36,7 @@ final class AppSoundPlayer {
             case .meetingTranscriptComplete:
                 return TranscriptedConstants.meetingTranscriptCompleteSoundFileName
             case .feedbackSubmitted:
-                return TranscriptedConstants.feedbackSubmittedSoundFileName
+                return nil
             case .dictationCancelled:
                 return nil
             }

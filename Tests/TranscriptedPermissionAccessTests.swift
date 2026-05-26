@@ -1,4 +1,5 @@
 import Foundation
+import EventKit
 
 @MainActor
 private final class PermissionRequestBox {
@@ -207,6 +208,48 @@ func testTranscriptedPermissionAccess() async {
 
         assertFalse(granted, "denied microphone access should stay blocked until Settings changes")
         assertEqual(requestBox.callCount, 0, "denied microphone access should not show a repeat system prompt")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestCalendarAccessIfNeeded — skips requester when calendar is already authorized") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestCalendarAccessIfNeeded(
+            statusProvider: { .fullAccess },
+            requester: {
+                requestBox.callCount += 1
+                return false
+            }
+        )
+
+        assertTrue(granted, "full calendar access should return true")
+        assertEqual(requestBox.callCount, 0, "authorized calendar status should not trigger another prompt")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestCalendarAccessIfNeeded — prompts when calendar is not determined") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestCalendarAccessIfNeeded(
+            statusProvider: { .notDetermined },
+            requester: {
+                requestBox.callCount += 1
+                return true
+            }
+        )
+
+        assertTrue(granted, "not-determined calendar access should return the requester result")
+        assertEqual(requestBox.callCount, 1, "not-determined calendar access should ask EventKit once")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestCalendarAccessIfNeeded — does not prompt after denial") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestCalendarAccessIfNeeded(
+            statusProvider: { .denied },
+            requester: {
+                requestBox.callCount += 1
+                return true
+            }
+        )
+
+        assertFalse(granted, "denied calendar access should stay blocked until Settings changes")
+        assertEqual(requestBox.callCount, 0, "denied calendar access should not show a repeat system prompt")
     }
 
     runSuite("TranscriptedPermissionAccess.systemAudioRecordingStatus — separates unknown from denied state") {

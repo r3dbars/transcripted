@@ -18,6 +18,11 @@ struct ParakeetDeviceRecoveryFailureAction: Equatable {
     let schedulePrewarmRetry: Bool
 }
 
+enum ParakeetDeviceRecoveryReadinessAction: Equatable {
+    case finishRecovery
+    case keepWaiting
+}
+
 enum ParakeetAudioEngineRebuildStrategy: Equatable {
     case queuedOnAudioEngineQueue
     case abandonBlockedAudioGraph
@@ -57,6 +62,17 @@ enum ParakeetDeviceRecoveryFailurePolicy {
     }
 }
 
+enum ParakeetDeviceRecoveryReadinessPolicy {
+    static func action(for readiness: ParakeetAudioFormatReadiness) -> ParakeetDeviceRecoveryReadinessAction {
+        switch readiness {
+        case .ready:
+            return .finishRecovery
+        case .invalid, .routeNotSettled:
+            return .keepWaiting
+        }
+    }
+}
+
 enum ParakeetDeviceRecoveryTimeoutPolicy {
     static func action(wasRecording: Bool) -> ParakeetDeviceRecoveryTimeoutAction {
         ParakeetDeviceRecoveryTimeoutAction(
@@ -80,6 +96,22 @@ enum ParakeetASRManagerCleanupDecision: Equatable {
 enum ParakeetASRManagerCleanupPolicy {
     static func decision(isTranscribing: Bool) -> ParakeetASRManagerCleanupDecision {
         isTranscribing ? .deferUntilProcessExit : .cleanupNow
+    }
+}
+
+struct ParakeetASRInferenceActivityState: Equatable {
+    private(set) var activeCount = 0
+
+    var isActive: Bool {
+        activeCount > 0
+    }
+
+    mutating func begin() {
+        activeCount += 1
+    }
+
+    mutating func finish() {
+        activeCount = max(0, activeCount - 1)
     }
 }
 
@@ -124,6 +156,14 @@ enum ParakeetAudioFormatReadinessPolicy {
 
         if selectedInputClass != "bluetooth",
            outputDeviceClass != "bluetooth",
+           inputSampleRate >= 44_100,
+           likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
+            return .routeNotSettled
+        }
+
+        if selectionOverrodeDefault,
+           selectedInputClass != "bluetooth",
+           outputDeviceClass == "bluetooth",
            inputSampleRate >= 44_100,
            likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
             return .routeNotSettled

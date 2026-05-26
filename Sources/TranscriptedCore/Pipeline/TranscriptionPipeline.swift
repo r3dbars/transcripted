@@ -44,9 +44,7 @@ extension Transcription {
         let processingStartTime = Date()
 
         do {
-            let durationFileURL = micURL ?? systemURL
-            let durationFile = try AVAudioFile(forReading: durationFileURL)
-            let duration = Double(durationFile.length) / durationFile.processingFormat.sampleRate
+            let duration = try Self.longestAudioDuration(micURL: micURL, systemURL: systemURL)
 
             onProgress?(0.0)
 
@@ -230,7 +228,10 @@ extension Transcription {
             var ghostSpeakerIdSet = Set<Int>()
             for ghostId in ghostSpeakerIds {
                 let bestSegment = speakerSegments
-                    .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                    .filter { segment in
+                        guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
+                        return !embedding.isEmpty
+                    }
                     .max(by: { $0.qualityScore < $1.qualityScore })
                 if let segment = bestSegment, let embedding = segment.embedding {
                     embeddingsPerSpeaker[ghostId] = [embedding]
@@ -573,6 +574,19 @@ extension Transcription {
         }
     }
 
+    nonisolated private static func longestAudioDuration(micURL: URL?, systemURL: URL) throws -> TimeInterval {
+        var durations = [try audioDuration(at: systemURL)]
+        if let micURL {
+            durations.append(try audioDuration(at: micURL))
+        }
+        return durations.max() ?? 0
+    }
+
+    nonisolated private static func audioDuration(at url: URL) throws -> TimeInterval {
+        let file = try AVAudioFile(forReading: url)
+        return Double(file.length) / file.processingFormat.sampleRate
+    }
+
     // MARK: - Mic Channel Diarization
 
     /// Result of running diarization + classification on the mic channel.
@@ -639,7 +653,10 @@ extension Transcription {
         var ghostSpeakerIdSet = Set<Int>()
         for ghostId in ghostSpeakerIds {
             let bestSegment = speakerSegments
-                .filter { $0.speakerId == ghostId && $0.embedding != nil && !$0.embedding!.isEmpty }
+                .filter { segment in
+                    guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
+                    return !embedding.isEmpty
+                }
                 .max(by: { $0.qualityScore < $1.qualityScore })
             if let segment = bestSegment, let embedding = segment.embedding {
                 embeddingsPerSpeaker[ghostId] = [embedding]

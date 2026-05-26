@@ -772,13 +772,13 @@ struct HomeStatsTopCard: View {
 struct HomeStatsBadge: View {
     let stats: [HomeStatItem]
     let streak: Int?
+    let onViewStats: () -> Void
 
     @State private var isHovering = false
-    @State private var isShowingDetails = false
 
     var body: some View {
         Button {
-            isShowingDetails = true
+            onViewStats()
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
@@ -815,6 +815,7 @@ struct HomeStatsBadge: View {
             .padding(14)
             .frame(width: 348, alignment: .leading)
             .frame(minHeight: 112)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.88))
@@ -830,13 +831,6 @@ struct HomeStatsBadge: View {
         }
         .buttonStyle(.plain)
         .help("Show more stats")
-        .sheet(isPresented: $isShowingDetails) {
-            HomeStatsDetailSheet(
-                stats: stats,
-                streak: streak,
-                onDone: { isShowingDetails = false }
-            )
-        }
     }
 
     private var metricColumns: [GridItem] {
@@ -891,7 +885,7 @@ private struct HomeStatsStripMetric: View {
     }
 }
 
-private struct HomeStatsDetailSheet: View {
+struct HomeStatsDetailSheet: View {
     let stats: [HomeStatItem]
     let streak: Int?
     let onDone: () -> Void
@@ -1018,12 +1012,20 @@ struct HomeRowMenuItem: Identifiable {
     let id = UUID()
     let title: String
     let symbolName: String
+    let isEnabled: Bool
     let isDestructive: Bool
     let action: () -> Void
 
-    init(title: String, symbolName: String, isDestructive: Bool = false, action: @escaping () -> Void) {
+    init(
+        title: String,
+        symbolName: String,
+        isEnabled: Bool = true,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) {
         self.title = title
         self.symbolName = symbolName
+        self.isEnabled = isEnabled
         self.isDestructive = isDestructive
         self.action = action
     }
@@ -1116,6 +1118,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 )
                 menuItem.target = self
                 menuItem.representedObject = item.id
+                menuItem.isEnabled = item.isEnabled
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
                     menuItem.image = image.withSymbolConfiguration(
@@ -1140,7 +1143,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func performMenuItem(_ sender: NSMenuItem) {
             guard let id = sender.representedObject as? UUID,
-                  let item = items.first(where: { $0.id == id }) else {
+                  let item = items.first(where: { $0.id == id }),
+                  item.isEnabled else {
                 return
             }
             item.action()
@@ -1437,7 +1441,10 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let hasSpeakerReviewWork: Bool
+    let canRetranscribe: Bool
+    let retranscriptionUnavailableReason: String?
     let onReviewSpeakers: () -> Void
+    let onRetranscribe: () -> Void
     let menuItems: [HomeRowMenuItem]
 
     var body: some View {
@@ -1460,18 +1467,35 @@ struct HomeMeetingRow: View {
     }
 
     private var reviewSpeakersAccessory: AnyView? {
-        guard RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+        if RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
             speakerStatus: item.speakerStatus,
             hasSpeakerReviewWork: hasSpeakerReviewWork
+        ) {
+            return AnyView(
+                HomeAttentionActionButton(
+                    title: "Review speakers",
+                    isDisabled: false,
+                    tint: .orange,
+                    action: onReviewSpeakers
+                )
+                    .help("Review speakers")
+            )
+        }
+
+        guard RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+            speakerStatus: item.speakerStatus,
+            hasRetainedAudio: item.audio?.retranscriptionInput != nil,
+            hasSpeakerReviewWork: hasSpeakerReviewWork
         ) else { return nil }
+
         return AnyView(
             HomeAttentionActionButton(
-                title: "Review speakers",
-                isDisabled: false,
+                title: "Identify speakers",
+                isDisabled: !canRetranscribe,
                 tint: .orange,
-                action: onReviewSpeakers
+                action: onRetranscribe
             )
-                .help("Review speakers")
+                .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
     }
 }
@@ -1812,6 +1836,8 @@ struct HomeActivityTabsCard: View {
     let copiedRowID: String?
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
+    let canRetranscribeSavedMeetings: Bool
+    let savedMeetingRetranscriptionUnavailableReason: String?
     let onOpenDictation: (SavedDictationEntry) -> Void
     let onCopyDictation: (SavedDictationEntry) -> Void
     let onFlagDictation: (SavedDictationEntry) -> Void
@@ -1820,6 +1846,7 @@ struct HomeActivityTabsCard: View {
     let onCopyMeeting: (RecentMeetingItem) -> Void
     let onFlagMeeting: (RecentMeetingItem) -> Void
     let onReviewMeetingSpeakers: (RecentMeetingItem) -> Void
+    let onRetranscribeMeeting: (RecentMeetingItem) -> Void
     let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -1877,7 +1904,10 @@ struct HomeActivityTabsCard: View {
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },
                                 hasSpeakerReviewWork: hasSpeakerReviewWork,
+                                canRetranscribe: canRetranscribeSavedMeetings,
+                                retranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
                                 onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
+                                onRetranscribe: { onRetranscribeMeeting(meeting) },
                                 menuItems: meetingMenuItems(meeting)
                             )
                         case .failed(let failedMeeting):
@@ -2237,6 +2267,7 @@ private struct HomeMeetingPodcastPlayer: View {
     let audio: MeetingAudioAttachment
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @State private var selectedPlaybackChoiceID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -2255,6 +2286,15 @@ private struct HomeMeetingPodcastPlayer: View {
                     }
 
                     Spacer()
+
+                    MeetingAudioSourceMenu(
+                        attachment: audio,
+                        selectedChoiceID: selectedPlaybackChoiceBinding
+                    ) { choice in
+                        if playback.isActive(audio) {
+                            playback.switchSource(audio, choice: choice)
+                        }
+                    }
                 }
 
                 HStack(spacing: 14) {
@@ -2269,13 +2309,13 @@ private struct HomeMeetingPodcastPlayer: View {
                     }
 
                     HomePodcastPlayerButton(
-                        symbolName: playback.symbolName(for: audio),
+                        symbolName: playback.symbolName(for: audio, choice: selectedPlaybackChoice),
                         size: 46,
-                        isPrimary: playback.isActive(audio),
+                        isPrimary: playback.isActive(audio, choice: selectedPlaybackChoice),
                         isDisabled: false,
-                        help: "\(playback.buttonTitle(for: audio)) meeting audio"
+                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio"
                     ) {
-                        playback.toggle(audio)
+                        playback.toggle(audio, choice: selectedPlaybackChoice)
                     }
 
                     HomePodcastPlayerButton(
@@ -2310,6 +2350,17 @@ private struct HomeMeetingPodcastPlayer: View {
 
     private var canSeek: Bool {
         playback.isActive(audio) && playback.duration > 0
+    }
+
+    private var selectedPlaybackChoice: MeetingAudioPlaybackChoice? {
+        playback.activeChoice(for: audio) ?? audio.playbackChoice(id: selectedPlaybackChoiceID)
+    }
+
+    private var selectedPlaybackChoiceBinding: Binding<String?> {
+        Binding(
+            get: { selectedPlaybackChoice?.id },
+            set: { selectedPlaybackChoiceID = $0 }
+        )
     }
 }
 
@@ -2638,6 +2689,7 @@ private struct HomeFailedMeetingRow: View {
     let onClear: () -> Void
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @State private var selectedPlaybackChoiceID: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -2662,18 +2714,28 @@ private struct HomeFailedMeetingRow: View {
 
                 HStack(spacing: 8) {
                     if let audio {
+                        let selectedChoice = selectedPlaybackChoice(for: audio)
                         HomeMeetingAudioControl(
-                            title: playback.buttonTitle(for: audio),
-                            symbolName: playback.symbolName(for: audio),
-                            isActive: playback.isActive(audio),
-                            isPlaying: playback.isPlaying && playback.isActive(audio),
+                            title: playback.buttonTitle(for: audio, choice: selectedChoice),
+                            symbolName: playback.symbolName(for: audio, choice: selectedChoice),
+                            isActive: playback.isActive(audio, choice: selectedChoice),
+                            isPlaying: playback.isPlaying && playback.isActive(audio, choice: selectedChoice),
                             scrubber: playback.isActive(audio)
                                 ? AnyView(MeetingAudioScrubber(attachment: audio, width: 190))
                                 : nil
                         ) {
-                            playback.toggle(audio)
+                            playback.toggle(audio, choice: selectedChoice)
                         }
-                        .help("\(playback.buttonTitle(for: audio)) retained meeting audio")
+                        .help("\(playback.buttonTitle(for: audio, choice: selectedChoice)) retained meeting audio")
+
+                        MeetingAudioSourceMenu(
+                            attachment: audio,
+                            selectedChoiceID: selectedPlaybackChoiceBinding(for: audio)
+                        ) { choice in
+                            if playback.isActive(audio) {
+                                playback.switchSource(audio, choice: choice)
+                            }
+                        }
 
                         SettingsInlineActionButton(title: "Show Audio", symbolName: "folder") {
                             onRevealAudio()
@@ -2737,5 +2799,16 @@ private struct HomeFailedMeetingRow: View {
 
     private var hasRetainedAudioFiles: Bool {
         !item.audioURLs.isEmpty
+    }
+
+    private func selectedPlaybackChoice(for audio: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
+        playback.activeChoice(for: audio) ?? audio.playbackChoice(id: selectedPlaybackChoiceID)
+    }
+
+    private func selectedPlaybackChoiceBinding(for audio: MeetingAudioAttachment) -> Binding<String?> {
+        Binding(
+            get: { selectedPlaybackChoice(for: audio)?.id },
+            set: { selectedPlaybackChoiceID = $0 }
+        )
     }
 }

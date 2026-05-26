@@ -3,6 +3,7 @@
 
 import SwiftUI
 import AppKit
+import AVFoundation
 import Carbon
 import Combine
 import TranscriptedCore
@@ -53,7 +54,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         actions: settingsActions
     )
     private lazy var onboardingWindowController = TranscriptedOnboardingWindowController(
-        makeView: { [unowned self] in self.makeOnboardingView() }
+        makeView: { [unowned self] in self.makeOnboardingView() },
+        onPresent: { [weak self] entrypoint in
+            self?.trackOnboardingShown(entrypoint: entrypoint)
+        }
     )
     private lazy var menuPanelController = MenuBarPanelController(
         appState: appState,
@@ -77,6 +81,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var meetingPromptDetector = MeetingPromptDetector()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var terminationCleanupStarted = false
+    private var terminationCleanupFinished = false
+    private var pendingTerminationReplyCount = 0
 
     /// Keeps NSApp in sync with the Dock visibility setting and promotes
     /// the app to `.regular` during active recording for force-quit
@@ -223,7 +229,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         if !PermissionsOnboardingPreferences.hasCompleted() {
             _ = resolvedSourceApp()
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "dock_icon")
             return false
         }
 
@@ -255,8 +261,27 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return .terminateNow
         }
 
-        guard !terminationCleanupStarted else { return .terminateNow }
+        if terminationCleanupFinished {
+            return .terminateNow
+        }
+        guard !terminationCleanupStarted else {
+            pendingTerminationReplyCount += 1
+            return .terminateLater
+        }
+        switch activeMeetingTerminationDecision() {
+        case .keepRecording:
+            return .terminateCancel
+        case .stopAndTranscribe:
+            Task { @MainActor [weak self] in
+                await self?.appState.meetingSession.stopRecording(reason: .quitConfirmation)
+            }
+            return .terminateCancel
+        case .saveAudioAndQuit:
+            break
+        }
+
         terminationCleanupStarted = true
+        pendingTerminationReplyCount = 1
 
         Task { @MainActor [weak self, sender] in
             guard let self else {
@@ -270,10 +295,57 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             self.appState.shutdown()
             await EventReporter.shared.flushLocalEventsForShutdown()
-            sender.reply(toApplicationShouldTerminate: true)
+            self.terminationCleanupFinished = true
+            self.replyToPendingTerminationRequests(sender, shouldTerminate: true)
         }
 
         return .terminateLater
+    }
+
+    private func replyToPendingTerminationRequests(_ sender: NSApplication, shouldTerminate: Bool) {
+        let replyCount = max(pendingTerminationReplyCount, 1)
+        pendingTerminationReplyCount = 0
+
+        for _ in 0..<replyCount {
+            sender.reply(toApplicationShouldTerminate: shouldTerminate)
+        }
+    }
+
+    private func activeMeetingTerminationDecision() -> ActiveMeetingQuitDecision {
+        guard #available(macOS 14.0, *) else { return .saveAudioAndQuit }
+        guard ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
+            preferenceEnabled: QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording(),
+            activeMeetingCapture: appState.meetingSession.shouldConfirmQuitForActiveCapture
+        ) else {
+            return .saveAudioAndQuit
+        }
+
+        return confirmQuitDuringActiveMeeting()
+    }
+
+    private func confirmQuitDuringActiveMeeting() -> ActiveMeetingQuitDecision {
+        closePopover()
+        NSApp.activate(ignoringOtherApps: true)
+
+        let presentation = ActiveMeetingQuitConfirmationPolicy.presentation
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = presentation.title
+        alert.informativeText = presentation.message
+        alert.addButton(withTitle: presentation.keepRecordingTitle)
+        alert.addButton(withTitle: presentation.stopAndTranscribeTitle)
+        alert.addButton(withTitle: presentation.saveAudioAndQuitTitle)
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
+            return .stopAndTranscribe
+        case .alertThirdButtonReturn:
+            return .saveAudioAndQuit
+        default:
+            return .keepRecording
+        }
     }
 
     private func acquireSingleInstanceLock() -> Bool {
@@ -308,7 +380,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         closePopover()
 
         if !PermissionsOnboardingPreferences.hasCompleted() {
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "single_instance_reopen")
         } else {
             showSettingsWindow(page: .home, source: "single_instance_reopen")
         }
@@ -319,7 +391,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @objc func togglePopover() {
         if !PermissionsOnboardingPreferences.hasCompleted() {
             _ = resolvedSourceApp()
-            onboardingWindowController.present()
+            onboardingWindowController.present(entrypoint: "status_item")
             return
         }
 
@@ -455,7 +527,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }
-            self.onboardingWindowController.present()
+            self.onboardingWindowController.present(entrypoint: "initial_launch")
         }
     }
 
@@ -487,21 +559,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func trackMenuBarOpened(entrypoint: String) {
-        let modelState: String
-        switch appState.sttRouter.modelDownloadState {
-        case .notLoaded:
-            modelState = "not_loaded"
-        case .downloading:
-            modelState = "downloading"
-        case .cached:
-            modelState = "cached"
-        case .loading:
-            modelState = "loading"
-        case .ready:
-            modelState = "ready"
-        case .failed:
-            modelState = "failed"
-        }
+        let modelState = modelStateAnalyticsName(appState.sttRouter.modelDownloadState)
 
         let updateState: String
         switch appState.sparkleUpdater.updateStatus.state {
@@ -533,6 +591,54 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "update_state": updateState,
             ]
         )
+    }
+
+    private func trackOnboardingShown(entrypoint: String) {
+        AnalyticsReporter.track(
+            "onboarding_shown",
+            properties: [
+                "analytics_available": AnalyticsReporter.isAvailable ? "true" : "false",
+                "crash_reporting_available": CrashReporter.isAvailable ? "true" : "false",
+                "entrypoint": entrypoint,
+                "has_target": lastExternalApplication == nil ? "false" : "true",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
+                "model_state": modelStateAnalyticsName(appState.sttRouter.modelDownloadState),
+                "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
+            ]
+        )
+    }
+
+    private func modelStateAnalyticsName(_ state: ParakeetModelState) -> String {
+        switch state {
+        case .notLoaded:
+            return "not_loaded"
+        case .downloading:
+            return "downloading"
+        case .cached:
+            return "cached"
+        case .loading:
+            return "loading"
+        case .ready:
+            return "ready"
+        case .failed:
+            return "failed"
+        }
+    }
+
+    private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined:
+            return "not_determined"
+        case .restricted:
+            return "restricted"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
@@ -627,8 +733,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
 
         let sourceApp = resolvedSourceApp()
+        let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sourceApp?.activate(options: [])
-        _ = settingsTextPaster.paste(latestText)
+        _ = settingsTextPaster.paste(latestText, target: pasteTarget)
     }
 
     @available(macOS 14.0, *)

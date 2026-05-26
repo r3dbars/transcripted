@@ -7,6 +7,7 @@ This document describes the observability lanes used by Transcripted and how to 
 | Lane | What it Reports | Required Env Vars | Required Scopes | How to Obtain Credential | Probe Command |
 |------|-----------------|-------------------|-----------------|--------------------------|---------------|
 | **Sentry** | Crash and reliability diagnostics | `SENTRY_AUTH_TOKEN` | `project:read` | Create an auth token at [Sentry API Tokens](https://sentry.io/settings/account/api/auth-tokens/) with `project:read` scope | `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/projects/r3dbars/apple-macos/issues/?query=is:unresolved&limit=10"` |
+| **Sentry Releases** | Release registration and debug symbols | `SENTRY_AUTH_TOKEN` or configured `sentry-cli` auth | `project:releases`, `project:write`, plus `org:read` for `sentry-cli` release management | Use the same Sentry token surface, with release-management scopes added only on release machines | `bash scripts/release/register-sentry-release.sh <version>` |
 | **PostHog** | Anonymous usage statistics | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` | Personal API key | Create a Personal API Key in PostHog project settings (Settings -> Personal API keys) | `bash scripts/ops/health-probe.sh posthog` |
 | **GitHub** | Release metadata, traffic stats | None (uses `gh auth`) | None (uses authenticated CLI) | Run `gh auth login` in your terminal | `gh api repos/r3dbars/transcripted` |
 | **Cloudflare** | Pages deployment status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Zone:Read` | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with Account permissions for `Zone:Read` | See `scripts/ops/health-probe.sh cloudflare` |
@@ -36,7 +37,9 @@ Only report aggregate counts, status codes, deployment IDs, and issue titles. Fo
 
 ### PostHog Probe Shape
 
-The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. First-value events are limited to `onboarding_first_dictation_saved`, `meeting_transcript_saved`, and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
+The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `onboarding_first_dictation_saved`, `meeting_transcript_saved`, and `onboarding_agent_cta_clicked`, so the health lane can see whether users reached a saved Markdown artifact or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
+
+If `POSTHOG_HOST` points at the app ingest host, such as `https://us.i.posthog.com`, the probe normalizes it to the matching PostHog API host before running HogQL. The probe only sends `POSTHOG_PERSONAL_API_KEY` to HTTPS PostHog API hosts by default. Set `POSTHOG_ALLOW_UNTRUSTED_HOST=1` only when using a trusted self-hosted PostHog endpoint.
 
 ## Quick Start
 

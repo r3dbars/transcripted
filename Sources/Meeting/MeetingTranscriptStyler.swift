@@ -36,9 +36,12 @@ enum MeetingTranscriptStyler {
     }
 
     static func displayTranscriptPreview(at url: URL) -> StyledMeetingTranscript? {
-        let raw: String
+        let frontmatter: TranscriptFrontmatterDocument?
         do {
-            raw = try previewString(at: url)
+            frontmatter = try TranscriptFrontmatter.readDocument(
+                from: url,
+                byteLimit: frontmatterPreviewByteLimit
+            )
         } catch {
             logFailure(
                 event: "meeting_transcript_preview_read_failed",
@@ -51,8 +54,9 @@ enum MeetingTranscriptStyler {
             return nil
         }
 
-        guard isMeetingTranscript(raw) else { return nil }
-        guard let document = parseDocument(raw, fallbackURL: url) else {
+        guard let frontmatter,
+              isMeetingTranscript(frontmatter) else { return nil }
+        guard let document = parseDocument(frontmatter, fallbackURL: url) else {
             return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
         }
 
@@ -79,7 +83,24 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: fallbackTitle(for: url))
         }
 
-        guard let document = parseDocument(raw, fallbackURL: url) else {
+        guard let frontmatter = TranscriptFrontmatter.document(in: raw) else {
+            return StyledMeetingTranscript(
+                url: url,
+                title: fallbackTitle(for: url)
+            )
+        }
+        guard isMeetingTranscript(frontmatter) else {
+            let explicitTitle = frontmatter.values["title"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = explicitTitle?.isEmpty == false
+                ? explicitTitle ?? fallbackTitle(for: url)
+                : fallbackTitle(for: url)
+            return StyledMeetingTranscript(
+                url: url,
+                title: title
+            )
+        }
+        guard let document = parseDocument(frontmatter, fallbackURL: url) else {
             return StyledMeetingTranscript(
                 url: url,
                 title: fallbackTitle(for: url)
@@ -91,9 +112,9 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: title)
         }
 
-        let frontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
+        let renderedFrontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
         let body = renderBody(document: document, title: title)
-        let updated = frontmatter + "\n\n" + body + "\n"
+        let updated = renderedFrontmatter + "\n\n" + body + "\n"
         let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title)
 
         if updated != raw {
@@ -134,22 +155,26 @@ enum MeetingTranscriptStyler {
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func previewString(at url: URL, byteLimit: Int = 64 * 1024) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        let data = try handle.read(upToCount: byteLimit) ?? Data()
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    private static func isMeetingTranscript(_ raw: String) -> Bool {
-        raw.hasPrefix("---\n") && (raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"))
+    private static func isMeetingTranscript(_ document: TranscriptFrontmatterDocument) -> Bool {
+        let body = document.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return document.values["capture_type"] == "meeting"
+            || body.hasPrefix("## Full Transcript")
+            || body.hasPrefix("## Transcript")
+            || body.contains("\n## Full Transcript")
+            || body.contains("\n## Transcript")
     }
 
     private static func parseDocument(_ raw: String, fallbackURL: URL) -> ParsedDocument? {
         guard let frontmatter = TranscriptFrontmatter.document(in: raw) else {
             return nil
         }
+        return parseDocument(frontmatter, fallbackURL: fallbackURL)
+    }
 
+    private static func parseDocument(
+        _ frontmatter: TranscriptFrontmatterDocument,
+        fallbackURL: URL
+    ) -> ParsedDocument? {
         let values = frontmatter.values
 
         let recordedAt = parseRecordedAt(values: values, fallbackURL: fallbackURL)

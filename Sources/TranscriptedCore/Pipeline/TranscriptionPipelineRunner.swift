@@ -16,7 +16,8 @@ extension TranscriptionTaskManager {
         healthInfo: RecordingHealthInfo?,
         splitLocalSpeakers: Bool = false,
         meetingTitle: String? = nil,
-        sourceFailedTranscriptionId: UUID? = nil
+        sourceFailedTranscriptionId: UUID? = nil,
+        removeSourceAudioAfterArchive: Bool = true
     ) async throws -> URL {
 
         // Require system audio for multichannel transcription
@@ -32,7 +33,8 @@ extension TranscriptionTaskManager {
             healthInfo: healthInfo,
             splitLocalSpeakers: splitLocalSpeakers,
             meetingTitle: meetingTitle,
-            sourceFailedTranscriptionId: sourceFailedTranscriptionId
+            sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+            removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
         )
     }
 
@@ -41,7 +43,8 @@ extension TranscriptionTaskManager {
         audioURL: URL,
         outputFolder: URL,
         taskId: UUID,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) async throws -> URL {
         try await transcribeMultichannelPipeline(
             micURL: nil,
@@ -50,7 +53,8 @@ extension TranscriptionTaskManager {
             taskId: taskId,
             healthInfo: nil,
             splitLocalSpeakers: false,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
         )
     }
 
@@ -66,7 +70,9 @@ extension TranscriptionTaskManager {
         healthInfo: RecordingHealthInfo?,
         splitLocalSpeakers: Bool = false,
         meetingTitle: String? = nil,
-        sourceFailedTranscriptionId: UUID? = nil
+        recordingDate: Date? = nil,
+        sourceFailedTranscriptionId: UUID? = nil,
+        removeSourceAudioAfterArchive: Bool = true
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -282,6 +288,7 @@ extension TranscriptionTaskManager {
             notifier: notifier,
             speakerStore: speakerDB,
             statsStore: statsStore,
+            recordingDate: recordingDate,
             transcriptionEngine: speechEngine
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
@@ -289,11 +296,12 @@ extension TranscriptionTaskManager {
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
-        let shouldRemoveScratchAudio = await archiveRecordingAudioIfConfigured(
+        let didArchiveRecordingAudio = await archiveRecordingAudioIfConfigured(
             micURL: micURL,
             systemURL: systemURL,
             savedURL: savedURL
         )
+        let shouldRemoveScratchAudio = didArchiveRecordingAudio && removeSourceAudioAfterArchive
 
         // Phase 3: Speaker naming — for system speakers that need action, plus any mic
         // speakers surfaced by local-speaker split. Entries from both channels flow

@@ -150,6 +150,48 @@ final class AnalyticsReporter {
         }
     }
 
+    static func defaultProperties(
+        distinctID: String,
+        sessionID: String,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        operatingSystemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> [String: String] {
+        var properties: [String: String] = [
+            "distinct_id": distinctID,
+            "app_version": infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            "build_version": infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+            "os_major": "\(operatingSystemVersion.majorVersion)",
+        ]
+
+        let sanitizedSessionID = AnalyticsPayloadSanitizer.sanitizeText(sessionID)
+        if !sanitizedSessionID.isEmpty {
+            properties["session_id"] = sanitizedSessionID
+        }
+
+        return properties
+    }
+
+    static func captureProperties(
+        sanitizedProperties: [String: String],
+        distinctID: String,
+        sessionID: String,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        operatingSystemVersion: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> [String: String] {
+        var eventProperties = defaultProperties(
+            distinctID: distinctID,
+            sessionID: sessionID,
+            infoDictionary: infoDictionary,
+            operatingSystemVersion: operatingSystemVersion
+        )
+        // Caller properties can carry historical build metadata, such as an older
+        // build that crashed before the current app launch noticed it.
+        for (key, value) in sanitizedProperties {
+            eventProperties[key] = value
+        }
+        return eventProperties
+    }
+
     private init() {}
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
@@ -187,14 +229,11 @@ final class AnalyticsReporter {
             allowedKeys: policy.allowedProperties
         )
 
-        var eventProperties: [String: String] = sanitizedProperties
-        eventProperties["distinct_id"] = distinctID
-        eventProperties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        eventProperties["os_major"] = "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"
-        let sanitizedSessionID = AnalyticsPayloadSanitizer.sanitizeText(sessionID)
-        if !sanitizedSessionID.isEmpty {
-            eventProperties["session_id"] = sanitizedSessionID
-        }
+        let eventProperties = Self.captureProperties(
+            sanitizedProperties: sanitizedProperties,
+            distinctID: distinctID,
+            sessionID: sessionID
+        )
 
         let payload = AnalyticsCaptureRequest(
             apiKey: apiKey,

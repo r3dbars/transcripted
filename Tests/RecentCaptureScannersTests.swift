@@ -138,4 +138,113 @@ func testRecentCaptureScanners() {
             "Ready meetings should not show a speaker review button"
         )
     }
+
+    runSuite("RecentMeetingRetranscriptionActionPolicy shows saved-audio speaker ID fallback") {
+        assertTrue(
+            RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+                speakerStatus: .needsReview(1),
+                hasRetainedAudio: true,
+                hasSpeakerReviewWork: false
+            ),
+            "A saved meeting with generic labels and retained audio should offer a new speaker-ID pass when no review queue exists"
+        )
+        assertFalse(
+            RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+                speakerStatus: .needsReview(1),
+                hasRetainedAudio: false,
+                hasSpeakerReviewWork: false
+            ),
+            "Re-transcription needs retained audio"
+        )
+        assertFalse(
+            RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+                speakerStatus: .needsReview(1),
+                hasRetainedAudio: true,
+                hasSpeakerReviewWork: true
+            ),
+            "Existing speaker review work should keep the normal Review speakers action"
+        )
+        assertFalse(
+            RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
+                speakerStatus: .ready,
+                hasRetainedAudio: true,
+                hasSpeakerReviewWork: false
+            ),
+            "Ready meetings should keep re-transcription in the row menu instead of showing an inline warning action"
+        )
+    }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy blocks while models prepare") {
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: true,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Preparing models...",
+            "saved-meeting re-transcription should not accept duplicate clicks while model prep is in flight"
+        )
+    }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy blocks during live work") {
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: true,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current dictation to finish before re-transcribing saved audio.",
+            "saved-meeting re-transcription should not race an active dictation"
+        )
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: true,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Stop the current recording before re-transcribing saved audio.",
+            "saved-meeting re-transcription should not start while a meeting is recording"
+        )
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: true,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.",
+            "saved-meeting re-transcription should stay single-flight with background meeting work"
+        )
+        assertEqual(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: true
+            ),
+            "Finish the speaker review window before re-transcribing saved audio.",
+            "saved-meeting re-transcription should wait until speaker review is resolved"
+        )
+    }
+
+    runSuite("SavedMeetingRetranscriptionAvailabilityPolicy allows idle saved meetings") {
+        assertNil(
+            SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "idle saved meetings with retained audio should stay re-transcribable"
+        )
+    }
 }

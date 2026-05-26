@@ -56,6 +56,7 @@ func testSentryRuntimeConfiguration() {
         let info: [String: Any] = [
             SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",
             SentryRuntimeConfiguration.environmentInfoKey: "local-plist",
+            SentryRuntimeConfiguration.releasePrefixInfoKey: "transcripted",
             "CFBundleShortVersionString": "1.2.3",
             "CFBundleVersion": "456",
         ]
@@ -76,14 +77,66 @@ func testSentryRuntimeConfiguration() {
             "production remains the final environment fallback"
         )
         assertEqual(
-            SentryRuntimeConfiguration.releaseName(infoDictionary: info),
+            SentryRuntimeConfiguration.releaseName(environment: [:], infoDictionary: info),
             "transcripted@1.2.3",
             "release name should stay versioned"
         )
         assertEqual(
-            SentryRuntimeConfiguration.dist(infoDictionary: info),
+            SentryRuntimeConfiguration.dist(environment: [:], infoDictionary: info),
             "456",
             "dist should still mirror CFBundleVersion"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration lets local validation override release metadata") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.releasePrefixInfoKey: "transcripted",
+            "CFBundleShortVersionString": "1.2.3",
+            "CFBundleVersion": "456",
+        ]
+        let environment = [
+            SentryRuntimeConfiguration.releaseEnvironmentKey: "transcripted@local-validation",
+            SentryRuntimeConfiguration.distEnvironmentKey: "local-build",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.releaseName(environment: environment, infoDictionary: info),
+            "transcripted@local-validation",
+            "SENTRY_RELEASE should win for smoke tests that must not look like a shipped build"
+        )
+        assertEqual(
+            SentryRuntimeConfiguration.dist(environment: environment, infoDictionary: info),
+            "local-build",
+            "SENTRY_DIST should win for smoke tests that need a synthetic dist"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration defaults to the Transcripted release prefix") {
+        let info: [String: Any] = [
+            "CFBundleShortVersionString": "1.2.3",
+            "CFBundleVersion": "456",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.releaseName(environment: [:], infoDictionary: info),
+            "transcripted@1.2.3",
+            "missing bundle prefix should still produce the shipped Transcripted release name"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration ignores invalid release overrides") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.releasePrefixInfoKey: "transcripted",
+            "CFBundleShortVersionString": "1.2.3",
+        ]
+        let environment = [
+            SentryRuntimeConfiguration.releaseEnvironmentKey: "bad/release",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.releaseName(environment: environment, infoDictionary: info),
+            "transcripted@1.2.3",
+            "invalid SENTRY_RELEASE values should not replace the shipped release name"
         )
     }
 

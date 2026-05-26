@@ -101,13 +101,16 @@ enum AudioRecordingFormatPolicy {
 
 enum AudioInputTapTeardownStep: Equatable {
     case stopEngine
+    case waitForStoppedInputCallbacks
     case removeInputTap
 }
 
 enum AudioInputTapTeardownPolicy {
+    static let inputCallbackDrainDelay: TimeInterval = 0.05
+
     static func steps(engineIsRunning: Bool) -> [AudioInputTapTeardownStep] {
         engineIsRunning
-            ? [.stopEngine, .removeInputTap]
+            ? [.stopEngine, .waitForStoppedInputCallbacks, .removeInputTap]
             : [.removeInputTap]
     }
 }
@@ -341,6 +344,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     "operation": operation
                 ])
                 engine.stop()
+            case .waitForStoppedInputCallbacks:
+                Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
             case .removeInputTap:
                 inputNode.removeTap(onBus: 0)
             }
@@ -766,7 +771,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
 
         // Pre-flight validation checks
-        let validationResult = RecordingValidator.validateRecordingConditions()
+        let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
         guard validationResult.isValid else {
             AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
             error = validationResult.errorMessage
@@ -887,6 +892,24 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         isRecording = true
         isStarting = false
+        restoreSystemAudioHealthyStatusAfterSuccessfulStart()
+    }
+
+    func restoreSystemAudioHealthyStatusAfterSuccessfulStart() {
+        guard systemAudioFileURL != nil,
+              !systemAudioFailed,
+              systemAudioStatus == .unknown else {
+            return
+        }
+
+        systemAudioStatus = .healthy
+    }
+
+    func assignSystemAudioFileURLIfCurrent(_ fileURL: URL, sessionGeneration: UInt64) {
+        guard recordingSessionGeneration == sessionGeneration else { return }
+
+        systemAudioFileURL = fileURL
+        restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
     // MARK: - Stop Recording

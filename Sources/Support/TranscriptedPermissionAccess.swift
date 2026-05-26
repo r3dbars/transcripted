@@ -64,23 +64,32 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     static func openSettings(for kind: TranscriptedPermissionKind) {
+        Task { @MainActor in
+            _ = await requestAccessOrOpenSettings(for: kind)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    static func requestAccessOrOpenSettings(for kind: TranscriptedPermissionKind) async -> Bool {
         switch kind {
         case .microphone:
             switch microphoneAuthorizationStatus() {
             case .authorized:
-                break
+                return true
             case .notDetermined:
-                activateForPermissionPrompt()
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    guard !granted else { return }
-                    Task { @MainActor in
-                        openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-                    }
+                let granted = await requestMicrophoneAccessIfNeeded()
+                notifyPermissionsDidChange(kind: .microphone)
+                if !granted {
+                    openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
                 }
+                return granted
             case .denied, .restricted:
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                return false
             @unknown default:
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+                return false
             }
         case .accessibility:
             if !AXIsProcessTrusted() {
@@ -88,38 +97,47 @@ enum TranscriptedPermissionAccess {
                 _ = AXIsProcessTrustedWithOptions(options)
             }
             openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            notifyPermissionsDidChange(kind: .accessibility)
+            return AXIsProcessTrusted()
         case .systemAudioRecording:
             if systemAudioRecordingStatus() == .granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
-                return
+                return true
             }
 
-            Task { @MainActor in
-                let granted = await requestSystemAudioRecordingAccessIfNeeded()
-                guard !granted else { return }
+            let granted = await requestSystemAudioRecordingAccessIfNeeded()
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+            if !granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             }
+            return granted
         case .calendar:
-            Task { @MainActor in
-                activateForPermissionPrompt()
-                let granted = await requestCalendarAccessIfNeeded()
-                guard !granted else { return }
+            activateForPermissionPrompt()
+            let granted = await requestCalendarAccessIfNeeded()
+            notifyPermissionsDidChange(kind: .calendar)
+            if !granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
             }
+            return granted
         }
     }
 
-    static func requestCalendarAccessIfNeeded() async -> Bool {
-        let status = EKEventStore.authorizationStatus(for: .event)
+    static func requestCalendarAccessIfNeeded(
+        statusProvider: () -> EKAuthorizationStatus = { EKEventStore.authorizationStatus(for: .event) },
+        requester: () async throws -> Bool = {
+            let store = EKEventStore()
+            return try await store.requestFullAccessToEvents()
+        }
+    ) async -> Bool {
+        let status = statusProvider()
         switch status {
         case .fullAccess:
             return true
         case .authorized:
             return true
         case .notDetermined:
-            let store = EKEventStore()
             do {
-                return try await store.requestFullAccessToEvents()
+                return try await requester()
             } catch {
                 return false
             }
@@ -212,6 +230,15 @@ enum TranscriptedPermissionAccess {
         guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
+
+    @MainActor
+    private static func notifyPermissionsDidChange(kind: TranscriptedPermissionKind) {
+        NotificationCenter.default.post(name: .transcriptedPermissionsDidChange, object: kind)
+    }
+}
+
+extension Notification.Name {
+    static let transcriptedPermissionsDidChange = Notification.Name("transcriptedPermissionsDidChange")
 }
 
 @available(macOS 26.0, *)

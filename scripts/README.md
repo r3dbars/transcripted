@@ -12,18 +12,25 @@ stable and the docs can keep pointing at the same commands:
 - `build-beta.sh` — signed beta/distribution build
 - `run-tests.sh` — curated fast test runner
 - `run-integration-smoke.sh` — app/core smoke verification
+- `run-e2e-smoke.sh` — deterministic release-critical artifact smoke without microphone/TCC
+- `run-live-capture-smoke.sh` — local hardware/TCC smoke for app launch plus mic and system-audio capture
 - `run-daily-audio-reliability.sh` — interactive or synthetic daily audio reliability check
 
-## Entrypoint implementations
+## Wrapper implementations
 
-The actual script bodies live under `scripts/entrypoints/` so the repo root does
+Most root wrapper bodies live under `scripts/entrypoints/` so the repo root does
 not have to carry the full operational logic:
 
 - `scripts/entrypoints/build-deps.sh`
 - `scripts/entrypoints/build.sh`
 - `scripts/entrypoints/build-beta.sh`
+- `scripts/entrypoints/run-e2e-smoke.sh`
 - `scripts/entrypoints/run-tests.sh`
 - `scripts/entrypoints/run-integration-smoke.sh`
+- `scripts/entrypoints/run-live-capture-smoke.sh`
+
+`run-daily-audio-reliability.sh` is the exception: it keeps its implementation
+with the operational health probes at `scripts/ops/daily-audio-reliability-check.sh`.
 
 ## Active helper scripts
 
@@ -32,6 +39,8 @@ not have to carry the full operational logic:
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
+- `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
+- `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release and upload release dSYMs after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
 ## Operational health probes
@@ -60,12 +69,21 @@ not have to carry the full operational logic:
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
-- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the auto-close workflow
+- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
   - Usage: `bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]`
   - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
   - Usage: `bash scripts/ops/qa-gate-closeout.sh [repo] [issue_number] [owner_login]`
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, and optional live capture
+  - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
+  - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
+  - Corpus usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus`
+  - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
+  - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
+  - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
+- `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
+- `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
   - Usage: `bash scripts/ops/nightly-transcripted-archive-miner.sh`
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state

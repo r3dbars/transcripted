@@ -83,6 +83,30 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
     }
 
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy waits on unsettled route formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .routeNotSettled),
+            .keepWaiting,
+            "route churn should keep using the recovery budget instead of failing after the first stale format"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy waits on invalid transient formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .invalid),
+            .keepWaiting,
+            "zero or invalid formats during device churn should wait for the recovery timeout"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryReadinessPolicy finishes only on ready formats") {
+        assertEqual(
+            ParakeetDeviceRecoveryReadinessPolicy.action(for: .ready),
+            .finishRecovery,
+            "ready formats should complete the device-change recovery"
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryTimeoutPolicy abandons blocked audio graph") {
         let idleAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: false)
         let recordingAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: true)
@@ -114,6 +138,26 @@ func testParakeetStartRecordingFailurePolicy() {
         )
     }
 
+    runSuite("ParakeetASRInferenceActivityState stays active until all inference exits") {
+        var state = ParakeetASRInferenceActivityState()
+
+        state.begin()
+        state.begin()
+        assertTrue(state.isActive, "any active CoreML inference should block manager cleanup")
+        assertEqual(state.activeCount, 2, "nested activity should keep an exact count")
+
+        state.finish()
+        assertTrue(state.isActive, "one completed inference should not clear cleanup protection while another remains")
+        assertEqual(state.activeCount, 1, "finish should decrement one active inference")
+
+        state.finish()
+        assertFalse(state.isActive, "cleanup protection can clear once every inference is done")
+        assertEqual(state.activeCount, 0, "activity count should return to zero")
+
+        state.finish()
+        assertEqual(state.activeCount, 0, "extra finish calls should not underflow")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts normal built-in formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,
@@ -142,7 +186,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "AirPods HFP 24k hardware to 48k output should remain valid")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts built-in mic with Bluetooth output speech bus") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers built-in override with Bluetooth output speech bus") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -153,7 +197,21 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionOverrodeDefault: true
         )
 
-        assertEqual(readiness, .ready, "built-in mic with Bluetooth output can capture at the 24k bus and resample")
+        assertEqual(readiness, .routeNotSettled, "built-in override with a 24k Bluetooth output bus should wait for CoreAudio to settle")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts intentional Bluetooth output speech bus") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: false
+        )
+
+        assertEqual(readiness, .ready, "native built-in capture with Bluetooth output can still use the speech bus when Transcripted did not force an input override")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy defers stale AirPods-to-built-in switch formats") {

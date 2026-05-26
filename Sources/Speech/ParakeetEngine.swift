@@ -35,17 +35,6 @@ private enum ParakeetAudioEngineWorkError: LocalizedError {
     }
 }
 
-private enum ParakeetDeviceRecoveryError: LocalizedError {
-    case routeNotSettled
-
-    var errorDescription: String? {
-        switch self {
-        case .routeNotSettled:
-            return "Audio route not settled after device change"
-        }
-    }
-}
-
 private enum CoreAudioInputDeviceLookup {
     static func preferredDictationInputSelection() throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
@@ -461,6 +450,10 @@ class ParakeetEngine: ObservableObject {
     private var modelFilePrefetchTask: Task<URL, Error>?
     private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
+    private var asrInferenceActivity = ParakeetASRInferenceActivityState()
+    private var asrInferenceHandoffCount = 0
+    private var asrInferenceWaiters: [CheckedContinuation<Void, Never>] = []
+    private var pureSampleTranscriptionActivityCount = 0
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
     private var cachedInputDeviceName = "Unknown"
@@ -1267,41 +1260,44 @@ class ParakeetEngine: ObservableObject {
             guard !Task.isCancelled, let self = self else { return }
             guard !self.recoveryState.isStale(generation: myGeneration) else { return }
             do {
-                // Two-step format validation. CoreAudio sometimes reports zero
-                // sample rate on first read after device change, even past the
-                // initial settle delay. One extra wait + re-read is enough.
-                var snapshot = try await self.audioInputSnapshot(
-                    operation: "device_recovery",
-                    recoveryGeneration: myGeneration
-                )
-                if self.audioFormatReadiness(outputFormat: snapshot.outputFormat, hwFormat: snapshot.hwFormat, selection: snapshot.selection) != .ready {
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                    guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                    snapshot = try await self.audioInputSnapshot(
-                        operation: "device_recovery_retry",
+                var recoveryAttempt = 0
+                var readySnapshot: ParakeetAudioInputSnapshot?
+                while readySnapshot == nil {
+                    recoveryAttempt += 1
+                    let snapshot = try await self.audioInputSnapshot(
+                        operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
                         recoveryGeneration: myGeneration
                     )
-                }
-                let readiness = self.audioFormatReadiness(
-                    outputFormat: snapshot.outputFormat,
-                    hwFormat: snapshot.hwFormat,
-                    selection: snapshot.selection
-                )
-                guard readiness == .ready else {
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "device_change_rewarm_deferred",
-                        message: "Audio route still settling after device change",
-                        context: self.audioFormatContext(
+                    let readiness = self.audioFormatReadiness(
+                        outputFormat: snapshot.outputFormat,
+                        hwFormat: snapshot.hwFormat,
+                        selection: snapshot.selection
+                    )
+                    switch ParakeetDeviceRecoveryReadinessPolicy.action(for: readiness) {
+                    case .finishRecovery:
+                        readySnapshot = snapshot
+                    case .keepWaiting:
+                        var context = self.audioFormatContext(
                             outputFormat: snapshot.outputFormat,
                             hwFormat: snapshot.hwFormat,
                             selection: snapshot.selection,
                             readiness: readiness
                         )
-                    )
-                    throw ParakeetDeviceRecoveryError.routeNotSettled
+                        context["recovery_attempt"] = "\(recoveryAttempt)"
+                        EventReporter.shared.capture(
+                            level: .warning,
+                            engine: "parakeet",
+                            event: "device_change_rewarm_deferred",
+                            message: "Audio route still settling after device change",
+                            context: context
+                        )
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+                        guard !Task.isCancelled else { return }
+                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
+                        continue
+                    }
                 }
+                guard let snapshot = readySnapshot else { return }
                 self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
                 self.prewarmRetryCount = 0
                 print("🔄 PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
@@ -1421,10 +1417,7 @@ class ParakeetEngine: ObservableObject {
                             ]
                         ))
                 }
-                let rebuildReason = error is ParakeetDeviceRecoveryError
-                    ? "device_change_route_not_settled"
-                    : "device_change_rewarm_failed"
-                await self.rebuildAudioEngine(reason: rebuildReason)
+                await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
                 if failureAction.schedulePrewarmRetry {
                     self.prewarmRetryCount = 0
                     self.schedulePrewarmRetry()
@@ -1817,14 +1810,13 @@ class ParakeetEngine: ObservableObject {
 
                 if self.liveDisplayEnabled, let eou = self.eouManager {
                     let resampled = AudioResampler.resample(monoSamples, from: effectiveSampleRate, to: 16000)
-                    self.streamingSamplesLock.lock()
-                    self.streamingSampleBuffer.append(contentsOf: resampled)
-                    var chunk: [Float]? = nil
-                    if self.streamingSampleBuffer.count >= self.eouChunkSamples {
-                        chunk = self.streamingSampleBuffer
+                    let chunk: [Float]? = self.streamingSamplesLock.withLock {
+                        self.streamingSampleBuffer.append(contentsOf: resampled)
+                        guard self.streamingSampleBuffer.count >= self.eouChunkSamples else { return nil }
+                        let ready = self.streamingSampleBuffer
                         self.streamingSampleBuffer = []
+                        return ready
                     }
-                    self.streamingSamplesLock.unlock()
                     if let chunk = chunk, let pcm = self.makePCMBuffer(from: chunk) {
                         Task {
                             do { _ = try await eou.process(audioBuffer: pcm) }
@@ -1834,17 +1826,17 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
-                self.pendingSamplesLock.lock()
-                self.pendingSamples.append(contentsOf: monoSamples)
-                let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
-                    sampleRate: effectiveSampleRate,
-                    seconds: TranscriptedConstants.audioBufferCapacitySeconds
-                )
-                let overflowMargin = Int(effectiveSampleRate)
-                if self.pendingSamples.count > maxSamples + overflowMargin {
-                    self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+                self.pendingSamplesLock.withLock {
+                    self.pendingSamples.append(contentsOf: monoSamples)
+                    let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+                        sampleRate: effectiveSampleRate,
+                        seconds: TranscriptedConstants.audioBufferCapacitySeconds
+                    )
+                    let overflowMargin = Int(effectiveSampleRate)
+                    if self.pendingSamples.count > maxSamples + overflowMargin {
+                        self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+                    }
                 }
-                self.pendingSamplesLock.unlock()
 
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - self.lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
@@ -2792,6 +2784,64 @@ class ParakeetEngine: ObservableObject {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
     }
 
+    private var hasActiveASRWork: Bool {
+        asrInferenceActivity.isActive
+            || asrInferenceHandoffCount > 0
+            || !asrInferenceWaiters.isEmpty
+            || pureSampleTranscriptionActivityCount > 0
+    }
+
+    private func beginPureSampleTranscriptionActivity() {
+        pureSampleTranscriptionActivityCount += 1
+    }
+
+    private func finishPureSampleTranscriptionActivity() {
+        pureSampleTranscriptionActivityCount = max(0, pureSampleTranscriptionActivityCount - 1)
+    }
+
+    private func beginASRInference() async {
+        if !asrInferenceActivity.isActive {
+            asrInferenceActivity.begin()
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            asrInferenceWaiters.append(continuation)
+        }
+        asrInferenceHandoffCount = max(0, asrInferenceHandoffCount - 1)
+        asrInferenceActivity.begin()
+    }
+
+    private func finishASRInference() {
+        asrInferenceActivity.finish()
+        if let next = asrInferenceWaiters.first {
+            asrInferenceWaiters.removeFirst()
+            asrInferenceHandoffCount += 1
+            next.resume()
+            return
+        }
+    }
+
+    private func runASRInference(
+        manager: AsrManager,
+        samples: [Float],
+        source: AudioSource
+    ) async throws -> String {
+        await beginASRInference()
+        do {
+            try Task.checkCancellation()
+            let result = try await manager.transcribe(samples, source: source)
+            let text = withExtendedLifetime(result) {
+                String(result.text)
+            }
+            finishASRInference()
+            return text
+        } catch {
+            finishASRInference()
+            throw error
+        }
+    }
+
     func transcribe() async -> String? {
         guard !isTranscribing else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
@@ -2841,14 +2891,18 @@ class ParakeetEngine: ObservableObject {
         }
 
         do {
-            let result = try await manager.transcribe(resampled, source: .microphone)
+            let resultText = try await runASRInference(
+                manager: manager,
+                samples: resampled,
+                source: .microphone
+            )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
             let corrected = CustomDictionaryTextProcessor.apply(to: trimmed)
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
-            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s: \"\(corrected.prefix(80))...\"")
+            print("✅ PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
 
             if trimmed.isEmpty {
                 let analysis = DictationAudioRecovery.analyze(
@@ -2876,9 +2930,13 @@ class ParakeetEngine: ObservableObject {
                     )
 
                     do {
-                        let retryResult = try await manager.transcribe(retrySamples, source: .microphone)
+                        let retryResultText = try await runASRInference(
+                            manager: manager,
+                            samples: retrySamples,
+                            source: .microphone
+                        )
                         let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
-                        let retryTrimmed = retryResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let retryTrimmed = retryResultText.trimmingCharacters(in: .whitespacesAndNewlines)
                         let retryCorrected = CustomDictionaryTextProcessor.apply(to: retryTrimmed)
                         if !retryTrimmed.isEmpty {
                             let totalElapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -2980,6 +3038,9 @@ class ParakeetEngine: ObservableObject {
     /// - Returns: Transcribed text, trimmed. Empty string if Parakeet returned nothing.
     /// - Throws: Re-throws `AsrManager.transcribe` errors (including model-not-ready).
     func transcribeSamples(_ samples: [Float], source: AudioSource) async throws -> String {
+        beginPureSampleTranscriptionActivity()
+        defer { finishPureSampleTranscriptionActivity() }
+
         guard let manager = asrManager, asrManagerReady else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcribeSamples")
@@ -3007,8 +3068,11 @@ class ParakeetEngine: ObservableObject {
         let sourceDescription = source == .microphone ? "microphone" : "system"
         let resultText: String
         do {
-            let result = try await manager.transcribe(samples, source: source)
-            resultText = result.text
+            resultText = try await runASRInference(
+                manager: manager,
+                samples: samples,
+                source: source
+            )
         } catch {
             if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
                 sampleCount: samples.count,
@@ -3199,7 +3263,9 @@ class ParakeetEngine: ObservableObject {
             wakeObserver = nil
         }
         removeInputDeviceChangeListener()
-        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(isTranscribing: isTranscribing)
+        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(
+            isTranscribing: isTranscribing || hasActiveASRWork
+        )
         let mgr = asrManager
         if cleanupDecision == .cleanupNow {
             asrManager = nil

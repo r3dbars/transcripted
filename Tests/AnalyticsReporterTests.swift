@@ -56,4 +56,43 @@ func testAnalyticsReporter() {
 
         assertEqual(value, "https://legacy.example.com", "legacy Draft override should still work when Transcripted override is absent")
     }
+
+    runSuite("AnalyticsReporter default properties include exact build metadata") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "session-1",
+            infoDictionary: [
+                "CFBundleShortVersionString": "1.2.3",
+                "CFBundleVersion": "456",
+            ],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["distinct_id"], "anonymous-device", "distinct id should be included")
+        assertEqual(properties["app_version"], "1.2.3", "app version should be included")
+        assertEqual(properties["build_version"], "456", "build version should be included")
+        assertEqual(properties["os_major"], "15", "OS major version should be included")
+        assertEqual(properties["session_id"], "session-1", "sanitized session id should be included")
+    }
+
+    runSuite("AnalyticsReporter keeps caller build metadata over current defaults") {
+        let properties = AnalyticsReporter.captureProperties(
+            sanitizedProperties: [
+                "app_version": "1.2.2",
+                "build_version": "455",
+            ],
+            distinctID: "anonymous-device",
+            sessionID: "session-1",
+            infoDictionary: [
+                "CFBundleShortVersionString": "1.2.3",
+                "CFBundleVersion": "456",
+            ],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["app_version"], "1.2.2", "caller app version should win")
+        assertEqual(properties["build_version"], "455", "caller build version should win")
+        assertEqual(properties["distinct_id"], "anonymous-device", "default distinct id should remain")
+        assertEqual(properties["session_id"], "session-1", "default session id should remain")
+    }
 }

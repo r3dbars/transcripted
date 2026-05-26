@@ -35,9 +35,9 @@ public class FailedTranscriptionManager: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
 
-        // Load existing failed transcriptions and auto-clean permanent failures
+        // Load existing failed transcriptions. User-visible failed meetings stay
+        // queued until the user retries, deletes, or the age-based cleanup runs.
         loadFailedTranscriptions()
-        cleanupPermanentFailures()
     }
 
     /// Loads failed transcriptions from disk
@@ -110,6 +110,7 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Adds a new failed transcription to the queue
     @discardableResult
     public func addFailedTranscription(
+        id: UUID = UUID(),
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
@@ -128,6 +129,7 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         let failed = FailedTranscription(
+            id: id,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
@@ -142,6 +144,44 @@ public class FailedTranscriptionManager: ObservableObject {
 
         AppLogger.pipeline.info("Added failed transcription", [
             "id": "\(failed.id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
+    }
+
+    @discardableResult
+    public func updateFailedTranscriptionAudio(
+        id: UUID,
+        micAudioURL: URL,
+        systemAudioURL: URL?
+    ) -> Bool {
+        guard isSafeAudioURL(micAudioURL), systemAudioURL.map(isSafeAudioURL) ?? true else {
+            AppLogger.pipeline.error("Rejected failed transcription audio update with out-of-sandbox path", [
+                "id": id.uuidString,
+                "micURL": micAudioURL.path,
+                "systemURL": systemAudioURL?.path ?? "none"
+            ])
+            return false
+        }
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let existing = failedTranscriptions[index]
+        failedTranscriptions[index] = FailedTranscription(
+            id: existing.id,
+            timestamp: existing.timestamp,
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: existing.errorMessage,
+            meetingTitle: existing.meetingTitle,
+            retryCount: existing.retryCount,
+            lastRetryDate: existing.lastRetryDate
+        )
+
+        let didPersist = saveFailedTranscriptions()
+        AppLogger.pipeline.info("Updated failed transcription audio", [
+            "id": "\(id)",
             "persisted": "\(didPersist)"
         ])
         return didPersist
@@ -222,37 +262,6 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Gets the total number of failed transcriptions
     public var count: Int {
         return failedTranscriptions.count
-    }
-
-    /// Auto-clean permanent failures (unrecoverable errors or exhausted retries).
-    /// Deletes audio files and removes from queue on launch.
-    private func cleanupPermanentFailures() {
-        let toRemove = failedTranscriptions.filter { failed in
-            // Permanent error that will never succeed
-            !failed.isRetryable ||
-            // Exhausted retries (3+ attempts, still failing)
-            failed.retryCount >= 3
-        }
-
-        guard !toRemove.isEmpty else { return }
-
-        for failure in toRemove {
-            // Delete audio files to reclaim disk space
-            removeAudioFile(failure.micAudioURL, label: "cleanup mic audio")
-            if let systemURL = failure.systemAudioURL {
-                removeAudioFile(systemURL, label: "cleanup system audio")
-            }
-            removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
-            if let systemURL = failure.systemAudioURL {
-                removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
-            }
-        }
-
-        let removedIds = Set(toRemove.map { $0.id })
-        failedTranscriptions.removeAll { removedIds.contains($0.id) }
-        saveFailedTranscriptions()
-
-        AppLogger.pipeline.info("Auto-cleaned permanent failures", ["count": "\(toRemove.count)"])
     }
 
     /// Cleans up failed transcriptions older than the specified number of days

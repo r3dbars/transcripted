@@ -22,6 +22,31 @@ extension TranscriptSaver {
         }
     }
 
+    /// Name one deferred review row in its saved transcript.
+    ///
+    /// Deferred rows can reuse labels across channels, e.g. both `Mic/Speaker 1`
+    /// and `System/Speaker 1` in the same meeting. This path scopes the rewrite
+    /// to the queued row's transcript, channel, diarizer id, and database id so
+    /// naming one row cannot rename its channel-local neighbor.
+    @discardableResult
+    public static func updateDeferredSpeakerName(
+        transcriptURL: URL,
+        dbId: UUID,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        newName: String
+    ) -> Bool {
+        fileUpdateQueue.sync {
+            _updateDeferredSpeakerNameImpl(
+                transcriptURL: transcriptURL,
+                dbId: dbId,
+                diarizerSpeakerId: diarizerSpeakerId,
+                channel: channel,
+                newName: newName
+            )
+        }
+    }
+
     /// After Settings merges two people, rewrite old source profile references to the
     /// kept profile id so future renames of the kept person still reach older transcripts.
     public static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String) {
@@ -98,6 +123,62 @@ extension TranscriptSaver {
         if updatedCount > 0 {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
                 ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
+        }
+    }
+
+    private static func _updateDeferredSpeakerNameImpl(
+        transcriptURL: URL,
+        dbId: UUID,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        newName: String
+    ) -> Bool {
+        guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
+            AppLogger.pipeline.error("Failed to read deferred speaker transcript", ["path": transcriptURL.path])
+            return false
+        }
+
+        guard let oldName = currentSpeakerName(
+            in: content,
+            diarizerSpeakerId: diarizerSpeakerId,
+            channel: channel,
+            matchingDbId: dbId
+        ) else {
+            AppLogger.pipeline.warning("Deferred speaker metadata no longer matches queued row", [
+                "path": transcriptURL.lastPathComponent,
+                "dbId": dbId.uuidString,
+                "diarizerSpeakerId": diarizerSpeakerId,
+                "channel": channel.rawValue
+            ])
+            return false
+        }
+
+        writeFrontmatterSpeakerMetadata(
+            in: &content,
+            diarizerSpeakerId: diarizerSpeakerId,
+            channel: channel,
+            persistentSpeakerId: dbId,
+            name: newName,
+            source: NameSource.userManual
+        )
+        applyScopedNameReplacement(
+            in: &content,
+            oldName: oldName,
+            newName: newName,
+            channel: channel
+        )
+        content = SpeakerBreakdownConsolidator.consolidate(content)
+
+        do {
+            try content.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            restrictTranscriptToOwnerOnly(transcriptURL)
+            return true
+        } catch {
+            AppLogger.pipeline.warning("Failed to update deferred speaker transcript", [
+                "file": transcriptURL.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return false
         }
     }
 
@@ -276,57 +357,76 @@ extension TranscriptSaver {
             }
 
             let obsidianEnabled = isObsidianFormatted(content)
-            let updatesByChannelKey = Dictionary(uniqueKeysWithValues: updates.map {
-                (
-                    $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId),
-                    (
-                        oldName: currentSpeakerName(
-                            in: content,
-                            diarizerSpeakerId: $0.diarizerSpeakerId,
-                            channel: $0.channel
-                        )
-                            ?? "Speaker \($0.diarizerSpeakerId)",
-                        newName: $0.newName
-                    )
-                )
-            })
+            let updatesByChannelKey = makeSpeakerNameChangesByChannelKey(
+                updates: updates,
+                content: content
+            )
 
             for update in updates {
                 updateFrontmatterSpeakerMetadata(in: &content, update: update)
             }
 
-            guard rewriteFullTranscriptSection(
+            if !rewriteFullTranscriptSection(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey,
                 obsidianEnabled: obsidianEnabled
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite transcript body for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped transcript label updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                guard applyScopedTranscriptLabelReplacements(
+                    in: &content,
+                    updatesByChannelKey: updatesByChannelKey,
+                    result: transcriptionResult
+                ) else {
+                    AppLogger.pipeline.error("Scoped transcript label fallback was ambiguous", [
+                        "path": transcriptURL.lastPathComponent
+                    ])
+                    return false
+                }
             }
 
-            guard rewriteRemoteSpeakerBreakdown(
+            if !rewriteRemoteSpeakerBreakdown(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite speaker breakdown for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped remote speaker breakdown updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                guard applyScopedBreakdownNameReplacements(
+                    in: &content,
+                    updatesByChannelKey: updatesByChannelKey,
+                    channels: [.system],
+                    result: transcriptionResult
+                ) else {
+                    AppLogger.pipeline.error("Scoped remote speaker breakdown fallback was ambiguous", [
+                        "path": transcriptURL.lastPathComponent
+                    ])
+                    return false
+                }
             }
 
-            guard rewriteLocalSpeakerBreakdownIfPresent(
+            if !rewriteLocalSpeakerBreakdownIfPresent(
                 in: &content,
                 result: transcriptionResult,
                 updatesByChannelKey: updatesByChannelKey
-            ) else {
-                AppLogger.pipeline.error("Failed to rewrite local speaker breakdown for speaker updates", [
+            ) {
+                AppLogger.pipeline.warning("Falling back to scoped local speaker breakdown updates", [
                     "path": transcriptURL.lastPathComponent
                 ])
-                return false
+                guard applyScopedBreakdownNameReplacements(
+                    in: &content,
+                    updatesByChannelKey: updatesByChannelKey,
+                    channels: [.mic],
+                    result: transcriptionResult
+                ) else {
+                    AppLogger.pipeline.error("Scoped local speaker breakdown fallback was ambiguous", [
+                        "path": transcriptURL.lastPathComponent
+                    ])
+                    return false
+                }
             }
 
             // Consolidate speaker breakdown when multiple diarizer IDs got the same name.
@@ -645,6 +745,324 @@ extension TranscriptSaver {
         }
     }
 
+    private static func applyScopedNameReplacement(
+        in content: inout String,
+        oldName: String,
+        newName: String,
+        channel: UtteranceChannel
+    ) {
+        let prefix = channel == .mic ? "Mic" : "System"
+        replaceTranscriptSpeakerLabels(
+            in: &content,
+            prefix: prefix,
+            oldName: oldName,
+            newName: newName
+        )
+        replaceSpeakerBreakdownName(
+            in: &content,
+            oldName: oldName,
+            newName: newName,
+            channel: channel
+        )
+    }
+
+    @discardableResult
+    private static func replaceTranscriptSpeakerLabels(
+        in content: inout String,
+        prefix: String,
+        oldName: String,
+        newName: String
+    ) -> Int {
+        let replacements = [
+            ("[\(prefix)/\(oldName)]", "[\(prefix)/\(newName)]"),
+            ("[\(prefix)/[[\(oldName)]]]", "[\(prefix)/[[\(newName)]]]"),
+        ]
+        var lines = content.components(separatedBy: "\n")
+        var changed = false
+        var replacementCount = 0
+
+        for index in lines.indices {
+            var line = lines[index]
+            for (oldLabel, newLabel) in replacements {
+                guard let labelRange = line.range(of: oldLabel),
+                      isTranscriptLabelPrefix(line[..<labelRange.lowerBound]) else {
+                    continue
+                }
+
+                line.replaceSubrange(labelRange, with: newLabel)
+                lines[index] = line
+                changed = true
+                replacementCount += 1
+                break
+            }
+        }
+
+        if changed {
+            content = lines.joined(separator: "\n")
+        }
+        return replacementCount
+    }
+
+    private static func countTranscriptSpeakerLabels(
+        in content: String,
+        prefix: String,
+        oldName: String
+    ) -> Int {
+        let labels = [
+            "[\(prefix)/\(oldName)]",
+            "[\(prefix)/[[\(oldName)]]]",
+        ]
+
+        return content.components(separatedBy: "\n").reduce(0) { count, line in
+            guard let labelRange = labels.compactMap({ line.range(of: $0) }).first,
+                  isTranscriptLabelPrefix(line[..<labelRange.lowerBound]) else {
+                return count
+            }
+            return count + 1
+        }
+    }
+
+    private static func isTranscriptLabelPrefix(_ prefix: Substring) -> Bool {
+        let normalized = String(prefix)
+            .replacingOccurrences(of: "**", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let parts = normalized.split(separator: ":")
+        guard parts.count >= 2, parts.count <= 3 else { return false }
+        return parts.allSatisfy { part in
+            !part.isEmpty && part.allSatisfy { $0.isNumber }
+        }
+    }
+
+    @discardableResult
+    private static func replaceSpeakerBreakdownName(
+        in content: inout String,
+        oldName: String,
+        newName: String,
+        channel: UtteranceChannel
+    ) -> Int {
+        guard let breakdownRange = speakerBreakdownContentRange(in: content, channel: channel) else { return 0 }
+
+        let oldPrefix = "- **\(oldName):**"
+        let newPrefix = "- **\(newName):**"
+        var replacementCount = 0
+        let replacement = String(content[breakdownRange])
+            .components(separatedBy: "\n")
+            .map { line -> String in
+                guard line.hasPrefix(oldPrefix) else { return line }
+                replacementCount += 1
+                return newPrefix + line.dropFirst(oldPrefix.count)
+            }
+            .joined(separator: "\n")
+
+        content.replaceSubrange(breakdownRange, with: replacement)
+        return replacementCount
+    }
+
+    private static func countSpeakerBreakdownRows(
+        in content: String,
+        oldName: String,
+        channel: UtteranceChannel
+    ) -> Int {
+        guard let breakdownRange = speakerBreakdownContentRange(in: content, channel: channel) else { return 0 }
+        let oldPrefix = "- **\(oldName):**"
+        return String(content[breakdownRange])
+            .components(separatedBy: "\n")
+            .filter { $0.hasPrefix(oldPrefix) }
+            .count
+    }
+
+    private static func speakerBreakdownContentRange(
+        in content: String,
+        channel: UtteranceChannel
+    ) -> Range<String.Index>? {
+        let header = channel == .mic
+            ? "#### Local Speaker Breakdown\n\n"
+            : "#### Remote Speaker Breakdown\n\n"
+        guard let headerRange = content.range(of: header) else { return nil }
+
+        let footerCandidates = [
+            "\n\n#### ",
+            "\n\n### ",
+            "\n\n## ",
+            "\n\n---\n\n",
+            "\n#### ",
+            "\n### ",
+            "\n## ",
+            "\n---\n",
+        ]
+        let footerStart = footerCandidates
+            .compactMap { content.range(of: $0, range: headerRange.upperBound..<content.endIndex)?.lowerBound }
+            .min() ?? content.endIndex
+        return headerRange.upperBound..<footerStart
+    }
+
+    private static func makeSpeakerNameChangesByChannelKey(
+        updates: [SpeakerNameUpdate],
+        content: String
+    ) -> [String: (oldName: String, newName: String)] {
+        var changes: [String: (oldName: String, newName: String)] = [:]
+        for update in updates {
+            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            changes[key] = (
+                oldName: currentSpeakerName(
+                    in: content,
+                    diarizerSpeakerId: update.diarizerSpeakerId,
+                    channel: update.channel
+                )
+                    ?? "Speaker \(update.diarizerSpeakerId)",
+                newName: update.newName
+            )
+        }
+        return changes
+    }
+
+    private static func applyScopedTranscriptLabelReplacements(
+        in content: inout String,
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
+        result: TranscriptionResult
+    ) -> Bool {
+        var replacementPlans: [(prefix: String, oldName: String, newName: String)] = []
+        for key in updatesByChannelKey.keys.sorted() {
+            guard let update = updatesByChannelKey[key] else { continue }
+            guard update.oldName != update.newName else { continue }
+            guard let target = channelAndDiarizerID(forSpeakerKey: key) else { return false }
+            let prefix = target.channel == .mic ? "Mic" : "System"
+            let expectedCount = expectedVisibleUtteranceCount(
+                in: result,
+                channel: target.channel,
+                diarizerSpeakerId: target.diarizerSpeakerId
+            )
+            let labelCount = countTranscriptSpeakerLabels(
+                in: content,
+                prefix: prefix,
+                oldName: update.oldName
+            )
+            if expectedCount == 0 {
+                guard labelCount == 0 else { return false }
+                continue
+            }
+            guard labelCount == expectedCount else {
+                return false
+            }
+            replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName))
+        }
+
+        guard !hasCascadingScopedNameReplacement(in: replacementPlans) else {
+            return false
+        }
+
+        for plan in replacementPlans {
+            let replaced = replaceTranscriptSpeakerLabels(
+                in: &content,
+                prefix: plan.prefix,
+                oldName: plan.oldName,
+                newName: plan.newName
+            )
+            guard replaced > 0 else { return false }
+        }
+        return true
+    }
+
+    private static func hasCascadingScopedNameReplacement(
+        in plans: [(prefix: String, oldName: String, newName: String)]
+    ) -> Bool {
+        for plan in plans {
+            guard plan.oldName != plan.newName else { continue }
+            if plans.contains(where: {
+                $0.prefix == plan.prefix
+                    && $0.oldName != $0.newName
+                    && $0.oldName == plan.newName
+            }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func applyScopedBreakdownNameReplacements(
+        in content: inout String,
+        updatesByChannelKey: [String: (oldName: String, newName: String)],
+        channels: Set<UtteranceChannel>,
+        result: TranscriptionResult
+    ) -> Bool {
+        var replacementPlans: [(prefix: String, oldName: String, newName: String, channel: UtteranceChannel)] = []
+        for key in updatesByChannelKey.keys.sorted() {
+            guard let update = updatesByChannelKey[key],
+                  let target = channelAndDiarizerID(forSpeakerKey: key),
+                  channels.contains(target.channel) else {
+                continue
+            }
+            let prefix = target.channel == .mic ? "Mic" : "System"
+            guard update.oldName != update.newName else { continue }
+            let expectedCount = expectedVisibleUtteranceCount(
+                in: result,
+                channel: target.channel,
+                diarizerSpeakerId: target.diarizerSpeakerId
+            )
+            if expectedCount == 0 {
+                guard countSpeakerBreakdownRows(
+                    in: content,
+                    oldName: update.oldName,
+                    channel: target.channel
+                ) == 0 else {
+                    return false
+                }
+                continue
+            }
+            replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName, channel: target.channel))
+        }
+
+        guard !hasCascadingScopedNameReplacement(in: replacementPlans.map {
+            (prefix: $0.prefix, oldName: $0.oldName, newName: $0.newName)
+        }) else {
+            return false
+        }
+
+        for plan in replacementPlans {
+            guard countSpeakerBreakdownRows(
+                in: content,
+                oldName: plan.oldName,
+                channel: plan.channel
+            ) == 1 else {
+                return false
+            }
+        }
+
+        for plan in replacementPlans {
+            let replaced = replaceSpeakerBreakdownName(
+                in: &content,
+                oldName: plan.oldName,
+                newName: plan.newName,
+                channel: plan.channel
+            )
+            guard replaced == 1 else { return false }
+        }
+        return true
+    }
+
+    private static func channelAndDiarizerID(forSpeakerKey key: String) -> (channel: UtteranceChannel, diarizerSpeakerId: Int)? {
+        if key.hasPrefix("mic_"), let id = Int(key.dropFirst("mic_".count)) {
+            return (.mic, id)
+        }
+        if key.hasPrefix("system_"), let id = Int(key.dropFirst("system_".count)) {
+            return (.system, id)
+        }
+        return nil
+    }
+
+    private static func expectedVisibleUtteranceCount(
+        in result: TranscriptionResult,
+        channel: UtteranceChannel,
+        diarizerSpeakerId: Int
+    ) -> Int {
+        let utterances = channel == .mic ? result.micUtterances : result.systemUtterances
+        return utterances.filter {
+            $0.speakerId == diarizerSpeakerId
+                && !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+    }
+
     /// Parse a YAML double-quoted string value after a known key prefix.
     /// Handles backslash escape sequences (`\"`, `\\`, etc.) and returns the unescaped value.
     /// Returns nil if the prefix is not found or the closing quote is missing.
@@ -865,6 +1283,52 @@ extension TranscriptSaver {
         return nil
     }
 
+    private static func currentSpeakerName(
+        in content: String,
+        diarizerSpeakerId: String,
+        channel: UtteranceChannel,
+        matchingDbId dbId: UUID
+    ) -> String? {
+        guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
+
+        let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
+        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
+        let targetDbId = dbId.uuidString
+        var lineIndex = 0
+
+        while lineIndex < lines.count {
+            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("- "), trimmed.contains(targetIdLine) else {
+                lineIndex += 1
+                continue
+            }
+
+            let nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: {
+                $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
+            }) ?? lines.count
+
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: channel),
+                  block.contains(where: { line in
+                      let trimmed = line.trimmingCharacters(in: .whitespaces)
+                      return trimmed == #"db_id: "\#(targetDbId)""# || trimmed == "db_id: \(targetDbId)"
+                  }) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
+            for index in (lineIndex + 1)..<nextEntryIndex {
+                let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                guard candidate.hasPrefix("name:") else { continue }
+                return extractYAMLQuotedString(from: candidate, prefix: "name: ")
+            }
+
+            return nil
+        }
+
+        return nil
+    }
+
     private static func speakerBlockMatchesChannel(
         _ block: ArraySlice<String>,
         channel: UtteranceChannel
@@ -972,6 +1436,10 @@ extension TranscriptSaver {
             "\n\n### ",
             "\n\n## ",
             "\n\n---\n\n",
+            "\n#### ",
+            "\n### ",
+            "\n## ",
+            "\n---\n",
         ]
         guard let footerRange = footerCandidates.compactMap({
             content.range(of: $0, range: headerRange.upperBound..<content.endIndex)
@@ -1085,7 +1553,9 @@ extension TranscriptSaver {
         let chunks = String(content[range])
             .components(separatedBy: "\n\n")
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let utterances = result.allUtterances
+        let utterances = result.allUtterances.filter {
+            !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         guard chunks.count == utterances.count else { return false }
 
         var rewrittenChunks: [String] = []
@@ -1204,7 +1674,16 @@ extension TranscriptSaver {
 
 enum SpeakerBreakdownConsolidator {
     private static let breakdownHeader = "#### Remote Speaker Breakdown\n\n"
-    private static let breakdownFooter = "\n---\n"
+    private static let breakdownFooters = [
+        "\n\n#### ",
+        "\n\n### ",
+        "\n\n## ",
+        "\n\n---\n\n",
+        "\n#### ",
+        "\n### ",
+        "\n## ",
+        "\n---\n",
+    ]
     private static let speakerCountPrefix = "- **Speakers Detected:** "
     private static let lineRegex = try? NSRegularExpression(
         pattern: #"- \*\*(.+?):\*\* (\d+) utterances?, ~(\d+) words?, (\d+):(\d+)"#
@@ -1231,12 +1710,23 @@ enum SpeakerBreakdownConsolidator {
     }
 
     static func consolidate(_ content: String) -> String {
-        guard let breakdownStart = content.range(of: breakdownHeader),
-              let breakdownEnd = content.range(of: breakdownFooter, range: breakdownStart.upperBound..<content.endIndex) else {
+        guard let breakdownStart = content.range(of: breakdownHeader) else {
             return content
         }
 
-        let breakdownRange = breakdownStart.upperBound..<breakdownEnd.lowerBound
+        let footerStart = breakdownFooters.compactMap({
+            content.range(of: $0, range: breakdownStart.upperBound..<content.endIndex)
+        }).min(by: { $0.lowerBound < $1.lowerBound })?.lowerBound
+        let breakdownEnd: String.Index
+        if let footerStart {
+            breakdownEnd = footerStart
+        } else if let footerlessEnd = footerlessBreakdownContentEnd(in: content, from: breakdownStart.upperBound) {
+            breakdownEnd = footerlessEnd
+        } else {
+            return content
+        }
+
+        let breakdownRange = breakdownStart.upperBound..<breakdownEnd
         let entries = parseEntries(from: String(content[breakdownRange]))
         guard !entries.isEmpty else { return content }
 
@@ -1279,6 +1769,42 @@ enum SpeakerBreakdownConsolidator {
         ])
 
         return result
+    }
+
+    private static func footerlessBreakdownContentEnd(
+        in content: String,
+        from start: String.Index
+    ) -> String.Index? {
+        var current = start
+        var lastEntryEnd: String.Index?
+
+        while current < content.endIndex {
+            let lineEnd = content[current...].firstIndex(of: "\n") ?? content.endIndex
+            let line = String(content[current..<lineEnd])
+            let nextLineStart = lineEnd < content.endIndex
+                ? content.index(after: lineEnd)
+                : content.endIndex
+
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                guard lastEntryEnd == nil else { break }
+                current = nextLineStart
+                continue
+            }
+
+            guard isBreakdownEntryLine(line) else { break }
+            lastEntryEnd = nextLineStart
+            current = nextLineStart
+        }
+
+        return lastEntryEnd
+    }
+
+    private static func isBreakdownEntryLine(_ line: String) -> Bool {
+        guard let lineRegex else { return false }
+        return lineRegex.firstMatch(
+            in: line,
+            range: NSRange(location: 0, length: (line as NSString).length)
+        ) != nil
     }
 
     private static func parseEntries(from breakdownText: String) -> [SpeakerBreakdownEntry] {

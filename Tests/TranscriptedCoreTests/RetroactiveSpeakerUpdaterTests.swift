@@ -130,6 +130,240 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Speaker 1]"))
     }
 
+    func testUpdateDeferredSpeakerNameOnlyRenamesQueuedChannelSpeaker() throws {
+        let micId = UUID()
+        let systemId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("channel-collision.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(micId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "1"
+            channel: system
+            db_id: "\(systemId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        #### Local Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Speaker 1] remote hello
+        [00:01] [Mic/Speaker 1] room hello
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: systemId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"db_id: "\#(systemId.uuidString)""#))
+        XCTAssertTrue(updated.contains(#"name: "Taylor""#))
+        XCTAssertTrue(updated.contains("[System/Taylor]"))
+        XCTAssertTrue(updated.contains("- **Taylor:** 1 utterances, ~2 words, 00:01"))
+        XCTAssertTrue(updated.contains(#"db_id: "\#(micId.uuidString)""#))
+        XCTAssertTrue(updated.contains("[Mic/Speaker 1]"))
+        XCTAssertTrue(updated.contains("- **Speaker 1:** 1 utterances, ~2 words, 00:01"))
+        XCTAssertFalse(updated.contains("[Mic/Taylor]"))
+    }
+
+    func testUpdateDeferredSpeakerNameCanRenameSameProfileAcrossSavedCalls() throws {
+        let speakerId = UUID()
+        let firstURL = temporaryDirectory.appendingPathComponent("first-call.md")
+        let secondURL = temporaryDirectory.appendingPathComponent("second-call.md")
+        try pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "1",
+            speakerName: "Speaker 1",
+            sample: "first call"
+        ).write(to: firstURL, atomically: true, encoding: .utf8)
+        try pendingSystemMarkdown(
+            speakerId: speakerId,
+            diarizerSpeakerId: "2",
+            speakerName: "Speaker 2",
+            sample: "second call"
+        ).write(to: secondURL, atomically: true, encoding: .utf8)
+
+        let firstUpdated = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: firstURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+        let secondUpdated = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: secondURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "2",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(firstUpdated)
+        XCTAssertTrue(secondUpdated)
+        let first = try String(contentsOf: firstURL, encoding: .utf8)
+        let second = try String(contentsOf: secondURL, encoding: .utf8)
+        XCTAssertTrue(first.contains(#"name: "Taylor""#))
+        XCTAssertTrue(first.contains("[System/Taylor]"))
+        XCTAssertFalse(first.contains("[System/Speaker 1]"))
+        XCTAssertTrue(second.contains(#"name: "Taylor""#))
+        XCTAssertTrue(second.contains("[System/Taylor]"))
+        XCTAssertFalse(second.contains("[System/Speaker 2]"))
+    }
+
+    func testUpdateDeferredSpeakerNameTreatsMissingChannelAsLegacySystemAudio() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("legacy-system.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Speaker 1] remote hello
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Taylor""#))
+        XCTAssertTrue(updated.contains("source: user_manual"))
+        XCTAssertTrue(updated.contains("[System/Taylor]"))
+        XCTAssertFalse(updated.contains("[System/Speaker 1]"))
+    }
+
+    func testUpdateDeferredSpeakerNameDoesNotRewriteLiteralTextMentions() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("literal-token.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~10 words, 00:03
+
+        ---
+
+        [00:00] [System/Speaker 1] literal token [System/Speaker 1] should stay in spoken text
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: speakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Taylor"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains("[00:00] [System/Taylor] literal token [System/Speaker 1] should stay in spoken text"))
+        XCTAssertTrue(updated.contains("- **Taylor:** 1 utterances, ~10 words, 00:03"))
+    }
+
+    func testUpdateDeferredSpeakerNameConsolidatesDuplicateRemoteBreakdownRows() throws {
+        let pendingSpeakerId = UUID()
+        let existingSpeakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("duplicate-breakdown.md")
+        try """
+        ---
+        system_speakers: 2
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(pendingSpeakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(existingSpeakerId.uuidString)"
+            name: "Alex"
+            confidence: high
+            source: db
+        ---
+
+        ## Speaker Analytics
+
+        - **Speakers Detected:** 2
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+        - **Alex:** 2 utterances, ~4 words, 00:03
+
+        ---
+
+        [00:00] [System/Speaker 1] first fragment
+        [00:01] [System/Alex] second fragment
+
+        ---
+
+        *2 channels | 3 speakers*
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let didUpdate = TranscriptSaver.updateDeferredSpeakerName(
+            transcriptURL: transcriptURL,
+            dbId: pendingSpeakerId,
+            diarizerSpeakerId: "1",
+            channel: .system,
+            newName: "Alex"
+        )
+
+        XCTAssertTrue(didUpdate)
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains("system_speakers: 1"))
+        XCTAssertTrue(updated.contains("- **Speakers Detected:** 1"))
+        XCTAssertTrue(updated.contains("- **Alex:** 3 utterances, ~6 words, 00:04"))
+        XCTAssertTrue(updated.contains("[00:00] [System/Alex] first fragment"))
+        XCTAssertTrue(updated.contains("*2 channels | 2 speakers*"))
+        XCTAssertFalse(updated.contains("- **Speaker 1:**"))
+        XCTAssertFalse(updated.contains("- **Alex:** 2 utterances, ~4 words, 00:03"))
+    }
+
     func testRetroactivelyMergeSpeakerRepointsDbIdForFutureRenames() throws {
         let sourceId = UUID()
         let targetId = UUID()
@@ -186,6 +420,163 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(markdown.contains(#"db_id: "\#(speakerId.uuidString)""#))
         XCTAssertTrue(markdown.contains(#"name: "Alex""#))
         XCTAssertTrue(markdown.contains("[System/Alex]"))
+    }
+
+    func testUpdateSpeakerNamesKeepsSplitSpeakerSaveWhenBreakdownSpacingDrifts() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let thirdId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("split-speaker-drift.md")
+        try """
+        ---
+        transcript_id: "\(UUID().uuidString)"
+        system_speakers: 3
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(firstId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(secondId.uuidString)"
+            name: "Speaker 2"
+            confidence: unknown
+            source: db_pending
+          - id: "3"
+            channel: system
+            db_id: "\(thirdId.uuidString)"
+            name: "Speaker 3"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+        - **Speaker 2:** 1 utterances, ~2 words, 00:01
+        - **Speaker 3:** 1 utterances, ~2 words, 00:01
+        ## Full Transcript
+
+        [00:00] [System/Speaker 1] first fragment
+
+        [00:02] [System/Speaker 2] second fragment
+
+        [00:04] [System/Speaker 3] third fragment
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 0:06 | 6 words | 3 speakers*
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 0, end: 1, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "first fragment"),
+                TranscriptionUtterance(start: 2, end: 3, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "second fragment"),
+                TranscriptionUtterance(start: 4, end: 5, channel: 1, speakerId: 3, persistentSpeakerId: thirdId, matchSimilarity: nil, transcript: "third fragment"),
+            ],
+            duration: 6,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Grigory", action: .named),
+            ],
+            transcriptionResult: result
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("[00:00] [System/Grigory] first fragment"), markdown)
+        XCTAssertTrue(markdown.contains("[00:02] [System/Grigory] second fragment"), markdown)
+        XCTAssertTrue(markdown.contains("[00:04] [System/Grigory] third fragment"), markdown)
+        XCTAssertTrue(markdown.contains(#"name: "Grigory""#), markdown)
+        XCTAssertFalse(markdown.contains("[System/Speaker 1]"), markdown)
+        XCTAssertFalse(markdown.contains("- **Speaker 2:**"), markdown)
+    }
+
+    func testUpdateSpeakerNamesConsolidatesFooterlessSplitSpeakerBreakdown() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let thirdId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("split-speaker-footerless-breakdown.md")
+        try """
+        ---
+        transcript_id: "\(UUID().uuidString)"
+        system_speakers: 3
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(firstId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(secondId.uuidString)"
+            name: "Speaker 2"
+            confidence: unknown
+            source: db_pending
+          - id: "3"
+            channel: system
+            db_id: "\(thirdId.uuidString)"
+            name: "Speaker 3"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        ## Full Transcript
+
+        [00:00] [System/Speaker 1] first fragment
+
+        [00:02] [System/Speaker 2] second fragment
+
+        [00:04] [System/Speaker 3] third fragment
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 0:06 | 6 words | 3 speakers*
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:01
+        - **Speaker 2:** 1 utterances, ~2 words, 00:01
+        - **Speaker 3:** 1 utterances, ~2 words, 00:01
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 0, end: 1, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "first fragment"),
+                TranscriptionUtterance(start: 2, end: 3, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "second fragment"),
+                TranscriptionUtterance(start: 4, end: 5, channel: 1, speakerId: 3, persistentSpeakerId: thirdId, matchSimilarity: nil, transcript: "third fragment"),
+            ],
+            duration: 6,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Grigory", action: .named),
+            ],
+            transcriptionResult: result
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("- **Grigory:** 3 utterances, ~6 words, 00:03"), markdown)
+        XCTAssertTrue(markdown.contains("system_speakers: 1"), markdown)
+        XCTAssertTrue(markdown.contains("| 6 words | 1 speakers*"), markdown)
+        XCTAssertFalse(markdown.contains("- **Speaker 2:**"), markdown)
     }
 
     func testMarkSpeakerReviewDeferredRepointsPendingDbIdWithoutRenamingTranscript() throws {
@@ -407,6 +798,29 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertEqual(SpeakerBreakdownConsolidator.consolidate(content), content)
     }
 
+    func testConsolidateSpeakerBreakdownPreservesFooterlessTrailingNotes() {
+        let content = """
+        ---
+        system_speakers: 3
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Alex:** 2 utterances, ~10 words, 00:30
+        - **Alex:** 1 utterances, ~5 words, 00:15
+        - **Jordan:** 4 utterances, ~40 words, 01:00
+
+        Follow-up note I typed after the transcript.
+        """
+
+        let updated = SpeakerBreakdownConsolidator.consolidate(content)
+
+        XCTAssertTrue(updated.contains("system_speakers: 2"))
+        XCTAssertTrue(updated.contains("- **Alex:** 3 utterances, ~15 words, 00:45"))
+        XCTAssertTrue(updated.contains("Follow-up note I typed after the transcript."))
+        XCTAssertFalse(updated.contains("- **Alex:** 2 utterances, ~10 words, 00:30"))
+    }
+
     private func markdown(speakerId: UUID, speakerName: String) -> String {
         """
         ---
@@ -425,6 +839,33 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         ---
 
         [00:00] [System/\(speakerName)] hello there
+        """
+    }
+
+    private func pendingSystemMarkdown(
+        speakerId: UUID,
+        diarizerSpeakerId: String,
+        speakerName: String,
+        sample: String
+    ) -> String {
+        """
+        ---
+        speakers:
+          - id: "\(diarizerSpeakerId)"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "\(speakerName)"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **\(speakerName):** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/\(speakerName)] \(sample)
         """
     }
 
@@ -935,6 +1376,320 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(updatedMarkdown.contains(#"name: "Sarah Graham""#))
         XCTAssertTrue(updatedMarkdown.contains("[00:01] [System/[[Sarah Graham]]] Literal tokens: [[Matt Vlasach]] [System/Matt Vlasach] **Matt Vlasach:** name: \"Matt Vlasach\""))
         XCTAssertTrue(updatedMarkdown.contains("- **Sarah Graham:** 1 utterances, ~11 words, 00:03"))
+    }
+
+    func testUpdateSpeakerNamesFallbackRenamesWikiLinkedLabels() throws {
+        let speakerId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("wiki-fallback.md")
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: speakerId, name: "Matt Vlasach", confidence: "medium", source: "db_pending")
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "[[Matt Vlasach]]",
+                text: "Hello there.",
+                diarizerSpeakerId: 1
+            )
+        ]
+
+        try sampleTranscript(
+            transcriptId: UUID(),
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 2, duration: "00:03")
+            ],
+            totalWords: 2
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let driftedResult = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 12, end: 15, channel: 1, speakerId: 1, persistentSpeakerId: speakerId, matchSimilarity: nil, transcript: "Hello there.")
+            ],
+            duration: 15,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: speakerId, diarizerSpeakerId: "1", newName: "Sarah Graham", previousName: "Matt Vlasach", action: .corrected)
+            ],
+            transcriptionResult: driftedResult
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("[00:01] [System/[[Sarah Graham]]] Hello there."), markdown)
+        XCTAssertFalse(markdown.contains("[System/[[Matt Vlasach]]]"), markdown)
+    }
+
+    func testUpdateSpeakerNamesFallbackFailsClosedWhenLabelsCollide() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("colliding-labels.md")
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Alex", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Alex", confidence: "medium", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Alex", text: "First speaker.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Alex", text: "Second speaker.", diarizerSpeakerId: 2),
+        ]
+        let originalMarkdown = sampleTranscript(
+            transcriptId: UUID(),
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Alex", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Alex", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 4
+        )
+        try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let driftedResult = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 12, end: 15, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "First speaker."),
+                TranscriptionUtterance(start: 5, end: 8, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "Second speaker."),
+            ],
+            duration: 15,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Bob", previousName: "Alex", action: .corrected)
+            ],
+            transcriptionResult: driftedResult
+        )
+
+        XCTAssertFalse(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertEqual(markdown, originalMarkdown)
+    }
+
+    func testUpdateSpeakerNamesFallbackFailsClosedForOverlappingRenames() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("overlapping-renames.md")
+        let speakers = [
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Matt", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sarah", confidence: "medium", source: "db_pending"),
+        ]
+        let utterances = [
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt", text: "First speaker.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sarah", text: "Second speaker.", diarizerSpeakerId: 2),
+        ]
+        let originalMarkdown = sampleTranscript(
+            transcriptId: UUID(),
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Sarah", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 4
+        )
+        try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let driftedResult = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 12, end: 15, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "First speaker."),
+                TranscriptionUtterance(start: 16, end: 19, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "Second speaker."),
+            ],
+            duration: 20,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sarah", action: .corrected),
+            ],
+            transcriptionResult: driftedResult
+        )
+
+        XCTAssertFalse(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertEqual(markdown, originalMarkdown)
+    }
+
+    func testUpdateSpeakerNamesBreakdownFallbackFailsClosedForOverlappingRenames() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("overlapping-breakdown-renames.md")
+        let originalMarkdown = """
+        ---
+        transcript_id: "\(UUID().uuidString)"
+        speakers:
+          - id: "1"
+            db_id: "\(firstId.uuidString)"
+            name: "Matt"
+            confidence: medium
+            source: db_pending
+          - id: "2"
+            db_id: "\(secondId.uuidString)"
+            name: "Sarah"
+            confidence: medium
+            source: db_pending
+        ---
+
+        ## Full Transcript
+
+        [00:12] [System/Matt] First speaker.
+
+        [00:16] [System/Sarah] Second speaker.
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 0:20 | 4 words | 2 speakers*
+
+        #### Remote Speaker Breakdown
+
+        - **Matt:** 1 utterances, ~2 words, 00:03
+        - **Sarah:** 1 utterances, ~2 words, 00:03
+        """
+        try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 12, end: 15, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "First speaker."),
+                TranscriptionUtterance(start: 16, end: 19, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "Second speaker."),
+            ],
+            duration: 20,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sarah", action: .corrected),
+            ],
+            transcriptionResult: result
+        )
+
+        XCTAssertFalse(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertEqual(markdown, originalMarkdown)
+    }
+
+    func testUpdateSpeakerNamesBreakdownFallbackFailsClosedWhenRowsCollide() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("colliding-breakdown-rows.md")
+        let originalMarkdown = """
+        ---
+        transcript_id: "\(UUID().uuidString)"
+        speakers:
+          - id: "1"
+            db_id: "\(firstId.uuidString)"
+            name: "Alex"
+            confidence: medium
+            source: db_pending
+          - id: "2"
+            db_id: "\(secondId.uuidString)"
+            name: "Alex"
+            confidence: medium
+            source: db_pending
+        ---
+
+        ## Full Transcript
+
+        [00:12] [System/Alex] First speaker.
+
+        [00:16] [System/Alex] Second speaker.
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 0:20 | 4 words | 2 speakers*
+
+        #### Remote Speaker Breakdown
+
+        - **Alex:** 1 utterances, ~2 words, 00:03
+        - **Alex:** 1 utterances, ~2 words, 00:03
+        """
+        try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 12, end: 15, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "First speaker."),
+                TranscriptionUtterance(start: 16, end: 19, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "Second speaker."),
+            ],
+            duration: 20,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Bob", previousName: "Alex", action: .corrected)
+            ],
+            transcriptionResult: result
+        )
+
+        XCTAssertFalse(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertEqual(markdown, originalMarkdown)
+    }
+
+    func testUpdateSpeakerNamesBreakdownFallbackSkipsNoOpConfirmations() throws {
+        let firstId = UUID()
+        let secondId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("no-op-breakdown-confirmation.md")
+        let originalMarkdown = sampleTranscript(
+            transcriptId: UUID(),
+            speakers: [
+                MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Matt", confidence: "medium", source: "db_pending"),
+                MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sarah", confidence: "medium", source: "db_pending"),
+            ],
+            utterances: [
+                MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt", text: "First speaker.", diarizerSpeakerId: 1),
+                MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sarah", text: "Second speaker.", diarizerSpeakerId: 2),
+            ],
+            breakdownEntries: [
+                BreakdownEntry(name: "Matt", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Sarah", utterances: 1, wordCount: 2, duration: "00:03"),
+            ],
+            totalWords: 4
+        )
+        try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(start: 1, end: 4, channel: 1, speakerId: 1, persistentSpeakerId: firstId, matchSimilarity: nil, transcript: "First speaker."),
+                TranscriptionUtterance(start: 5, end: 8, channel: 1, speakerId: 2, persistentSpeakerId: secondId, matchSimilarity: nil, transcript: "Second speaker."),
+            ],
+            duration: 8,
+            processingTime: 1
+        )
+
+        let didUpdate = TranscriptSaver.updateSpeakerNames(
+            transcriptURL: transcriptURL,
+            updates: [
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Sarah", previousName: "Sarah", action: .confirmed),
+            ],
+            transcriptionResult: result
+        )
+
+        XCTAssertTrue(didUpdate)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains("Matt"), markdown)
+        XCTAssertTrue(markdown.contains("[00:01] [System/Sarah] First speaker."), markdown)
+        XCTAssertTrue(markdown.contains("[00:05] [System/Sarah] Second speaker."), markdown)
+        XCTAssertTrue(markdown.contains("- **Sarah:** 2 utterances, ~4 words, 00:06"), markdown)
     }
 
     private func sampleTranscript(

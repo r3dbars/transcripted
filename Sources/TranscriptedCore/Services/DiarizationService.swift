@@ -13,10 +13,10 @@
 // so the entire speaker identification stack works unchanged.
 
 import Foundation
-import FluidAudio
+@preconcurrency import FluidAudio
 
 /// A speaker segment from diarization with optional voice fingerprint
-public struct SpeakerSegment {
+public struct SpeakerSegment: Sendable {
     public let speakerId: Int          // Unlimited speakers (PyAnnote offline) or 0-3 (Sortformer streaming)
     public let startTime: Double       // seconds
     public let endTime: Double         // seconds
@@ -177,15 +177,19 @@ public class DiarizationService: ObservableObject {
 
         let result = try await manager.process(audio: samples)
 
-        // Convert FluidAudio segments to our SpeakerSegment type
-        let segments = result.segments.map { segment in
-            SpeakerSegment(
-                speakerId: speakerIdFromString(segment.speakerId),
-                startTime: Double(segment.startTimeSeconds),
-                endTime: Double(segment.endTimeSeconds),
-                embedding: segment.embedding.isEmpty ? nil : segment.embedding,
-                qualityScore: segment.qualityScore
-            )
+        // Copy FluidAudio/CoreML-backed outputs into plain Swift values before
+        // result cleanup can recycle CoreML feature buffers on another queue.
+        let segments = withExtendedLifetime(result) {
+            result.segments.map { segment in
+                let embedding = segment.embedding
+                return SpeakerSegment(
+                    speakerId: speakerIdFromString(segment.speakerId),
+                    startTime: Double(segment.startTimeSeconds),
+                    endTime: Double(segment.endTimeSeconds),
+                    embedding: embedding.isEmpty ? nil : embedding.map { $0 },
+                    qualityScore: segment.qualityScore
+                )
+            }
         }
 
         let speakerIds = Set(segments.map { $0.speakerId })
@@ -217,14 +221,17 @@ public class DiarizationService: ObservableObject {
 
         let result = try manager.performCompleteDiarization(samples, sampleRate: sampleRate)
 
-        let segments = result.segments.map { segment in
-            SpeakerSegment(
-                speakerId: speakerIdFromString(segment.speakerId),
-                startTime: Double(segment.startTimeSeconds),
-                endTime: Double(segment.endTimeSeconds),
-                embedding: segment.embedding.isEmpty ? nil : segment.embedding,
-                qualityScore: segment.qualityScore
-            )
+        let segments = withExtendedLifetime(result) {
+            result.segments.map { segment in
+                let embedding = segment.embedding
+                return SpeakerSegment(
+                    speakerId: speakerIdFromString(segment.speakerId),
+                    startTime: Double(segment.startTimeSeconds),
+                    endTime: Double(segment.endTimeSeconds),
+                    embedding: embedding.isEmpty ? nil : embedding.map { $0 },
+                    qualityScore: segment.qualityScore
+                )
+            }
         }
 
         let speakerIds = Set(segments.map { $0.speakerId })

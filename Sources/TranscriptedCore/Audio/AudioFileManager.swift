@@ -222,7 +222,7 @@ extension Audio {
 
                     DispatchQueue.main.async {
                         guard sessionGeneration == strongSelf.recordingSessionGeneration else { return }
-                        strongSelf.systemAudioFileURL = fileURL
+                        strongSelf.assignSystemAudioFileURLIfCurrent(fileURL, sessionGeneration: sessionGeneration)
                     }
                     AppLogger.audioSystem.info("System audio capture started")
 

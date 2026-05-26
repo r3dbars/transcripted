@@ -5,7 +5,7 @@
 - `main` is the current Transcripted product, derived from the earlier Draft codebase.
 - The current app on `main` supports **dictation** and **meetings**.
 - Meeting capture includes local mic + system audio, imported-audio transcription, optional local-speaker review, and agent-readable Markdown output.
-- The older draft / ghostwriting flow is not active on `main`. `DictationSessionController` only keeps `cancelSession()` as a compatibility hook for interrupt paths left from the removed draft-mode routing.
+- The older draft / ghostwriting flow is not active on `main`.
 - `Sources/TranscriptedCore/` is an in-repo library consumed through `Sources/Meeting/`. Keep it as a library boundary.
 - `Sources/Speech/` owns the app-owned local STT path. Meetings reuse that path through `Sources/Meeting/MeetingSTTAdapter.swift`.
 - `Sources/Reliability/` owns wake / sleep recovery for hotkeys and active capture flows.
@@ -60,7 +60,7 @@ file taking precedence when there is any conflict.
 
 ```bash
 bash build-deps.sh
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 bash run-integration-smoke.sh
 swift test
@@ -68,7 +68,7 @@ swift test
 
 Rules:
 
-1. After changing Swift source, run `bash build.sh` and `bash run-tests.sh`.
+1. After changing Swift source, run `bash build.sh --no-open` and `bash run-tests.sh`.
 2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
@@ -100,7 +100,7 @@ Rules:
    - any automatic-check / automatic-download flags
 9. Preferred release verification for release-path changes:
    - `bash build-deps.sh --force` when dependency tooling changes
-   - `bash build.sh`
+   - `bash build.sh --no-open`
    - `bash run-tests.sh`
    - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
@@ -115,10 +115,13 @@ Rules:
 2. Runtime Sentry config lives in `Info.plist` under:
    - `TranscriptedSentryDSN`
    - `TranscriptedSentryEnvironment`
+   - `TranscriptedSentryReleasePrefix`
    - optional: `TranscriptedSentryAppHangTrackingEnabled`
 3. Local overrides for testing can come from process environment:
    - `SENTRY_DSN`
    - `SENTRY_ENVIRONMENT`
+   - `SENTRY_RELEASE`
+   - `SENTRY_DIST`
    - `SENTRY_ENABLE_APP_HANG_TRACKING`
 4. Runtime PostHog config lives in `Info.plist` under:
    - `TranscriptedPostHogAPIKey`
@@ -138,7 +141,7 @@ Rules:
    - Settings should still expose the anonymous analytics toggle
    - Settings should still expose the `Send Test Sentry Event` action when Sentry is configured
 12. Preferred verification for observability-related changes:
-   - `bash build.sh`
+   - `bash build.sh --no-open`
    - `bash run-tests.sh`
    - confirm Sentry, analytics, and observability preference tests still pass through `run-tests.sh`
 
