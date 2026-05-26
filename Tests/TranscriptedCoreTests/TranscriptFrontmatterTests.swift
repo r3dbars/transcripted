@@ -115,4 +115,29 @@ final class TranscriptFrontmatterTests: XCTestCase {
         XCTAssertEqual(values["title"], "Long Meeting")
         XCTAssertEqual(values["duration"], "120:00")
     }
+
+    func testReadDocumentClampsOversizedByteLimitToMaximumFrontmatterLimit() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptFrontmatterTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("oversized-frontmatter.md")
+        let raw = """
+        ---
+        title: "Oversized"
+        padding: "\(String(repeating: "x", count: TranscriptFrontmatter.maximumFrontmatterByteLimit + 8_192))"
+        ---
+
+        Body
+        """
+        try raw.write(to: url, atomically: true, encoding: .utf8)
+
+        let document = try TranscriptFrontmatter.readDocument(
+            from: url,
+            byteLimit: TranscriptFrontmatter.maximumFrontmatterByteLimit * 2
+        )
+
+        XCTAssertNil(document)
+    }
 }

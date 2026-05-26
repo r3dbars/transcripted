@@ -771,7 +771,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
 
         // Pre-flight validation checks
-        let validationResult = RecordingValidator.validateRecordingConditions()
+        let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
         guard validationResult.isValid else {
             AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
             error = validationResult.errorMessage

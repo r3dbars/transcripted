@@ -59,7 +59,7 @@ references, meeting titles, speaker names, local paths, or user identifiers.
    have `~/Library/Application Support/Draft/observability-overrides.plist`.
 5. Run `bash build-deps.sh --force` once to download the pinned Sentry and
    Sparkle frameworks.
-6. Run `bash build.sh` and `bash run-tests.sh`.
+6. Run `bash build.sh --no-open` and `bash run-tests.sh`.
 7. In the app, verify onboarding shows two separate default-on questions for:
    - crash and error reports
    - anonymous usage statistics

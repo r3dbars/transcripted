@@ -76,7 +76,7 @@ xcrun notarytool store-credentials <profile-name> ...
 To force a specific certificate for either build flow:
 
 ```bash
-SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh
+SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh --no-open
 SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
 ```
 

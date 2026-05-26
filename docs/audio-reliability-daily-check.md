@@ -136,7 +136,7 @@ Use the failed scenario folder as the before-run, patch narrowly, then rerun the
 same scenario. After a fix, run:
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 bash run-integration-smoke.sh
 ```

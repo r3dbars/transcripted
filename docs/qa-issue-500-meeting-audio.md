@@ -13,7 +13,7 @@ The goal is to prove three things:
 Build and launch the app you are testing:
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 open build/Transcripted.app
 ```
 

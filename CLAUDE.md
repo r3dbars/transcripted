@@ -28,7 +28,7 @@ Before making assumptions about the codebase:
 6. `Sources/CLAUDE.md` — app target orientation
 7. the nearest local `CLAUDE.md` for the area you are changing (see "Subsystem docs" below)
 
-When docs disagree, prefer: current repo-level docs → current source → local `CLAUDE.md` whose file lists still match the tree → `docs/archive/` only as context.
+When docs disagree, split the decision: `AGENTS.md` and `.agents/test-matrix.yml` win for workflow contracts; current source wins for runtime behavior and file existence; local `CLAUDE.md` files explain subsystem intent when their file lists still match the tree; `docs/archive/` is context only.
 
 ## Build and test
 
@@ -36,7 +36,7 @@ Common commands (thin root wrappers; implementations live under `scripts/entrypo
 
 ```bash
 bash build-deps.sh                 # build/refresh prebuilt deps under deps-libs/, deps-frameworks/, deps-modules/
-bash build.sh                      # authoritative app build (raw swiftc, NOT swift build)
+bash build.sh --no-open            # authoritative app build for non-interactive verification
 bash run-tests.sh                  # curated fast tests (manifest-driven)
 bash run-integration-smoke.sh      # app/core linkage + wake recovery + MicRecordingFileMerger
 bash run-e2e-smoke.sh              # deterministic release-critical artifact smoke (no mic/TCC)
@@ -48,18 +48,18 @@ bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the
 
 Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
-- Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh` + `bash run-tests.sh`
-- Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build.sh` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
+- Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `bash run-e2e-smoke.sh`
 - Touched QA bench/corpus files (`scripts/ops/transcripted-qa-bench.sh`, `scripts/ops/validate-meeting-corpus.py`, `scripts/ops/compare-meeting-corpus.py`, `docs/qa-test-bench.md`) → quick QA bench + Python compile checks
 - Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
-- Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build.sh` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
-- Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh` + `bash run-tests.sh`
-- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
+- Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
+- Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
 - Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
 - Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
-- Touched docs/agent files (`README.md`, `AGENT_START.md`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `docs/**`, `.agents/**`) → `scripts/dev/agent-preflight.sh`
+- Touched docs/agent files (`README.md`, `AGENT_START.md`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `WORKFLOW.md`, `docs/**`, `.agents/**`, `.github/**`) → `scripts/dev/agent-preflight.sh`
 
 ### Fast-test gotchas
 

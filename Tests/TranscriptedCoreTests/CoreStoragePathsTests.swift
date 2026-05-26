@@ -1,10 +1,7 @@
 import XCTest
 @testable import TranscriptedCore
 
-/// Smoke tests for the public Core API — verifies that `import TranscriptedCore`
-/// produces a linkable test binary and that the Step 7 / Step 8 seams work as
-/// documented. Heavier logic-level tests still live in the app-target
-/// `TranscriptedTests/` directory until Step 10 rewires the Xcode app target.
+/// Storage-path and recording-validator coverage for the Core package seam.
 @available(macOS 14.0, *)
 final class CoreStoragePathsTests: XCTestCase {
 

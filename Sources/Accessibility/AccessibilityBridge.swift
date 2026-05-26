@@ -21,8 +21,7 @@ struct AccessibilityBridge {
         let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedRef)
         guard result == .success, let focusedElement = focusedRef else { return nil }
 
-        guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else { return nil }
-        let axElement = focusedElement as! AXUIElement
+        guard let axElement = axElement(from: focusedElement) else { return nil }
 
         var roleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
@@ -60,17 +59,27 @@ struct AccessibilityBridge {
         AXUIElementCopyAttributeValue(axElement, kAXPositionAttribute as CFString, &posRef)
         AXUIElementCopyAttributeValue(axElement, kAXSizeAttribute as CFString, &sizeRef)
 
-        guard let posValue = posRef, let sizeValue = sizeRef,
-              CFGetTypeID(posValue) == AXValueGetTypeID(),
-              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+        guard let posValue = axValue(from: posRef),
+              let sizeValue = axValue(from: sizeRef) else { return nil }
 
         var point = CGPoint.zero
         var size = CGSize.zero
-        guard AXValueGetValue(posValue as! AXValue, .cgPoint, &point),
-              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else {
+        guard AXValueGetValue(posValue, .cgPoint, &point),
+              AXValueGetValue(sizeValue, .cgSize, &size) else {
             return nil
         }
 
         return CGRect(origin: point, size: size)
+    }
+
+    private static func axElement(from value: AnyObject) -> AXUIElement? {
+        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    private static func axValue(from value: AnyObject?) -> AXValue? {
+        guard let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXValue.self)
     }
 }

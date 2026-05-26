@@ -36,6 +36,11 @@ for arg in "$@"; do
             echo "Set FAST_TEST_COVERAGE=1 or pass --coverage to write LLVM coverage artifacts to $COVERAGE_DIR."
             exit 0
             ;;
+        *)
+            echo "Unknown option: $arg"
+            echo "Usage: bash run-tests.sh [--coverage]"
+            exit 2
+            ;;
     esac
 done
 

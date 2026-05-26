@@ -69,7 +69,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
-- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the auto-close workflow
+- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
   - Usage: `bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]`
   - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
