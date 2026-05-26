@@ -122,6 +122,41 @@ func testDictationRecordingStartOverlayPolicy() {
         assertFalse(plan.reportRuntimeStall, "handled startup failures should not become stall telemetry")
     }
 
+    runSuite("DictationMicrophoneTimeoutPresentationPolicy names Bluetooth fallback failures") {
+        let message = DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: "MacBook Pro Microphone",
+            startAttempts: 1,
+            inputFormatReady: false,
+            routeContext: [
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
+            ]
+        )
+
+        assertEqual(
+            message,
+            "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings.",
+            "Bluetooth fallback timeouts should tell users what changed instead of blaming only the selected mic"
+        )
+    }
+
+    runSuite("DictationMicrophoneTimeoutPresentationPolicy keeps generic fallback copy") {
+        let message = DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: "Studio Display Microphone",
+            startAttempts: 0,
+            inputFormatReady: false
+        )
+
+        assertEqual(
+            message,
+            "Couldn't reach Studio Display Microphone. Try selecting a different input in System Settings.",
+            "non-Bluetooth route failures should keep the existing device-specific guidance"
+        )
+    }
+
     runSuite("DictationActiveTaskCancellationPolicy leaves active inference alone") {
         let plan = DictationActiveTaskCancellationPolicy.plan(
             cancelRecording: true,

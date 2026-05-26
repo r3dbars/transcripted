@@ -62,6 +62,35 @@ struct DictationRecordingStartFailurePolicy {
     }
 }
 
+struct DictationMicrophoneTimeoutPresentationPolicy {
+    static func message(
+        deviceName: String,
+        startAttempts: Int,
+        inputFormatReady: Bool,
+        routeContext: [String: String] = [:]
+    ) -> String {
+        if isBluetoothFallbackRoute(routeContext) {
+            return "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings."
+        }
+
+        if startAttempts > 0, inputFormatReady {
+            return "Couldn't start the microphone. Try again, or choose a different input in System Settings."
+        }
+
+        return "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
+    }
+
+    private static func isBluetoothFallbackRoute(_ context: [String: String]) -> Bool {
+        let selectedInputClass = context["selected_input_class"] ?? context["input_device_class"]
+
+        return context["selection_overrode_default"] == "true"
+            && context["selection_reason"] == "preferredBuiltInForBluetoothHeadset"
+            && context["default_input_class"] == "bluetooth"
+            && context["default_output_class"] == "bluetooth"
+            && selectedInputClass == "built_in"
+    }
+}
+
 struct DictationActiveTaskCancellationPlan: Equatable {
     let cancelStreamingTask: Bool
     let cancelSpeechEngine: Bool

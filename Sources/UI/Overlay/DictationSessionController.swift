@@ -590,7 +590,8 @@ class DictationSessionController: ObservableObject {
             microphoneTimeoutMessage(
                 deviceName: appState.sttRouter.inputDeviceName,
                 startAttempts: startAttempts,
-                inputFormatReady: appState.sttRouter.inputFormatReady
+                inputFormatReady: appState.sttRouter.inputFormatReady,
+                routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
             ),
             actionTitle: "Try Again",
             action: { [weak self] in
@@ -775,7 +776,8 @@ class DictationSessionController: ObservableObject {
                 microphoneTimeoutMessage(
                     deviceName: appState.sttRouter.inputDeviceName,
                     startAttempts: 0,
-                    inputFormatReady: appState.sttRouter.inputFormatReady
+                    inputFormatReady: appState.sttRouter.inputFormatReady,
+                    routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
                 ),
                 actionTitle: "Try Again",
                 action: { [weak self] in
@@ -1161,12 +1163,15 @@ class DictationSessionController: ObservableObject {
     private func microphoneTimeoutMessage(
         deviceName: String,
         startAttempts: Int,
-        inputFormatReady: Bool
+        inputFormatReady: Bool,
+        routeContext: [String: String]
     ) -> String {
-        if startAttempts > 0, inputFormatReady {
-            return "Couldn't start the microphone. Try again, or choose a different input in System Settings."
-        }
-        return "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
+        DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: deviceName,
+            startAttempts: startAttempts,
+            inputFormatReady: inputFormatReady,
+            routeContext: routeContext
+        )
     }
 
     /// Shrink the panel to compact (header-only) height without animation.
