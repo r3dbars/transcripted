@@ -15,7 +15,7 @@ enum ObservabilityTextRedactor {
     }
 
     private static let pathStartRegex = makeRegex(
-        #"(?<!https:)(?<!http:)(?<![A-Za-z0-9._%+\-])/(?:System/Volumes/Data/)?(?:Users|Volumes|private/var|var|tmp|Applications|Library|opt)(?=/|$)"#
+        #"(?<!https:)(?<!http:)(?<![A-Za-z0-9._%+\-])/(?:System/Volumes/Data/)?(?:Users|Volumes|private/tmp|private/var|var|tmp|Applications|Library|opt)(?=/|$)"#
     )
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = makeRegex(
