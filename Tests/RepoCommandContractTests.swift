@@ -1368,7 +1368,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Agent setup details has an explicit toggle") {
-        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
 
         assertTrue(
             contents.contains("AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup)"),

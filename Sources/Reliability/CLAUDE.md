@@ -15,6 +15,8 @@ not belong to the UI, capture, or speech subsystems directly.
 - `TranscriptedAppState.handleSystemWake()` delegates recovery here
 - hotkeys are unregistered and re-registered with bounded retries
 - repeated wake calls reuse an in-flight or just-completed recovery task briefly to avoid stampedes
+- speech/audio recovery still belongs to `Sources/Speech/`; this layer only
+  coordinates wake-time retries and avoids duplicate app-wide recovery work
 
 ## Guardrails
 
@@ -25,7 +27,7 @@ not belong to the UI, capture, or speech subsystems directly.
 ## Verify
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 ```
 
