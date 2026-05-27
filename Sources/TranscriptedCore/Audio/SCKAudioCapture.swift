@@ -54,6 +54,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
     private var _generation: UInt64 = 0
     private let generationLock = NSLock()
+    private var isWaitingForTimedOutStopCallback = false
     private static let callbackTimeoutSeconds = 8
     private static let permissionPromptCallbackTimeoutSeconds = 120
     private static let callbackTimeout: DispatchTimeInterval = .seconds(callbackTimeoutSeconds)
@@ -84,7 +85,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
 
     func prepare() throws {
         AppLogger.audioSystem.info("SCKAudioCapture: preparing ScreenCaptureKit audio stream")
-        stopSync()
+        try stopCurrentStreamBeforePrepare()
         let prepareGeneration = incrementGeneration()
 
         // Fetch shareable content. On first use this can be held by the macOS
@@ -158,6 +159,14 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     }
 
     func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {
+        guard !isWaitingForTimedOutStopCallback else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: refusing to start stream while previous stop is still pending")
+            throw SCKCaptureTimeoutError(operation: "previous stop cleanup")
+        }
+        guard !_isCapturing else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: refusing to start stream because capture is already active")
+            throw "SCKAudioCapture: capture already active"
+        }
         guard let stream = stream else {
             AppLogger.audioSystem.info("SCKAudioCapture: auto-preparing in start()")
             try prepare()
@@ -237,6 +246,10 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
 
     func stopSync() {
         guard let stream = stream else { return }
+        guard !isWaitingForTimedOutStopCallback else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: previous stop still pending")
+            return
+        }
         let stopGeneration = currentGeneration()
         guard _isCapturing else {
             cleanupIfCurrent(generation: stopGeneration, stream: stream)
@@ -250,6 +263,20 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             cleanupIfCurrent(generation: stopGeneration, stream: stream)
         } else {
             retainStreamReferenceAfterTimedOutStop(stream)
+        }
+    }
+
+    private func stopCurrentStreamBeforePrepare() throws {
+        guard !isWaitingForTimedOutStopCallback else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: refusing to prepare new stream while previous stop is still pending")
+            throw SCKCaptureTimeoutError(operation: "previous stop cleanup")
+        }
+
+        stopSync()
+
+        guard !isWaitingForTimedOutStopCallback, stream == nil else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: refusing to prepare new stream because previous stream is still stopping")
+            throw SCKCaptureTimeoutError(operation: "previous stop cleanup")
         }
     }
 
@@ -311,6 +338,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         _isCapturing = true
+        isWaitingForTimedOutStopCallback = true
         AppLogger.audioSystem.warning("SCKAudioCapture: keeping stream reference after stop timeout")
     }
 
@@ -364,6 +392,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         AppLogger.audioSystem.info("SCKAudioCapture: cleanup")
         logStats()
         _isCapturing = false
+        isWaitingForTimedOutStopCallback = false
         stream = nil
         streamOutput = nil
         bufferCallback = nil

@@ -232,6 +232,14 @@ func testRepoCommandContract() {
                 && contents.contains("SCKAudioCapture: keeping stream reference after stop timeout"),
             "ScreenCaptureKit should keep the stream reference when a stop callback times out, then clean it up if the callback arrives late"
         )
+        assertTrue(
+            contents.contains("isWaitingForTimedOutStopCallback")
+                && contents.contains("stopCurrentStreamBeforePrepare")
+                && contents.contains("refusing to prepare new stream while previous stop is still pending")
+                && contents.contains("refusing to prepare new stream because previous stream is still stopping")
+                && contents.contains("refusing to start stream while previous stop is still pending"),
+            "ScreenCaptureKit should block new prepare/start attempts while an old timed-out stop callback is still pending"
+        )
     }
 
     runSuite("Repo command contract - deterministic E2E smoke stays on the release surface") {
