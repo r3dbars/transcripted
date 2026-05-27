@@ -109,7 +109,7 @@ enum ObservabilityTextRedactor {
         result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
         range = NSRange(result.startIndex..., in: result)
         result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
-        range = NSRange(result.startIndex..., in: result)
+
         return result
     }
 

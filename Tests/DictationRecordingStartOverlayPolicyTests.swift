@@ -163,6 +163,27 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
+    runSuite("DictationMicrophoneTimeoutPresentationPolicy names immediate Bluetooth fallback start failures") {
+        let message = DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: "MacBook Pro Microphone",
+            startAttempts: 0,
+            inputFormatReady: true,
+            routeContext: [
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
+            ]
+        )
+
+        assertEqual(
+            message,
+            "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings.",
+            "Bluetooth fallback start failures should not fall through to generic microphone copy"
+        )
+    }
+
     runSuite("DictationMicrophoneTimeoutPresentationPolicy keeps generic fallback copy") {
         let message = DictationMicrophoneTimeoutPresentationPolicy.message(
             deviceName: "Studio Display Microphone",

@@ -79,6 +79,38 @@ The volume `before` and `during` values come from `meeting_recording_started` or
 `system_peak` is the system-audio peak.
 The dropped flags are generated from the same scalar fields and are also attached to degraded-capture diagnostics.
 
+## Results Sheet
+
+Copy this table into the issue or local notes before a run. Keep the raw scalar
+values in `event values` so the pass/fail call can be checked later.
+
+| App | Route | Voice processing | Meeting volume | Mic usable | System audio present | Output dropped | Result | Event values | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Chrome Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail | `mic_raw_peak=`, `mic_processed_peak=`, `system_peak=`, `default_output_volume_before=`, `default_output_volume_during=`, `default_output_volume_after=` |  |
+| Safari Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Safari Meet | built-in mic/speakers | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | built-in mic/speakers | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| WhatsApp Mac | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Zoom | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| no meeting app | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline |
+| Chrome Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Safari Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Safari Meet | AirPods/Bluetooth | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | AirPods/Bluetooth | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| WhatsApp Mac | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Zoom | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| no meeting app | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline |
+| Chrome Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Safari Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Safari Meet | USB mic | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Firefox Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Firefox Meet | USB mic | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| WhatsApp Mac | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Zoom | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| no meeting app | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline, if available |
+
 ## Pass Bar
 
 A run passes when:

@@ -33,6 +33,10 @@ DEFAULT_REPO = Path("/Users/redbars/transcripted-latest")
 LOCAL_TZ = ZoneInfo("America/Chicago") if ZoneInfo else timezone.utc
 FRESH_HOURS = 18
 DAU_GOAL = 1000
+GITHUB_REPOS = (
+    ("r3dbars/transcripted", "app"),
+    ("r3dbars/transcripted-webapp", "webapp"),
+)
 POSTHOG_ENV_KEYS = (
     "POSTHOG_PERSONAL_API_KEY",
     "POSTHOG_PROJECT_ID",
@@ -62,9 +66,23 @@ POSTHOG_ALLOW_UNTRUSTED_HOST_ENV = "POSTHOG_ALLOW_UNTRUSTED_HOST"
 NIGHTLY_PREFIXES = (
     "[nightly-",
     "[reliability]",
+    "[activation]",
+    "[operator]",
+    "[support]",
+    "[content]",
+    "[launch]",
+    "[comparison]",
+    "[retention]",
     "nightly-",
     "codex/nightly",
     "codex/reliability",
+    "codex/activation",
+    "codex/operator",
+    "codex/support",
+    "codex/content",
+    "codex/launch",
+    "codex/comparison",
+    "codex/retention",
 )
 
 LANE_ORDER = [
@@ -493,7 +511,11 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             signal = "Product health produced a score and watchlist."
             action = "Review the score delta"
     elif automation.id == "transcripted-nightly-code-review":
-        if contains_any(lower, ("no new high-confidence", "no pr opened", "green/watch")):
+        if "opened draft pr" in lower:
+            status = "needs_review"
+            signal = "Review lane opened a verified draft PR."
+            action = "Review code-review PR"
+        elif contains_any(lower, ("no new high-confidence", "no pr opened", "green/watch")):
             status = "green"
             signal = "Recent risk areas were reviewed; no new high-confidence repo bug was found."
             action = "No action"
@@ -572,10 +594,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             signal = "Comparison lane found a sharper market wedge plus claims to avoid."
             action = "Choose positioning angle"
     elif automation.id == "transcripted-nightly-retention-agent":
-        if "retention score" in lower or "top churn hypothesis" in lower:
+        if contains_any(
+            lower,
+            ("retention score", "top churn hypothesis", "strongest repeat-use predictor", "highest-leverage retention move"),
+        ):
             status = "needs_review"
-            signal = "Retention lane says the repeat-use loop is promising but under-measured."
-            action = "Define activation endpoint"
+            signal = "Retention lane found the clearest repeat-use habit loop."
+            action = "Review retention habit loop"
     elif automation.id == "transcripted-nightly-launch-agent":
         if "launch recommendation: prepare" in lower or "launch score" in lower:
             status = "needs_review"
@@ -593,7 +618,7 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            if "issue #500" in lower:
+            if "issue #500" in lower or "#500" in lower:
                 signal = "Reviewer kept issue #500 as the real user-trust blocker."
                 action = "Run the issue #500 audio matrix"
             else:
@@ -704,6 +729,10 @@ def normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
         "url": pr.get("url", ""),
         "headRefName": pr.get("headRefName", ""),
     }
+    if "repository" in pr:
+        normalized["repository"] = pr.get("repository")
+    if "repositoryLabel" in pr:
+        normalized["repositoryLabel"] = pr.get("repositoryLabel")
     if "isDraft" in pr:
         normalized["isDraft"] = bool(pr.get("isDraft"))
     if "updatedAt" in pr:
@@ -718,39 +747,67 @@ def normalize_pr(pr: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def pr_display_id(pr: dict[str, Any]) -> str:
+    prefix = pr.get("repositoryLabel")
+    number = pr.get("number")
+    return f"{prefix} PR #{number}" if prefix else f"PR #{number}"
+
+
 def github_data(repo: Path, no_github: bool) -> dict[str, Any]:
     if no_github:
         return {"open_prs": [], "recent_merged_prs": [], "error": "GitHub disabled"}
 
     fields = "number,title,url,isDraft,headRefName,labels,updatedAt"
-    open_prs, open_error = run_json_command(
-        ["gh", "pr", "list", "--repo", "r3dbars/transcripted", "--state", "open", "--json", fields, "--limit", "100"],
-        cwd=repo,
-    )
-    merged_prs, merged_error = run_json_command(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            "r3dbars/transcripted",
-            "--state",
-            "merged",
-            "--json",
-            "number,title,url,mergedAt,headRefName,labels",
-            "--limit",
-            "12",
-        ],
-        cwd=repo,
-    )
+    open_prs: list[dict[str, Any]] = []
+    merged_prs: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for repo_name, repo_label in GITHUB_REPOS:
+        repo_open_prs, open_error = run_json_command(
+            ["gh", "pr", "list", "--repo", repo_name, "--state", "open", "--json", fields, "--limit", "100"],
+            cwd=repo,
+        )
+        repo_merged_prs, merged_error = run_json_command(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                repo_name,
+                "--state",
+                "merged",
+                "--json",
+                "number,title,url,mergedAt,headRefName,labels",
+                "--limit",
+                "12",
+            ],
+            cwd=repo,
+        )
+        if open_error:
+            errors.append(f"{repo_name} open PRs: {open_error}")
+        if merged_error:
+            errors.append(f"{repo_name} merged PRs: {merged_error}")
+        for pr in repo_open_prs:
+            pr["repository"] = repo_name
+            pr["repositoryLabel"] = repo_label
+            open_prs.append(pr)
+        for pr in repo_merged_prs:
+            pr["repository"] = repo_name
+            pr["repositoryLabel"] = repo_label
+            merged_prs.append(pr)
+
     nightly_open = sorted(
         (normalize_pr(pr) for pr in open_prs if is_nightly_pr(pr)),
         key=pr_priority,
     )
-    error = open_error or merged_error
+    recent_merged = sorted(
+        (normalize_pr(pr) for pr in merged_prs),
+        key=lambda pr: str(pr.get("mergedAt") or ""),
+        reverse=True,
+    )[:12]
+    error = "; ".join(errors) if errors else None
     return {
         "open_prs": nightly_open,
-        "recent_merged_prs": [normalize_pr(pr) for pr in merged_prs],
+        "recent_merged_prs": recent_merged,
         "error": error,
     }
 
@@ -763,21 +820,24 @@ def human_next_steps(
     ops_tokens_incomplete: bool,
 ) -> list[str]:
     steps: list[str] = []
+    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
     if dau_unknown:
         steps.append("Fix DAU visibility: set PostHog read credentials and rerun this report.")
 
-    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
     if blocked_lanes:
         lane = blocked_lanes[0]
-        steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+        if lane.human_action == "Run the issue #500 audio matrix":
+            steps.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        else:
+            steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
 
     if open_prs:
         if len(open_prs) == 1:
             pr = open_prs[0]
-            steps.append(f"Review PR #{pr.get('number')}: {pr.get('title')}.")
+            steps.append(f"Review {pr_display_id(pr)}: {pr.get('title')}.")
         else:
             pr = open_prs[0]
-            steps.append(f"Review {len(open_prs)} open nightly PRs, starting with PR #{pr.get('number')}.")
+            steps.append(f"Review {len(open_prs)} open nightly PRs, starting with {pr_display_id(pr)}.")
 
     if github_error and github_error != "GitHub disabled":
         steps.append("Restore GitHub CLI access so PR review status is not guessed.")
@@ -1048,8 +1108,19 @@ def query_posthog_dau() -> dict[str, Any]:
         "WHERE timestamp >= now() - INTERVAL 24 HOUR "
         f"AND event IN ({event_list})"
     )
+    daily_query = (
+        "SELECT "
+        "toDate(timestamp) AS day, "
+        "uniq(distinct_id) AS active_devices "
+        "FROM events "
+        "WHERE timestamp >= now() - INTERVAL 30 DAY "
+        f"AND event IN ({event_list}) "
+        "GROUP BY day "
+        "ORDER BY day ASC"
+    )
     try:
         payload = posthog_query(host, project_id, token, current_query)
+        daily_payload = posthog_query(host, project_id, token, daily_query)
     except urllib.error.HTTPError as exc:
         return {"dau": None, "event_count": None, "error": f"PostHog query failed with HTTP {exc.code}"}
     except (urllib.error.URLError, TimeoutError):
@@ -1063,7 +1134,8 @@ def query_posthog_dau() -> dict[str, Any]:
         event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
     except (IndexError, TypeError, ValueError):
         return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
-    return {"dau": dau, "event_count": event_count, "error": None}
+    history = build_dau_history(daily_payload.get("results") or daily_payload.get("data") or [], datetime.now(timezone.utc).date())
+    return {"dau": dau, "event_count": event_count, "history": history, "error": None}
 
 
 def build_dau_status(
@@ -1075,11 +1147,11 @@ def build_dau_status(
     memory_dau = extract_first_int(
         all_memory,
         (
-            r"\bcurrent_dau[^\d]{0,30}(\d{1,5})\b",
-            r"\bcurrent DAU:\s*(\d{1,5})\b",
             r"\bDAU:\s*(\d{1,5})\b",
-            r"\b(\d{1,5})\s+daily active users\b",
-            r"\b(\d{1,5})\s+daily active devices\b",
+            r"\b(\d{1,5})\s+DAU\b",
+            r"\bcurrent DAU[^\d]{0,30}(\d{1,5})\b",
+            r"\b(\d{1,5})\s+active distinct IDs over the last 24 hours\b",
+            r"\b(\d{1,5})\s+active devices in the last 24 hours\b",
         ),
     )
     active_devices = extract_first_int(
@@ -1114,8 +1186,8 @@ def build_dau_status(
         gap = f"{max(0, DAU_GOAL - exact_dau)} away"
         confidence = "High" if exact_source == "PostHog" else ("Medium" if ops_tokens_incomplete else "High")
     else:
-        current = "Unknown"
-        gap = "Unknown"
+        current = "DAU unknown"
+        gap = "Cannot calculate exact gap"
         confidence = "Low" if ops_tokens_incomplete else "Medium"
 
     proxy_parts: list[str] = []
@@ -1123,7 +1195,7 @@ def build_dau_status(
     if isinstance(event_count, int):
         proxy_parts.append(f"{event_count} PostHog events in the last 24 hours")
     if active_devices is not None and exact_dau is None:
-        proxy_parts.append(f"{active_devices} active devices in the last 7 days")
+        proxy_parts.append(f"{active_devices} active devices in recent telemetry")
     if downloads is not None:
         proxy_parts.append(f"{downloads} latest-release downloads")
     if repo_viewers is not None:
@@ -1131,23 +1203,24 @@ def build_dau_status(
     proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
 
     if exact_source == "PostHog":
-        note = "Current DAU came from PostHog active workflow events in the last 24 hours."
+        note = "Exact DAU came from PostHog active workflow events for the last 24 hours."
     elif exact_dau is not None:
-        note = "Current DAU came from a nightly automation memory entry."
+        note = "Exact DAU came from a nightly automation memory entry."
     elif posthog_dau and posthog_dau.get("error"):
-        note = f"Current DAU is unknown because {posthog_dau['error']}."
+        note = f"DAU is unknown because {posthog_dau['error']}."
     elif ops_tokens_incomplete:
-        note = "Current DAU is unknown because live product analytics could not be read."
+        note = "DAU is unknown because live product analytics could not be read."
     else:
         note = "Use this as the morning growth read, not a perfect analytics dashboard."
 
     return {
-        "goal": f"{DAU_GOAL:,} DAU",
+        "goal": f"{DAU_GOAL:,} daily active users",
         "current": current,
         "gap": gap,
         "proxy": proxy,
         "confidence": confidence,
         "note": note,
+        "history": posthog_dau.get("history") if posthog_dau else None,
     }
 
 
@@ -1171,7 +1244,7 @@ def build_accomplishments(lanes: list[LaneResult], open_prs: list[dict[str, Any]
         items.append("Audio reliability checks passed synthetically, but issue #500 stayed on the watch list.")
     if open_prs:
         pr = open_prs[0]
-        items.append(f"{len(open_prs)} open nightly PRs are waiting; PR #{pr.get('number')} is the first one to review.")
+        items.append(f"{len(open_prs)} open nightly PRs are waiting; {pr_display_id(pr)} is the first one to review.")
 
     return items[:8]
 
@@ -1183,16 +1256,18 @@ def build_recommendations(
     dau_unknown: bool,
 ) -> list[str]:
     recommendations: list[str] = []
+    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
     if dau_unknown:
         recommendations.append("Fix DAU visibility: set PostHog read credentials, then rerun this report.")
-
-    blocked_lanes = [lane for lane in lanes if lane.status == "blocked"]
     if blocked_lanes:
         lane = blocked_lanes[0]
-        recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
+        if lane.human_action == "Run the issue #500 audio matrix":
+            recommendations.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        else:
+            recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
     if open_prs:
         pr = open_prs[0]
-        recommendations.append(f"Review PR #{pr.get('number')} first: {pr.get('title')}.")
+        recommendations.append(f"Review {pr_display_id(pr)} first: {pr.get('title')}.")
         if len(open_prs) > 1:
             recommendations.append(f"Then triage the other {len(open_prs) - 1} open nightly PRs.")
     if ops_tokens_incomplete and not dau_unknown:
@@ -1275,7 +1350,7 @@ def build_ceo_brief(
     artifact_drift = any(lane.human_action == "Decide whether to clean local artifacts" for lane in lanes)
     issue_500_watch = any(lane.human_action == "Watch issue #500" for lane in lanes)
     blocked_or_unknown = any(lane.status in ("blocked", "unknown") for lane in lanes)
-    dau_unknown = dau_status["current"] == "Unknown"
+    dau_unknown = dau_status["current"] == "DAU unknown"
     growth_ready = any(
         lane.id
         in {
@@ -1342,7 +1417,7 @@ def build_ceo_brief(
     needs_judgment: list[str] = []
     if open_prs:
         pr = open_prs[0]
-        needs_judgment.append(f"Approve/merge PR #{pr.get('number')} first if its smoke check passes.")
+        needs_judgment.append(f"Approve/merge {pr_display_id(pr)} first if its smoke check passes.")
     if artifact_drift:
         needs_judgment.append("Decide whether to clean the repeated local artifact drift or keep it as known local residue.")
     if issue_500_watch:
@@ -1423,7 +1498,7 @@ def build_payload(
     if posthog_dau is None:
         posthog_dau = query_posthog_dau()
     dau_status = build_dau_status(full_memories, ops_tokens_incomplete, posthog_dau)
-    dau_unknown = dau_status["current"] == "Unknown"
+    dau_unknown = dau_status["current"] == "DAU unknown"
     steps = human_next_steps(
         lanes,
         gh_payload["open_prs"],
@@ -1578,7 +1653,7 @@ def render_html(payload: dict[str, Any]) -> str:
     lanes = payload["lanes"]
     open_prs = payload["open_prs"]
     ceo = payload["ceo_brief"]
-    dau = ceo.get("dau_status") or ceo.get("wau_status", {})
+    dau = ceo["dau_status"]
 
     green_lanes = [lane for lane in lanes if lane["status"] == "green"]
     hard_blocked_lanes = [lane for lane in lanes if lane["status"] == "blocked"]
@@ -1594,7 +1669,7 @@ def render_html(payload: dict[str, Any]) -> str:
     if not recommendation_items:
         recommendation_items = "<li>No human action needed right now.</li>"
 
-    dau_unknown = dau["current"] == "Unknown"
+    dau_unknown = dau["current"] == "DAU unknown"
     hard_blocked_count = len(hard_blocked_lanes)
     unknown_count = len(unknown_lanes)
     pr_word = "PR" if counts["open_nightly_prs"] == 1 else "PRs"
@@ -1624,7 +1699,7 @@ def render_html(payload: dict[str, Any]) -> str:
         open_pr_rows = "\n".join(
             "<div class=\"pr-row\">"
             "<div>"
-            f"<a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a>"
+            f"<a href=\"{escape(pr.get('url', ''))}\">{escape(pr_display_id(pr))}</a>"
             f"<strong>{escape(pr.get('title', ''))}</strong>"
             "</div>"
             f"<span>{'draft' if pr.get('isDraft') else 'ready'} · {escape(pr.get('headRefName', ''))}</span>"
@@ -1639,7 +1714,7 @@ def render_html(payload: dict[str, Any]) -> str:
         merged_rows = "\n".join(
             "<div class=\"pr-row merged\">"
             "<div>"
-            f"<a href=\"{escape(pr.get('url', ''))}\">PR #{escape(pr.get('number', ''))}</a>"
+            f"<a href=\"{escape(pr.get('url', ''))}\">{escape(pr_display_id(pr))}</a>"
             f"<strong>{escape(pr.get('title', ''))}</strong>"
             "</div>"
             f"<span>merged · {escape(pr.get('mergedAt', ''))}</span>"
@@ -2009,14 +2084,6 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="section focus-section">
     <h2>What happened last night</h2>
-    <section class="summary-strip">
-      <div><span>Current DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
-      <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
-      <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
-      <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
-      <div><span>Blocked</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
-      <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
-    </section>
     <ul class="plain-list">
       <li><strong>{escape(bottom_line)}</strong></li>
       {accomplishment_items}
@@ -2026,6 +2093,15 @@ a:hover {{ text-decoration: underline; }}
   <section class="section actions-section">
     <h2>Recommended actions</h2>
     <ol>{recommendation_items}</ol>
+  </section>
+
+  <section class="summary-strip">
+    <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
+    <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
+    <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
+    <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
+    <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
+    <div><span>Blocked</span><strong>{escape(health_text)}</strong><small>{escape(health_context)}</small></div>
   </section>
 
   <details class="more-detail">
@@ -2046,8 +2122,8 @@ a:hover {{ text-decoration: underline; }}
             <ol class="compact-list">{step_items}</ol>
           </div>
           <div class="detail-block">
-            <h3>DAU source</h3>
-            <p>{escape(dau['note'])}</p>
+            <h3>Daily activity context</h3>
+            <p>Average daily active devices: {escape(averages['last_7'])} over the last complete week.</p>
           </div>
         </div>
       </section>
@@ -2108,8 +2184,8 @@ a:hover {{ text-decoration: underline; }}
 def headline_text(payload: dict[str, Any]) -> str:
     status = payload["overall_status"]
     ceo = payload.get("ceo_brief", {})
-    dau = ceo.get("dau_status", ceo.get("wau_status", {}))
-    if dau.get("current") == "Unknown":
+    dau = ceo.get("dau_status", {})
+    if dau.get("current") == "DAU unknown":
         return "We do not know current DAU. Fix that first."
     if status == "green":
         return "Everything that matters is green. No human action needed."
