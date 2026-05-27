@@ -18,6 +18,7 @@ rules:
       - "Sources/TranscriptedCore/**"
       - "Tests/Integration/**"
     checks:
+      - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "bash run-integration-smoke.sh"
@@ -65,6 +66,7 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n run-integration-smoke.sh"
       - "bash -n scripts/entrypoints/run-integration-smoke.sh"
+      - "bash build-deps.sh --force"
       - "bash run-integration-smoke.sh"
 
   - paths:
@@ -74,6 +76,14 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n run-daily-audio-reliability.sh"
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
+
+  - paths:
+      - "scripts/ops/generate-nightly-digest.py"
+      - "scripts/README.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
+      - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
@@ -109,6 +119,7 @@ rules:
       - "Sources/TranscriptedCore/**"
       - "Tests/TranscriptedCoreTests/**"
     checks:
+      - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "bash run-integration-smoke.sh"

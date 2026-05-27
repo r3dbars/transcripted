@@ -90,6 +90,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Sources/Meeting/*" "Sources/TranscriptedCore/*" "Tests/Integration/*"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
@@ -124,6 +125,7 @@ if [ -n "$changed_paths" ]; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n run-integration-smoke.sh"
             add_command "bash -n scripts/entrypoints/run-integration-smoke.sh"
+            add_command "bash build-deps.sh --force"
             add_command "bash run-integration-smoke.sh"
         fi
 
@@ -131,6 +133,12 @@ if [ -n "$changed_paths" ]; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n run-daily-audio-reliability.sh"
             add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/generate-nightly-digest.py" "scripts/README.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
+            add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
@@ -152,6 +160,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Package.swift" "Sources/TranscriptedCore/*" "Tests/TranscriptedCoreTests/*"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"

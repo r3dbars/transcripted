@@ -56,7 +56,8 @@ extension TranscriptSaver {
         date: Date,
         meetingTitle: String? = nil,
         healthInfo: RecordingHealthInfo? = nil,
-        transcriptionEngine: SpeechTranscriptionEngineDescriptor = .parakeetLocal
+        transcriptionEngine: SpeechTranscriptionEngineDescriptor = .parakeetLocal,
+        formatOptions: TranscriptFormatOptions = .default
     ) -> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .medium
@@ -91,7 +92,7 @@ extension TranscriptSaver {
         processing_time: "\(String(format: "%.1f", result.processingTime))s"
         transcription_engine: \(transcriptionEngine.identifier)
         diarization_engine: pyannote_offline
-        sources: [mic, system_audio]
+        sources: [\(formatOptions.yamlSourcesList)]
         mic_utterances: \(result.micUtteranceCount)
         system_utterances: \(result.systemUtteranceCount)
         mic_speakers: \(result.micSpeakerCount)
@@ -142,7 +143,7 @@ extension TranscriptSaver {
         }
 
         // Obsidian-compatible metadata (tags, aliases, cssclasses)
-        let obsidianEnabled = UserDefaults.standard.bool(forKey: "enableObsidianFormat")
+        let obsidianEnabled = formatOptions.includeObsidianMetadata
         if obsidianEnabled {
             yaml += "\ntags:"
             yaml += "\n  - transcripted"
@@ -174,36 +175,38 @@ extension TranscriptSaver {
         doc += "---\n\n"
         doc += "## Channel & Speaker Analytics\n\n"
 
-        // Mic channel stats
-        let micTimeSeconds = result.micUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
-        let micTimeStr = DateFormattingHelper.formatDuration(micTimeSeconds)
-        let micHasMultipleSpeakers = result.micSpeakerCount > 1
-        let micSectionTitle = micHasMultipleSpeakers ? "Microphone (People in the Room)" : "Microphone (You)"
-        doc += "### \(micSectionTitle)\n"
-        doc += "- **Utterances:** \(result.micUtteranceCount)\n"
-        doc += "- **Words:** ~\(result.micWordCount)\n"
-        doc += "- **Speaking Time:** \(micTimeStr)\n"
-        if micHasMultipleSpeakers {
-            doc += "- **Speakers Detected:** \(result.micSpeakerCount)\n"
-        }
-        doc += "\n"
-
-        // Local speaker breakdown (only when mic diarization found multiple speakers)
-        if micHasMultipleSpeakers {
-            doc += "#### Local Speaker Breakdown\n\n"
-            let micSpeakerGroups = Dictionary(grouping: result.micUtterances, by: { $0.speakerId })
-            for speaker in micSpeakerGroups.keys.sorted() {
-                let utterances = micSpeakerGroups[speaker] ?? []
-                let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
-                let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
-                let speakingTimeStr = DateFormattingHelper.formatDuration(speakingTime)
-
-                let speakerKey = "mic_\(speaker)"
-                let speakerName = speakerMappings[speakerKey]?.displayName ?? "Speaker \(speaker)"
-
-                doc += "- **\(speakerName):** \(utterances.count) utterances, ~\(wordCount) words, \(speakingTimeStr)\n"
+        if formatOptions.includesMicrophone {
+            // Mic channel stats
+            let micTimeSeconds = result.micUtterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+            let micTimeStr = DateFormattingHelper.formatDuration(micTimeSeconds)
+            let micHasMultipleSpeakers = result.micSpeakerCount > 1
+            let micSectionTitle = micHasMultipleSpeakers ? "Microphone (People in the Room)" : "Microphone (You)"
+            doc += "### \(micSectionTitle)\n"
+            doc += "- **Utterances:** \(result.micUtteranceCount)\n"
+            doc += "- **Words:** ~\(result.micWordCount)\n"
+            doc += "- **Speaking Time:** \(micTimeStr)\n"
+            if micHasMultipleSpeakers {
+                doc += "- **Speakers Detected:** \(result.micSpeakerCount)\n"
             }
             doc += "\n"
+
+            // Local speaker breakdown (only when mic diarization found multiple speakers)
+            if micHasMultipleSpeakers {
+                doc += "#### Local Speaker Breakdown\n\n"
+                let micSpeakerGroups = Dictionary(grouping: result.micUtterances, by: { $0.speakerId })
+                for speaker in micSpeakerGroups.keys.sorted() {
+                    let utterances = micSpeakerGroups[speaker] ?? []
+                    let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
+                    let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
+                    let speakingTimeStr = DateFormattingHelper.formatDuration(speakingTime)
+
+                    let speakerKey = "mic_\(speaker)"
+                    let speakerName = speakerMappings[speakerKey]?.displayName ?? "Speaker \(speaker)"
+
+                    doc += "- **\(speakerName):** \(utterances.count) utterances, ~\(wordCount) words, \(speakingTimeStr)\n"
+                }
+                doc += "\n"
+            }
         }
 
         // System channel stats with speaker breakdown

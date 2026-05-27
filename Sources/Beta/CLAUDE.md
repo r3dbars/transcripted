@@ -20,3 +20,16 @@ the app target.
 - `build-beta.sh` still accepts a positional beta-token argument for backwards-compatible invocations, but the value is not injected into the binary
 - if you need beta distribution or backend context, read `archive/backend-beta-worker/README.md`
 - older docs mentioning `GeminiEngine`, keychain helpers, or chat-drafting HTTP paths do not match the current tree
+
+## Verification
+
+For app-target beta config changes:
+
+```bash
+bash build.sh --no-open
+bash run-tests.sh
+```
+
+For release or distribution-path changes, follow `docs/release-packaging.md`
+and smoke the beta build path with `SKIP_NOTARIZATION=1 bash build-beta.sh
+<token> <user-name>`.

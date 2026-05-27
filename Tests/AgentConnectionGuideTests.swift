@@ -114,6 +114,79 @@ func testAgentConnectionGuide() {
         )
     }
 
+    runSuite("AgentConnectionGuide.codexInbox — creates the local setup folder") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCodexInbox-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let inbox = try? AgentConnectionGuide.ensureCodexInboxFolder(
+            appSupportRoot: root,
+            createdAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+
+        assertNotNil(inbox, "Codex Inbox folder should be created")
+        let inboxURL = inbox ?? root.appendingPathComponent("CodexInbox", isDirectory: true)
+        assertEqual(inboxURL.lastPathComponent, "CodexInbox", "Codex Inbox should use a shell-friendly folder name")
+
+        for name in ["pending", "processed", "outputs", "state"] {
+            assertTrue(
+                FileManager.default.fileExists(atPath: inboxURL.appendingPathComponent(name, isDirectory: true).path),
+                "Codex Inbox should create \(name)/"
+            )
+        }
+
+        let readme = (try? String(contentsOf: inboxURL.appendingPathComponent("README.md"), encoding: .utf8)) ?? ""
+        let agents = (try? String(contentsOf: inboxURL.appendingPathComponent("AGENTS.md"), encoding: .utf8)) ?? ""
+        let setup = (try? String(contentsOf: inboxURL.appendingPathComponent("codex-inbox-setup.md"), encoding: .utf8)) ?? ""
+        let state = (try? String(contentsOf: inboxURL.appendingPathComponent("state.json"), encoding: .utf8)) ?? ""
+
+        assertTrue(readme.contains("Transcripted Codex Inbox"), "README should name the Codex Inbox")
+        assertTrue(agents.contains("Process only new unprocessed meetings"), "AGENTS should tell Codex not to backfill by default")
+        assertTrue(setup.contains("transcripted-inbox-watch"), "setup prompt should name the heartbeat automation")
+        assertTrue(state.contains("\"processedMeetings\": []"), "state should start with no processed meetings")
+        assertTrue(state.contains("\"installedAt\""), "state should create a setup baseline")
+    }
+
+    runSuite("AgentConnectionGuide.codexInboxSetupPrompt — explains the pinned-thread automation") {
+        let inboxURL = URL(fileURLWithPath: "/tmp/Transcripted Codex Inbox", isDirectory: true)
+        let prompt = AgentConnectionGuide.codexInboxSetupPrompt(inboxURL: inboxURL)
+
+        assertTrue(prompt.contains("Transcripted Codex Inbox Setup"), "prompt should title the setup clearly")
+        assertTrue(prompt.contains(inboxURL.path), "prompt should include the inbox path")
+        assertTrue(prompt.contains(AgentConnectionGuide.meetingsFolder.path), "prompt should include the meetings folder")
+        assertTrue(prompt.contains("Monday through Friday"), "prompt should ask for a weekday schedule")
+        assertTrue(prompt.contains(":05 and :35"), "prompt should ask for checks after the hour and half-hour")
+        assertTrue(prompt.contains("stay quiet"), "prompt should keep empty checks silent")
+        assertTrue(prompt.contains("Ask before sending messages"), "prompt should preserve approval before external action")
+        assertFalse(prompt.contains("Claude Desktop"), "Codex setup should not route through Claude Desktop")
+        assertFalse(prompt.contains("Justin"), "Codex setup should use user-neutral labels")
+    }
+
+    runSuite("AgentConnectionGuide.codexInboxSetupURL — opens a Codex thread with the inbox path") {
+        let inboxURL = URL(fileURLWithPath: "/tmp/Transcripted Codex Inbox", isDirectory: true)
+        let url = AgentConnectionGuide.codexInboxSetupURL(inboxURL: inboxURL)
+
+        assertNotNil(url, "Codex setup should produce a deep link")
+        let deepLink = url ?? URL(fileURLWithPath: "/")
+        assertEqual(deepLink.scheme ?? "", "codex", "Codex setup should use the Codex URL scheme")
+        assertEqual(deepLink.host ?? "", "threads", "Codex setup should open a thread")
+        assertEqual(deepLink.path, "/new", "Codex setup should create a new thread")
+
+        let queryItems = URLComponents(url: deepLink, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let pathValue = queryItems.first { $0.name == "path" }?.value
+        let promptValue = queryItems.first { $0.name == "prompt" }?.value ?? ""
+
+        assertEqual(
+            pathValue ?? "",
+            inboxURL.standardizedFileURL.path,
+            "Codex setup should pass the inbox as the thread working path"
+        )
+        assertTrue(
+            promptValue.contains("codex-inbox-setup.md"),
+            "Codex setup should keep the URL prompt short and point at the setup file"
+        )
+    }
+
     runSuite("AgentConnectionGuide.mcpSetupText — avoids source-build instructions for DMG users") {
         let setupText = AgentConnectionGuide.mcpSetupText
 
@@ -133,6 +206,18 @@ func testAgentConnectionGuide() {
             !setupText.contains("swift build"),
             "DMG setup copy should not ask normal users to build from source"
         )
+    }
+
+    runSuite("AgentConnectionGuide.folderPathsText — stays computed from current storage paths") {
+        let source = readAgentConnectionGuideSource()
+        let folderText = AgentConnectionGuide.folderPathsText
+
+        assertTrue(
+            source.contains("static var folderPathsText"),
+            "folder path copy should be computed so relocated capture-library paths are reflected"
+        )
+        assertTrue(folderText.contains(AgentConnectionGuide.meetingsFolder.path), "folder copy should include current meetings path")
+        assertTrue(folderText.contains(AgentConnectionGuide.dictationsFolder.path), "folder copy should include current dictations path")
     }
 
     runSuite("AgentConnectionGuide bundled skills — files and manifest are versioned") {
@@ -238,4 +323,10 @@ func testAgentConnectionGuide() {
             "bundle should scope search-memory answers to the portable meeting"
         )
     }
+}
+
+private func readAgentConnectionGuideSource() -> String {
+    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("Sources/UI/Shared/AgentConnectionGuide.swift")
+    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

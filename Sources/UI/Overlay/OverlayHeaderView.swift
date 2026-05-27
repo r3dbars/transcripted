@@ -67,6 +67,7 @@ final class OverlayHeaderView: NSView {
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
     private let stopButton = OverlayPrimaryButton(frame: .zero)
+    private var usesMiniCursorLayout = false
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -124,6 +125,31 @@ final class OverlayHeaderView: NSView {
         let hintSize = shortcutHint.fittingSize
         let stopSize = stopButton.fittingSize
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
+
+        if usesMiniCursorLayout {
+            spinner.frame = .zero
+            stopButton.frame = .zero
+            shortcutHint.frame = .zero
+            if waveformHost.isHidden {
+                let miniLabelSize = modeLabel.fittingSize
+                modeLabel.frame = NSRect(
+                    x: (bounds.width - miniLabelSize.width) / 2,
+                    y: (h - miniLabelSize.height) / 2,
+                    width: miniLabelSize.width,
+                    height: miniLabelSize.height
+                )
+                waveformHost.frame = .zero
+            } else {
+                modeLabel.frame = .zero
+                waveformHost.frame = NSRect(
+                    x: 10,
+                    y: (h - 18) / 2,
+                    width: max(0, bounds.width - 20),
+                    height: 18
+                )
+            }
+            return
+        }
 
         if isCenteredListeningLayout {
             let compactPad: CGFloat = 10
@@ -238,8 +264,13 @@ final class OverlayHeaderView: NSView {
         dictationShortcutHint: String,
         loadingTitle: String?,
         isError: Bool = false,
+        isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
+        usesMiniCursorLayout = isMiniCursorMode
+            && (state == .starting || state == .listening || (state == .drafting && !isError) || state == .success)
+        let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)
+
         // Mode label text + color
         switch state {
         case .starting:
@@ -261,17 +292,19 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         }
+        modeLabel.isHidden = miniWaveformOnly
+        updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout)
 
         // Spinner visibility
         let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
-        spinner.isHidden = !showSpinner
+        spinner.isHidden = usesMiniCursorLayout || !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
         waveformHost.isHidden = !meterPresentation.isVisible
         waveformHost.isActive = meterPresentation.isVisible
         waveformHost.level = meterPresentation.level
-        stopButton.isHidden = state != .listening
+        stopButton.isHidden = usesMiniCursorLayout || state != .listening
 
         // Shortcut hint
         switch state {
@@ -293,5 +326,56 @@ final class OverlayHeaderView: NSView {
         }
 
         needsLayout = true
+    }
+
+    private func updateAccessibility(
+        for state: FloatingOverlayController.OverlayState,
+        usesMiniCursorLayout: Bool
+    ) {
+        guard usesMiniCursorLayout else {
+            setAccessibilityElement(false)
+            setAccessibilityLabel(nil)
+            setAccessibilityValue(nil)
+            setAccessibilityHelp(nil)
+            return
+        }
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(accessibilityLabel(for: state))
+        setAccessibilityValue(accessibilityValue(for: state))
+        setAccessibilityHelp("Press Escape or your dictation shortcut to stop dictation.")
+    }
+
+    private func accessibilityLabel(for state: FloatingOverlayController.OverlayState) -> String {
+        switch state {
+        case .starting:
+            return "Dictation starting"
+        case .listening:
+            return "Dictation listening"
+        case .drafting:
+            return "Dictation transcribing"
+        case .success:
+            return "Dictation pasted"
+        case .loading:
+            return "Dictation loading"
+        case .idle:
+            return "Dictation"
+        }
+    }
+
+    private func accessibilityValue(for state: FloatingOverlayController.OverlayState) -> String {
+        switch state {
+        case .starting, .listening:
+            return "Mini cursor waveform"
+        case .drafting:
+            return "Processing speech"
+        case .success:
+            return "Text pasted"
+        case .loading:
+            return "Preparing local voice model"
+        case .idle:
+            return ""
+        }
     }
 }

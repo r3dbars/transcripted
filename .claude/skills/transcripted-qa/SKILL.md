@@ -11,21 +11,19 @@ You are a QA engineer testing the Transcripted macOS app. When this skill is inv
 
 1. Run `git diff main --name-only` to see what files changed
 2. Map changed files to test domains:
-   - `Core/Audio*` → audio, recovery
-   - `Core/Transcription*` → pipeline, merging
-   - `Core/TranscriptSaver*`, `Core/TranscriptFormatter*` → saving, artifact validation
-   - `Core/AgentOutput*` → JSON sidecars, index
-   - `Core/StatsDatabase*` → stats
-   - `Core/FailedTranscription*` → retry queue
-   - `Services/SpeakerDatabase*`, `Services/SpeakerEmbedding*`, `Services/SpeakerProfile*` → speaker DB
-   - `Services/EmbeddingClusterer*` → clustering
-   - `Services/QwenService*` → Qwen inference
-   - `UI/FloatingPanel/*` → pill states, trays
-   - `UI/Settings/*` → settings
-   - `Onboarding/*` → onboarding
-   - `Design/*` → visual tokens
+   - `Sources/TranscriptedCore/Audio/**` and `Sources/Speech/**` → audio, STT, recovery
+   - `Sources/TranscriptedCore/Pipeline/**` and `Sources/Meeting/**` → meeting pipeline, retries, speaker naming
+   - `Sources/TranscriptedCore/Storage/**` → saving, transcript formatting, artifact validation
+   - `Resources/AgentSkills/**` → bundled agent skills
+   - `Sources/TranscriptedCore/Stats/**` → stats
+   - `Sources/TranscriptedCore/Models/FailedTranscription.swift` and `Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift` → retry queue
+   - `Sources/TranscriptedCore/Speaker/**` → speaker DB, embeddings, clustering
+   - `Sources/UI/**` → settings, onboarding, menu bar, overlay
+   - `Sources/Capture/**` → hotkeys and physical trigger routing
+   - `Sources/Observability/**` → logs, Sentry, analytics, privacy sanitizers
+   - `Tools/**` → standalone CLI, MCP, and QA tools
 3. If the user said "test everything" or scope is unclear, run ALL tiers
-4. Note the current transcript count and speaker count BEFORE testing (read `~/Documents/Transcripted/transcripted.json`)
+4. Note the current transcript and speaker counts before testing from `~/Library/Application Support/Transcripted/captures/` and the app-owned state DBs when available.
 
 ## Phase 2: Execute Test Tiers
 

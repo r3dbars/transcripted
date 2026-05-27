@@ -199,17 +199,18 @@ final class EventReporter {
             appVersion: appVersion,
             osVersion: osVersion
         )
+        let localEntry = LocalObservabilityPayloadSanitizer.sanitize(entry)
 
         let appendTaskID = nextAppendTaskID
         nextAppendTaskID += 1
-        let appendTask = Task.detached(priority: .utility) { [writer, entry] in
-            await writer.append(entry)
+        let appendTask = Task.detached(priority: .utility) { [writer, localEntry] in
+            await writer.append(localEntry)
             await MainActor.run {
                 EventReporter.shared.markAppendTaskFinished(appendTaskID)
             }
         }
         pendingAppendTasks[appendTaskID] = appendTask
-        ReliabilityPacketRecorder.record(event: entry)
+        ReliabilityPacketRecorder.record(event: localEntry)
 
         if level == .error,
            let sentryPolicy = SentryEventPolicy.policy(forEngine: engine, event: event) {

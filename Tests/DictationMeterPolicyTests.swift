@@ -24,6 +24,20 @@ func testDictationMeterPolicy() {
         assertEqual(drafting, .init(isVisible: false, level: 0), "drafting should clear the meter")
     }
 
+    runSuite("DictationMeterPolicy shows quiet startup waveform when requested") {
+        let quietStartup = DictationMeterPolicy.presentation(
+            isListening: false,
+            sttIsRecording: false,
+            rawLevel: 0.8,
+            showsQuietStartupWaveform: true
+        )
+        assertEqual(
+            quietStartup,
+            .init(isVisible: true, level: 0),
+            "mini cursor startup should show a flat quiet waveform instead of text"
+        )
+    }
+
     runSuite("DictationMeterPolicy shows clamped level while listening and recording") {
         let visible = DictationMeterPolicy.presentation(
             isListening: true,

@@ -13,15 +13,21 @@
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
+- `DictationCleanupPreferences.swift` — persisted General toggle for filler-word cleanup after dictation
+- `DictationFillerCleanupPolicy.swift` — text cleanup policy for light dictation filler removal
+- `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path
+- `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
+- `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, and meeting shortcuts, including migration from older right-Option settings
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
+- `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
 - `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
@@ -51,7 +57,7 @@
 After changing support code:
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 ```
 

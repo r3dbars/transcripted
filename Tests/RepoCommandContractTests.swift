@@ -173,7 +173,9 @@ func testRepoCommandContract() {
             "bash -n scripts/entrypoints/build.sh",
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
-            "bash -n scripts/ops/daily-audio-reliability-check.sh"
+            "bash -n scripts/ops/daily-audio-reliability-check.sh",
+            "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
+            "python3 scripts/ops/generate-nightly-digest.py --self-test"
         ]
 
         for check in expectedChecks {
@@ -192,11 +194,82 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Core verification starts with rebuilt deps") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        let coreMatrixBlock = sourceSlice(
+            matrix,
+            from: "- \"Package.swift\"",
+            to: "- \"Sources/Observability/**\""
+        )
+        assertTrue(
+            coreMatrixBlock.contains("bash build-deps.sh --force")
+                && coreMatrixBlock.contains("bash build.sh --no-open")
+                && coreMatrixBlock.contains("bash run-integration-smoke.sh")
+                && coreMatrixBlock.contains("swift test"),
+            "Core/package test guidance should rebuild dependency frameworks before app, smoke, or package checks"
+        )
+
+        let corePreflightBlock = sourceSlice(
+            preflight,
+            from: "if matches_any \"$path\" \"Package.swift\"",
+            to: "if matches_any \"$path\" \"Tools/TranscriptedCLI/*\""
+        )
+        assertTrue(
+            corePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
+                && corePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
+                && corePreflightBlock.contains("add_command \"bash run-integration-smoke.sh\"")
+                && corePreflightBlock.contains("add_command \"swift test\""),
+            "agent preflight should list the dependency rebuild before Core verification commands"
+        )
+    }
+
     runSuite("Repo command contract - Audio preflight uses injected Core paths") {
         let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
         assertTrue(
             contents.contains("RecordingValidator.validateRecordingConditions(paths: paths)"),
             "Audio.start should validate the same CoreStoragePaths that the embedder injected"
+        )
+    }
+
+    runSuite("Repo command contract - microphone permission callback cannot start after cancellation") {
+        let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
+        assertTrue(
+            contents.contains("pendingStartIntentId")
+                && contents.contains("isCurrentStartIntent(startIntentId)")
+                && contents.contains("Ignoring stale microphone permission response after start was cancelled"),
+            "Audio.start should bind permission callbacks to the active start intent"
+        )
+    }
+
+    runSuite("Repo command contract - ScreenCaptureKit callbacks are timeout-bounded") {
+        let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/SCKAudioCapture.swift")
+        assertTrue(
+            contents.contains("SCKCaptureTimeoutError")
+                && contents.contains("timeout: DispatchTimeInterval = callbackTimeout")
+                && contents.contains("wait(timeout: .now() + timeout)")
+                && contents.contains("permissionPromptCallbackTimeout")
+                && contents.contains("operation: \"shareable content fetch\"")
+                && contents.contains("timeout: Self.permissionPromptCallbackTimeout")
+                && !contents.contains("semaphore.wait()\n"),
+            "ScreenCaptureKit waits should stay bounded while allowing first-run permission prompts longer than normal callbacks"
+        )
+        assertTrue(
+            contents.contains("stopStreamAndCleanupIfConfirmed")
+                && contents.contains("retainStreamReferenceAfterTimedOutStop")
+                && contents.contains("cleanupAfterLateCallback")
+                && contents.contains("running late stop callback cleanup")
+                && contents.contains("SCKAudioCapture: keeping stream reference after stop timeout"),
+            "ScreenCaptureKit should keep the stream reference when a stop callback times out, then clean it up if the callback arrives late"
+        )
+        assertTrue(
+            contents.contains("isWaitingForTimedOutStopCallback")
+                && contents.contains("stopCurrentStreamBeforePrepare")
+                && contents.contains("refusing to prepare new stream while previous stop is still pending")
+                && contents.contains("refusing to prepare new stream because previous stream is still stopping")
+                && contents.contains("refusing to start stream while previous stop is still pending"),
+            "ScreenCaptureKit should block new prepare/start attempts while an old timed-out stop callback is still pending"
         )
     }
 
@@ -284,6 +357,24 @@ func testRepoCommandContract() {
             shippedIcons,
             ["Transcripted.icns"],
             "Resources are copied wholesale into the app bundle, so old icon experiments should not ship"
+        )
+    }
+
+    runSuite("Repo command contract - legacy bundle identifier is an explicit compatibility contract") {
+        let infoPlist = readRepoTextFile("Info.plist")
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+
+        assertEqual(
+            plistStringValue("CFBundleIdentifier", in: infoPlist),
+            "com.justinbetker.draft",
+            "bundle id should stay unchanged until there is an explicit TCC/defaults migration"
+        )
+        assertTrue(
+            releaseDocs.contains("Bundle Identifier Compatibility")
+                && releaseDocs.contains("com.justinbetker.draft")
+                && releaseDocs.contains("Treat any bundle")
+                && releaseDocs.contains("identifier rename as a release migration"),
+            "release docs should explain why the legacy bundle id is intentional"
         )
     }
 
@@ -784,6 +875,227 @@ func testRepoCommandContract() {
         assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
             "fast dictation start fallback should emit a local proof event"
+        )
+    }
+
+    runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
+        let sizeBlock = sourceSlice(
+            overlayContents,
+            from: "private func preferredPanelSize(for state: OverlayState) -> NSSize",
+            to: "private func errorPanelSize() -> NSSize"
+        )
+        let showPanelBlock = sourceSlice(
+            overlayContents,
+            from: "func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil)",
+            to: "func resizePanelToCompact()"
+        )
+
+        let miniSizeReturn = "return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)"
+        for (caseText, expectation) in [
+            ("case .starting where isCursorMiniPresentationMode:", "mini cursor dictation should be tiny on the first visible startup frame"),
+            ("case .listening where isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny while listening"),
+            ("case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny while transcription is pending"),
+            ("case .success where isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny for the pasted confirmation"),
+        ] {
+            guard let caseRange = sizeBlock.range(of: caseText) else {
+                assertTrue(false, expectation)
+                continue
+            }
+            let restOfSizeBlock = String(sizeBlock[caseRange.upperBound...])
+            assertTrue(
+                restOfSizeBlock.contains(miniSizeReturn),
+                expectation
+            )
+        }
+        assertTrue(
+            showPanelBlock.contains("let shouldOpenAtCursor = isCursorMiniPanelMode")
+                && showPanelBlock.contains("? nil")
+                && showPanelBlock.contains(": sourceApp.flatMap")
+                && showPanelBlock.contains("if shouldOpenAtCursor")
+                && showPanelBlock.contains("origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)"),
+            "mini cursor dictation should skip AX lookup and open at the cursor instead of first anchoring to the text box"
+        )
+        assertTrue(
+            showPanelBlock.contains("panel.ignoresMouseEvents = isCursorMiniPanelMode"),
+            "mini cursor dictation should not briefly intercept the mouse while it appears"
+        )
+        assertTrue(
+            showPanelBlock.contains("if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer"),
+            "mini cursor dictation should not run the full-panel spring animation"
+        )
+
+        let showStartingBlock = sourceSlice(
+            overlayContents,
+            from: "func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil)",
+            to: "@discardableResult"
+        )
+        assertTrue(
+            showStartingBlock.contains("errorMessage = \"\"")
+                && showStartingBlock.contains("state = .starting")
+                && showStartingBlock.contains("resizePanelToCompact()")
+                && showStartingBlock.contains("showPanel(near: sourceApp, anchorRect: anchorRect)"),
+            "starting state should clear stale UI, force mini/compact size, then show the panel"
+        )
+
+        let loadingBlock = sourceSlice(
+            overlayContents,
+            from: "func showLoadingState(",
+            to: "func showError("
+        )
+        assertTrue(
+            loadingBlock.contains("if isCursorMiniPresentationMode, state == .starting || state == .listening")
+                && loadingBlock.contains("scheduleMiniLoadingReveal()"),
+            "mini cursor dictation should debounce full loading UI instead of flashing it immediately"
+        )
+        assertTrue(
+            loadingBlock.contains("resizePanel(to: loadingSize, keepingVisible: true")
+                && overlayContents.contains("private func clampedVisiblePanelFrame"),
+            "delayed mini cursor loading expansion should stay clamped to the visible screen"
+        )
+        assertTrue(
+            overlayContents.contains("miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000"),
+            "mini cursor should keep the quiet startup waveform visible long enough to avoid a broken-looking full-window flash"
+        )
+        assertTrue(
+            overlayContents.contains("NSWorkspace.shared.accessibilityDisplayShouldReduceMotion"),
+            "cursor-follow smoothing should respect macOS Reduce Motion"
+        )
+        assertTrue(
+            overlayContents.contains("updatePanelCornerRadius()")
+                && overlayContents.contains("OverlayTokens.panelCursorMiniCornerRadius"),
+            "mini cursor dictation should use a pill-like radius instead of the full overlay corner radius"
+        )
+
+        let headerContents = readRepoTextFile("Sources/UI/Overlay/OverlayHeaderView.swift")
+        assertTrue(
+            headerContents.contains("state == .starting || state == .listening || (state == .drafting && !isError) || state == .success"),
+            "mini cursor dictation should use the tiny centered header layout during startup"
+        )
+        assertTrue(
+            headerContents.contains("let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)"),
+            "mini cursor dictation should render starting/listening as waveform-only instead of flashing text"
+        )
+        assertTrue(
+            headerContents.contains("stopButton.isHidden = usesMiniCursorLayout || state != .listening")
+                && headerContents.contains("stopButton.frame = .zero"),
+            "mini cursor dictation should never leak the stop button into the tiny pill"
+        )
+        assertTrue(
+            headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state))")
+                && headerContents.contains("Dictation listening")
+                && headerContents.contains("Press Escape or your dictation shortcut"),
+            "mini cursor waveform-only states should still expose an accessible dictation status and stop hint"
+        )
+
+        let rootContents = readRepoTextFile("Sources/UI/Overlay/OverlayRootView.swift")
+        assertTrue(
+            rootContents.contains("showsQuietStartupWaveform: state == .starting && isMiniCursorMode"),
+            "mini cursor dictation should show a flat quiet waveform during startup"
+        )
+
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let readyModelStartBlock = sourceSlice(
+            contents,
+            from: "if appState.sttRouter.isModelLoaded {",
+            to: "startDictationAfterWarmup(sourceApp: sourceApp)"
+        )
+        assertTrue(
+            readyModelStartBlock.contains("beginDictationRecording(sourceApp: sourceApp)"),
+            "ready-model dictation should hand off directly to recording startup"
+        )
+        assertFalse(
+            readyModelStartBlock.contains("overlayController.showPanel"),
+            "ready-model dictation should not show an idle overlay before recording startup sets the first visible state"
+        )
+        let fastPathStartBlock = sourceSlice(
+            contents,
+            from: "case .skipLoadingAndStartRecording:",
+            to: "recordingStartRetryTask?.cancel()"
+        )
+        assertTrue(
+            fastPathStartBlock.contains("overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)"),
+            "starting dictation should force the current panel to the mini/compact size before async recording work"
+        )
+
+        let warmupStartBlock = sourceSlice(
+            contents,
+            from: "private func startDictationAfterWarmup(sourceApp: NSRunningApplication?)",
+            to: "startupTask = Task"
+        )
+        assertTrue(
+            warmupStartBlock.contains("overlayController.showMiniCursorStartingStateIfNeeded")
+                && warmupStartBlock.contains("updateLoadingOverlay(sourceApp: sourceApp)"),
+            "mini cursor dictation should show a tiny startup pill before any delayed model-loading UI"
+        )
+        assertTrue(
+            contents.contains("hasStartupTask: startupTask != nil"),
+            "mini cursor model warmup should remain cancellable before the delayed loading reveal"
+        )
+        let lifecycleContents = readRepoTextFile("Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift")
+        assertTrue(
+            lifecycleContents.contains("hasStartupTask || hasRecordingStartTask"),
+            "pending startup tasks should be treated like recording-start tasks for stop/cancel decisions"
+        )
+
+        let permissionErrorBlock = sourceSlice(
+            contents,
+            from: "private func presentMicrophonePermissionError(",
+            to: "overlayController.showError("
+        )
+        assertFalse(
+            permissionErrorBlock.contains("overlayController.showPanel"),
+            "permission errors should not pre-show an idle/mini panel before the real error panel"
+        )
+
+        let transcribingStartBlock = sourceSlice(
+            contents,
+            from: "overlayController.state = .drafting",
+            to: "appState.runtimeDiagnostics.recordSession(kind: \"dictation\", stage: \"transcribing\")"
+        )
+
+        assertTrue(
+            transcribingStartBlock.contains("overlayController.resizePanelToCompact()"),
+            "dictation should re-check the compact/mini overlay size before showing the transcribing state"
+        )
+    }
+
+    runSuite("Repo command contract - dictation window settings uses visual cards") {
+        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
+        let rowBlock = sourceSlice(
+            contents,
+            from: "struct DictationOverlayModeRow: View",
+            to: "struct GeneralActionRow: View"
+        )
+
+        assertTrue(
+            rowBlock.contains("title: \"Dictation window\"")
+                && rowBlock.contains("DictationOverlayModeChoice")
+                && rowBlock.contains("DictationOverlayModePreview")
+                && rowBlock.contains("NearTextOverlayPreview")
+                && rowBlock.contains("MiniCursorOverlayPreview"),
+            "General settings should present dictation window modes as visual cards, not a text-only control"
+        )
+        assertTrue(
+            rowBlock.contains("@FocusState")
+                && rowBlock.contains(".focusable(true)")
+                && rowBlock.contains("isFocused"),
+            "custom dictation window cards should expose visible keyboard focus styling"
+        )
+        assertTrue(
+            rowBlock.contains("Dictation window options")
+                && rowBlock.contains("Selected")
+                && rowBlock.contains("Not selected"),
+            "custom dictation window cards should make one-of-two selection state clear to accessibility"
+        )
+        assertTrue(
+            rowBlock.contains("Text(\"Stop\")")
+                && rowBlock.contains("stroke(Color.accentColor"),
+            "near-text preview should show the larger controlled overlay beside a focused text field"
+        )
+        assertFalse(
+            rowBlock.contains(".pickerStyle(.segmented)"),
+            "dictation window setting should not regress to the old segmented text picker"
         )
     }
 
@@ -1387,7 +1699,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Agent setup details has an explicit toggle") {
-        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
 
         assertTrue(
             contents.contains("AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup)"),

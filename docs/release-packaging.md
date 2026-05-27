@@ -33,6 +33,17 @@ stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
 The same `Info.plist` metadata also drives Sentry release reporting:
 `transcripted@<CFBundleShortVersionString>` with dist set to
 `CFBundleVersion`.
+
+## Bundle Identifier Compatibility
+
+`Info.plist` intentionally keeps the legacy bundle identifier
+`com.justinbetker.draft` for now even though the product name is Transcripted.
+Changing it would create a new macOS app identity for TCC permissions,
+UserDefaults, login items, update state, and support debugging. Treat any bundle
+identifier rename as a release migration, not a cleanup. A safe migration needs
+explicit defaults migration, permission/support copy updates, Sparkle/Homebrew
+coordination, and fresh QA on existing installs.
+
 Distribution builds also generate `build/Transcripted.app.dSYM` so production
 crashes can be symbolicated in Sentry. Keep that dSYM beside the release build
 until Sentry registration has uploaded it.

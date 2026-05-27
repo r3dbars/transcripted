@@ -40,6 +40,13 @@ Each section captures:
 - `Tests/DictationTranscriptStoreTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 
+## Verification
+
+```bash
+bash build.sh --no-open
+bash run-tests.sh
+```
+
 ## Agent notes
 
 - If you change the markdown layout, update the tests.

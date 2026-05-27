@@ -95,6 +95,7 @@ func testObservabilityTextRedactor() {
         assertFalse(redacted.contains("v1.0,backup"), "punctuation after dotted path components must not leak")
         assertFalse(redacted.contains("Client [Acme.com]"), "bracketed path components must not leak")
         assertFalse(redacted.contains("source audio.wav"), "file names after dotted components must not leak")
+        assertFalse(redacted.contains("source.wav"), "file names after punctuated dotted components must not leak")
         assertFalse(redacted.contains("source status=retry.wav"), "file names with key-like tokens must not leak")
         assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after the path should remain")
     }

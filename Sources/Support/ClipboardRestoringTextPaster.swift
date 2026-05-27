@@ -95,10 +95,16 @@ final class ClipboardRestoringTextPaster {
         clipboardRestoreTask = nil
     }
 
-    func paste(_ text: String, target: DictationPasteTarget? = nil) -> TextPasteOutcome {
+    func paste(
+        _ text: String,
+        target: DictationPasteTarget? = nil,
+        activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait
+    ) -> TextPasteOutcome {
         cancelPendingClipboardRestore()
 
-        if let target, !target.matchesCurrentFrontmostApp() {
+        if let target,
+           !target.matchesCurrentFrontmostApp(),
+           !waitForTargetActivation(target, timeout: activationWait) {
             copyTextToClipboard(text)
             return .copied(
                 "Focus changed before Transcripted could paste, so the text was copied.",
@@ -149,6 +155,19 @@ final class ClipboardRestoringTextPaster {
         }
 
         return .pasted
+    }
+
+    private func waitForTargetActivation(_ target: DictationPasteTarget, timeout: TimeInterval) -> Bool {
+        guard timeout > 0 else { return false }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            if target.matchesCurrentFrontmostApp() {
+                return true
+            }
+        }
+        return target.matchesCurrentFrontmostApp()
     }
 
     func copyTextToClipboard(_ text: String) {

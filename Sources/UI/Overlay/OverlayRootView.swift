@@ -124,6 +124,7 @@ final class OverlayRootView: NSView {
         loadingElapsedSeconds: Int,
         isTranscribing: Bool,
         isRecording: Bool,
+        isMiniCursorMode: Bool,
         audioLevel: Float,
         liveTranscript: String
     ) {
@@ -140,10 +141,12 @@ final class OverlayRootView: NSView {
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? loadingPresentation.title : nil,
             isError: showError,
+            isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(
                 isListening: state == .listening,
                 sttIsRecording: isRecording,
-                rawLevel: audioLevel
+                rawLevel: audioLevel,
+                showsQuietStartupWaveform: state == .starting && isMiniCursorMode
             )
         )
 

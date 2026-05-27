@@ -17,6 +17,8 @@ struct AgentConnectionStarterSkill {
 }
 
 enum AgentConnectionGuide {
+    private static let codexInboxSetupFilename = "codex-inbox-setup.md"
+
     private static let portableDateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -72,6 +74,12 @@ enum AgentConnectionGuide {
 
     static var dictationsFolder: URL {
         DictationStoragePaths.transcriptsFolder
+    }
+
+    static var codexInboxFolder: URL {
+        FileManager.default.transcriptedAppSupportDir
+            .appendingPathComponent("CodexInbox", isDirectory: true)
+            .standardizedFileURL
     }
 
     static let starterSkills = [
@@ -167,6 +175,108 @@ enum AgentConnectionGuide {
         }
 
         return prompt
+    }
+
+    static func ensureCodexInboxFolder(
+        appSupportRoot: URL? = nil,
+        fileManager: FileManager = .default,
+        createdAt: Date = Date()
+    ) throws -> URL {
+        let root = appSupportRoot ?? fileManager.transcriptedAppSupportDir
+        let inboxURL = root
+            .appendingPathComponent("CodexInbox", isDirectory: true)
+            .standardizedFileURL
+
+        try fileManager.createPrivateDirectory(at: inboxURL)
+        for name in ["pending", "processed", "outputs", "state"] {
+            try fileManager.createPrivateDirectory(at: inboxURL.appendingPathComponent(name, isDirectory: true))
+        }
+
+        try writeCodexInboxTextIfNeeded(readmeText(inboxURL: inboxURL), to: inboxURL.appendingPathComponent("README.md"), fileManager: fileManager)
+        try writeCodexInboxTextIfNeeded(agentsText(inboxURL: inboxURL), to: inboxURL.appendingPathComponent("AGENTS.md"), fileManager: fileManager)
+        try writeCodexInboxTextIfNeeded(
+            codexInboxSetupPrompt(inboxURL: inboxURL),
+            to: inboxURL.appendingPathComponent(codexInboxSetupFilename),
+            fileManager: fileManager
+        )
+
+        let stateURL = inboxURL.appendingPathComponent("state.json", isDirectory: false)
+        if !fileManager.fileExists(atPath: stateURL.path) {
+            try initialCodexInboxState(createdAt: createdAt)
+                .write(to: stateURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: stateURL)
+        }
+
+        return inboxURL
+    }
+
+    static func codexInboxSetupURL(inboxURL: URL = codexInboxFolder) -> URL? {
+        var components = URLComponents()
+        components.scheme = "codex"
+        components.host = "threads"
+        components.path = "/new"
+        components.queryItems = [
+            URLQueryItem(name: "path", value: inboxURL.standardizedFileURL.path),
+            URLQueryItem(name: "prompt", value: codexInboxOpenPrompt(inboxURL: inboxURL)),
+        ]
+        return components.url
+    }
+
+    static func codexInboxSetupPrompt(inboxURL: URL = codexInboxFolder) -> String {
+        let inboxPath = inboxURL.standardizedFileURL.path
+        let setupPath = inboxURL
+            .appendingPathComponent(codexInboxSetupFilename, isDirectory: false)
+            .standardizedFileURL
+            .path
+
+        return """
+        # Transcripted Codex Inbox Setup
+
+        Set this Codex thread up as my Transcripted Inbox.
+
+        Goal:
+        When Transcripted saves a new meeting, check for it during work hours and post a short after-action report in this pinned Codex thread.
+
+        Local paths:
+        - Codex Inbox: \(inboxPath)
+        - Setup prompt file: \(setupPath)
+        - Meetings: \(meetingsFolder.path)
+        - Dictations: \(dictationsFolder.path)
+        - State file: \(inboxPath)/state.json
+        - Pending folder: \(inboxPath)/pending
+        - Processed folder: \(inboxPath)/processed
+        - Outputs folder: \(inboxPath)/outputs
+
+        Setup steps:
+        1. Create or update a heartbeat automation named `transcripted-inbox-watch` attached to this Codex thread.
+        2. Schedule it Monday through Friday from 8:05 AM through 5:35 PM local time, every 30 minutes at :05 and :35. If the scheduler cannot express that exactly, use the closest 30-minute weekday work-hours schedule and tell me what schedule you used.
+        3. Ask me to pin this thread if it is not already pinned.
+        4. Use `state.json` to avoid processing the same meeting twice.
+        5. Treat the existing `installedAt` value in `state.json` as the baseline. Do not backfill older meetings unless I ask.
+
+        Every heartbeat:
+        - Never rely on the default current working directory.
+        - Read `state.json`, `pending/`, `processed/`, and the Transcripted Meetings folder.
+        - Find the newest unprocessed meeting saved after `installedAt`, or the oldest pending handoff if one exists.
+        - If there is no new meeting, stay quiet.
+        - If there is a new meeting, reply in this pinned thread with:
+          1. What changed
+          2. Short summary
+          3. Decisions, if any
+          4. What you owe
+          5. What others owe you
+          6. Useful follow-up drafts, if any
+          7. The next 1-3 actions Codex can take
+        - End with: `Want me to take any of these now? Reply with numbers.`
+        - Ask before sending messages, creating issues, editing files outside this inbox, or taking external actions.
+        - Keep it short and practical.
+        """
+    }
+
+    static func codexInboxOpenPrompt(inboxURL: URL = codexInboxFolder) -> String {
+        """
+        Set up this thread as my Transcripted Codex Inbox. Read \(codexInboxSetupFilename) in this folder, create the heartbeat automation described there, and tell me what you set up.
+        """
     }
 
     static var folderAccessPrompt: String {
@@ -311,11 +421,86 @@ enum AgentConnectionGuide {
         ].joined(separator: "\n")
     }
 
-    static let folderPathsText = """
-    Meetings:
-    \(meetingsFolder.path)
+    static var folderPathsText: String {
+        """
+        Meetings:
+        \(meetingsFolder.path)
 
-    Dictations:
-    \(dictationsFolder.path)
-    """
+        Dictations:
+        \(dictationsFolder.path)
+        """
+    }
+
+    private static func readmeText(inboxURL: URL) -> String {
+        """
+        # Transcripted Codex Inbox
+
+        This folder helps Codex watch Transcripted's local meeting Markdown files and turn new meetings into follow-up work.
+
+        Start here:
+        - `codex-inbox-setup.md` tells Codex how to create the recurring pinned-thread check.
+        - `state.json` tracks the setup baseline and processed meetings.
+        - `pending/` is for future Transcripted handoffs.
+        - `processed/` is for meetings Codex has already handled.
+        - `outputs/` is for after-action reports or drafts Codex writes back.
+
+        Transcripted meeting files live at:
+        \(meetingsFolder.path)
+
+        Codex Inbox:
+        \(inboxURL.standardizedFileURL.path)
+        """
+    }
+
+    private static func agentsText(inboxURL: URL) -> String {
+        """
+        # Transcripted Codex Inbox
+
+        You are working in the user's Transcripted Codex Inbox.
+
+        Start by reading:
+        - `codex-inbox-setup.md`
+        - `state.json`
+
+        Use Transcripted's local Markdown meetings as the source of truth:
+        - Meetings: \(meetingsFolder.path)
+        - Dictations: \(dictationsFolder.path)
+
+        Rules:
+        - Process only new unprocessed meetings unless the user asks for backfill.
+        - Do not invent facts.
+        - Cite filenames, dates, speakers, and timestamps when useful.
+        - Ask before sending messages, creating issues, editing files outside this inbox, or taking external actions.
+        - Keep reports short and practical.
+
+        Inbox path:
+        \(inboxURL.standardizedFileURL.path)
+        """
+    }
+
+    private static func initialCodexInboxState(createdAt: Date) -> String {
+        let createdAtString = portableDateFormatter.string(from: createdAt)
+        return """
+        {
+          "version": 1,
+          "installedAt": "\(createdAtString)",
+          "processedMeetings": []
+        }
+        """
+    }
+
+    private static func writeCodexInboxTextIfNeeded(
+        _ text: String,
+        to url: URL,
+        fileManager: FileManager
+    ) throws {
+        if let existing = try? String(contentsOf: url, encoding: .utf8),
+           existing == text {
+            fileManager.restrictFileToOwnerOnly(at: url)
+            return
+        }
+
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        fileManager.restrictFileToOwnerOnly(at: url)
+    }
 }

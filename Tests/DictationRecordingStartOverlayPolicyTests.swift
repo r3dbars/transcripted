@@ -44,6 +44,7 @@ func testDictationRecordingStartOverlayPolicy() {
         let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: false,
             isListeningOverlay: false,
+            hasStartupTask: false,
             hasRecordingStartTask: true,
             sttIsRecording: false
         )
@@ -59,6 +60,7 @@ func testDictationRecordingStartOverlayPolicy() {
         let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: true,
             isListeningOverlay: false,
+            hasStartupTask: false,
             hasRecordingStartTask: false,
             sttIsRecording: false
         )
@@ -70,10 +72,27 @@ func testDictationRecordingStartOverlayPolicy() {
         )
     }
 
+    runSuite("DictationRecordingStartLifecyclePolicy cancels mini warmup before loading reveal") {
+        let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
+            isLoadingOverlay: false,
+            isListeningOverlay: false,
+            hasStartupTask: true,
+            hasRecordingStartTask: false,
+            sttIsRecording: false
+        )
+
+        assertEqual(
+            decision,
+            .cancelPendingStart,
+            "a stop during delayed mini cursor model warmup should cancel startup before recording begins"
+        )
+    }
+
     runSuite("DictationRecordingStartLifecyclePolicy stops once recording is active") {
         let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: false,
             isListeningOverlay: false,
+            hasStartupTask: true,
             hasRecordingStartTask: true,
             sttIsRecording: true
         )
@@ -89,6 +108,7 @@ func testDictationRecordingStartOverlayPolicy() {
         let decision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: false,
             isListeningOverlay: false,
+            hasStartupTask: false,
             hasRecordingStartTask: false,
             sttIsRecording: false
         )

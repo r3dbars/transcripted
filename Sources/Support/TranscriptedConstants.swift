@@ -160,6 +160,10 @@ enum TranscriptedConstants {
     /// Delay after posting Cmd+V before restoring the user's clipboard.
     static let clipboardRestoreDelay: UInt64 = 120_000_000  // 120ms
 
+    /// Max time to wait for a just-activated target app before paste-back falls
+    /// back to copying. This covers menu/settings flows where activation is async.
+    static let clipboardTargetActivationWait: TimeInterval = 0.35
+
     // MARK: - Dictation Auto Enter
 
     /// Small pause after paste-back before optionally pressing Enter.

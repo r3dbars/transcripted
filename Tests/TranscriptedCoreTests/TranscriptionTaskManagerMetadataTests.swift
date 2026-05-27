@@ -152,6 +152,83 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
     }
 
+    func testClearCompletedSpeakerNamingRequestClearsActiveReviewAndPromotesNext() {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("first-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        manager.clearCompletedSpeakerNamingRequest(transcriptId: firstId)
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, secondId)
+        XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
+    }
+
+    func testCancelSpeakerNamingRequestCleansArtifactsAndPromotesNext() throws {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+        let micURL = tempDirectory.appendingPathComponent("audio/first-mic.wav")
+        let systemURL = tempDirectory.appendingPathComponent("audio/first-system.wav")
+        let clipURL = tempDirectory.appendingPathComponent("speaker_clips/first-clip.wav")
+        try Data("mic".utf8).write(to: micURL)
+        try Data("system".utf8).write(to: systemURL)
+        try Data("clip".utf8).write(to: clipURL)
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "hello",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false
+                )
+            ],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            shouldRemoveTemporaryAudioOnCleanup: true,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        manager.cancelSpeakerNamingRequest(transcriptId: firstId)
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, secondId)
+        XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
+    }
+
     func testStatusResetClearsSavedVisualWhileSpeakerReviewPendingButKeepsMetadata() async throws {
         let manager = makeManager()
         let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
@@ -224,6 +301,56 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         )
 
         XCTAssertTrue(markdown.contains("title: \"Customer Discovery Sync\""))
+    }
+
+    func testTranscriptFormatterUsesExplicitFormatOptionsForSourcesAndObsidianMetadata() throws {
+        let originalObsidianDefault = UserDefaults.standard.object(forKey: "enableObsidianFormat")
+        defer {
+            if let originalObsidianDefault {
+                UserDefaults.standard.set(originalObsidianDefault, forKey: "enableObsidianFormat")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "enableObsidianFormat")
+            }
+        }
+        UserDefaults.standard.set(true, forKey: "enableObsidianFormat")
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(
+                    start: 0,
+                    end: 2,
+                    channel: 1,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: "Imported meeting audio."
+                )
+            ],
+            duration: 2,
+            processingTime: 0.5
+        )
+
+        let defaultMarkdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(),
+            date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(audioSources: [.systemAudio])
+        )
+        let obsidianMarkdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(),
+            date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(
+                audioSources: [.systemAudio],
+                includeObsidianMetadata: true
+            )
+        )
+
+        XCTAssertTrue(defaultMarkdown.contains("sources: [system_audio]"))
+        XCTAssertFalse(defaultMarkdown.contains("### Microphone"), "system-only imports should not claim a microphone source")
+        XCTAssertFalse(defaultMarkdown.contains("\ntags:"), "Core formatting should not read UserDefaults directly")
+        XCTAssertTrue(obsidianMarkdown.contains("\ntags:"), "embedders can still opt into Obsidian metadata explicitly")
     }
 
     func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
@@ -403,6 +530,99 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(values["duration"], "0:04", "meeting metadata should use the longest readable track, not a short mic placeholder")
     }
 
+    func testCancelAllSuppressesLateTranscriptSaveAndFailedQueue() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "This should not be saved.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let statsStore = MetadataCapturingStatsStore()
+        let manager = makeManager(speechToText: speech, diarization: diarization, statsStore: statsStore)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("cancel-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            meetingTitle: "Cancelled call"
+        )
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        manager.cancelAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "cancelled live mic scratch audio should be deleted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "cancelled live system scratch audio should be deleted")
+        speech.release()
+
+        try await waitUntil {
+            speech.didReturn
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let savedMarkdown = (try? FileManager.default.contentsOfDirectory(
+            at: outputFolder,
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "md" } ?? []
+
+        XCTAssertTrue(savedMarkdown.isEmpty, "cancelled transcription should not save a late transcript")
+        XCTAssertNil(manager.lastSavedTranscriptURL, "cancelled transcription should not publish saved metadata")
+        XCTAssertTrue(statsStore.recordedSessions.isEmpty, "cancelled transcription should not record stats for a deleted transcript")
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 0, "cancelled transcription should not enter retry queue")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+    }
+
+    func testCancelAllAfterCommittedSideEffectsStillPublishesTranscript() async throws {
+        let statsStore = CancellingOnRecordStatsStore()
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "This should stay visible."),
+            diarization: MetadataStubDiarizationEngine(),
+            statsStore: statsStore
+        )
+        statsStore.onFirstRecord = {
+            Task { @MainActor in
+                manager.cancelAll()
+            }
+        }
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("committed-cancel-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("committed-cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            meetingTitle: "Committed cancel"
+        )
+
+        try await waitUntil(timeout: 3.0) {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(statsStore.recordedSessions.count, 1)
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+    }
+
     func testStopTimeoutFailedQueueCanKeepScratchAudioUntilItFinalizes() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -461,6 +681,55 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(markdown.contains("Recovered Customer Call"))
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
+    }
+
+    func testCancelAllDuringRetryDoesNotPoisonFutureRetry() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Recovered after cancel.")
+        let manager = makeManager(speechToText: speech)
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-cancel-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("retry-cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Retry cancel"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let cancelledRetry = Task {
+            await manager.retryFailedTranscription(
+                failedId: failedId,
+                outputFolder: outputFolder
+            )
+        }
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        manager.cancelAll()
+        speech.release()
+
+        let didCancelledRetrySucceed = await cancelledRetry.value
+        XCTAssertFalse(didCancelledRetrySucceed)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.map(\.id), [failedId])
+        XCTAssertNil(manager.lastSavedTranscriptURL)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: outputFolder
+        )
+
+        XCTAssertTrue(didRetry, "a cancelled retry should not leave the failed id marked cancelled forever")
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Recovered after cancel."))
     }
 
     func testRetrySuccessWithoutSpeakerNamingDeletesRetainedFailedAudio() async throws {
@@ -625,6 +894,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             markdown.contains("\ntime: \(frontmatterTimeString(sourceRecordingDate))\n"),
             "frontmatter time should use the source recording time"
         )
+        XCTAssertEqual(statsStore.recordedSessions.count, 1, "successful imports should record stats exactly once")
         let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
         XCTAssertLessThan(
             abs(metadata.date.timeIntervalSince(sourceRecordingDate)),
@@ -1289,6 +1559,45 @@ private final class MetadataCapturingStatsStore: StatsStore {
 }
 
 @available(macOS 14.0, *)
+private final class CancellingOnRecordStatsStore: StatsStore {
+    private let base = MetadataCapturingStatsStore()
+    private let lock = NSLock()
+    private var didCallOnFirstRecord = false
+    var onFirstRecord: (() -> Void)?
+
+    var recordedSessions: [RecordingMetadata] {
+        base.recordedSessions
+    }
+
+    func recordSession(_ metadata: RecordingMetadata) {
+        base.recordSession(metadata)
+
+        let callback: (() -> Void)?
+        lock.lock()
+        if didCallOnFirstRecord {
+            callback = nil
+        } else {
+            didCallOnFirstRecord = true
+            callback = onFirstRecord
+        }
+        lock.unlock()
+        callback?()
+    }
+
+    func getTotalRecordingsCount() -> Int {
+        base.getTotalRecordingsCount()
+    }
+
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+        base.getRecordings(from: startDate, to: endDate)
+    }
+
+    func recordingExists(transcriptPath: String) -> Bool {
+        base.recordingExists(transcriptPath: transcriptPath)
+    }
+}
+
+@available(macOS 14.0, *)
 @MainActor
 private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
@@ -1313,6 +1622,42 @@ private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
         }
         return transcript
     }
+    func cleanup() {
+        isReady = false
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class BlockingMetadataStubSpeechToTextEngine: SpeechToTextEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    private(set) var didStart = false
+    private(set) var didReturn = false
+    private var shouldRelease = false
+    private let transcript: String
+
+    init(transcript: String) {
+        self.transcript = transcript
+    }
+
+    func initialize() async {
+        isReady = true
+    }
+
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        didStart = true
+        while !shouldRelease {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        didReturn = true
+        return transcript
+    }
+
+    func release() {
+        shouldRelease = true
+    }
+
     func cleanup() {
         isReady = false
     }

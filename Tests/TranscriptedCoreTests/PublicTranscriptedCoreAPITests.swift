@@ -21,4 +21,65 @@ final class PublicTranscriptedCoreAPITests: XCTestCase {
         XCTAssertEqual(RecordingValidator.minimumDiskSpace, 100 * 1024 * 1024)
         XCTAssertTrue(RecordingValidator.validateSavePath(paths.transcripts).isValid)
     }
+
+    func testLegacyTranscriptStorageConformerCanOmitFormatOptions() {
+        LegacyTranscriptStorage.didUseLegacySave = false
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [],
+            duration: 0,
+            processingTime: 0
+        )
+
+        _ = LegacyTranscriptStorage.saveTranscript(
+            result,
+            transcriptId: UUID(),
+            speakerMappings: [:],
+            speakerSources: [:],
+            speakerDbIds: [:],
+            directory: nil,
+            meetingTitle: nil,
+            healthInfo: nil,
+            notifier: nil,
+            speakerStore: nil,
+            statsStore: nil,
+            formatOptions: .default
+        )
+
+        XCTAssertTrue(LegacyTranscriptStorage.didUseLegacySave)
+    }
+}
+
+@available(macOS 14.0, *)
+private enum LegacyTranscriptStorage: TranscriptStorage {
+    static var didUseLegacySave = false
+    static var defaultSaveDirectory: URL { FileManager.default.temporaryDirectory }
+
+    static func saveTranscript(
+        _ result: TranscriptionResult,
+        transcriptId: UUID,
+        speakerMappings: [String: SpeakerMapping],
+        speakerSources: [String: String],
+        speakerDbIds: [String: UUID],
+        directory: URL?,
+        meetingTitle: String?,
+        healthInfo: RecordingHealthInfo?,
+        notifier: TranscriptNotifier?,
+        speakerStore: (any SpeakerStore)?,
+        statsStore: (any StatsStore)?
+    ) -> URL? {
+        didUseLegacySave = true
+        return nil
+    }
+
+    static func updateSpeakerNames(
+        transcriptURL: URL,
+        updates: [SpeakerNameUpdate],
+        transcriptionResult: TranscriptionResult,
+        speakerStore: (any SpeakerStore)?
+    ) -> Bool {
+        false
+    }
+
+    static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {}
 }

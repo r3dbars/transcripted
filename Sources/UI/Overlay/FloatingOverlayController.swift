@@ -52,7 +52,11 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state != .loading {
+                cancelMiniLoadingReveal()
+            }
             pushStateToViews()
+            updateCursorFollowTracking()
         }
     }
     var isVisible = false
@@ -76,6 +80,13 @@ class FloatingOverlayController {
     private var blurView: NSVisualEffectView?
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
+    private var cursorFollowTask: Task<Void, Never>?
+
+    private static let cursorFollowIntervalNanoseconds: UInt64 = 33_000_000
+    private static let cursorFollowOffset = NSSize(width: 22, height: 20)
+    private static let cursorFollowScreenInset: CGFloat = 10
+    private static let cursorFollowSmoothing: CGFloat = 0.32
+    private static let miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
     private var hideGeneration: UInt64 = 0
@@ -89,7 +100,9 @@ class FloatingOverlayController {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
+        miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
+        cursorFollowTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -158,6 +171,7 @@ class FloatingOverlayController {
         panel.contentView?.layer?.borderColor = OverlayTokens.panelStroke.cgColor
 
         self.panel = panel
+        updatePanelCornerRadius()
 
         // Combine subscriptions: push live engine data to views
         sttRouter.$audioLevel
@@ -202,9 +216,12 @@ class FloatingOverlayController {
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
             isRecording: sttRouter?.isRecording ?? false,
+            isMiniCursorMode: isCursorMiniPanelMode,
             audioLevel: sttRouter?.audioLevel ?? 0,
             liveTranscript: sttRouter?.liveTranscript ?? ""
         )
+        updatePanelMouseBehavior()
+        updatePanelCornerRadius()
     }
 
     // MARK: - Panel Show/Hide
@@ -222,7 +239,10 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         errorMessage = ""
 
-        let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
+        let shouldOpenAtCursor = isCursorMiniPanelMode
+        let rawTargetRect = shouldOpenAtCursor
+            ? nil
+            : sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
         let anchorTargetRect: NSRect?
         if let anchorRect, anchorRect.width > 0, anchorRect.height > 0 {
             anchorTargetRect = anchorRect
@@ -248,7 +268,9 @@ class FloatingOverlayController {
         }
 
         var origin: NSPoint
-        if let rect = anchorTargetRect {
+        if shouldOpenAtCursor {
+            origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)
+        } else if let rect = anchorTargetRect {
             origin = NSPoint(
                 x: rect.midX - panelSize.width / 2,
                 y: rect.midY - panelSize.height / 2
@@ -287,13 +309,14 @@ class FloatingOverlayController {
 
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
-        panel.ignoresMouseEvents = false
+        panel.ignoresMouseEvents = isCursorMiniPanelMode
+        updatePanelCornerRadius()
 
         // Spring entrance
         panel.alphaValue = 0
         panel.orderFrontRegardless()
 
-        if let contentLayer = panel.contentView?.layer {
+        if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer {
             let spring = CASpringAnimation(keyPath: "transform.scale")
             spring.fromValue = 0.88
             spring.toValue = 1.0
@@ -312,11 +335,41 @@ class FloatingOverlayController {
 
         isVisible = true
         pushStateToViews()
+        updateCursorFollowTracking()
         installEscapeMonitor()
     }
 
     func resizePanelToCompact() {
-        resizePanelInstant(to: NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight))
+        resizePanelInstant(to: preferredPanelSize(for: state))
+        if isCursorMiniTrackingMode {
+            updateCursorFollowPosition(snap: true)
+        }
+    }
+
+    func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
+        loadingTimerTask?.cancel()
+        loadingTimerTask = nil
+        cancelMiniLoadingReveal()
+        errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
+        state = .starting
+        resizePanelToCompact()
+        if !isVisible {
+            showPanel(near: sourceApp, anchorRect: anchorRect)
+        }
+    }
+
+    @discardableResult
+    func showMiniCursorStartingStateIfNeeded(
+        near sourceApp: NSRunningApplication?,
+        anchorRect: NSRect? = nil
+    ) -> Bool {
+        guard isCursorMiniPresentationMode else { return false }
+        showStartingState(near: sourceApp, anchorRect: anchorRect)
+        return true
     }
 
     // MARK: - Hide Animations
@@ -395,6 +448,7 @@ class FloatingOverlayController {
 
     private var errorDismissTask: Task<Void, Never>?
     private var loadingTimerTask: Task<Void, Never>?
+    private var miniLoadingRevealTask: Task<Void, Never>?
     private var successDismissTask: Task<Void, Never>?
 
     func showLoadingState(
@@ -408,6 +462,10 @@ class FloatingOverlayController {
         errorActionHandler = nil
         if let presentation {
             loadingPresentation = presentation
+        }
+        if isCursorMiniPresentationMode, state == .starting || state == .listening {
+            scheduleMiniLoadingReveal()
+            return
         }
         let enteringLoading = state != .loading
         if enteringLoading {
@@ -431,6 +489,43 @@ class FloatingOverlayController {
                     guard let self = self, !Task.isCancelled, self.state == .loading else { break }
                     self.loadingElapsedSeconds += 1
                 }
+            }
+        }
+    }
+
+    private func scheduleMiniLoadingReveal() {
+        guard miniLoadingRevealTask == nil else { return }
+        miniLoadingRevealTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.miniLoadingRevealDelayNanoseconds)
+            } catch { return }
+            guard let self,
+                  !Task.isCancelled,
+                  self.isVisible,
+                  self.isCursorMiniTrackingMode else { return }
+            self.miniLoadingRevealTask = nil
+            self.state = .loading
+            self.loadingElapsedSeconds = 0
+            self.stopCursorFollowTracking()
+            let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
+            self.resizePanel(to: loadingSize, keepingVisible: true)
+            self.pushStateToViews()
+            self.startLoadingTimerIfNeeded()
+        }
+    }
+
+    private func cancelMiniLoadingReveal() {
+        miniLoadingRevealTask?.cancel()
+        miniLoadingRevealTask = nil
+    }
+
+    private func startLoadingTimerIfNeeded() {
+        guard loadingTimerTask == nil else { return }
+        loadingTimerTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled, self.state == .loading else { break }
+                self.loadingElapsedSeconds += 1
             }
         }
     }
@@ -520,10 +615,12 @@ class FloatingOverlayController {
         panel?.contentView?.layer?.removeAllAnimations()
 
         isVisible = false
+        stopCursorFollowTracking()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        cancelMiniLoadingReveal()
         successDismissTask?.cancel()
         successDismissTask = nil
         state = .idle
@@ -565,7 +662,7 @@ class FloatingOverlayController {
 
     // MARK: - Panel Resize
 
-    private func resizePanelInstant(to size: NSSize) {
+    private func resizePanelInstant(to size: NSSize, keepingVisible: Bool = false) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
@@ -573,10 +670,13 @@ class FloatingOverlayController {
         frame.size = size
         frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
+        if keepingVisible {
+            frame = clampedVisiblePanelFrame(frame)
+        }
         panel.setFrame(frame, display: true, animate: false)
     }
 
-    private func resizePanel(to size: NSSize) {
+    private func resizePanel(to size: NSSize, keepingVisible: Bool = false) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
@@ -584,7 +684,30 @@ class FloatingOverlayController {
         frame.size = size
         frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
+        if keepingVisible {
+            frame = clampedVisiblePanelFrame(frame)
+        }
         panel.setFrame(frame, display: true, animate: true)
+    }
+
+    private func clampedVisiblePanelFrame(_ frame: NSRect) -> NSRect {
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        let screen = NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
+            ?? NSScreen.screens.first { frame.intersects($0.frame) }
+            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else { return frame }
+
+        let inset = Self.cursorFollowScreenInset
+        var clamped = frame
+        let minX = visibleFrame.minX + inset
+        let maxX = visibleFrame.maxX - frame.width - inset
+        let minY = visibleFrame.minY + inset
+        let maxY = visibleFrame.maxY - frame.height - inset
+
+        clamped.origin.x = maxX < minX ? minX : max(minX, min(clamped.origin.x, maxX))
+        clamped.origin.y = maxY < minY ? minY : max(minY, min(clamped.origin.y, maxY))
+        return clamped
     }
 
     private func preferredPanelSize(for state: OverlayState) -> NSSize {
@@ -593,6 +716,14 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .starting where isCursorMiniPresentationMode:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .listening where isCursorMiniPresentationMode:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
+        case .success where isCursorMiniPresentationMode:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .idle, .starting, .listening, .drafting, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
         }
@@ -603,5 +734,114 @@ class FloatingOverlayController {
             ? OverlayTokens.panelMinHeight
             : OverlayTokens.panelActionErrorHeight
         return NSSize(width: OverlayTokens.panelWidth, height: height)
+    }
+
+    // MARK: - Cursor Following
+
+    private var isCursorMiniPresentationMode: Bool {
+        DictationOverlayPresentationPreferences.mode() == .cursorMini
+    }
+
+    private var isCursorMiniPanelMode: Bool {
+        guard isCursorMiniPresentationMode else { return false }
+        switch state {
+        case .starting, .listening, .success:
+            return true
+        case .drafting:
+            return errorMessage.isEmpty
+        case .idle, .loading:
+            return false
+        }
+    }
+
+    private var isCursorMiniListeningMode: Bool {
+        state == .listening && isCursorMiniPresentationMode
+    }
+
+    private var isCursorMiniTrackingMode: Bool {
+        (state == .starting || state == .listening) && isCursorMiniPresentationMode
+    }
+
+    private func updateCursorFollowTracking() {
+        updatePanelMouseBehavior()
+        guard isVisible, isCursorMiniTrackingMode else {
+            stopCursorFollowTracking()
+            return
+        }
+        startCursorFollowTracking()
+    }
+
+    private func startCursorFollowTracking() {
+        guard cursorFollowTask == nil else { return }
+        updateCursorFollowPosition(snap: true)
+        cursorFollowTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isVisible, self.isCursorMiniTrackingMode else { break }
+                self.updateCursorFollowPosition(snap: false)
+                try? await Task.sleep(nanoseconds: Self.cursorFollowIntervalNanoseconds)
+            }
+        }
+    }
+
+    private func stopCursorFollowTracking() {
+        cursorFollowTask?.cancel()
+        cursorFollowTask = nil
+    }
+
+    private func updateCursorFollowPosition(snap: Bool) {
+        guard let panel, isVisible, isCursorMiniTrackingMode else { return }
+
+        let target = cursorFollowOrigin(
+            for: NSEvent.mouseLocation,
+            panelSize: panel.frame.size
+        )
+        var frame = panel.frame
+        if snap || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            frame.origin = target
+        } else {
+            frame.origin.x += (target.x - frame.origin.x) * Self.cursorFollowSmoothing
+            frame.origin.y += (target.y - frame.origin.y) * Self.cursorFollowSmoothing
+        }
+        panel.setFrameOrigin(frame.origin)
+    }
+
+    private func updatePanelCornerRadius() {
+        let radius = isCursorMiniPanelMode
+            ? OverlayTokens.panelCursorMiniCornerRadius
+            : OverlayTokens.cornerRadius
+        blurView?.layer?.cornerRadius = radius
+        panel?.contentView?.layer?.cornerRadius = radius
+    }
+
+    private func updatePanelMouseBehavior() {
+        guard isVisible else { return }
+        panel?.ignoresMouseEvents = isCursorMiniPanelMode
+    }
+
+    private func cursorFollowOrigin(for mouseLocation: NSPoint, panelSize: NSSize) -> NSPoint {
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else {
+            return NSPoint(
+                x: mouseLocation.x + Self.cursorFollowOffset.width,
+                y: mouseLocation.y + Self.cursorFollowOffset.height
+            )
+        }
+
+        let inset = Self.cursorFollowScreenInset
+        var x = mouseLocation.x + Self.cursorFollowOffset.width
+        if x + panelSize.width > visibleFrame.maxX - inset {
+            x = mouseLocation.x - panelSize.width - Self.cursorFollowOffset.width
+        }
+
+        var y = mouseLocation.y + Self.cursorFollowOffset.height
+        if y + panelSize.height > visibleFrame.maxY - inset {
+            y = mouseLocation.y - panelSize.height - Self.cursorFollowOffset.height
+        }
+
+        return NSPoint(
+            x: max(visibleFrame.minX + inset, min(x, visibleFrame.maxX - panelSize.width - inset)),
+            y: max(visibleFrame.minY + inset, min(y, visibleFrame.maxY - panelSize.height - inset))
+        )
     }
 }

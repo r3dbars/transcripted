@@ -84,5 +84,25 @@ func testClipboardRestoringTextPaster() async {
                 "a different frontmost process should block automatic paste even if bundle ids match"
             )
         }
+
+        runSuite("ClipboardRestoringTextPaster — waits briefly for menu-triggered target activation") {
+            let source = readClipboardPasterSource()
+
+            assertTrue(
+                TranscriptedConstants.clipboardTargetActivationWait > 0
+                    && TranscriptedConstants.clipboardTargetActivationWait < 0.5,
+                "activation wait should be short but non-zero"
+            )
+            assertTrue(
+                source.contains("waitForTargetActivation(target, timeout: activationWait)"),
+                "paste-back should wait briefly before treating target activation as focus loss"
+            )
+        }
     }
+}
+
+private func readClipboardPasterSource() -> String {
+    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("Sources/Support/ClipboardRestoringTextPaster.swift")
+    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

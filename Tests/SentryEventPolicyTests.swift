@@ -22,6 +22,18 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "audio_engine_start_failed"
         )
+        let audioFormatReadTimeout = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "audio_format_read_timeout"
+        )
+        let audioEngineStartTimeout = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "audio_engine_start_timeout"
+        )
+        let zombieEngineRecoveryFailed = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "zombie_engine_recovery_failed"
+        )
         let microphoneStartTimeout = SentryEventPolicy.policy(
             forEngine: "dictation",
             event: "microphone_start_timeout"
@@ -84,6 +96,9 @@ func testSentryEventPolicy() {
         assertEqual(sessionStall?.summary, "Transcripted detected a stalled runtime session.", "session stalls should be visible in Sentry")
         assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
+        assertEqual(audioFormatReadTimeout?.summary, "Speech audio format readiness timed out.", "audio-format readiness timeouts should be visible in Sentry")
+        assertEqual(audioEngineStartTimeout?.summary, "Speech audio engine start timed out.", "audio start timeouts should be visible in Sentry")
+        assertEqual(zombieEngineRecoveryFailed?.summary, "Speech engine zombie-state recovery failed.", "zombie recovery failures should be visible in Sentry")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")
         assertEqual(deviceRecoveryTimeout?.summary, "Speech engine device-change recovery timed out.", "device recovery timeouts should be visible in Sentry with privacy-safe route context")
         assertEqual(recordingInterrupted?.summary, "Dictation recording was interrupted by audio device recovery.", "recording interruptions should be visible in Sentry with privacy-safe route context")

@@ -126,6 +126,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var isRecording: Bool = false
     @Published public private(set) var isMonitoring: Bool = false  // Lightweight level metering without file recording
     private var isStarting: Bool = false  // Prevents double-start during async setup
+    private var pendingStartIntentId: UUID?
     @Published public var audioLevel: Float = 0.0
     @Published public var recordingDuration: TimeInterval = 0.0
     @Published public var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
@@ -757,6 +758,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         micSegments = []
     }
 
+    private func beginStartIntent() -> UUID {
+        // Gate duplicate start requests while the permission prompt is open or
+        // the async recorder setup is still being scheduled.
+        isStarting = true
+        let id = UUID()
+        pendingStartIntentId = id
+        return id
+    }
+
+    private func isCurrentStartIntent(_ id: UUID) -> Bool {
+        pendingStartIntentId == id && isStarting && !isRecording
+    }
+
+    private func clearStartIntent(_ id: UUID) {
+        if pendingStartIntentId == id {
+            pendingStartIntentId = nil
+        }
+    }
+
     // MARK: - Start Recording
 
     public func start() {
@@ -778,9 +798,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return
         }
 
-        // Gate duplicate start requests while the permission prompt is open or
-        // the async recorder setup is still being scheduled.
-        isStarting = true
+        let startIntentId = beginStartIntent()
 
         // Check microphone permission and request if not determined
         // This allows users who skipped permission during onboarding to grant it at record time
@@ -788,13 +806,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
         if microphoneStatus == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 DispatchQueue.main.async {
+                    guard self.isCurrentStartIntent(startIntentId) else {
+                        AppLogger.audio.info("Ignoring stale microphone permission response after start was cancelled")
+                        return
+                    }
+
                     if granted {
                         // Permission granted, proceed with start
-                        self.startAudioCaptureAsync()
+                        self.startAudioCaptureAsync(startIntentId: startIntentId)
                     } else {
                         // Permission denied — already on main via the outer dispatch
                         self.error = "Microphone permission required. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted, then try again."
                         self.isStarting = false
+                        self.clearStartIntent(startIntentId)
                     }
                 }
             }
@@ -802,48 +826,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
         } else if microphoneStatus == .denied {
             // Permission explicitly denied
             DispatchQueue.main.async {
+                guard self.isCurrentStartIntent(startIntentId) else { return }
                 self.error = "Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted."
                 self.isStarting = false
+                self.clearStartIntent(startIntentId)
             }
             return
         }
-        prepareForNewRecordingStart()
-        let startGeneration = recordingSessionGeneration
-
-        AppLogger.audio.info("Starting audio capture")
-
-        onRecordingStart?()
-
-        Task {
-            do {
-                try await startAudioCapture(sessionGeneration: startGeneration)
-                await MainActor.run {
-                    self.finishSuccessfulStartIfCurrent(startGeneration)
-                }
-            } catch {
-                await MainActor.run {
-                    guard self.recordingSessionGeneration == startGeneration else {
-                        AppLogger.audio.info("Skipping stale start failure after session boundary", [
-                            "startGeneration": "\(startGeneration)",
-                            "currentGeneration": "\(self.recordingSessionGeneration)"
-                        ])
-                        return
-                    }
-
-                    self.error = "Recording failed to start: \(error.localizedDescription). Try quitting and reopening Transcripted."
-                    self.isRecording = false
-                    self.isStarting = false
-                    self.stop()
-                }
-            }
-        }
+        startAudioCaptureAsync(startIntentId: startIntentId)
     }
 
     /// Helper method to start audio capture asynchronously
     /// Used when permission is already granted or after permission request completes
-    private func startAudioCaptureAsync() {
-        // Set isStarting to prevent double-start during async setup
+    private func startAudioCaptureAsync(startIntentId: UUID) {
+        guard isCurrentStartIntent(startIntentId) else {
+            AppLogger.audio.info("Ignoring stale audio capture start request after start was cancelled")
+            return
+        }
+
         isStarting = true
+        clearStartIntent(startIntentId)
         prepareForNewRecordingStart()
         let startGeneration = recordingSessionGeneration
 
@@ -918,6 +920,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Bump generation synchronously on the calling thread so any
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
+        pendingStartIntentId = nil
         recordingSessionGeneration &+= 1
         let stopGeneration = recordingSessionGeneration
 

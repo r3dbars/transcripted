@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (60 Swift files)
+## Files (64 Swift files)
 
 ### Overlay/
 
@@ -74,6 +74,7 @@ The current agent-connect surfaces should keep one simple mental model:
 
 ### Settings/
 
+- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page, including Claude Desktop install/repair, copy prompts, folder paths, and config reveal actions
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
@@ -85,11 +86,14 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
+- `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, people, storage, connectAgent, privacy, support, about) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
+- `Settings/TranscriptedSettingsSidebar.swift` — Settings sidebar section model and sidebar row
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -131,12 +135,17 @@ onboarding and Settings own those prompts so the dialogs appear in context.
 Controllers own Combine subscriptions and push explicit `update(...)` calls into
 AppKit views. Views are renderers, not observable state owners.
 
+Settings is the exception: its SwiftUI pages can own local `@State` and
+`@ObservedObject` view models. Keep runtime side effects routed through injected
+controllers, preference helpers, or `TranscriptedSettingsActions` so the window
+does not become another app coordinator.
+
 ## Verification
 
 After changing UI code:
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 ```
 
