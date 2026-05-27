@@ -828,7 +828,23 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - mini cursor expands before transcription") {
+    runSuite("Repo command contract - mini cursor stays compact through transcription") {
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
+        let sizeBlock = sourceSlice(
+            overlayContents,
+            from: "private func preferredPanelSize(for state: OverlayState) -> NSSize",
+            to: "private func errorPanelSize() -> NSSize"
+        )
+
+        assertTrue(
+            sizeBlock.contains("case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:"),
+            "mini cursor dictation should stay tiny while transcription is pending"
+        )
+        assertTrue(
+            sizeBlock.contains("case .success where isCursorMiniPresentationMode:"),
+            "mini cursor dictation should stay tiny for the pasted confirmation"
+        )
+
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let transcribingStartBlock = sourceSlice(
             contents,
@@ -838,7 +854,7 @@ func testRepoCommandContract() {
 
         assertTrue(
             transcribingStartBlock.contains("overlayController.resizePanelToCompact()"),
-            "mini cursor dictation should resize back to compact before showing the transcribing state"
+            "dictation should re-check the compact/mini overlay size before showing the transcribing state"
         )
     }
 

@@ -67,7 +67,7 @@ final class OverlayHeaderView: NSView {
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
     private let stopButton = OverlayPrimaryButton(frame: .zero)
-    private var usesMiniCursorListeningLayout = false
+    private var usesMiniCursorLayout = false
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -126,17 +126,28 @@ final class OverlayHeaderView: NSView {
         let stopSize = stopButton.fittingSize
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
 
-        if usesMiniCursorListeningLayout {
-            modeLabel.frame = .zero
+        if usesMiniCursorLayout {
             spinner.frame = .zero
             stopButton.frame = .zero
             shortcutHint.frame = .zero
-            waveformHost.frame = NSRect(
-                x: 10,
-                y: (h - 18) / 2,
-                width: max(0, bounds.width - 20),
-                height: 18
-            )
+            if waveformHost.isHidden {
+                let miniLabelSize = modeLabel.fittingSize
+                modeLabel.frame = NSRect(
+                    x: (bounds.width - miniLabelSize.width) / 2,
+                    y: (h - miniLabelSize.height) / 2,
+                    width: miniLabelSize.width,
+                    height: miniLabelSize.height
+                )
+                waveformHost.frame = .zero
+            } else {
+                modeLabel.frame = .zero
+                waveformHost.frame = NSRect(
+                    x: 10,
+                    y: (h - 18) / 2,
+                    width: max(0, bounds.width - 20),
+                    height: 18
+                )
+            }
             return
         }
 
@@ -256,7 +267,9 @@ final class OverlayHeaderView: NSView {
         isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
-        usesMiniCursorListeningLayout = state == .listening && isMiniCursorMode
+        usesMiniCursorLayout = isMiniCursorMode
+            && (state == .listening || (state == .drafting && !isError) || state == .success)
+        let miniWaveformOnly = usesMiniCursorLayout && state == .listening
 
         // Mode label text + color
         switch state {
@@ -279,18 +292,18 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         }
-        modeLabel.isHidden = usesMiniCursorListeningLayout
+        modeLabel.isHidden = miniWaveformOnly
 
         // Spinner visibility
         let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
-        spinner.isHidden = usesMiniCursorListeningLayout || !showSpinner
+        spinner.isHidden = usesMiniCursorLayout || !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
         waveformHost.isHidden = !meterPresentation.isVisible
         waveformHost.isActive = meterPresentation.isVisible
         waveformHost.level = meterPresentation.level
-        stopButton.isHidden = usesMiniCursorListeningLayout || state != .listening
+        stopButton.isHidden = usesMiniCursorLayout || state != .listening
 
         // Shortcut hint
         switch state {
