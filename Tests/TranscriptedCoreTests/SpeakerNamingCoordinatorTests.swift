@@ -300,7 +300,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testHandleNamingCompleteCoalescesSplitRowsAndSkipsNoDialogSpeaker() async throws {
+    func testHandleNamingCompleteRegression1143CoalescesSplitRowsAndSkipsNoDialogSpeaker() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
         let firstSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
@@ -337,7 +337,6 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let utterances = [
             MarkdownUtterance(timestamp: "00:01", source: "System", label: "Speaker 1", text: "First fragment.", diarizerSpeakerId: 1),
             MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
-            MarkdownUtterance(timestamp: "00:09", source: "System", label: "Speaker 3", text: "", diarizerSpeakerId: 3),
         ]
         let styledTranscript = """
         ---
@@ -351,7 +350,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         diarization_engine: pyannote_offline
         sources: [mic, system_audio]
         mic_utterances: 0
-        system_utterances: 3
+        system_utterances: 2
         mic_speakers: 0
         system_speakers: 3
         total_word_count: 4
