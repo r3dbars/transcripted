@@ -39,6 +39,12 @@ stale. Click `Install for Claude Desktop` again from Transcripted Settings to
 replace it with the current bundled helper. The current helper should print only
 the JSON self-test payload.
 
+A stale helper can also pass `--self-test` but still behave like an older build,
+for example if `transcripted-mcp --help` starts the MCP server instead of
+printing usage. If Transcripted Settings says the direct tools need repair, or
+the installed helper differs from the app-bundled helper, click `Install for
+Claude Desktop` again.
+
 Current `transcripted-mcp` capabilities:
 
 - `recent_context`
