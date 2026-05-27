@@ -53,6 +53,7 @@ class FloatingOverlayController {
         didSet {
             guard state != oldValue else { return }
             pushStateToViews()
+            updateCursorFollowTracking()
         }
     }
     var isVisible = false
@@ -76,6 +77,12 @@ class FloatingOverlayController {
     private var blurView: NSVisualEffectView?
     private var dragHandleView: PanelDragView?
     private var escapeMonitor: Any?
+    private var cursorFollowTask: Task<Void, Never>?
+
+    private static let cursorFollowIntervalNanoseconds: UInt64 = 33_000_000
+    private static let cursorFollowOffset = NSSize(width: 22, height: 20)
+    private static let cursorFollowScreenInset: CGFloat = 10
+    private static let cursorFollowSmoothing: CGFloat = 0.32
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
     private var hideGeneration: UInt64 = 0
@@ -90,6 +97,7 @@ class FloatingOverlayController {
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
+        cursorFollowTask?.cancel()
     }
 
     var sttRouter: STTRouter?
@@ -312,6 +320,7 @@ class FloatingOverlayController {
 
         isVisible = true
         pushStateToViews()
+        updateCursorFollowTracking()
         installEscapeMonitor()
     }
 
@@ -520,6 +529,7 @@ class FloatingOverlayController {
         panel?.contentView?.layer?.removeAllAnimations()
 
         isVisible = false
+        stopCursorFollowTracking()
         errorDismissTask?.cancel()
         errorDismissTask = nil
         loadingTimerTask?.cancel()
@@ -603,5 +613,76 @@ class FloatingOverlayController {
             ? OverlayTokens.panelMinHeight
             : OverlayTokens.panelActionErrorHeight
         return NSSize(width: OverlayTokens.panelWidth, height: height)
+    }
+
+    // MARK: - Cursor Following
+
+    private func updateCursorFollowTracking() {
+        guard isVisible, state == .listening else {
+            stopCursorFollowTracking()
+            return
+        }
+        startCursorFollowTracking()
+    }
+
+    private func startCursorFollowTracking() {
+        guard cursorFollowTask == nil else { return }
+        updateCursorFollowPosition(snap: true)
+        cursorFollowTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isVisible, self.state == .listening else { break }
+                self.updateCursorFollowPosition(snap: false)
+                try? await Task.sleep(nanoseconds: Self.cursorFollowIntervalNanoseconds)
+            }
+        }
+    }
+
+    private func stopCursorFollowTracking() {
+        cursorFollowTask?.cancel()
+        cursorFollowTask = nil
+    }
+
+    private func updateCursorFollowPosition(snap: Bool) {
+        guard let panel, isVisible, state == .listening else { return }
+
+        let target = cursorFollowOrigin(
+            for: NSEvent.mouseLocation,
+            panelSize: panel.frame.size
+        )
+        var frame = panel.frame
+        if snap {
+            frame.origin = target
+        } else {
+            frame.origin.x += (target.x - frame.origin.x) * Self.cursorFollowSmoothing
+            frame.origin.y += (target.y - frame.origin.y) * Self.cursorFollowSmoothing
+        }
+        panel.setFrameOrigin(frame.origin)
+    }
+
+    private func cursorFollowOrigin(for mouseLocation: NSPoint, panelSize: NSSize) -> NSPoint {
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else {
+            return NSPoint(
+                x: mouseLocation.x + Self.cursorFollowOffset.width,
+                y: mouseLocation.y + Self.cursorFollowOffset.height
+            )
+        }
+
+        let inset = Self.cursorFollowScreenInset
+        var x = mouseLocation.x + Self.cursorFollowOffset.width
+        if x + panelSize.width > visibleFrame.maxX - inset {
+            x = mouseLocation.x - panelSize.width - Self.cursorFollowOffset.width
+        }
+
+        var y = mouseLocation.y + Self.cursorFollowOffset.height
+        if y + panelSize.height > visibleFrame.maxY - inset {
+            y = mouseLocation.y - panelSize.height - Self.cursorFollowOffset.height
+        }
+
+        return NSPoint(
+            x: max(visibleFrame.minX + inset, min(x, visibleFrame.maxX - panelSize.width - inset)),
+            y: max(visibleFrame.minY + inset, min(y, visibleFrame.maxY - panelSize.height - inset))
+        )
     }
 }
