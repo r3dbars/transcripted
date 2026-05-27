@@ -99,6 +99,26 @@ func testObservabilityTextRedactor() {
         assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after the path should remain")
     }
 
+    runSuite("ObservabilityTextRedactor keeps scanning dotted path components before spaced filenames") {
+        let input = "failed /Users/jane/Documents/Acme.com Client Call.wav status=retry"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Acme.com"), "dotted folder names must not survive")
+        assertFalse(redacted.contains("Client Call.wav"), "spaced filename tail must not survive")
+        assertEqual(redacted, "failed [redacted-path] status=retry",
+                    "safe metadata after the path should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor keeps metadata-like folders inside path tails") {
+        let input = "failed /Users/jane/Documents/Project status=retry Notes/source audio.wav status=done trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("status=retry Notes"), "metadata-like folder names must not survive")
+        assertFalse(redacted.contains("source audio.wav"), "filename tail after metadata-like folder must not survive")
+        assertEqual(redacted, "failed [redacted-path] status=done trigger=hotkey",
+                    "safe metadata after the path should remain")
+    }
+
     runSuite("ObservabilityTextRedactor preserves diagnostics after punctuated filenames") {
         let input = "failed /Users/jane/Documents/Report.pdf, permission denied code=1"
         let redacted = ObservabilityTextRedactor.redact(input)
@@ -106,6 +126,14 @@ func testObservabilityTextRedactor() {
         assertFalse(redacted.contains("Report.pdf"), "filename before punctuation must not survive")
         assertTrue(redacted.contains("[redacted-path], permission denied code=1"),
                    "diagnostic prose after path punctuation should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor preserves diagnostics after punctuated extensionless paths") {
+        let input = "failed /tmp/imports, permission denied code=1"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertEqual(redacted, "failed [redacted-path], permission denied code=1",
+                    "diagnostic prose after an extensionless path delimiter should remain")
     }
 
     runSuite("ObservabilityTextRedactor preserves metadata after extensionless paths") {

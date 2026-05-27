@@ -140,7 +140,6 @@ enum ObservabilityTextRedactor {
             }
 
             if isSoftPathDelimiter(character),
-               pathPrefixLooksLikeFile(text[start..<index]),
                softDelimiterEndsPath(in: text, at: index) {
                 break
             }
@@ -148,9 +147,13 @@ enum ObservabilityTextRedactor {
             if character == " " {
                 let prefix = text[start..<index]
                 let nextToken = nextPathToken(in: text, after: index)
-                if nextTokenLooksLikeMetadata(nextToken)
-                    || (pathPrefixLooksLikeFile(prefix)
-                        && !nextTokenCouldContinuePath(nextToken)) {
+                let pathContinuesLater = pathContinuationAppears(in: text, after: index)
+                if nextTokenLooksLikeMetadata(nextToken) && !pathContinuesLater {
+                    break
+                }
+                if pathPrefixLooksLikeFile(prefix)
+                    && !nextTokenCouldContinuePath(nextToken)
+                    && !pathContinuesLater {
                     break
                 }
             }
@@ -222,17 +225,61 @@ enum ObservabilityTextRedactor {
     }
 
     private static func nextTokenCouldContinuePath(_ token: String) -> Bool {
-        token.contains("/") || pathTokenLooksLikeFile(token)
+        let normalized = normalizedPathToken(token)
+        let lowercased = normalized.lowercased()
+        guard !normalized.contains("@"),
+              !lowercased.hasPrefix("http://"),
+              !lowercased.hasPrefix("https://"),
+              !lowercased.hasSuffix(".local") else {
+            return false
+        }
+        return normalized.contains("/") || pathTokenLooksLikeFile(normalized)
+    }
+
+    private static func pathContinuationAppears(in text: String, after spaceIndex: String.Index) -> Bool {
+        var index = text.index(after: spaceIndex)
+        var inspectedTokens = 0
+
+        while index < text.endIndex && inspectedTokens < 8 {
+            while index < text.endIndex, text[index] == " " {
+                index = text.index(after: index)
+            }
+            guard index < text.endIndex, !isHardPathDelimiter(text[index]) else {
+                return false
+            }
+
+            var token = ""
+            while index < text.endIndex {
+                let character = text[index]
+                if character == " " || isHardPathDelimiter(character) {
+                    break
+                }
+                token.append(character)
+                index = text.index(after: index)
+            }
+
+            if nextTokenCouldContinuePath(token) {
+                return true
+            }
+            inspectedTokens += 1
+        }
+
+        return false
     }
 
     private static func nextTokenLooksLikeMetadata(_ token: String) -> Bool {
-        guard !token.contains("/"),
-              !pathTokenLooksLikeFile(token),
-              let separator = token.firstIndex(of: "=") else {
+        let normalized = normalizedPathToken(token)
+        guard !normalized.contains("/"),
+              !pathTokenLooksLikeFile(normalized),
+              let separator = normalized.firstIndex(of: "=") else {
             return false
         }
-        let key = String(token[..<separator]).lowercased()
+        let key = String(normalized[..<separator]).lowercased()
         return pathDiagnosticMetadataKeys.contains(key)
+    }
+
+    private static func normalizedPathToken(_ token: String) -> String {
+        token.trimmingCharacters(in: CharacterSet(charactersIn: ",;:)]}"))
     }
 
     private static func pathTokenLooksLikeFile(_ token: String) -> Bool {
