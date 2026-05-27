@@ -120,10 +120,25 @@ struct SentryEventPolicy: Equatable {
             event: "audio_format_failed",
             summary: "Transcripted could not create the expected audio format."
         ),
+        "parakeet.audio_format_read_timeout": .init(
+            engine: "parakeet",
+            event: "audio_format_read_timeout",
+            summary: "Speech audio format readiness timed out."
+        ),
         "parakeet.audio_engine_start_failed": .init(
             engine: "parakeet",
             event: "audio_engine_start_failed",
             summary: "Speech audio engine failed to start."
+        ),
+        "parakeet.audio_engine_start_timeout": .init(
+            engine: "parakeet",
+            event: "audio_engine_start_timeout",
+            summary: "Speech audio engine start timed out."
+        ),
+        "parakeet.zombie_engine_recovery_failed": .init(
+            engine: "parakeet",
+            event: "zombie_engine_recovery_failed",
+            summary: "Speech engine zombie-state recovery failed."
         ),
         "parakeet.asr_manager_unavailable": .init(
             engine: "parakeet",

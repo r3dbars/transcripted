@@ -23,6 +23,7 @@ public class TranscriptionTaskManager: ObservableObject {
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?)] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
+    private var intentionallyCancelledTaskIds: Set<UUID> = []
     var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
     public let transcription: Transcription
 
@@ -30,6 +31,7 @@ public class TranscriptionTaskManager: ObservableObject {
     public let statsStore: (any StatsStore)?
     let retainedAudioDirectory: URL?
     private let retainedAudioDirectoryProvider: (() -> URL?)?
+    private let transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)?
     private let cleanupDirectories: [URL]
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
@@ -46,6 +48,7 @@ public class TranscriptionTaskManager: ObservableObject {
         cleanupDirectories: [URL]? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil,
+        transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)? = nil,
         statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
     ) {
@@ -54,6 +57,7 @@ public class TranscriptionTaskManager: ObservableObject {
         self.notifier = notifier
         self.retainedAudioDirectory = retainedAudioDirectory
         self.retainedAudioDirectoryProvider = retainedAudioDirectoryProvider
+        self.transcriptFormatOptionsProvider = transcriptFormatOptionsProvider
         self.cleanupDirectories = (cleanupDirectories ?? [speakerClipsDirectory])
             .map(Self.canonicalDirectoryURL)
         self.transcription = Transcription(
@@ -195,6 +199,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
+                    guard !self.finishCancelledTaskIfNeeded(taskId: task.id) else { return }
                     self.publishTranscriptSaved(from: transcriptURL)
                     self.handleTaskCompletion(taskId: task.id)
                 }
@@ -207,6 +212,7 @@ public class TranscriptionTaskManager: ObservableObject {
                         self.handleTaskCompletion(taskId: task.id)
                         return
                     }
+                    guard !self.finishCancelledTaskIfNeeded(taskId: task.id, error: error) else { return }
 
                     self.publishFailure(
                         displayMessage: "Transcription failed",
@@ -285,6 +291,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
+                    guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
                     self.publishTranscriptSaved(from: transcriptURL)
                     self.handleTaskCompletion(taskId: taskId)
                 }
@@ -295,6 +302,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 ])
 
                 await MainActor.run {
+                    if self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) {
+                        self.removeRecordingFile(audioURL, label: "cancelled imported recording")
+                        return
+                    }
                     self.removeRecordingFile(audioURL, label: "failed imported recording")
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
@@ -381,6 +392,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 )
 
                 await MainActor.run {
+                    guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
                     self.publishTranscriptSaved(from: transcriptURL)
                     self.handleTaskCompletion(taskId: taskId)
                 }
@@ -391,6 +403,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 ])
 
                 await MainActor.run {
+                    guard !self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) else { return }
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
                         displayMessage: Self.savedAudioRetranscriptionFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
@@ -877,6 +890,7 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTasks.removeValue(forKey: taskId)
         activeTaskAudio.removeValue(forKey: taskId)
         preservedTaskIdsForShutdown.remove(taskId)
+        intentionallyCancelledTaskIds.remove(taskId)
         activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
@@ -891,8 +905,31 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    private func finishCancelledTaskIfNeeded(taskId: UUID, error: Error? = nil) -> Bool {
+        guard intentionallyCancelledTaskIds.contains(taskId) || error is CancellationError else {
+            return false
+        }
+
+        intentionallyCancelledTaskIds.remove(taskId)
+        let hadActiveTask = activeTasks.removeValue(forKey: taskId) != nil
+        activeTaskAudio.removeValue(forKey: taskId)
+        preservedTaskIdsForShutdown.remove(taskId)
+        if hadActiveTask {
+            activeCount = max(0, activeCount - 1)
+            backgroundTaskCount = max(0, backgroundTaskCount - 1)
+        }
+
+        AppLogger.pipeline.info("Suppressed cancelled transcription task outcome", [
+            "taskId": "\(taskId)",
+            "remaining": "\(activeCount)",
+            "backgroundTasks": "\(backgroundTaskCount)"
+        ])
+        return true
+    }
+
     public func cancelAll() {
         for (taskId, task) in activeTasks {
+            intentionallyCancelledTaskIds.insert(taskId)
             task.cancel()
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
@@ -1030,6 +1067,14 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func resolvedRetainedAudioDirectory() -> URL? {
         retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
+    }
+
+    func resolvedTranscriptFormatOptions(hasMicAudio: Bool) -> TranscriptFormatOptions {
+        let audioSources: [TranscriptAudioSource] = hasMicAudio
+            ? [.microphone, .systemAudio]
+            : [.systemAudio]
+        return (transcriptFormatOptionsProvider?() ?? .default)
+            .withAudioSources(audioSources)
     }
 
     nonisolated func removeManagedCleanupFile(_ url: URL?, label: String) {

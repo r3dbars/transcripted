@@ -133,6 +133,12 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
         fi
 
+        if matches_any "$path" "scripts/ops/generate-nightly-digest.py" "scripts/README.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
+            add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
+        fi
+
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"

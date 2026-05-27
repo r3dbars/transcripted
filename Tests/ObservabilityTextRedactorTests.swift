@@ -59,6 +59,18 @@ func testObservabilityTextRedactor() {
                    "sensitive device/file assignments should be redacted")
     }
 
+    runSuite("ObservabilityTextRedactor scrubs local paths that contain spaces") {
+        let input = "failed to read /Users/jane/Documents/Client Calls/ACME Roadmap.md and /tmp/Meeting Imports/source audio.wav from /Users/jane/Library/Application Support/Transcripted/John's Call (équipe).wav"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Client Calls"), "user folder paths with spaces must not survive")
+        assertFalse(redacted.contains("ACME Roadmap.md"), "full user path tail must be scrubbed")
+        assertFalse(redacted.contains("Meeting Imports"), "temporary paths with spaces must not survive")
+        assertFalse(redacted.contains("John's Call"), "apostrophes in app-support filenames must not leak")
+        assertFalse(redacted.contains("équipe"), "non-ASCII app-support filename tails must not leak")
+        assertTrue(redacted.contains("[redacted-path]"), "path marker should remain")
+    }
+
     runSuite("ObservabilityTextRedactor scrubs inline key=value sensitive assignments") {
         let input = "ctx meeting_title=Private Roadmap speaker_name=Jane Doe trigger=hotkey"
         let redacted = ObservabilityTextRedactor.redact(input)

@@ -14,7 +14,9 @@ enum ObservabilityTextRedactor {
         return try! NSRegularExpression(pattern: "(?!)")
     }
 
-    private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\s"]*)?"#)
+    private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\n\r"\[\]]*)?"#)
+    private static let knownUserFolderPathRegex = makeRegex(#"/Users/[^/\s]+/(?:Desktop|Documents|Downloads|Library|Movies|Music|Pictures|Public)(?:/[^\n\r"\[\]]*)+"#)
+    private static let tempPathWithSpacesRegex = makeRegex(#"/(?:private/var|var|tmp)(?:/[^\n\r"\[\]]*)+"#)
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = makeRegex(
         #"(?<!https:)(?<!http:)/(?:System/Volumes/Data/)?(?:Users|private|var|tmp|Volumes|Applications|Library|opt)[^\s"]*"#
@@ -65,6 +67,10 @@ enum ObservabilityTextRedactor {
         result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
         range = NSRange(result.startIndex..., in: result)
         result = appSupportPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
+        range = NSRange(result.startIndex..., in: result)
+        result = knownUserFolderPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
+        range = NSRange(result.startIndex..., in: result)
+        result = tempPathWithSpacesRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
         range = NSRange(result.startIndex..., in: result)
         result = userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
         range = NSRange(result.startIndex..., in: result)

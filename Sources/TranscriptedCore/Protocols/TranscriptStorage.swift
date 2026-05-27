@@ -20,7 +20,8 @@ public protocol TranscriptStorage {
         healthInfo: RecordingHealthInfo?,
         notifier: TranscriptNotifier?,
         speakerStore: (any SpeakerStore)?,
-        statsStore: (any StatsStore)?
+        statsStore: (any StatsStore)?,
+        formatOptions: TranscriptFormatOptions
     ) -> URL?
 
     /// Update speaker names in an existing transcript file.

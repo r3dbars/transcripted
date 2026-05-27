@@ -275,6 +275,10 @@ extension TranscriptionTaskManager {
         }
 
         let transcriptId = UUID()
+        try Task.checkCancellation()
+        let formatOptions = await MainActor.run {
+            self.resolvedTranscriptFormatOptions(hasMicAudio: micURL != nil)
+        }
 
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,
@@ -289,19 +293,25 @@ extension TranscriptionTaskManager {
             speakerStore: speakerDB,
             statsStore: statsStore,
             recordingDate: recordingDate,
-            transcriptionEngine: speechEngine
+            transcriptionEngine: speechEngine,
+            formatOptions: formatOptions
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }
+        try await checkCancellationAfterTranscriptSideEffects(savedURL: savedURL)
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
-        let didArchiveRecordingAudio = await archiveRecordingAudioIfConfigured(
+        let archiveOutcome = await archiveRecordingAudioIfConfigured(
             micURL: micURL,
             systemURL: systemURL,
             savedURL: savedURL
         )
-        let shouldRemoveScratchAudio = didArchiveRecordingAudio && removeSourceAudioAfterArchive
+        try await checkCancellationAfterTranscriptSideEffects(
+            savedURL: savedURL,
+            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory
+        )
+        let shouldRemoveScratchAudio = archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive
 
         // Phase 3: Speaker naming — for system speakers that need action, plus any mic
         // speakers surfaced by local-speaker split. Entries from both channels flow
@@ -338,6 +348,11 @@ extension TranscriptionTaskManager {
             } catch {
                 AppLogger.pipeline.warning("System clip extraction failed, skipping system naming", ["error": error.localizedDescription])
             }
+            try await checkCancellationAfterTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+                speakerClipURLs: namingEntries.map(\.clipURL)
+            )
         }
 
         // Mic-channel naming — surface every mic speaker with a persistent profile so the
@@ -374,6 +389,11 @@ extension TranscriptionTaskManager {
             } catch {
                 AppLogger.pipeline.warning("Mic clip extraction failed, skipping mic naming", ["error": error.localizedDescription])
             }
+            try await checkCancellationAfterTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+                speakerClipURLs: namingEntries.map(\.clipURL)
+            )
         }
 
         if !namingEntries.isEmpty {
@@ -390,6 +410,11 @@ extension TranscriptionTaskManager {
                 }
 
             let capturedEntries = namingEntries
+            try await checkCancellationAfterTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+                speakerClipURLs: capturedEntries.map(\.clipURL)
+            )
             await MainActor.run {
                 self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
                     speakers: capturedEntries,
@@ -415,6 +440,12 @@ extension TranscriptionTaskManager {
                     }
                 ))
             }
+            try await checkCancellationAfterTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+                speakerClipURLs: capturedEntries.map(\.clipURL),
+                queuedSpeakerRequestTranscriptId: transcriptId
+            )
 
             AppLogger.pipeline.info("Speaker naming requested", [
                 "total": "\(namingEntries.count)",
@@ -431,17 +462,28 @@ extension TranscriptionTaskManager {
             removeManagedCleanupFile(micURL, label: "completed mic scratch")
             removeManagedCleanupFile(systemURL, label: "completed system scratch")
         }
+        try await checkCancellationAfterTranscriptSideEffects(
+            savedURL: savedURL,
+            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory
+        )
 
         return savedURL
+    }
+
+    private struct RecordingAudioArchiveOutcome {
+        let didArchiveRecordingAudio: Bool
+        let retainedAudioDirectory: URL?
     }
 
     nonisolated private func archiveRecordingAudioIfConfigured(
         micURL: URL?,
         systemURL: URL,
         savedURL: URL
-    ) async -> Bool {
+    ) async -> RecordingAudioArchiveOutcome {
         let retainedAudioDirectory = await MainActor.run { self.resolvedRetainedAudioDirectory() }
-        guard let retainedAudioDirectory else { return true }
+        guard let retainedAudioDirectory else {
+            return RecordingAudioArchiveOutcome(didArchiveRecordingAudio: true, retainedAudioDirectory: nil)
+        }
 
         do {
             let retainedAudio = try RecordingAudioArchiver.archive(
@@ -454,15 +496,60 @@ extension TranscriptionTaskManager {
                 "hasMic": "\(retainedAudio.micURL != nil)",
                 "hasSystem": "\(retainedAudio.systemURL != nil)"
             ])
-            return true
+            return RecordingAudioArchiveOutcome(
+                didArchiveRecordingAudio: true,
+                retainedAudioDirectory: retainedAudio.directory
+            )
         } catch {
             AppLogger.pipeline.warning("Failed to retain meeting audio; leaving scratch files in place", [
                 "hasMic": "\(micURL != nil)",
                 "hasSystem": "true",
                 "errorType": "\(type(of: error))"
             ])
-            return false
+            return RecordingAudioArchiveOutcome(didArchiveRecordingAudio: false, retainedAudioDirectory: nil)
         }
+    }
+
+    private func checkCancellationAfterTranscriptSideEffects(
+        savedURL: URL,
+        retainedAudioDirectory: URL? = nil,
+        speakerClipURLs: [URL] = [],
+        queuedSpeakerRequestTranscriptId: UUID? = nil
+    ) async throws {
+        do {
+            try Task.checkCancellation()
+        } catch {
+            if let queuedSpeakerRequestTranscriptId {
+                await MainActor.run {
+                    pendingSpeakerNamingRequests.removeAll { $0.transcriptId == queuedSpeakerRequestTranscriptId }
+                }
+            }
+            cleanupCancelledTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: retainedAudioDirectory,
+                speakerClipURLs: speakerClipURLs
+            )
+            throw error
+        }
+    }
+
+    nonisolated private func cleanupCancelledTranscriptSideEffects(
+        savedURL: URL,
+        retainedAudioDirectory: URL?,
+        speakerClipURLs: [URL]
+    ) {
+        try? FileManager.default.removeItem(at: savedURL)
+        if let retainedAudioDirectory {
+            try? FileManager.default.removeItem(at: retainedAudioDirectory)
+        }
+        for clipURL in speakerClipURLs {
+            try? FileManager.default.removeItem(at: clipURL)
+        }
+        AppLogger.pipeline.info("Cleaned cancelled transcription side effects", [
+            "transcript": savedURL.lastPathComponent,
+            "clips": "\(speakerClipURLs.count)",
+            "retainedAudio": retainedAudioDirectory == nil ? "false" : "true"
+        ])
     }
 
 }

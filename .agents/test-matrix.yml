@@ -76,6 +76,14 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/ops/generate-nightly-digest.py"
+      - "scripts/README.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
+      - "python3 scripts/ops/generate-nightly-digest.py --self-test"
+
+  - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"

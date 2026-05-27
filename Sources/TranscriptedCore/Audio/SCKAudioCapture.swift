@@ -13,6 +13,15 @@ import ScreenCaptureKit
 /// The public interface matches `SystemAudioCaptureEngine` so `Audio` can swap
 /// between this and the CoreAudio-based `SystemAudioCapture` transparently.
 @available(macOS 26.0, *)
+private struct SCKCaptureTimeoutError: LocalizedError {
+    let operation: String
+
+    var errorDescription: String? {
+        "ScreenCaptureKit \(operation) timed out."
+    }
+}
+
+@available(macOS 26.0, *)
 final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
     @Published var errorMessage: String?
 
@@ -23,6 +32,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
     private var _generation: UInt64 = 0
     private let generationLock = NSLock()
+    private static let callbackTimeout: DispatchTimeInterval = .seconds(8)
 
     var diagnosticBackendName: String { "screen_capture_kit" }
 
@@ -64,7 +74,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             fetchError = error
             semaphore.signal()
         }
-        semaphore.wait()
+        try Self.waitForCallback(semaphore, operation: "shareable content fetch")
 
         if let error = fetchError {
             AppLogger.audioSystem.error("SCKAudioCapture: failed to get shareable content", ["error": error.localizedDescription])
@@ -143,17 +153,19 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         self.streamOutput = output
 
         let queue = DispatchQueue(label: "SCKAudioCapture.output", qos: .userInitiated)
+        var didRequestStart = false
         do {
             try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: queue)
 
             // Start capture — synchronous wait since we're on a background thread.
             let semaphore = DispatchSemaphore(value: 0)
             var startError: Error?
+            didRequestStart = true
             stream.startCapture { error in
                 startError = error
                 semaphore.signal()
             }
-            semaphore.wait()
+            try Self.waitForCallback(semaphore, operation: "start capture")
 
             if let error = startError {
                 throw error
@@ -167,7 +179,11 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
         } catch {
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
-            cleanupIfCurrent(generation: startGeneration, stream: stream)
+            if didRequestStart {
+                invalidateGenerationIfCurrent(startGeneration)
+                stopStreamSynchronously(stream)
+            }
+            cleanupStreamReference(stream)
             publishErrorMessage(error.localizedDescription)
             throw error
         }
@@ -216,6 +232,14 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         return _generation
     }
 
+    private func invalidateGenerationIfCurrent(_ generation: UInt64) {
+        generationLock.lock()
+        defer { generationLock.unlock() }
+        if _generation == generation {
+            _generation &+= 1
+        }
+    }
+
     private func cleanupIfCurrent(generation: UInt64, stream expectedStream: SCStream) {
         guard currentGeneration() == generation,
               let currentStream = stream,
@@ -226,7 +250,17 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         cleanup()
     }
 
-    private func stopStreamSynchronously(_ stream: SCStream) {
+    private func cleanupStreamReference(_ expectedStream: SCStream) {
+        guard let currentStream = stream,
+              currentStream === expectedStream else {
+            AppLogger.audioSystem.info("SCKAudioCapture: skipping cleanup for replaced stream")
+            return
+        }
+        cleanup()
+    }
+
+    @discardableResult
+    private func stopStreamSynchronously(_ stream: SCStream) -> Bool {
         let semaphore = DispatchSemaphore(value: 0)
         stream.stopCapture { error in
             if let error = error {
@@ -234,7 +268,24 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             }
             semaphore.signal()
         }
-        semaphore.wait()
+        do {
+            try Self.waitForCallback(semaphore, operation: "stop capture")
+            return true
+        } catch {
+            AppLogger.audioSystem.warning("SCKAudioCapture: stop timed out", ["error": error.localizedDescription])
+            return false
+        }
+    }
+
+    private static func waitForCallback(_ semaphore: DispatchSemaphore, operation: String) throws {
+        guard semaphore.wait(timeout: .now() + callbackTimeout) == .success else {
+            let error = SCKCaptureTimeoutError(operation: operation)
+            AppLogger.audioSystem.error("SCKAudioCapture: callback timed out", [
+                "operation": operation,
+                "timeoutSeconds": "8"
+            ])
+            throw error
+        }
     }
 
     private func cleanup() {

@@ -48,6 +48,27 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("ContextCaptureEngine hotkey debounce — tracks independent actions separately") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("_lastAcceptedHotkeyTimesByAction"),
+            "hotkey debounce should store last accepted times per action instead of one global timestamp"
+        )
+        assertTrue(
+            source.contains("shouldAcceptHotkeyAction(\"dictation_hands_free\")"),
+            "hands-free dictation should have its own debounce key"
+        )
+        assertTrue(
+            source.contains("shouldAcceptHotkeyAction(\"dictation_push_to_talk\")"),
+            "push-to-talk dictation should have its own debounce key"
+        )
+        assertTrue(
+            source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),
+            "meeting physical trigger should have its own debounce key"
+        )
+    }
+
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would
@@ -342,4 +363,10 @@ private func makeContextCaptureDefaults() -> (UserDefaults, String) {
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
+}
+
+private func readContextCaptureEngineSource() -> String {
+    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("Sources/Capture/ContextCaptureEngine.swift")
+    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

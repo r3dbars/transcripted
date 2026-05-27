@@ -59,6 +59,34 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("LocalObservabilityPayloadSanitizer redacts local-only sensitive context before disk write") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-05-26T12:00:00.000Z",
+            level: "info",
+            engine: "capture",
+            event: "dictation_toggle_requested",
+            message: "source /Users/jane/Documents/Client Calls/ACME Roadmap.md",
+            context: [
+                "source_app_name": "Private Notes",
+                "source_app_bundle_id": "com.private.notes",
+                "audio_device": "Jane's AirPods Pro",
+                "file_path": "/Users/jane/Documents/Client Calls/ACME Roadmap.md",
+                "trigger": "physical_key",
+            ],
+            appVersion: "1.2.3",
+            osVersion: "Version 26.0"
+        )
+
+        let sanitized = LocalObservabilityPayloadSanitizer.sanitize(event)
+
+        assertFalse(sanitized.message.contains("Client Calls"), "local event messages should redact paths before disk write")
+        assertEqual(sanitized.context?["source_app_name"], "[redacted-sensitive-value]", "source app name should be redacted locally")
+        assertEqual(sanitized.context?["source_app_bundle_id"], "[redacted-sensitive-value]", "bundle id should be redacted locally")
+        assertEqual(sanitized.context?["audio_device"], "[redacted-sensitive-value]", "raw audio device names should be redacted locally")
+        assertEqual(sanitized.context?["file_path"], "[redacted-sensitive-value]", "file paths should be redacted locally")
+        assertEqual(sanitized.context?["trigger"], "physical_key", "coarse diagnostics should stay useful")
+    }
+
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogWriterTests-\(UUID().uuidString)", isDirectory: true)

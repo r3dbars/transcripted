@@ -173,7 +173,9 @@ func testRepoCommandContract() {
             "bash -n scripts/entrypoints/build.sh",
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
-            "bash -n scripts/ops/daily-audio-reliability-check.sh"
+            "bash -n scripts/ops/daily-audio-reliability-check.sh",
+            "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
+            "python3 scripts/ops/generate-nightly-digest.py --self-test"
         ]
 
         for check in expectedChecks {
@@ -197,6 +199,26 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("RecordingValidator.validateRecordingConditions(paths: paths)"),
             "Audio.start should validate the same CoreStoragePaths that the embedder injected"
+        )
+    }
+
+    runSuite("Repo command contract - microphone permission callback cannot start after cancellation") {
+        let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
+        assertTrue(
+            contents.contains("pendingStartIntentId")
+                && contents.contains("isCurrentStartIntent(startIntentId)")
+                && contents.contains("Ignoring stale microphone permission response after start was cancelled"),
+            "Audio.start should bind permission callbacks to the active start intent"
+        )
+    }
+
+    runSuite("Repo command contract - ScreenCaptureKit callbacks are timeout-bounded") {
+        let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/SCKAudioCapture.swift")
+        assertTrue(
+            contents.contains("SCKCaptureTimeoutError")
+                && contents.contains("wait(timeout: .now() + callbackTimeout)")
+                && !contents.contains("semaphore.wait()\n"),
+            "ScreenCaptureKit prepare/start/stop waits should use bounded callback timeouts"
         )
     }
 
@@ -284,6 +306,24 @@ func testRepoCommandContract() {
             shippedIcons,
             ["Transcripted.icns"],
             "Resources are copied wholesale into the app bundle, so old icon experiments should not ship"
+        )
+    }
+
+    runSuite("Repo command contract - legacy bundle identifier is an explicit compatibility contract") {
+        let infoPlist = readRepoTextFile("Info.plist")
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+
+        assertEqual(
+            plistStringValue("CFBundleIdentifier", in: infoPlist),
+            "com.justinbetker.draft",
+            "bundle id should stay unchanged until there is an explicit TCC/defaults migration"
+        )
+        assertTrue(
+            releaseDocs.contains("Bundle Identifier Compatibility")
+                && releaseDocs.contains("com.justinbetker.draft")
+                && releaseDocs.contains("Treat any bundle")
+                && releaseDocs.contains("identifier rename as a release migration"),
+            "release docs should explain why the legacy bundle id is intentional"
         )
     }
 

@@ -21,12 +21,15 @@ private var _sharedMeetingToggle: (() -> Void)?
 // Use systemUptime (monotonic) instead of CFAbsoluteTimeGetCurrent (wall clock)
 // so NTP adjustments, manual time changes, or DST transitions can't make a
 // backward clock jump silently drop all subsequent hotkey presses.
-private var _lastAcceptedHotkeyTime: TimeInterval = 0
+private var _lastAcceptedHotkeyTimesByAction: [String: TimeInterval] = [:]
 
-private func shouldAcceptHotkeyAction(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
-    let elapsed = now - _lastAcceptedHotkeyTime
+private func shouldAcceptHotkeyAction(
+    _ actionKey: String,
+    now: TimeInterval = ProcessInfo.processInfo.systemUptime
+) -> Bool {
+    let elapsed = now - (_lastAcceptedHotkeyTimesByAction[actionKey] ?? 0)
     guard elapsed >= TranscriptedConstants.hotkeyActionDebounceInterval else { return false }
-    _lastAcceptedHotkeyTime = now
+    _lastAcceptedHotkeyTimesByAction[actionKey] = now
     return true
 }
 
@@ -92,7 +95,7 @@ private func hotkeyHandler(
     )
     guard status == noErr else { return noErr }
 
-    guard shouldAcceptHotkeyAction() else {
+    guard shouldAcceptHotkeyAction("carbon_meeting_toggle") else {
         Task { @MainActor in
             EventReporter.shared.capture(
                 level: .info,
@@ -611,7 +614,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalDictationHandsFreePress() {
-        guard shouldAcceptHotkeyAction() else {
+        guard shouldAcceptHotkeyAction("dictation_hands_free") else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
                 level: .info,
@@ -632,7 +635,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalDictationPushToTalkPress() {
-        guard shouldAcceptHotkeyAction() else {
+        guard shouldAcceptHotkeyAction("dictation_push_to_talk") else {
             DiagnosticsTrail.record(
                 logger: sessionController?.appState?.logger,
                 level: .info,
@@ -688,7 +691,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalMeetingPress() {
-        guard shouldAcceptHotkeyAction() else {
+        guard shouldAcceptHotkeyAction("meeting_physical_trigger") else {
             EventReporter.shared.capture(
                 level: .info,
                 engine: "capture",

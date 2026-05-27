@@ -226,6 +226,56 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("title: \"Customer Discovery Sync\""))
     }
 
+    func testTranscriptFormatterUsesExplicitFormatOptionsForSourcesAndObsidianMetadata() throws {
+        let originalObsidianDefault = UserDefaults.standard.object(forKey: "enableObsidianFormat")
+        defer {
+            if let originalObsidianDefault {
+                UserDefaults.standard.set(originalObsidianDefault, forKey: "enableObsidianFormat")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "enableObsidianFormat")
+            }
+        }
+        UserDefaults.standard.set(true, forKey: "enableObsidianFormat")
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(
+                    start: 0,
+                    end: 2,
+                    channel: 1,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: "Imported meeting audio."
+                )
+            ],
+            duration: 2,
+            processingTime: 0.5
+        )
+
+        let defaultMarkdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(),
+            date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(audioSources: [.systemAudio])
+        )
+        let obsidianMarkdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: result,
+            transcriptId: UUID(),
+            date: Date(timeIntervalSince1970: 0),
+            formatOptions: TranscriptFormatOptions(
+                audioSources: [.systemAudio],
+                includeObsidianMetadata: true
+            )
+        )
+
+        XCTAssertTrue(defaultMarkdown.contains("sources: [system_audio]"))
+        XCTAssertFalse(defaultMarkdown.contains("### Microphone"), "system-only imports should not claim a microphone source")
+        XCTAssertFalse(defaultMarkdown.contains("\ntags:"), "Core formatting should not read UserDefaults directly")
+        XCTAssertTrue(obsidianMarkdown.contains("\ntags:"), "embedders can still opt into Obsidian metadata explicitly")
+    }
+
     func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
         let manager = makeManager()
         let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
@@ -401,6 +451,57 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let values = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
 
         XCTAssertEqual(values["duration"], "0:04", "meeting metadata should use the longest readable track, not a short mic placeholder")
+    }
+
+    func testCancelAllSuppressesLateTranscriptSaveAndFailedQueue() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "This should not be saved.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let manager = makeManager(speechToText: speech, diarization: diarization)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("cancel-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            meetingTitle: "Cancelled call"
+        )
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        manager.cancelAll()
+        speech.release()
+
+        try await waitUntil {
+            speech.didReturn
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let savedMarkdown = (try? FileManager.default.contentsOfDirectory(
+            at: outputFolder,
+            includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "md" } ?? []
+
+        XCTAssertTrue(savedMarkdown.isEmpty, "cancelled transcription should not save a late transcript")
+        XCTAssertNil(manager.lastSavedTranscriptURL, "cancelled transcription should not publish saved metadata")
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 0, "cancelled transcription should not enter retry queue")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
     }
 
     func testStopTimeoutFailedQueueCanKeepScratchAudioUntilItFinalizes() throws {
@@ -1313,6 +1414,42 @@ private final class MetadataStubSpeechToTextEngine: SpeechToTextEngine {
         }
         return transcript
     }
+    func cleanup() {
+        isReady = false
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class BlockingMetadataStubSpeechToTextEngine: SpeechToTextEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    private(set) var didStart = false
+    private(set) var didReturn = false
+    private var shouldRelease = false
+    private let transcript: String
+
+    init(transcript: String) {
+        self.transcript = transcript
+    }
+
+    func initialize() async {
+        isReady = true
+    }
+
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        didStart = true
+        while !shouldRelease {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        didReturn = true
+        return transcript
+    }
+
+    func release() {
+        shouldRelease = true
+    }
+
     func cleanup() {
         isReady = false
     }

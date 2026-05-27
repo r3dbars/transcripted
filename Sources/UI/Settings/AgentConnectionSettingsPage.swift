@@ -13,6 +13,8 @@ struct AgentConnectionSettingsPage: View {
     @State private var copiedLocalAgentPrompt = false
     @State private var copiedFolderPrompt = false
     @State private var copiedFolderPaths = false
+    @State private var openedCodexInboxSetup = false
+    @State private var codexInboxSetupError: String?
     @State private var showAdvancedAgentSetup = false
 
     var body: some View {
@@ -149,6 +151,28 @@ struct AgentConnectionSettingsPage: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsInlineActionButton(
+                    title: openedCodexInboxSetup ? "Opened Codex Setup" : "Set up Codex Inbox",
+                    symbolName: openedCodexInboxSetup ? "checkmark" : "tray.and.arrow.down",
+                    tone: .accent
+                ) {
+                    setupCodexInbox()
+                }
+
+                Text("Want a pinned Codex chat for Transcripted? This opens Codex with a setup prompt. Send it, then pin the chat in Codex.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let codexInboxSetupError {
+                    Label(codexInboxSetupError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
                 SettingsInlineActionButton(title: "Get Claude Desktop", symbolName: "arrow.down.circle", tone: .accent) {
                     openClaudeDesktopDownload()
@@ -253,6 +277,34 @@ struct AgentConnectionSettingsPage: View {
             }
 
             isInstallingClaudeDesktop = false
+        }
+    }
+
+    private func setupCodexInbox() {
+        codexInboxSetupError = nil
+
+        do {
+            let inboxURL = try AgentConnectionGuide.ensureCodexInboxFolder()
+            copyText(AgentConnectionGuide.codexInboxSetupPrompt(inboxURL: inboxURL))
+
+            guard let setupURL = AgentConnectionGuide.codexInboxSetupURL(inboxURL: inboxURL) else {
+                NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
+                codexInboxSetupError = "The setup prompt was copied. Open Codex and paste it."
+                return
+            }
+
+            if NSWorkspace.shared.open(setupURL) {
+                openedCodexInboxSetup = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    openedCodexInboxSetup = false
+                }
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
+                codexInboxSetupError = "Codex was not found. The setup prompt was copied and the inbox folder is open."
+            }
+        } catch {
+            codexInboxSetupError = "Could not set up Codex Inbox: \(error.localizedDescription)"
         }
     }
 
