@@ -517,6 +517,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         let version = versionString(for: item)
         let state = UpdateStatus.State.updateAvailable(version: version)
         let failureKind = UpdateFailureKind.classify(error, fallback: .downloadFailed).rawValue
+        let failureCode = UpdateFailureKind.diagnosticCode(error)
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
         trackUpdateLifecycleEvent(
             "update_download_finished",
@@ -528,7 +529,8 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
             result: "download_failed",
             state: state,
             version: version,
-            failureKind: failureKind
+            failureKind: failureKind,
+            failureCode: failureCode
         )
     }
 

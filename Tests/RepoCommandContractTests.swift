@@ -392,6 +392,25 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sparkle download failures include diagnostic codes") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let downloadFailureBlock = sourceSlice(
+            controller,
+            from: "func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: any Error)",
+            to: "func updater(\n        _ updater: SPUUpdater,\n        willInstallUpdateOnQuit"
+        )
+
+        assertTrue(
+            downloadFailureBlock.contains("failureCode: UpdateFailureKind.diagnosticCode(error)")
+                || downloadFailureBlock.contains("failureCode = UpdateFailureKind.diagnosticCode(error)"),
+            "Sparkle download failures should attach a coarse diagnostic code to finished telemetry"
+        )
+        assertTrue(
+            downloadFailureBlock.contains("failureCode: failureCode"),
+            "download_failed update_check_finished telemetry should include the diagnostic code"
+        )
+    }
+
     runSuite("Repo command contract - downloaded Sparkle state emits ready telemetry") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
         let readyHelper = sourceSlice(
