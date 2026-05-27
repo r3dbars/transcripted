@@ -59,6 +59,100 @@ func testObservabilityTextRedactor() {
                    "sensitive device/file assignments should be redacted")
     }
 
+    runSuite("ObservabilityTextRedactor scrubs local paths that contain spaces") {
+        let input = "failed to read /Users/jane/Documents/Client Calls/ACME Roadmap.md, /tmp/Meeting Imports/source audio.wav, and /private/tmp/Private Temp Imports/source audio.wav from /Users/jane/Library/Application Support/Transcripted/John's Call (équipe).wav status=retry trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Client Calls"), "user folder paths with spaces must not survive")
+        assertFalse(redacted.contains("ACME Roadmap.md"), "full user path tail must be scrubbed")
+        assertFalse(redacted.contains("Meeting Imports"), "temporary paths with spaces must not survive")
+        assertFalse(redacted.contains("Private Temp Imports"), "private temporary paths with spaces must not survive")
+        assertFalse(redacted.contains("John's Call"), "apostrophes in app-support filenames must not leak")
+        assertFalse(redacted.contains("équipe"), "non-ASCII app-support filename tails must not leak")
+        assertTrue(redacted.contains("[redacted-path]"), "path marker should remain")
+        assertTrue(redacted.contains("status=retry"), "safe metadata after a path should remain")
+        assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after a path should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor scrubs user-selected paths with spaces") {
+        let input = "imported /Users/jane/Projects/Client Calls/ACME Roadmap.md and /Volumes/External Disk/Meeting Imports/source audio.wav by /Users/jane/Documents/person@example.com/Private Folder/followup.md"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Client Calls"), "custom user folder paths with spaces must not survive")
+        assertFalse(redacted.contains("External Disk"), "volume paths with spaces must not survive")
+        assertFalse(redacted.contains("source audio.wav"), "volume path tails must not survive")
+        assertFalse(redacted.contains("person@example.com"), "emails embedded in paths must not survive")
+        assertFalse(redacted.contains("Private Folder"), "path tails after email-like segments must not survive")
+        assertTrue(redacted.contains("[redacted-path]"), "path marker should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor does not stop early inside legal path names") {
+        let input = "failed /Users/jane/Documents/Acme.com Calls/source audio.wav, /Users/jane/Documents/Acme.com, Inc/source.wav, /Users/jane/Documents/v1.0,backup/source.wav, and /Users/jane/Documents/Client [Acme.com]/source status=retry.wav trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Acme.com Calls"), "dotted path components before spaces must not leak")
+        assertFalse(redacted.contains("Acme.com, Inc"), "punctuated dotted path components must not leak")
+        assertFalse(redacted.contains("v1.0,backup"), "punctuation after dotted path components must not leak")
+        assertFalse(redacted.contains("Client [Acme.com]"), "bracketed path components must not leak")
+        assertFalse(redacted.contains("source audio.wav"), "file names after dotted components must not leak")
+        assertFalse(redacted.contains("source status=retry.wav"), "file names with key-like tokens must not leak")
+        assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after the path should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor keeps scanning dotted path components before spaced filenames") {
+        let input = "failed /Users/jane/Documents/Acme.com Client Call.wav status=retry"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Acme.com"), "dotted folder names must not survive")
+        assertFalse(redacted.contains("Client Call.wav"), "spaced filename tail must not survive")
+        assertEqual(redacted, "failed [redacted-path] status=retry",
+                    "safe metadata after the path should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor keeps metadata-like folders inside path tails") {
+        let input = "failed /Users/jane/Documents/Project status=retry Notes/source audio.wav status=done trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("status=retry Notes"), "metadata-like folder names must not survive")
+        assertFalse(redacted.contains("source audio.wav"), "filename tail after metadata-like folder must not survive")
+        assertEqual(redacted, "failed [redacted-path] status=done trigger=hotkey",
+                    "safe metadata after the path should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor preserves diagnostics after punctuated filenames") {
+        let input = "failed /Users/jane/Documents/Report.pdf, permission denied code=1"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Report.pdf"), "filename before punctuation must not survive")
+        assertTrue(redacted.contains("[redacted-path], permission denied code=1"),
+                   "diagnostic prose after path punctuation should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor preserves diagnostics after punctuated extensionless paths") {
+        let input = "failed /tmp/imports, permission denied code=1"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertEqual(redacted, "failed [redacted-path], permission denied code=1",
+                    "diagnostic prose after an extensionless path delimiter should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor preserves metadata after extensionless paths") {
+        let input = "failed /tmp/imports status=retry trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertEqual(redacted, "failed [redacted-path] status=retry trigger=hotkey",
+                    "safe key-value diagnostics after extensionless paths should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor keeps key-like tokens inside path tails") {
+        let input = "failed /Users/jane/Documents/Project A=1 Notes/source audio.wav status=retry"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("A=1 Notes"), "key-like path folder names must not leak")
+        assertFalse(redacted.contains("source audio.wav"), "path tails after key-like folders must not leak")
+        assertTrue(redacted.contains("status=retry"), "safe metadata after the path should remain")
+    }
+
     runSuite("ObservabilityTextRedactor scrubs inline key=value sensitive assignments") {
         let input = "ctx meeting_title=Private Roadmap speaker_name=Jane Doe trigger=hotkey"
         let redacted = ObservabilityTextRedactor.redact(input)
