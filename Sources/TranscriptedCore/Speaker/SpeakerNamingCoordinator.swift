@@ -273,11 +273,31 @@ extension TranscriptionTaskManager {
         cleanupSpeakerClips(request.speakers)
     }
 
-    private func clearCompletedSpeakerNamingRequest(transcriptId: UUID) {
+    func clearCompletedSpeakerNamingRequest(transcriptId: UUID) {
         if speakerNamingRequest?.transcriptId == transcriptId {
             speakerNamingRequest = nil
         }
         pendingSpeakerNamingRequests.removeAll { $0.transcriptId == transcriptId }
+        promoteNextSpeakerNamingRequestIfNeeded()
+    }
+
+    func cancelSpeakerNamingRequest(transcriptId: UUID) {
+        var cancelledRequests: [SpeakerNamingRequest] = []
+        if let request = speakerNamingRequest, request.transcriptId == transcriptId {
+            cancelledRequests.append(request)
+            speakerNamingRequest = nil
+        }
+        pendingSpeakerNamingRequests.removeAll { request in
+            if request.transcriptId == transcriptId {
+                cancelledRequests.append(request)
+                return true
+            }
+            return false
+        }
+
+        for request in cancelledRequests {
+            cleanupSpeakerNamingRequest(request)
+        }
         promoteNextSpeakerNamingRequestIfNeeded()
     }
 

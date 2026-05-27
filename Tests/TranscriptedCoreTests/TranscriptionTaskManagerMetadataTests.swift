@@ -152,6 +152,83 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
     }
 
+    func testClearCompletedSpeakerNamingRequestClearsActiveReviewAndPromotesNext() {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("first-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        manager.clearCompletedSpeakerNamingRequest(transcriptId: firstId)
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, secondId)
+        XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
+    }
+
+    func testCancelSpeakerNamingRequestCleansArtifactsAndPromotesNext() throws {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+        let micURL = tempDirectory.appendingPathComponent("audio/first-mic.wav")
+        let systemURL = tempDirectory.appendingPathComponent("audio/first-system.wav")
+        let clipURL = tempDirectory.appendingPathComponent("speaker_clips/first-clip.wav")
+        try Data("mic".utf8).write(to: micURL)
+        try Data("system".utf8).write(to: systemURL)
+        try Data("clip".utf8).write(to: clipURL)
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [
+                SpeakerNamingEntry(
+                    id: UUID(),
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "hello",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false
+                )
+            ],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            shouldRemoveTemporaryAudioOnCleanup: true,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        manager.cancelSpeakerNamingRequest(transcriptId: firstId)
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, secondId)
+        XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
+    }
+
     func testStatusResetClearsSavedVisualWhileSpeakerReviewPendingButKeepsMetadata() async throws {
         let manager = makeManager()
         let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
@@ -464,7 +541,8 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                 qualityScore: 0.95
             )
         ])
-        let manager = makeManager(speechToText: speech, diarization: diarization)
+        let statsStore = MetadataCapturingStatsStore()
+        let manager = makeManager(speechToText: speech, diarization: diarization, statsStore: statsStore)
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")
         let micURL = scratchDirectory.appendingPathComponent("cancel-mic.wav")
         let systemURL = scratchDirectory.appendingPathComponent("cancel-system.wav")
@@ -498,6 +576,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
 
         XCTAssertTrue(savedMarkdown.isEmpty, "cancelled transcription should not save a late transcript")
         XCTAssertNil(manager.lastSavedTranscriptURL, "cancelled transcription should not publish saved metadata")
+        XCTAssertTrue(statsStore.recordedSessions.isEmpty, "cancelled transcription should not record stats for a deleted transcript")
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 0, "cancelled transcription should not enter retry queue")
         XCTAssertEqual(manager.activeCount, 0)
         XCTAssertEqual(manager.backgroundTaskCount, 0)
