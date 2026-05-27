@@ -186,7 +186,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "AirPods HFP 24k hardware to 48k output should remain valid")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy defers built-in override with Bluetooth output speech bus") {
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts built-in override with Bluetooth output speech bus") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -197,7 +197,7 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionOverrodeDefault: true
         )
 
-        assertEqual(readiness, .routeNotSettled, "built-in override with a 24k Bluetooth output bus should wait for CoreAudio to settle")
+        assertEqual(readiness, .ready, "built-in fallback with Bluetooth output can start because the tap uses the delivered buffer format")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy accepts intentional Bluetooth output speech bus") {
