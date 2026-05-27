@@ -108,6 +108,14 @@ func testObservabilityTextRedactor() {
                    "diagnostic prose after path punctuation should remain")
     }
 
+    runSuite("ObservabilityTextRedactor preserves metadata after extensionless paths") {
+        let input = "failed /tmp/imports status=retry trigger=hotkey"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertEqual(redacted, "failed [redacted-path] status=retry trigger=hotkey",
+                    "safe key-value diagnostics after extensionless paths should remain")
+    }
+
     runSuite("ObservabilityTextRedactor keeps key-like tokens inside path tails") {
         let input = "failed /Users/jane/Documents/Project A=1 Notes/source audio.wav status=retry"
         let redacted = ObservabilityTextRedactor.redact(input)
