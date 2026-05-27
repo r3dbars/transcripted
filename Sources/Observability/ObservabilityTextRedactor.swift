@@ -55,6 +55,22 @@ enum ObservabilityTextRedactor {
     )
     private static let emailRegex = makeRegex(#"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
     private static let localHostnameRegex = makeRegex(#"\b[a-zA-Z0-9._-]+\.local\b"#)
+    private static let pathDiagnosticMetadataKeys: Set<String> = [
+        "attempt",
+        "attempts",
+        "code",
+        "duration_ms",
+        "error",
+        "event",
+        "failure_kind",
+        "operation",
+        "outcome",
+        "reason",
+        "stage",
+        "status",
+        "trigger",
+        "wait_ms",
+    ]
 
     static func redact(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,9 +148,9 @@ enum ObservabilityTextRedactor {
             if character == " " {
                 let prefix = text[start..<index]
                 let nextToken = nextPathToken(in: text, after: index)
-                if pathPrefixLooksLikeFile(prefix)
-                    && (nextTokenLooksLikeMetadata(nextToken)
-                        || !nextTokenCouldContinuePath(nextToken)) {
+                if nextTokenLooksLikeMetadata(nextToken)
+                    || (pathPrefixLooksLikeFile(prefix)
+                        && !nextTokenCouldContinuePath(nextToken)) {
                     break
                 }
             }
@@ -210,9 +226,13 @@ enum ObservabilityTextRedactor {
     }
 
     private static func nextTokenLooksLikeMetadata(_ token: String) -> Bool {
-        token.contains("=")
-            && !token.contains("/")
-            && !pathTokenLooksLikeFile(token)
+        guard !token.contains("/"),
+              !pathTokenLooksLikeFile(token),
+              let separator = token.firstIndex(of: "=") else {
+            return false
+        }
+        let key = String(token[..<separator]).lowercased()
+        return pathDiagnosticMetadataKeys.contains(key)
     }
 
     private static func pathTokenLooksLikeFile(_ token: String) -> Bool {
