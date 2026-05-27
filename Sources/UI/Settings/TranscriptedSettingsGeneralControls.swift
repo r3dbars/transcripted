@@ -156,17 +156,17 @@ struct DictationOverlayModeRow: View {
     @Binding var selection: DictationOverlayPresentationMode
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 GeneralTitleLabel(
-                    title: "Dictation overlay",
+                    title: "Dictation window",
                     info: GeneralInfo(
-                        title: "Dictation overlay",
-                        message: "Text box keeps the current full overlay near the active text field. Mini cursor uses a tiny waveform that follows your pointer while you talk."
+                        title: "Dictation window",
+                        message: "Choose how Transcripted shows live dictation. Near text box uses the full window beside the focused field. Mini cursor uses a tiny waveform that follows your pointer."
                     )
                 )
 
-                Text(selection.detail)
+                Text("Pick the window people see while dictating.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -175,25 +175,189 @@ struct DictationOverlayModeRow: View {
 
             Spacer(minLength: 10)
 
-            Picker("Dictation overlay", selection: $selection) {
+            HStack(alignment: .top, spacing: 10) {
                 ForEach(DictationOverlayPresentationMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+                    DictationOverlayModeChoice(
+                        mode: mode,
+                        isSelected: selection == mode,
+                        action: { selection = mode }
+                    )
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 220)
+            .frame(maxWidth: 374, alignment: .trailing)
             .help(selection.detail)
-            .accessibilityLabel(Text("Dictation overlay"))
-            .accessibilityValue(Text(selection.title))
-            .accessibilityHint(Text(selection.detail))
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(minHeight: 54)
+        .padding(.vertical, 12)
+        .frame(minHeight: 124)
         .overlay(alignment: .bottom) {
             Divider()
         }
+    }
+}
+
+private struct DictationOverlayModeChoice: View {
+    let mode: DictationOverlayPresentationMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) { cardContent }
+        .buttonStyle(.plain)
+        .help(mode.detail)
+        .accessibilityLabel(Text(mode.title))
+        .accessibilityValue(Text(isSelected ? "Selected" : "Not selected"))
+        .accessibilityHint(Text(mode.detail))
+        .onHover { isHovering = $0 }
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            DictationOverlayModePreview(mode: mode, isSelected: isSelected)
+                .frame(maxWidth: .infinity)
+
+            copyContent
+        }
+        .padding(10)
+        .frame(width: 182, alignment: .topLeading)
+        .frame(minHeight: 112, alignment: .topLeading)
+        .background(cardBackground)
+        .overlay(cardStroke)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var copyContent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(mode.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+
+            Text(mode.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(choiceFill)
+    }
+
+    private var cardStroke: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .stroke(choiceStroke, lineWidth: isSelected ? 2 : 1)
+    }
+
+    private var choiceFill: Color {
+        isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(isHovering ? 0.055 : 0.035)
+    }
+
+    private var choiceStroke: Color {
+        if isSelected { return .accentColor }
+        return Color.primary.opacity(isHovering ? 0.18 : 0.11)
+    }
+}
+
+private struct DictationOverlayModePreview: View {
+    let mode: DictationOverlayPresentationMode
+    let isSelected: Bool
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.black.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+
+            switch mode {
+            case .nearText:
+                NearTextOverlayPreview()
+            case .cursorMini:
+                MiniCursorOverlayPreview()
+            }
+        }
+        .frame(height: 46)
+        .overlay(alignment: .topTrailing) {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .background(Circle().fill(Color.black.opacity(0.72)))
+                    .padding(6)
+            }
+        }
+    }
+}
+
+private struct NearTextOverlayPreview: View {
+    var body: some View {
+        VStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Color.white.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                )
+                .frame(width: 104, height: 24)
+                .overlay {
+                    MiniWaveformBars(barCount: 15, activeIndex: 9)
+                        .frame(width: 62, height: 14)
+                }
+
+            Capsule()
+                .fill(Color.white.opacity(0.20))
+                .frame(width: 116, height: 6)
+        }
+    }
+}
+
+private struct MiniCursorOverlayPreview: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "cursorarrow")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.56))
+                .offset(y: 8)
+
+            Capsule()
+                .fill(Color.black.opacity(0.82))
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                )
+                .frame(width: 76, height: 24)
+                .overlay {
+                    MiniWaveformBars(barCount: 12, activeIndex: 7)
+                        .frame(width: 50, height: 14)
+                }
+        }
+    }
+}
+
+private struct MiniWaveformBars: View {
+    let barCount: Int
+    let activeIndex: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<barCount, id: \.self) { index in
+                Capsule()
+                    .fill(Color.white.opacity(index == activeIndex ? 0.95 : 0.68))
+                    .frame(width: 1.6, height: barHeight(at: index))
+            }
+        }
+    }
+
+    private func barHeight(at index: Int) -> CGFloat {
+        let pattern: [CGFloat] = [5, 9, 7, 12, 8, 14, 6, 11, 8, 13, 7, 10, 5, 9, 6]
+        return pattern[index % pattern.count]
     }
 }
 

@@ -9,7 +9,7 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
     var title: String {
         switch self {
         case .nearText:
-            return "Text box"
+            return "Near text box"
         case .cursorMini:
             return "Mini cursor"
         }
@@ -18,7 +18,7 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
     var detail: String {
         switch self {
         case .nearText:
-            return "Full overlay appears near the active text box."
+            return "Full dictation window appears near the active text box."
         case .cursorMini:
             return "Tiny waveform follows the cursor while you talk."
         }

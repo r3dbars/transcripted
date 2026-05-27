@@ -50,6 +50,27 @@ func testDictationOverlayPresentationPreferences() {
             "storage key should not drift across updates"
         )
     }
+
+    runSuite("DictationOverlayPresentationMode exposes clear settings labels") {
+        assertEqual(
+            DictationOverlayPresentationMode.nearText.title,
+            "Near text box",
+            "full overlay mode should name where the window appears"
+        )
+        assertEqual(
+            DictationOverlayPresentationMode.cursorMini.title,
+            "Mini cursor",
+            "mini overlay mode should match the settings card label"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.nearText.detail.contains("Full dictation window"),
+            "full overlay mode should describe the larger dictation window"
+        )
+        assertTrue(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("follows the cursor"),
+            "mini overlay mode should explain that it follows the pointer"
+        )
+    }
 }
 
 private func makeDictationOverlayPresentationDefaults() -> (UserDefaults, String) {
