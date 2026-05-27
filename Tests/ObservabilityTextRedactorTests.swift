@@ -97,6 +97,24 @@ func testObservabilityTextRedactor() {
         assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after the path should remain")
     }
 
+    runSuite("ObservabilityTextRedactor preserves diagnostics after punctuated filenames") {
+        let input = "failed /Users/jane/Documents/Report.pdf, permission denied code=1"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("Report.pdf"), "filename before punctuation must not survive")
+        assertTrue(redacted.contains("[redacted-path], permission denied code=1"),
+                   "diagnostic prose after path punctuation should remain")
+    }
+
+    runSuite("ObservabilityTextRedactor keeps key-like tokens inside path tails") {
+        let input = "failed /Users/jane/Documents/Project A=1 Notes/source audio.wav status=retry"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("A=1 Notes"), "key-like path folder names must not leak")
+        assertFalse(redacted.contains("source audio.wav"), "path tails after key-like folders must not leak")
+        assertTrue(redacted.contains("status=retry"), "safe metadata after the path should remain")
+    }
+
     runSuite("ObservabilityTextRedactor scrubs inline key=value sensitive assignments") {
         let input = "ctx meeting_title=Private Roadmap speaker_name=Jane Doe trigger=hotkey"
         let redacted = ObservabilityTextRedactor.redact(input)
