@@ -643,6 +643,55 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }
 
+    func testCancelAllDuringRetryDoesNotPoisonFutureRetry() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Recovered after cancel.")
+        let manager = makeManager(speechToText: speech)
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-cancel-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("retry-cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Retry cancel"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let cancelledRetry = Task {
+            await manager.retryFailedTranscription(
+                failedId: failedId,
+                outputFolder: outputFolder
+            )
+        }
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        manager.cancelAll()
+        speech.release()
+
+        let didCancelledRetrySucceed = await cancelledRetry.value
+        XCTAssertFalse(didCancelledRetrySucceed)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.map(\.id), [failedId])
+        XCTAssertNil(manager.lastSavedTranscriptURL)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: outputFolder
+        )
+
+        XCTAssertTrue(didRetry, "a cancelled retry should not leave the failed id marked cancelled forever")
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Recovered after cancel."))
+    }
+
     func testRetrySuccessWithoutSpeakerNamingDeletesRetainedFailedAudio() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)

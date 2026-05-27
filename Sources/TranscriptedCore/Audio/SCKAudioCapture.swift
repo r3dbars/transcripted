@@ -32,7 +32,10 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var bufferCallback: ((AVAudioPCMBuffer) -> Void)?
     private var _generation: UInt64 = 0
     private let generationLock = NSLock()
-    private static let callbackTimeout: DispatchTimeInterval = .seconds(8)
+    private static let callbackTimeoutSeconds = 8
+    private static let permissionPromptCallbackTimeoutSeconds = 120
+    private static let callbackTimeout: DispatchTimeInterval = .seconds(callbackTimeoutSeconds)
+    private static let permissionPromptCallbackTimeout: DispatchTimeInterval = .seconds(permissionPromptCallbackTimeoutSeconds)
 
     var diagnosticBackendName: String { "screen_capture_kit" }
 
@@ -62,9 +65,8 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         stopSync()
         let prepareGeneration = incrementGeneration()
 
-        // Fetch shareable content — triggers the system permission dialog on first use.
-        // Called from a background thread (AudioFileManager dispatches to .userInitiated),
-        // so the semaphore won't deadlock.
+        // Fetch shareable content. On first use this can be held by the macOS
+        // permission prompt, so it gets a longer timeout than normal callbacks.
         let semaphore = DispatchSemaphore(value: 0)
         var content: SCShareableContent?
         var fetchError: Error?
@@ -74,7 +76,12 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             fetchError = error
             semaphore.signal()
         }
-        try Self.waitForCallback(semaphore, operation: "shareable content fetch")
+        try Self.waitForCallback(
+            semaphore,
+            operation: "shareable content fetch",
+            timeout: Self.permissionPromptCallbackTimeout,
+            timeoutSeconds: Self.permissionPromptCallbackTimeoutSeconds
+        )
 
         if let error = fetchError {
             AppLogger.audioSystem.error("SCKAudioCapture: failed to get shareable content", ["error": error.localizedDescription])
@@ -172,7 +179,6 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             }
 
             guard currentGeneration() == startGeneration, self.stream === stream else {
-                stopStreamSynchronously(stream)
                 throw AudioCaptureStaleSessionError()
             }
             _isCapturing = true
@@ -181,9 +187,10 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
             if didRequestStart {
                 invalidateGenerationIfCurrent(startGeneration)
-                stopStreamSynchronously(stream)
+                stopStreamAndCleanupIfConfirmed(stream)
+            } else {
+                cleanupStreamReference(stream)
             }
-            cleanupStreamReference(stream)
             publishErrorMessage(error.localizedDescription)
             throw error
         }
@@ -215,8 +222,11 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         _isCapturing = false
-        stopStreamSynchronously(stream)
-        cleanupIfCurrent(generation: stopGeneration, stream: stream)
+        if stopStreamSynchronously(stream) {
+            cleanupIfCurrent(generation: stopGeneration, stream: stream)
+        } else {
+            retainStreamReferenceAfterTimedOutStop(stream)
+        }
     }
 
     private func incrementGeneration() -> UInt64 {
@@ -259,6 +269,25 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         cleanup()
     }
 
+    private func stopStreamAndCleanupIfConfirmed(_ expectedStream: SCStream) {
+        if stopStreamSynchronously(expectedStream) {
+            cleanupStreamReference(expectedStream)
+        } else {
+            retainStreamReferenceAfterTimedOutStop(expectedStream)
+        }
+    }
+
+    private func retainStreamReferenceAfterTimedOutStop(_ expectedStream: SCStream) {
+        guard let currentStream = stream,
+              currentStream === expectedStream else {
+            AppLogger.audioSystem.info("SCKAudioCapture: skipping timed-out stop retention for replaced stream")
+            return
+        }
+
+        _isCapturing = true
+        AppLogger.audioSystem.warning("SCKAudioCapture: keeping stream reference after stop timeout")
+    }
+
     @discardableResult
     private func stopStreamSynchronously(_ stream: SCStream) -> Bool {
         let semaphore = DispatchSemaphore(value: 0)
@@ -277,12 +306,17 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
     }
 
-    private static func waitForCallback(_ semaphore: DispatchSemaphore, operation: String) throws {
-        guard semaphore.wait(timeout: .now() + callbackTimeout) == .success else {
+    private static func waitForCallback(
+        _ semaphore: DispatchSemaphore,
+        operation: String,
+        timeout: DispatchTimeInterval = callbackTimeout,
+        timeoutSeconds: Int = callbackTimeoutSeconds
+    ) throws {
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
             let error = SCKCaptureTimeoutError(operation: operation)
             AppLogger.audioSystem.error("SCKAudioCapture: callback timed out", [
                 "operation": operation,
-                "timeoutSeconds": "8"
+                "timeoutSeconds": "\(timeoutSeconds)"
             ])
             throw error
         }

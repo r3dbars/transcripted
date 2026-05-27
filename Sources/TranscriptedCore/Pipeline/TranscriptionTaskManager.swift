@@ -839,7 +839,9 @@ public class TranscriptionTaskManager: ObservableObject {
 
             AppLogger.pipeline.info("Retry successful", ["file": transcriptURL.lastPathComponent])
 
-            await MainActor.run {
+            let didPublishRetry = await MainActor.run {
+                guard !self.finishCancelledTaskIfNeeded(taskId: failedId) else { return false }
+
                 let waitingForSpeakerNames = self.hasPendingSpeakerNamingRequest(sourceFailedTranscriptionId: failedId)
                 if waitingForSpeakerNames {
                     AppLogger.pipeline.info("Retry transcript saved; keeping failed meeting until speaker names finalize", [
@@ -852,14 +854,17 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
                 self.publishTranscriptSaved(from: transcriptURL)
+                return true
             }
 
-            return true
+            return didPublishRetry
 
         } catch {
             AppLogger.pipeline.error("Retry failed", ["error": "\(error.localizedDescription)"])
             let diagnosticMessage = "Retry failed: \(Self.safeFailureDiagnosticMessage(for: error))"
             await MainActor.run {
+                guard !self.finishCancelledTaskIfNeeded(taskId: failedId, error: error) else { return }
+
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)

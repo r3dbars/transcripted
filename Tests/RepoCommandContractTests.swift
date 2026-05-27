@@ -216,9 +216,19 @@ func testRepoCommandContract() {
         let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/SCKAudioCapture.swift")
         assertTrue(
             contents.contains("SCKCaptureTimeoutError")
-                && contents.contains("wait(timeout: .now() + callbackTimeout)")
+                && contents.contains("timeout: DispatchTimeInterval = callbackTimeout")
+                && contents.contains("wait(timeout: .now() + timeout)")
+                && contents.contains("permissionPromptCallbackTimeout")
+                && contents.contains("operation: \"shareable content fetch\"")
+                && contents.contains("timeout: Self.permissionPromptCallbackTimeout")
                 && !contents.contains("semaphore.wait()\n"),
-            "ScreenCaptureKit prepare/start/stop waits should use bounded callback timeouts"
+            "ScreenCaptureKit waits should stay bounded while allowing first-run permission prompts longer than normal callbacks"
+        )
+        assertTrue(
+            contents.contains("stopStreamAndCleanupIfConfirmed")
+                && contents.contains("retainStreamReferenceAfterTimedOutStop")
+                && contents.contains("SCKAudioCapture: keeping stream reference after stop timeout"),
+            "ScreenCaptureKit should keep the stream reference when a stop callback times out"
         )
     }
 
