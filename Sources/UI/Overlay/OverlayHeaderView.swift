@@ -268,7 +268,7 @@ final class OverlayHeaderView: NSView {
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
         usesMiniCursorLayout = isMiniCursorMode
-            && (state == .listening || (state == .drafting && !isError) || state == .success)
+            && (state == .starting || state == .listening || (state == .drafting && !isError) || state == .success)
         let miniWaveformOnly = usesMiniCursorLayout && state == .listening
 
         // Mode label text + color

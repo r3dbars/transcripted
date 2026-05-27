@@ -828,14 +828,23 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - mini cursor stays compact through transcription") {
+    runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let sizeBlock = sourceSlice(
             overlayContents,
             from: "private func preferredPanelSize(for state: OverlayState) -> NSSize",
             to: "private func errorPanelSize() -> NSSize"
         )
+        let showPanelBlock = sourceSlice(
+            overlayContents,
+            from: "func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil)",
+            to: "func resizePanelToCompact()"
+        )
 
+        assertTrue(
+            sizeBlock.contains("case .starting where isCursorMiniPresentationMode:"),
+            "mini cursor dictation should be tiny on the first visible startup frame"
+        )
         assertTrue(
             sizeBlock.contains("case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:"),
             "mini cursor dictation should stay tiny while transcription is pending"
@@ -843,6 +852,21 @@ func testRepoCommandContract() {
         assertTrue(
             sizeBlock.contains("case .success where isCursorMiniPresentationMode:"),
             "mini cursor dictation should stay tiny for the pasted confirmation"
+        )
+        assertTrue(
+            showPanelBlock.contains("if isCursorMiniPanelMode")
+                && showPanelBlock.contains("origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)"),
+            "mini cursor dictation should open at the cursor instead of first anchoring to the text box"
+        )
+        assertTrue(
+            showPanelBlock.contains("panel.ignoresMouseEvents = isCursorMiniPanelMode"),
+            "mini cursor dictation should not briefly intercept the mouse while it appears"
+        )
+
+        let headerContents = readRepoTextFile("Sources/UI/Overlay/OverlayHeaderView.swift")
+        assertTrue(
+            headerContents.contains("state == .starting || state == .listening"),
+            "mini cursor dictation should use the tiny centered header layout during startup"
         )
 
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")

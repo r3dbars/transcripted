@@ -258,7 +258,9 @@ class FloatingOverlayController {
         }
 
         var origin: NSPoint
-        if let rect = anchorTargetRect {
+        if isCursorMiniPanelMode {
+            origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)
+        } else if let rect = anchorTargetRect {
             origin = NSPoint(
                 x: rect.midX - panelSize.width / 2,
                 y: rect.midY - panelSize.height / 2
@@ -297,7 +299,7 @@ class FloatingOverlayController {
 
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
-        panel.ignoresMouseEvents = false
+        panel.ignoresMouseEvents = isCursorMiniPanelMode
 
         // Spring entrance
         panel.alphaValue = 0
@@ -608,6 +610,8 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .starting where isCursorMiniPresentationMode:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .listening where isCursorMiniPresentationMode:
             return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:
@@ -635,11 +639,11 @@ class FloatingOverlayController {
     private var isCursorMiniPanelMode: Bool {
         guard isCursorMiniPresentationMode else { return false }
         switch state {
-        case .listening, .success:
+        case .starting, .listening, .success:
             return true
         case .drafting:
             return errorMessage.isEmpty
-        case .idle, .starting, .loading:
+        case .idle, .loading:
             return false
         }
     }
@@ -648,9 +652,13 @@ class FloatingOverlayController {
         state == .listening && isCursorMiniPresentationMode
     }
 
+    private var isCursorMiniTrackingMode: Bool {
+        (state == .starting || state == .listening) && isCursorMiniPresentationMode
+    }
+
     private func updateCursorFollowTracking() {
         updatePanelMouseBehavior()
-        guard isVisible, isCursorMiniListeningMode else {
+        guard isVisible, isCursorMiniTrackingMode else {
             stopCursorFollowTracking()
             return
         }
@@ -662,7 +670,7 @@ class FloatingOverlayController {
         updateCursorFollowPosition(snap: true)
         cursorFollowTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                guard let self, self.isVisible, self.state == .listening else { break }
+                guard let self, self.isVisible, self.isCursorMiniTrackingMode else { break }
                 self.updateCursorFollowPosition(snap: false)
                 try? await Task.sleep(nanoseconds: Self.cursorFollowIntervalNanoseconds)
             }
@@ -675,7 +683,7 @@ class FloatingOverlayController {
     }
 
     private func updateCursorFollowPosition(snap: Bool) {
-        guard let panel, isVisible, isCursorMiniListeningMode else { return }
+        guard let panel, isVisible, isCursorMiniTrackingMode else { return }
 
         let target = cursorFollowOrigin(
             for: NSEvent.mouseLocation,
