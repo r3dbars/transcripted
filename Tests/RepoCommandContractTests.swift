@@ -227,8 +227,10 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("stopStreamAndCleanupIfConfirmed")
                 && contents.contains("retainStreamReferenceAfterTimedOutStop")
+                && contents.contains("cleanupAfterLateCallback")
+                && contents.contains("running late stop callback cleanup")
                 && contents.contains("SCKAudioCapture: keeping stream reference after stop timeout"),
-            "ScreenCaptureKit should keep the stream reference when a stop callback times out"
+            "ScreenCaptureKit should keep the stream reference when a stop callback times out, then clean it up if the callback arrives late"
         )
     }
 
@@ -815,6 +817,20 @@ func testRepoCommandContract() {
         assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
             "fast dictation start fallback should emit a local proof event"
+        )
+    }
+
+    runSuite("Repo command contract - mini cursor expands before transcription") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let transcribingStartBlock = sourceSlice(
+            contents,
+            from: "overlayController.state = .drafting",
+            to: "appState.runtimeDiagnostics.recordSession(kind: \"dictation\", stage: \"transcribing\")"
+        )
+
+        assertTrue(
+            transcribingStartBlock.contains("overlayController.resizePanelToCompact()"),
+            "mini cursor dictation should resize back to compact before showing the transcribing state"
         )
     }
 

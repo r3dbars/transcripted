@@ -825,6 +825,7 @@ class DictationSessionController: ObservableObject {
                 }
             }
             overlayController.state = .drafting
+            overlayController.resizePanelToCompact()
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             let voiceText = await appState.sttRouter.transcribe()
             guard !Task.isCancelled,

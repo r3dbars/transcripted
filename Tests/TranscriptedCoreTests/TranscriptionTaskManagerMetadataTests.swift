@@ -562,6 +562,8 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         }
 
         manager.cancelAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "cancelled live mic scratch audio should be deleted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "cancelled live system scratch audio should be deleted")
         speech.release()
 
         try await waitUntil {

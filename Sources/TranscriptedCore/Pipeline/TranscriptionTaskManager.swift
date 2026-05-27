@@ -943,6 +943,10 @@ public class TranscriptionTaskManager: ObservableObject {
         for (taskId, task) in activeTasks {
             intentionallyCancelledTaskIds.insert(taskId)
             task.cancel()
+            if let audio = activeTaskAudio[taskId] {
+                removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
+                removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
+            }
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
         activeTasks.removeAll()

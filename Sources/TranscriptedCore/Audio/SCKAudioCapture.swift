@@ -22,6 +22,28 @@ private struct SCKCaptureTimeoutError: LocalizedError {
 }
 
 @available(macOS 26.0, *)
+private final class SCKStopCallbackState {
+    private let lock = NSLock()
+    private var didComplete = false
+    private var didTimeOut = false
+
+    func complete() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        didComplete = true
+        return didTimeOut
+    }
+
+    func markTimedOutUnlessComplete() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if didComplete { return false }
+        didTimeOut = true
+        return true
+    }
+}
+
+@available(macOS 26.0, *)
 final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
     @Published var errorMessage: String?
 
@@ -222,7 +244,9 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         _isCapturing = false
-        if stopStreamSynchronously(stream) {
+        if stopStreamSynchronously(stream, cleanupAfterLateCallback: { [weak self, stream] in
+            self?.cleanupIfCurrent(generation: stopGeneration, stream: stream)
+        }) {
             cleanupIfCurrent(generation: stopGeneration, stream: stream)
         } else {
             retainStreamReferenceAfterTimedOutStop(stream)
@@ -270,7 +294,9 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     }
 
     private func stopStreamAndCleanupIfConfirmed(_ expectedStream: SCStream) {
-        if stopStreamSynchronously(expectedStream) {
+        if stopStreamSynchronously(expectedStream, cleanupAfterLateCallback: { [weak self, expectedStream] in
+            self?.cleanupStreamReference(expectedStream)
+        }) {
             cleanupStreamReference(expectedStream)
         } else {
             retainStreamReferenceAfterTimedOutStop(expectedStream)
@@ -289,18 +315,30 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     }
 
     @discardableResult
-    private func stopStreamSynchronously(_ stream: SCStream) -> Bool {
+    private func stopStreamSynchronously(
+        _ stream: SCStream,
+        cleanupAfterLateCallback: (() -> Void)? = nil
+    ) -> Bool {
         let semaphore = DispatchSemaphore(value: 0)
+        let callbackState = SCKStopCallbackState()
         stream.stopCapture { error in
             if let error = error {
                 AppLogger.audioSystem.warning("SCKAudioCapture: stop error", ["error": error.localizedDescription])
             }
+            let shouldCleanupLate = callbackState.complete()
             semaphore.signal()
+            if shouldCleanupLate {
+                AppLogger.audioSystem.info("SCKAudioCapture: running late stop callback cleanup")
+                cleanupAfterLateCallback?()
+            }
         }
         do {
             try Self.waitForCallback(semaphore, operation: "stop capture")
             return true
         } catch {
+            guard callbackState.markTimedOutUnlessComplete() else {
+                return true
+            }
             AppLogger.audioSystem.warning("SCKAudioCapture: stop timed out", ["error": error.localizedDescription])
             return false
         }
