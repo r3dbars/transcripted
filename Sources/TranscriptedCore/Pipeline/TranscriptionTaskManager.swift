@@ -905,6 +905,10 @@ public class TranscriptionTaskManager: ObservableObject {
         }
     }
 
+    func canCommitTaskSideEffects(taskId: UUID) -> Bool {
+        activeTasks[taskId] != nil && !intentionallyCancelledTaskIds.contains(taskId)
+    }
+
     private func finishCancelledTaskIfNeeded(taskId: UUID, error: Error? = nil) -> Bool {
         guard intentionallyCancelledTaskIds.contains(taskId) || error is CancellationError else {
             return false
@@ -917,6 +921,9 @@ public class TranscriptionTaskManager: ObservableObject {
         if hadActiveTask {
             activeCount = max(0, activeCount - 1)
             backgroundTaskCount = max(0, backgroundTaskCount - 1)
+        }
+        if activeCount == 0 {
+            publishNonFailureStatus(.idle)
         }
 
         AppLogger.pipeline.info("Suppressed cancelled transcription task outcome", [

@@ -159,6 +159,37 @@ public class TranscriptSaver {
         healthInfo: RecordingHealthInfo? = nil,
         notifier: TranscriptNotifier? = nil,
         speakerStore: (any SpeakerStore)? = nil,
+        statsStore: (any StatsStore)? = nil
+    ) -> URL? {
+        saveTranscript(
+            result,
+            transcriptId: transcriptId,
+            speakerMappings: speakerMappings,
+            speakerSources: speakerSources,
+            speakerDbIds: speakerDbIds,
+            directory: directory,
+            meetingTitle: meetingTitle,
+            healthInfo: healthInfo,
+            notifier: notifier,
+            speakerStore: speakerStore,
+            statsStore: statsStore,
+            formatOptions: .default
+        )
+    }
+
+    @available(macOS 14.0, *)
+    @discardableResult
+    public static func saveTranscript(
+        _ result: TranscriptionResult,
+        transcriptId: UUID,
+        speakerMappings: [String: SpeakerMapping] = [:],
+        speakerSources: [String: String] = [:],
+        speakerDbIds: [String: UUID] = [:],
+        directory: URL? = nil,
+        meetingTitle: String? = nil,
+        healthInfo: RecordingHealthInfo? = nil,
+        notifier: TranscriptNotifier? = nil,
+        speakerStore: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil,
         recordingDate: Date? = nil,
         transcriptionEngine: SpeechTranscriptionEngineDescriptor,

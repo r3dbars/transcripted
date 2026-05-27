@@ -267,14 +267,13 @@ extension TranscriptionTaskManager {
             }
         }
 
+        let transcriptId = UUID()
+        try Task.checkCancellation()
         // Phase 2: Save transcript with speaker names
         let notifier: TranscriptNotifier? = await MainActor.run {
             self.displayStatus = .finishing
             return self.notifier
         }
-
-        let transcriptId = UUID()
-        try Task.checkCancellation()
         let formatOptions = await MainActor.run {
             self.resolvedTranscriptFormatOptions(hasMicAudio: micURL != nil)
         }
@@ -291,7 +290,7 @@ extension TranscriptionTaskManager {
             healthInfo: healthInfo,
             notifier: nil,
             speakerStore: speakerDB,
-            statsStore: nil,
+            statsStore: DeferredTranscriptStatsStore(),
             recordingDate: transcriptDate,
             transcriptionEngine: speechEngine,
             formatOptions: formatOptions
@@ -451,16 +450,19 @@ extension TranscriptionTaskManager {
                 speakerClipURLs: capturedEntries.map(\.clipURL),
                 queuedSpeakerRequestTranscriptId: transcriptId
             )
-            await MainActor.run {
-                commitSavedTranscriptSideEffects(
-                    savedURL: savedURL,
-                    result: result,
-                    transcriptId: transcriptId,
-                    meetingTitle: meetingTitle,
-                    transcriptDate: transcriptDate,
-                    notifier: notifier
-                )
-            }
+            try await commitSavedTranscriptSideEffectsUnlessCancelled(
+                taskId: taskId,
+                savedURL: savedURL,
+                result: result,
+                transcriptId: transcriptId,
+                meetingTitle: meetingTitle,
+                transcriptDate: transcriptDate,
+                notifier: notifier,
+                retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+                retainedAudioURLs: archiveOutcome.retainedAudioURLs,
+                speakerClipURLs: capturedEntries.map(\.clipURL),
+                queuedSpeakerRequestTranscriptId: transcriptId
+            )
 
             AppLogger.pipeline.info("Speaker naming requested", [
                 "total": "\(namingEntries.count)",
@@ -470,27 +472,24 @@ extension TranscriptionTaskManager {
             return savedURL
         }
 
-        // No naming needed — clean up scratch audio once retained copies exist.
-        // Failed-queue source audio is deleted by retry completion, since it may
-        // live outside the normal scratch cleanup roots.
-        if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
-            removeManagedCleanupFile(micURL, label: "completed mic scratch")
-            removeManagedCleanupFile(systemURL, label: "completed system scratch")
-        }
-        try await checkCancellationAfterTranscriptSideEffects(
+        try await commitSavedTranscriptSideEffectsUnlessCancelled(
+            taskId: taskId,
             savedURL: savedURL,
+            result: result,
+            transcriptId: transcriptId,
+            meetingTitle: meetingTitle,
+            transcriptDate: transcriptDate,
+            notifier: notifier,
             retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
             retainedAudioURLs: archiveOutcome.retainedAudioURLs
         )
-        await MainActor.run {
-            commitSavedTranscriptSideEffects(
-                savedURL: savedURL,
-                result: result,
-                transcriptId: transcriptId,
-                meetingTitle: meetingTitle,
-                transcriptDate: transcriptDate,
-                notifier: notifier
-            )
+
+        // No naming needed — clean up scratch audio after the saved outcome has
+        // committed, so a late cancellation cannot delete transcript + retained
+        // audio after scratch files are gone.
+        if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
+            removeManagedCleanupFile(micURL, label: "completed mic scratch")
+            removeManagedCleanupFile(systemURL, label: "completed system scratch")
         }
 
         return savedURL
@@ -570,6 +569,57 @@ extension TranscriptionTaskManager {
         (statsStore ?? StatsDatabase.shared).recordSession(metadata)
     }
 
+    private func commitSavedTranscriptSideEffectsUnlessCancelled(
+        taskId: UUID,
+        savedURL: URL,
+        result: TranscriptionResult,
+        transcriptId: UUID,
+        meetingTitle: String?,
+        transcriptDate: Date,
+        notifier: TranscriptNotifier?,
+        retainedAudioDirectory: URL? = nil,
+        retainedAudioURLs: [URL] = [],
+        speakerClipURLs: [URL] = [],
+        queuedSpeakerRequestTranscriptId: UUID? = nil
+    ) async throws {
+        try await checkCancellationAfterTranscriptSideEffects(
+            savedURL: savedURL,
+            retainedAudioDirectory: retainedAudioDirectory,
+            retainedAudioURLs: retainedAudioURLs,
+            speakerClipURLs: speakerClipURLs,
+            queuedSpeakerRequestTranscriptId: queuedSpeakerRequestTranscriptId
+        )
+
+        let didCommit = await MainActor.run {
+            guard canCommitTaskSideEffects(taskId: taskId) else {
+                if let queuedSpeakerRequestTranscriptId {
+                    cancelSpeakerNamingRequest(transcriptId: queuedSpeakerRequestTranscriptId)
+                }
+                return false
+            }
+
+            commitSavedTranscriptSideEffects(
+                savedURL: savedURL,
+                result: result,
+                transcriptId: transcriptId,
+                meetingTitle: meetingTitle,
+                transcriptDate: transcriptDate,
+                notifier: notifier
+            )
+            return true
+        }
+
+        guard didCommit else {
+            cleanupCancelledTranscriptSideEffects(
+                savedURL: savedURL,
+                retainedAudioDirectory: retainedAudioDirectory,
+                retainedAudioURLs: retainedAudioURLs,
+                speakerClipURLs: speakerClipURLs
+            )
+            throw CancellationError()
+        }
+    }
+
     private func checkCancellationAfterTranscriptSideEffects(
         savedURL: URL,
         retainedAudioDirectory: URL? = nil,
@@ -625,4 +675,12 @@ extension TranscriptionTaskManager {
         ])
     }
 
+}
+
+@available(macOS 14.0, *)
+private struct DeferredTranscriptStatsStore: StatsStore {
+    func recordSession(_ metadata: RecordingMetadata) {}
+    func getTotalRecordingsCount() -> Int { 0 }
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] { [] }
+    func recordingExists(transcriptPath: String) -> Bool { false }
 }

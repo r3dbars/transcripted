@@ -14,9 +14,9 @@ enum ObservabilityTextRedactor {
         return try! NSRegularExpression(pattern: "(?!)")
     }
 
-    private static let appSupportPathRegex = makeRegex(#"/Users/[^/\s]+/Library/Application Support/(?:Transcripted|Draft)(?:/[^\n\r"\[\]]*)?"#)
-    private static let knownUserFolderPathRegex = makeRegex(#"/Users/[^/\s]+/(?:Desktop|Documents|Downloads|Library|Movies|Music|Pictures|Public)(?:/[^\n\r"\[\]]*)+"#)
-    private static let tempPathWithSpacesRegex = makeRegex(#"/(?:private/var|var|tmp)(?:/[^\n\r"\[\]]*)+"#)
+    private static let pathStartRegex = makeRegex(
+        #"(?<!https:)(?<!http:)(?<![A-Za-z0-9._%+\-])/(?:System/Volumes/Data/)?(?:Users|Volumes|private/var|var|tmp|Applications|Library|opt)(?=/|$)"#
+    )
     private static let userPathRegex = makeRegex(#"/Users/[^/\s]+/"#)
     private static let absolutePathRegex = makeRegex(
         #"(?<!https:)(?<!http:)/(?:System/Volumes/Data/)?(?:Users|private|var|tmp|Volumes|Applications|Library|opt)[^\s"]*"#
@@ -62,15 +62,7 @@ enum ObservabilityTextRedactor {
 
         var result = trimmed
         var range = NSRange(result.startIndex..., in: result)
-        result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
-        range = NSRange(result.startIndex..., in: result)
-        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
-        range = NSRange(result.startIndex..., in: result)
-        result = appSupportPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
-        range = NSRange(result.startIndex..., in: result)
-        result = knownUserFolderPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
-        range = NSRange(result.startIndex..., in: result)
-        result = tempPathWithSpacesRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
+        result = redactFilePaths(in: result)
         range = NSRange(result.startIndex..., in: result)
         result = userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
         range = NSRange(result.startIndex..., in: result)
@@ -98,6 +90,103 @@ enum ObservabilityTextRedactor {
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
+        result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
+        range = NSRange(result.startIndex..., in: result)
+        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
+        range = NSRange(result.startIndex..., in: result)
         return result
+    }
+
+    private static func redactFilePaths(in text: String) -> String {
+        var result = text
+        let matches = pathStartRegex.matches(
+            in: result,
+            range: NSRange(result.startIndex..., in: result)
+        )
+
+        for match in matches.reversed() {
+            guard let start = Range(match.range, in: result)?.lowerBound else { continue }
+            let end = pathEnd(in: result, from: start)
+            guard start < end else { continue }
+            result.replaceSubrange(start..<end, with: "[redacted-path]")
+        }
+
+        return result
+    }
+
+    private static func pathEnd(in text: String, from start: String.Index) -> String.Index {
+        var index = start
+
+        while index < text.endIndex {
+            let character = text[index]
+            if isHardPathDelimiter(character) {
+                break
+            }
+
+            if character == " " {
+                let nextToken = nextPathToken(in: text, after: index)
+                if nextTokenLooksLikeMetadata(nextToken)
+                    || (pathPrefixLooksLikeFile(text[start..<index])
+                        && !nextTokenCouldContinuePath(nextToken)) {
+                    break
+                }
+            }
+
+            index = text.index(after: index)
+        }
+
+        return index
+    }
+
+    private static func isHardPathDelimiter(_ character: Character) -> Bool {
+        character == "\n"
+            || character == "\r"
+            || character == "\t"
+            || character == "\""
+    }
+
+    private static func pathPrefixLooksLikeFile(_ prefix: Substring) -> Bool {
+        guard let slash = prefix.lastIndex(of: "/") else { return false }
+        let filename = prefix[prefix.index(after: slash)...]
+        guard let dot = filename.lastIndex(of: ".") else { return false }
+        let ext = filename[filename.index(after: dot)...]
+        guard (1...8).contains(ext.count) else { return false }
+        return ext.allSatisfy { $0.isLetter || $0.isNumber }
+    }
+
+    private static func nextPathToken(in text: String, after spaceIndex: String.Index) -> String {
+        var index = text.index(after: spaceIndex)
+        while index < text.endIndex, text[index] == " " {
+            index = text.index(after: index)
+        }
+
+        var token = ""
+        while index < text.endIndex {
+            let character = text[index]
+            if character == " " || isHardPathDelimiter(character) {
+                break
+            }
+            token.append(character)
+            index = text.index(after: index)
+        }
+
+        return token
+    }
+
+    private static func nextTokenCouldContinuePath(_ token: String) -> Bool {
+        token.contains("/") || pathTokenLooksLikeFile(token)
+    }
+
+    private static func nextTokenLooksLikeMetadata(_ token: String) -> Bool {
+        token.contains("=")
+            && !token.contains("/")
+            && !pathTokenLooksLikeFile(token)
+    }
+
+    private static func pathTokenLooksLikeFile(_ token: String) -> Bool {
+        guard let dot = token.lastIndex(of: ".") else { return false }
+        let ext = token[token.index(after: dot)...]
+        guard (1...8).contains(ext.count) else { return false }
+        return ext.allSatisfy { $0.isLetter || $0.isNumber }
     }
 }

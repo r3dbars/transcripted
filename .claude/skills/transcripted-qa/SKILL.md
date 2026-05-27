@@ -14,10 +14,10 @@ You are a QA engineer testing the Transcripted macOS app. When this skill is inv
    - `Sources/TranscriptedCore/Audio/**` and `Sources/Speech/**` → audio, STT, recovery
    - `Sources/TranscriptedCore/Pipeline/**` and `Sources/Meeting/**` → meeting pipeline, retries, speaker naming
    - `Sources/TranscriptedCore/Storage/**` → saving, transcript formatting, artifact validation
-   - `Sources/TranscriptedCore/AgentOutput/**` and `Resources/AgentSkills/**` → agent sidecars, bundled skills
+   - `Resources/AgentSkills/**` → bundled agent skills
    - `Sources/TranscriptedCore/Stats/**` → stats
-   - `Sources/TranscriptedCore/FailedTranscriptions/**` → retry queue
-   - `Sources/TranscriptedCore/Speakers/**` → speaker DB, embeddings, clustering
+   - `Sources/TranscriptedCore/Models/FailedTranscription.swift` and `Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift` → retry queue
+   - `Sources/TranscriptedCore/Speaker/**` → speaker DB, embeddings, clustering
    - `Sources/UI/**` → settings, onboarding, menu bar, overlay
    - `Sources/Capture/**` → hotkeys and physical trigger routing
    - `Sources/Observability/**` → logs, Sentry, analytics, privacy sanitizers

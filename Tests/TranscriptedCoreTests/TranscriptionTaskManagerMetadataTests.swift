@@ -805,6 +805,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             markdown.contains("\ntime: \(frontmatterTimeString(sourceRecordingDate))\n"),
             "frontmatter time should use the source recording time"
         )
+        XCTAssertEqual(statsStore.recordedSessions.count, 1, "successful imports should record stats exactly once")
         let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
         XCTAssertLessThan(
             abs(metadata.date.timeIntervalSince(sourceRecordingDate)),
