@@ -69,4 +69,17 @@ func testUpdateFailureKind() {
         assertEqual(UpdateFailureKind.classify(busy), .sparkleBusy, "session-in-progress errors should normalize to sparkle_busy")
         assertEqual(UpdateFailureKind.classify(unknown, fallback: .feedUnreachable), .feedUnreachable, "unrecognized text should keep the caller fallback")
     }
+
+    runSuite("UpdateFailureKind emits coarse diagnostic codes") {
+        let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
+        let sparkle = NSError(domain: "SUSparkleErrorDomain", code: 2003)
+        let cocoa = NSError(domain: NSCocoaErrorDomain, code: 260)
+        let custom = NSError(domain: "SensitiveVendor.PrivateDomain", code: 42)
+
+        assertEqual(UpdateFailureKind.diagnosticCode(nil), nil, "missing errors should not invent failure codes")
+        assertEqual(UpdateFailureKind.diagnosticCode(offline), "url_-1009", "URL errors should keep only the coarse domain bucket and code")
+        assertEqual(UpdateFailureKind.diagnosticCode(sparkle), "sparkle_2003", "Sparkle errors should be grouped without raw localized text")
+        assertEqual(UpdateFailureKind.diagnosticCode(cocoa), "cocoa_260", "Cocoa errors should use a stable public domain bucket")
+        assertEqual(UpdateFailureKind.diagnosticCode(custom), "other_42", "custom domains should not be sent off-device")
+    }
 }

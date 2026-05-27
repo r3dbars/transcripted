@@ -11,6 +11,27 @@ enum UpdateFailureKind: String {
     case sparkleBusy = "sparkle_busy"
     case unknown = "unknown"
 
+    static func diagnosticCode(_ error: Error?) -> String? {
+        guard let error else { return nil }
+
+        let nsError = error as NSError
+        let domain = nsError.domain.lowercased()
+        let codePrefix: String
+
+        switch nsError.domain {
+        case NSURLErrorDomain:
+            codePrefix = "url"
+        case NSCocoaErrorDomain:
+            codePrefix = "cocoa"
+        case NSPOSIXErrorDomain:
+            codePrefix = "posix"
+        default:
+            codePrefix = domain.contains("sparkle") ? "sparkle" : "other"
+        }
+
+        return "\(codePrefix)_\(nsError.code)"
+    }
+
     static func classify(_ error: Error?, fallback: UpdateFailureKind = .unknown) -> UpdateFailureKind {
         guard let error else { return fallback }
 

@@ -292,6 +292,7 @@ struct AnalyticsEventPolicy: Equatable {
             name: "update_check_finished",
             allowedProperties: [
                 "automatic_downloads_enabled",
+                "failure_code",
                 "failure_kind",
                 "result",
                 "state",

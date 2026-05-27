@@ -305,7 +305,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             result: "error",
             state: updateStatus.state,
             version: updateStatus.availableUpdateVersion,
-            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue
+            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue,
+            failureCode: UpdateFailureKind.diagnosticCode(error)
         )
     }
 
@@ -401,12 +402,16 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         result: String,
         state: UpdateStatus.State,
         version: String?,
-        failureKind: String? = nil
+        failureKind: String? = nil,
+        failureCode: String? = nil
     ) {
         var properties = baseUpdateTelemetryProperties(state: state, version: version)
         properties["result"] = result
         if let failureKind {
             properties["failure_kind"] = failureKind
+        }
+        if let failureCode {
+            properties["failure_code"] = failureCode
         }
         AnalyticsReporter.track("update_check_finished", properties: properties)
     }
