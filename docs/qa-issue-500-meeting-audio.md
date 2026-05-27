@@ -95,8 +95,21 @@ values in `event values` so the pass/fail call can be checked later.
 | Zoom | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
 | no meeting app | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline |
 | Chrome Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Safari Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Safari Meet | AirPods/Bluetooth | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| Firefox Meet | AirPods/Bluetooth | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
+| WhatsApp Mac | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
 | Zoom | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
 | no meeting app | AirPods/Bluetooth | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline |
+| Chrome Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Safari Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Safari Meet | USB mic | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Firefox Meet | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Firefox Meet | USB mic | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| WhatsApp Mac | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| Zoom | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | if available |
+| no meeting app | USB mic | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  | baseline, if available |
 
 ## Pass Bar
 
