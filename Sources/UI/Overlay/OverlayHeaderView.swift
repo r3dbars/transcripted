@@ -269,7 +269,7 @@ final class OverlayHeaderView: NSView {
     ) {
         usesMiniCursorLayout = isMiniCursorMode
             && (state == .starting || state == .listening || (state == .drafting && !isError) || state == .success)
-        let miniWaveformOnly = usesMiniCursorLayout && state == .listening
+        let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)
 
         // Mode label text + color
         switch state {

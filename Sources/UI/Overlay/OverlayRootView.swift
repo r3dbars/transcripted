@@ -145,7 +145,8 @@ final class OverlayRootView: NSView {
             meterPresentation: DictationMeterPolicy.presentation(
                 isListening: state == .listening,
                 sttIsRecording: isRecording,
-                rawLevel: audioLevel
+                rawLevel: audioLevel,
+                showsQuietStartupWaveform: state == .starting && isMiniCursorMode
             )
         )
 

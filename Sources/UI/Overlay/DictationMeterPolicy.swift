@@ -7,8 +7,13 @@ enum DictationMeterPolicy {
     static func presentation(
         isListening: Bool,
         sttIsRecording: Bool,
-        rawLevel: Float
+        rawLevel: Float,
+        showsQuietStartupWaveform: Bool = false
     ) -> Presentation {
+        if showsQuietStartupWaveform {
+            return Presentation(isVisible: true, level: 0)
+        }
+
         guard isListening, sttIsRecording else {
             return Presentation(isVisible: false, level: 0)
         }

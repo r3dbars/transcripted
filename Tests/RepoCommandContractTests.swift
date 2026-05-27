@@ -905,9 +905,19 @@ func testRepoCommandContract() {
             "mini cursor dictation should use the tiny centered header layout during startup"
         )
         assertTrue(
+            headerContents.contains("let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)"),
+            "mini cursor dictation should render starting/listening as waveform-only instead of flashing text"
+        )
+        assertTrue(
             headerContents.contains("stopButton.isHidden = usesMiniCursorLayout || state != .listening")
                 && headerContents.contains("stopButton.frame = .zero"),
             "mini cursor dictation should never leak the stop button into the tiny pill"
+        )
+
+        let rootContents = readRepoTextFile("Sources/UI/Overlay/OverlayRootView.swift")
+        assertTrue(
+            rootContents.contains("showsQuietStartupWaveform: state == .starting && isMiniCursorMode"),
+            "mini cursor dictation should show a flat quiet waveform during startup"
         )
 
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
