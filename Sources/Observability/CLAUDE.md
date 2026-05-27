@@ -22,6 +22,8 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — explicit allowlist of PostHog events + properties
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
+- `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
+- `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
 - `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` helpers used by both sanitizers so redaction rules stay in one place while each destination keeps its own length cap and sensitive-key list
@@ -51,7 +53,7 @@ anonymous analytics, and Sparkle update plumbing.
 After changing observability code:
 
 ```bash
-bash build.sh
+bash build.sh --no-open
 bash run-tests.sh
 ```
 

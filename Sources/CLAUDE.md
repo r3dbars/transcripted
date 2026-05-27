@@ -24,17 +24,17 @@ Important entry points:
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`)
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
-- `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting hotkey routing, and hotkey error surfacing
+- `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting trigger routing, and trigger error surfacing
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
-- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter
+- `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
 
 ## Directory map
 
 - `Accessibility/` — AX helpers for overlay positioning
 - `Beta/` — beta-only config currently; older API docs are historical
-- `Capture/` — meeting hotkey registration, physical dictation trigger capture, context parsing, and capture routing
+- `Capture/` — physical dictation trigger capture, meeting trigger routing, context parsing, and capture routing
 - `Dictation/` — dictation transcript persistence and timeout helpers
 - `Meeting/` — app-side meeting bridge, prompts, imported-audio prep, storage, and transcript restyling
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
