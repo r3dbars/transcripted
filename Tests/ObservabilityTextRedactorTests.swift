@@ -87,12 +87,15 @@ func testObservabilityTextRedactor() {
     }
 
     runSuite("ObservabilityTextRedactor does not stop early inside legal path names") {
-        let input = "failed /Users/jane/Documents/Acme.com Calls/source audio.wav and /Users/jane/Documents/Client [Acme]/source status=retry.wav trigger=hotkey"
+        let input = "failed /Users/jane/Documents/Acme.com Calls/source audio.wav, /Users/jane/Documents/Acme.com, Inc/source.wav, /Users/jane/Documents/v1.0,backup/source.wav, and /Users/jane/Documents/Client [Acme.com]/source status=retry.wav trigger=hotkey"
         let redacted = ObservabilityTextRedactor.redact(input)
 
         assertFalse(redacted.contains("Acme.com Calls"), "dotted path components before spaces must not leak")
-        assertFalse(redacted.contains("Client [Acme]"), "bracketed path components must not leak")
+        assertFalse(redacted.contains("Acme.com, Inc"), "punctuated dotted path components must not leak")
+        assertFalse(redacted.contains("v1.0,backup"), "punctuation after dotted path components must not leak")
+        assertFalse(redacted.contains("Client [Acme.com]"), "bracketed path components must not leak")
         assertFalse(redacted.contains("source audio.wav"), "file names after dotted components must not leak")
+        assertFalse(redacted.contains("source.wav"), "file names after punctuated dotted components must not leak")
         assertFalse(redacted.contains("source status=retry.wav"), "file names with key-like tokens must not leak")
         assertTrue(redacted.contains("trigger=hotkey"), "safe metadata after the path should remain")
     }

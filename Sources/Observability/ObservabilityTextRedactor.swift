@@ -123,7 +123,9 @@ enum ObservabilityTextRedactor {
                 break
             }
 
-            if isSoftPathDelimiter(character), pathPrefixLooksLikeFile(text[start..<index]) {
+            if isSoftPathDelimiter(character),
+               pathPrefixLooksLikeFile(text[start..<index]),
+               softDelimiterEndsPath(in: text, at: index) {
                 break
             }
 
@@ -157,6 +159,22 @@ enum ObservabilityTextRedactor {
             || character == ")"
             || character == "]"
             || character == "}"
+    }
+
+    private static func softDelimiterEndsPath(in text: String, at index: String.Index) -> Bool {
+        let nextIndex = text.index(after: index)
+        guard nextIndex < text.endIndex else { return true }
+
+        let nextCharacter = text[nextIndex]
+        if isHardPathDelimiter(nextCharacter) {
+            return true
+        }
+
+        if nextCharacter == " " {
+            return !nextTokenCouldContinuePath(nextPathToken(in: text, after: index))
+        }
+
+        return false
     }
 
     private static func pathPrefixLooksLikeFile(_ prefix: Substring) -> Bool {
