@@ -293,6 +293,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.textColor = OverlayTokens.textMuted
         }
         modeLabel.isHidden = miniWaveformOnly
+        updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout)
 
         // Spinner visibility
         let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
@@ -325,5 +326,56 @@ final class OverlayHeaderView: NSView {
         }
 
         needsLayout = true
+    }
+
+    private func updateAccessibility(
+        for state: FloatingOverlayController.OverlayState,
+        usesMiniCursorLayout: Bool
+    ) {
+        guard usesMiniCursorLayout else {
+            setAccessibilityElement(false)
+            setAccessibilityLabel(nil)
+            setAccessibilityValue(nil)
+            setAccessibilityHelp(nil)
+            return
+        }
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(accessibilityLabel(for: state))
+        setAccessibilityValue(accessibilityValue(for: state))
+        setAccessibilityHelp("Press Escape or your dictation shortcut to stop dictation.")
+    }
+
+    private func accessibilityLabel(for state: FloatingOverlayController.OverlayState) -> String {
+        switch state {
+        case .starting:
+            return "Dictation starting"
+        case .listening:
+            return "Dictation listening"
+        case .drafting:
+            return "Dictation transcribing"
+        case .success:
+            return "Dictation pasted"
+        case .loading:
+            return "Dictation loading"
+        case .idle:
+            return "Dictation"
+        }
+    }
+
+    private func accessibilityValue(for state: FloatingOverlayController.OverlayState) -> String {
+        switch state {
+        case .starting, .listening:
+            return "Mini cursor waveform"
+        case .drafting:
+            return "Processing speech"
+        case .success:
+            return "Text pasted"
+        case .loading:
+            return "Preparing local voice model"
+        case .idle:
+            return ""
+        }
     }
 }

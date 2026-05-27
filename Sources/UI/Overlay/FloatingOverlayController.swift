@@ -86,7 +86,7 @@ class FloatingOverlayController {
     private static let cursorFollowOffset = NSSize(width: 22, height: 20)
     private static let cursorFollowScreenInset: CGFloat = 10
     private static let cursorFollowSmoothing: CGFloat = 0.32
-    private static let miniLoadingRevealDelayNanoseconds: UInt64 = 220_000_000
+    private static let miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
     private var hideGeneration: UInt64 = 0
@@ -171,6 +171,7 @@ class FloatingOverlayController {
         panel.contentView?.layer?.borderColor = OverlayTokens.panelStroke.cgColor
 
         self.panel = panel
+        updatePanelCornerRadius()
 
         // Combine subscriptions: push live engine data to views
         sttRouter.$audioLevel
@@ -220,6 +221,7 @@ class FloatingOverlayController {
             liveTranscript: sttRouter?.liveTranscript ?? ""
         )
         updatePanelMouseBehavior()
+        updatePanelCornerRadius()
     }
 
     // MARK: - Panel Show/Hide
@@ -308,6 +310,7 @@ class FloatingOverlayController {
         panel.setFrameOrigin(origin)
         panel.setContentSize(panelSize)
         panel.ignoresMouseEvents = isCursorMiniPanelMode
+        updatePanelCornerRadius()
 
         // Spring entrance
         panel.alphaValue = 0
@@ -767,13 +770,21 @@ class FloatingOverlayController {
             panelSize: panel.frame.size
         )
         var frame = panel.frame
-        if snap {
+        if snap || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             frame.origin = target
         } else {
             frame.origin.x += (target.x - frame.origin.x) * Self.cursorFollowSmoothing
             frame.origin.y += (target.y - frame.origin.y) * Self.cursorFollowSmoothing
         }
         panel.setFrameOrigin(frame.origin)
+    }
+
+    private func updatePanelCornerRadius() {
+        let radius = isCursorMiniPanelMode
+            ? OverlayTokens.panelCursorMiniCornerRadius
+            : OverlayTokens.cornerRadius
+        blurView?.layer?.cornerRadius = radius
+        panel?.contentView?.layer?.cornerRadius = radius
     }
 
     private func updatePanelMouseBehavior() {

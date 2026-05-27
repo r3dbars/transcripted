@@ -20,7 +20,7 @@ enum DictationOverlayPresentationMode: String, CaseIterable, Identifiable, Hasha
         case .nearText:
             return "Full dictation window appears near the active text box."
         case .cursorMini:
-            return "Tiny waveform follows the cursor while you talk."
+            return "Tiny waveform follows the cursor. Stop with your dictation shortcut or Escape."
         }
     }
 }

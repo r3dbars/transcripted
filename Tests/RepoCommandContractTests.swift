@@ -194,6 +194,37 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Core verification starts with rebuilt deps") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        let coreMatrixBlock = sourceSlice(
+            matrix,
+            from: "- \"Package.swift\"",
+            to: "- \"Sources/Observability/**\""
+        )
+        assertTrue(
+            coreMatrixBlock.contains("bash build-deps.sh --force")
+                && coreMatrixBlock.contains("bash build.sh --no-open")
+                && coreMatrixBlock.contains("bash run-integration-smoke.sh")
+                && coreMatrixBlock.contains("swift test"),
+            "Core/package test guidance should rebuild dependency frameworks before app, smoke, or package checks"
+        )
+
+        let corePreflightBlock = sourceSlice(
+            preflight,
+            from: "if matches_any \"$path\" \"Package.swift\"",
+            to: "if matches_any \"$path\" \"Tools/TranscriptedCLI/*\""
+        )
+        assertTrue(
+            corePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
+                && corePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
+                && corePreflightBlock.contains("add_command \"bash run-integration-smoke.sh\"")
+                && corePreflightBlock.contains("add_command \"swift test\""),
+            "agent preflight should list the dependency rebuild before Core verification commands"
+        )
+    }
+
     runSuite("Repo command contract - Audio preflight uses injected Core paths") {
         let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
         assertTrue(
@@ -898,6 +929,19 @@ func testRepoCommandContract() {
                 && loadingBlock.contains("scheduleMiniLoadingReveal()"),
             "mini cursor dictation should debounce full loading UI instead of flashing it immediately"
         )
+        assertTrue(
+            overlayContents.contains("miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000"),
+            "mini cursor should keep the quiet startup waveform visible long enough to avoid a broken-looking full-window flash"
+        )
+        assertTrue(
+            overlayContents.contains("NSWorkspace.shared.accessibilityDisplayShouldReduceMotion"),
+            "cursor-follow smoothing should respect macOS Reduce Motion"
+        )
+        assertTrue(
+            overlayContents.contains("updatePanelCornerRadius()")
+                && overlayContents.contains("OverlayTokens.panelCursorMiniCornerRadius"),
+            "mini cursor dictation should use a pill-like radius instead of the full overlay corner radius"
+        )
 
         let headerContents = readRepoTextFile("Sources/UI/Overlay/OverlayHeaderView.swift")
         assertTrue(
@@ -912,6 +956,12 @@ func testRepoCommandContract() {
             headerContents.contains("stopButton.isHidden = usesMiniCursorLayout || state != .listening")
                 && headerContents.contains("stopButton.frame = .zero"),
             "mini cursor dictation should never leak the stop button into the tiny pill"
+        )
+        assertTrue(
+            headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state))")
+                && headerContents.contains("Dictation listening")
+                && headerContents.contains("Press Escape or your dictation shortcut"),
+            "mini cursor waveform-only states should still expose an accessible dictation status and stop hint"
         )
 
         let rootContents = readRepoTextFile("Sources/UI/Overlay/OverlayRootView.swift")
@@ -974,6 +1024,45 @@ func testRepoCommandContract() {
         assertTrue(
             transcribingStartBlock.contains("overlayController.resizePanelToCompact()"),
             "dictation should re-check the compact/mini overlay size before showing the transcribing state"
+        )
+    }
+
+    runSuite("Repo command contract - dictation window settings uses visual cards") {
+        let contents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
+        let rowBlock = sourceSlice(
+            contents,
+            from: "struct DictationOverlayModeRow: View",
+            to: "struct GeneralActionRow: View"
+        )
+
+        assertTrue(
+            rowBlock.contains("title: \"Dictation window\"")
+                && rowBlock.contains("DictationOverlayModeChoice")
+                && rowBlock.contains("DictationOverlayModePreview")
+                && rowBlock.contains("NearTextOverlayPreview")
+                && rowBlock.contains("MiniCursorOverlayPreview"),
+            "General settings should present dictation window modes as visual cards, not a text-only control"
+        )
+        assertTrue(
+            rowBlock.contains("@FocusState")
+                && rowBlock.contains(".focusable(true)")
+                && rowBlock.contains("isFocused"),
+            "custom dictation window cards should expose visible keyboard focus styling"
+        )
+        assertTrue(
+            rowBlock.contains("Dictation window options")
+                && rowBlock.contains("Selected")
+                && rowBlock.contains("Not selected"),
+            "custom dictation window cards should make one-of-two selection state clear to accessibility"
+        )
+        assertTrue(
+            rowBlock.contains("Text(\"Stop\")")
+                && rowBlock.contains("stroke(Color.accentColor"),
+            "near-text preview should show the larger controlled overlay beside a focused text field"
+        )
+        assertFalse(
+            rowBlock.contains(".pickerStyle(.segmented)"),
+            "dictation window setting should not regress to the old segmented text picker"
         )
     }
 

@@ -61,7 +61,8 @@ struct GeneralInfoButton: View {
                     Circle()
                         .fill(Color.primary.opacity(isHovering ? 0.10 : 0.04))
                 )
-                .contentShape(Circle())
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Learn about \(info.title)")
@@ -186,6 +187,10 @@ struct DictationOverlayModeRow: View {
             }
             .frame(maxWidth: 374, alignment: .trailing)
             .help(selection.detail)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Dictation window options"))
+            .accessibilityValue(Text(selection.title))
+            .accessibilityHint(Text("Choose one of two dictation window styles."))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -202,10 +207,13 @@ private struct DictationOverlayModeChoice: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         Button(action: action) { cardContent }
         .buttonStyle(.plain)
+        .focusable(true)
+        .focused($isFocused)
         .help(mode.detail)
         .accessibilityLabel(Text(mode.title))
         .accessibilityValue(Text(isSelected ? "Selected" : "Not selected"))
@@ -250,7 +258,7 @@ private struct DictationOverlayModeChoice: View {
 
     private var cardStroke: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .stroke(choiceStroke, lineWidth: isSelected ? 2 : 1)
+            .stroke(choiceStroke, lineWidth: isSelected || isFocused ? 2 : 1)
     }
 
     private var choiceFill: Color {
@@ -258,6 +266,7 @@ private struct DictationOverlayModeChoice: View {
     }
 
     private var choiceStroke: Color {
+        if isFocused { return .accentColor.opacity(0.92) }
         if isSelected { return .accentColor }
         return Color.primary.opacity(isHovering ? 0.18 : 0.11)
     }
@@ -299,20 +308,33 @@ private struct DictationOverlayModePreview: View {
 private struct NearTextOverlayPreview: View {
     var body: some View {
         VStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color.white.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                )
-                .frame(width: 104, height: 24)
-                .overlay {
-                    MiniWaveformBars(barCount: 15, activeIndex: 9)
-                        .frame(width: 62, height: 14)
-                }
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.white.opacity(0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    )
+                    .frame(width: 82, height: 24)
+                    .overlay {
+                        MiniWaveformBars(barCount: 13, activeIndex: 8)
+                            .frame(width: 54, height: 14)
+                    }
 
-            Capsule()
-                .fill(Color.white.opacity(0.20))
+                Text("Stop")
+                    .font(.system(size: 7, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.86))
+                    .padding(.horizontal, 5)
+                    .frame(height: 16)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.92))
+                    )
+            }
+
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.58), lineWidth: 1)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 2, style: .continuous))
                 .frame(width: 116, height: 6)
         }
     }
@@ -342,6 +364,8 @@ private struct MiniCursorOverlayPreview: View {
 }
 
 private struct MiniWaveformBars: View {
+    private static let heightPattern: [CGFloat] = [5, 9, 7, 12, 8, 14, 6, 11, 8, 13, 7, 10, 5, 9, 6]
+
     let barCount: Int
     let activeIndex: Int
 
@@ -356,8 +380,7 @@ private struct MiniWaveformBars: View {
     }
 
     private func barHeight(at index: Int) -> CGFloat {
-        let pattern: [CGFloat] = [5, 9, 7, 12, 8, 14, 6, 11, 8, 13, 7, 10, 5, 9, 6]
-        return pattern[index % pattern.count]
+        Self.heightPattern[index % Self.heightPattern.count]
     }
 }
 

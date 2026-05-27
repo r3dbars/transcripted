@@ -90,6 +90,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Sources/Meeting/*" "Sources/TranscriptedCore/*" "Tests/Integration/*"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
@@ -124,6 +125,7 @@ if [ -n "$changed_paths" ]; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n run-integration-smoke.sh"
             add_command "bash -n scripts/entrypoints/run-integration-smoke.sh"
+            add_command "bash build-deps.sh --force"
             add_command "bash run-integration-smoke.sh"
         fi
 
@@ -158,6 +160,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Package.swift" "Sources/TranscriptedCore/*" "Tests/TranscriptedCoreTests/*"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"

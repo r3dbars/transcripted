@@ -70,6 +70,10 @@ func testDictationOverlayPresentationPreferences() {
             DictationOverlayPresentationMode.cursorMini.detail.contains("follows the cursor"),
             "mini overlay mode should explain that it follows the pointer"
         )
+        assertTrue(
+            DictationOverlayPresentationMode.cursorMini.detail.contains("Escape"),
+            "mini overlay mode should explain how to stop when the stop button is hidden"
+        )
     }
 }
 

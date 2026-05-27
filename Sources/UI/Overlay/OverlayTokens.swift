@@ -23,6 +23,7 @@ enum OverlayTokens {
     static let panelActionErrorHeight: CGFloat = 122
     static let panelMaxHeight: CGFloat     = 340
     static let cornerRadius: CGFloat   = 12
+    static let panelCursorMiniCornerRadius: CGFloat = 17
     static let contentPadding: CGFloat = 12
 
     // Header
