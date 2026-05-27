@@ -508,7 +508,7 @@ class FloatingOverlayController {
             self.loadingElapsedSeconds = 0
             self.stopCursorFollowTracking()
             let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
-            self.resizePanel(to: loadingSize)
+            self.resizePanel(to: loadingSize, keepingVisible: true)
             self.pushStateToViews()
             self.startLoadingTimerIfNeeded()
         }
@@ -662,7 +662,7 @@ class FloatingOverlayController {
 
     // MARK: - Panel Resize
 
-    private func resizePanelInstant(to size: NSSize) {
+    private func resizePanelInstant(to size: NSSize, keepingVisible: Bool = false) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
@@ -670,10 +670,13 @@ class FloatingOverlayController {
         frame.size = size
         frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
+        if keepingVisible {
+            frame = clampedVisiblePanelFrame(frame)
+        }
         panel.setFrame(frame, display: true, animate: false)
     }
 
-    private func resizePanel(to size: NSSize) {
+    private func resizePanel(to size: NSSize, keepingVisible: Bool = false) {
         guard let panel = panel else { return }
         var frame = panel.frame
         let widthDelta = size.width - frame.size.width
@@ -681,7 +684,30 @@ class FloatingOverlayController {
         frame.size = size
         frame.origin.x -= widthDelta / 2
         frame.origin.y -= heightDelta
+        if keepingVisible {
+            frame = clampedVisiblePanelFrame(frame)
+        }
         panel.setFrame(frame, display: true, animate: true)
+    }
+
+    private func clampedVisiblePanelFrame(_ frame: NSRect) -> NSRect {
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        let screen = NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
+            ?? NSScreen.screens.first { frame.intersects($0.frame) }
+            ?? NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else { return frame }
+
+        let inset = Self.cursorFollowScreenInset
+        var clamped = frame
+        let minX = visibleFrame.minX + inset
+        let maxX = visibleFrame.maxX - frame.width - inset
+        let minY = visibleFrame.minY + inset
+        let maxY = visibleFrame.maxY - frame.height - inset
+
+        clamped.origin.x = maxX < minX ? minX : max(minX, min(clamped.origin.x, maxX))
+        clamped.origin.y = maxY < minY ? minY : max(minY, min(clamped.origin.y, maxY))
+        return clamped
     }
 
     private func preferredPanelSize(for state: OverlayState) -> NSSize {

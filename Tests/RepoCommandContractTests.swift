@@ -930,6 +930,11 @@ func testRepoCommandContract() {
             "mini cursor dictation should debounce full loading UI instead of flashing it immediately"
         )
         assertTrue(
+            loadingBlock.contains("resizePanel(to: loadingSize, keepingVisible: true")
+                && overlayContents.contains("private func clampedVisiblePanelFrame"),
+            "delayed mini cursor loading expansion should stay clamped to the visible screen"
+        )
+        assertTrue(
             overlayContents.contains("miniLoadingRevealDelayNanoseconds: UInt64 = 700_000_000"),
             "mini cursor should keep the quiet startup waveform visible long enough to avoid a broken-looking full-window flash"
         )
