@@ -52,6 +52,9 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state != .loading {
+                cancelMiniLoadingReveal()
+            }
             pushStateToViews()
             updateCursorFollowTracking()
         }
@@ -83,6 +86,7 @@ class FloatingOverlayController {
     private static let cursorFollowOffset = NSSize(width: 22, height: 20)
     private static let cursorFollowScreenInset: CGFloat = 10
     private static let cursorFollowSmoothing: CGFloat = 0.32
+    private static let miniLoadingRevealDelayNanoseconds: UInt64 = 220_000_000
 
     /// Generation counter — incremented on every showPanel(), checked in async _performHide()
     private var hideGeneration: UInt64 = 0
@@ -96,6 +100,7 @@ class FloatingOverlayController {
         }
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
+        miniLoadingRevealTask?.cancel()
         successDismissTask?.cancel()
         cursorFollowTask?.cancel()
     }
@@ -232,7 +237,10 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         errorMessage = ""
 
-        let rawTargetRect = sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
+        let shouldOpenAtCursor = isCursorMiniPanelMode
+        let rawTargetRect = shouldOpenAtCursor
+            ? nil
+            : sourceApp.flatMap { AccessibilityBridge.focusedTextFieldRect(for: $0) }
         let anchorTargetRect: NSRect?
         if let anchorRect, anchorRect.width > 0, anchorRect.height > 0 {
             anchorTargetRect = anchorRect
@@ -258,7 +266,7 @@ class FloatingOverlayController {
         }
 
         var origin: NSPoint
-        if isCursorMiniPanelMode {
+        if shouldOpenAtCursor {
             origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)
         } else if let rect = anchorTargetRect {
             origin = NSPoint(
@@ -305,7 +313,7 @@ class FloatingOverlayController {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
 
-        if let contentLayer = panel.contentView?.layer {
+        if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer {
             let spring = CASpringAnimation(keyPath: "transform.scale")
             spring.fromValue = 0.88
             spring.toValue = 1.0
@@ -330,9 +338,35 @@ class FloatingOverlayController {
 
     func resizePanelToCompact() {
         resizePanelInstant(to: preferredPanelSize(for: state))
-        if isCursorMiniListeningMode {
+        if isCursorMiniTrackingMode {
             updateCursorFollowPosition(snap: true)
         }
+    }
+
+    func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
+        loadingTimerTask?.cancel()
+        loadingTimerTask = nil
+        cancelMiniLoadingReveal()
+        errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
+        state = .starting
+        resizePanelToCompact()
+        if !isVisible {
+            showPanel(near: sourceApp, anchorRect: anchorRect)
+        }
+    }
+
+    @discardableResult
+    func showMiniCursorStartingStateIfNeeded(
+        near sourceApp: NSRunningApplication?,
+        anchorRect: NSRect? = nil
+    ) -> Bool {
+        guard isCursorMiniPresentationMode else { return false }
+        showStartingState(near: sourceApp, anchorRect: anchorRect)
+        return true
     }
 
     // MARK: - Hide Animations
@@ -411,6 +445,7 @@ class FloatingOverlayController {
 
     private var errorDismissTask: Task<Void, Never>?
     private var loadingTimerTask: Task<Void, Never>?
+    private var miniLoadingRevealTask: Task<Void, Never>?
     private var successDismissTask: Task<Void, Never>?
 
     func showLoadingState(
@@ -424,6 +459,10 @@ class FloatingOverlayController {
         errorActionHandler = nil
         if let presentation {
             loadingPresentation = presentation
+        }
+        if isCursorMiniPresentationMode, state == .starting || state == .listening {
+            scheduleMiniLoadingReveal()
+            return
         }
         let enteringLoading = state != .loading
         if enteringLoading {
@@ -447,6 +486,43 @@ class FloatingOverlayController {
                     guard let self = self, !Task.isCancelled, self.state == .loading else { break }
                     self.loadingElapsedSeconds += 1
                 }
+            }
+        }
+    }
+
+    private func scheduleMiniLoadingReveal() {
+        guard miniLoadingRevealTask == nil else { return }
+        miniLoadingRevealTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.miniLoadingRevealDelayNanoseconds)
+            } catch { return }
+            guard let self,
+                  !Task.isCancelled,
+                  self.isVisible,
+                  self.isCursorMiniTrackingMode else { return }
+            self.miniLoadingRevealTask = nil
+            self.state = .loading
+            self.loadingElapsedSeconds = 0
+            self.stopCursorFollowTracking()
+            let loadingSize = NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
+            self.resizePanel(to: loadingSize)
+            self.pushStateToViews()
+            self.startLoadingTimerIfNeeded()
+        }
+    }
+
+    private func cancelMiniLoadingReveal() {
+        miniLoadingRevealTask?.cancel()
+        miniLoadingRevealTask = nil
+    }
+
+    private func startLoadingTimerIfNeeded() {
+        guard loadingTimerTask == nil else { return }
+        loadingTimerTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled, self.state == .loading else { break }
+                self.loadingElapsedSeconds += 1
             }
         }
     }
@@ -541,6 +617,7 @@ class FloatingOverlayController {
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        cancelMiniLoadingReveal()
         successDismissTask?.cancel()
         successDismissTask = nil
         state = .idle

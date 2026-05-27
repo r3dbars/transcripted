@@ -116,7 +116,6 @@ class DictationSessionController: ObservableObject {
             recordDictationStarted(appState: appState, trigger: trigger)
             continueDictationStart(
                 appState: appState,
-                overlayController: overlayController,
                 sourceApp: sourceApp
             )
         case .notDetermined:
@@ -135,7 +134,6 @@ class DictationSessionController: ObservableObject {
                     self.recordDictationStarted(appState: appState, trigger: trigger)
                     self.continueDictationStart(
                         appState: appState,
-                        overlayController: overlayController,
                         sourceApp: sourceApp
                     )
                 } else {
@@ -212,12 +210,10 @@ class DictationSessionController: ObservableObject {
 
     private func continueDictationStart(
         appState: TranscriptedAppState,
-        overlayController: FloatingOverlayController,
         sourceApp: NSRunningApplication?
     ) {
         guard isDictating else { return }
         if appState.sttRouter.isModelLoaded {
-            overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
             beginDictationRecording(sourceApp: sourceApp)
             return
         }
@@ -239,10 +235,7 @@ class DictationSessionController: ObservableObject {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
             // still runs asynchronously so a slow device graph never blocks UI.
-            overlayController.state = .starting
-            if !overlayController.isVisible {
-                overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
-            }
+            overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = Task { @MainActor [weak self] in
                 guard let self,
@@ -305,6 +298,10 @@ class DictationSessionController: ObservableObject {
             return
         case .showLoadingWhileWaiting:
             // Slow path — engine is settling after a device change. Wait for it.
+            overlayController.showMiniCursorStartingStateIfNeeded(
+                near: sourceApp,
+                anchorRect: sessionAnchorRect
+            )
             overlayController.showLoadingState(
                 near: sourceApp,
                 presentation: microphoneRecoveryPresentation(
@@ -644,9 +641,6 @@ class DictationSessionController: ObservableObject {
         )
         trackDictationStartFailed(dictationStartFailureKind(for: status))
         appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "start_failed")
-        if !overlayController.isVisible {
-            overlayController.showPanel(near: sourceApp, anchorRect: sessionAnchorRect)
-        }
         overlayController.showError(
             microphoneUnavailableMessage(for: status, openedSettings: false),
             actionTitle: shouldOfferRecoveryAction ? TranscriptedPermissionKind.microphoneActionTitle(for: status) : nil,
@@ -997,6 +991,10 @@ class DictationSessionController: ObservableObject {
         guard let appState = appState, let overlayController = overlayController else { return }
 
         startupTask?.cancel()
+        overlayController.showMiniCursorStartingStateIfNeeded(
+            near: sourceApp,
+            anchorRect: sessionAnchorRect
+        )
         updateLoadingOverlay(sourceApp: sourceApp)
 
         startupTask = Task { @MainActor [weak self] in

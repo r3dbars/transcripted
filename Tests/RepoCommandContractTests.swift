@@ -841,35 +841,120 @@ func testRepoCommandContract() {
             to: "func resizePanelToCompact()"
         )
 
+        let miniSizeReturn = "return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)"
+        for (caseText, expectation) in [
+            ("case .starting where isCursorMiniPresentationMode:", "mini cursor dictation should be tiny on the first visible startup frame"),
+            ("case .listening where isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny while listening"),
+            ("case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny while transcription is pending"),
+            ("case .success where isCursorMiniPresentationMode:", "mini cursor dictation should stay tiny for the pasted confirmation"),
+        ] {
+            guard let caseRange = sizeBlock.range(of: caseText) else {
+                assertTrue(false, expectation)
+                continue
+            }
+            let restOfSizeBlock = String(sizeBlock[caseRange.upperBound...])
+            assertTrue(
+                restOfSizeBlock.contains(miniSizeReturn),
+                expectation
+            )
+        }
         assertTrue(
-            sizeBlock.contains("case .starting where isCursorMiniPresentationMode:"),
-            "mini cursor dictation should be tiny on the first visible startup frame"
-        )
-        assertTrue(
-            sizeBlock.contains("case .drafting where errorMessage.isEmpty && isCursorMiniPresentationMode:"),
-            "mini cursor dictation should stay tiny while transcription is pending"
-        )
-        assertTrue(
-            sizeBlock.contains("case .success where isCursorMiniPresentationMode:"),
-            "mini cursor dictation should stay tiny for the pasted confirmation"
-        )
-        assertTrue(
-            showPanelBlock.contains("if isCursorMiniPanelMode")
+            showPanelBlock.contains("let shouldOpenAtCursor = isCursorMiniPanelMode")
+                && showPanelBlock.contains("? nil")
+                && showPanelBlock.contains(": sourceApp.flatMap")
+                && showPanelBlock.contains("if shouldOpenAtCursor")
                 && showPanelBlock.contains("origin = cursorFollowOrigin(for: mousePos, panelSize: panelSize)"),
-            "mini cursor dictation should open at the cursor instead of first anchoring to the text box"
+            "mini cursor dictation should skip AX lookup and open at the cursor instead of first anchoring to the text box"
         )
         assertTrue(
             showPanelBlock.contains("panel.ignoresMouseEvents = isCursorMiniPanelMode"),
             "mini cursor dictation should not briefly intercept the mouse while it appears"
         )
+        assertTrue(
+            showPanelBlock.contains("if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer"),
+            "mini cursor dictation should not run the full-panel spring animation"
+        )
+
+        let showStartingBlock = sourceSlice(
+            overlayContents,
+            from: "func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil)",
+            to: "@discardableResult"
+        )
+        assertTrue(
+            showStartingBlock.contains("errorMessage = \"\"")
+                && showStartingBlock.contains("state = .starting")
+                && showStartingBlock.contains("resizePanelToCompact()")
+                && showStartingBlock.contains("showPanel(near: sourceApp, anchorRect: anchorRect)"),
+            "starting state should clear stale UI, force mini/compact size, then show the panel"
+        )
+
+        let loadingBlock = sourceSlice(
+            overlayContents,
+            from: "func showLoadingState(",
+            to: "func showError("
+        )
+        assertTrue(
+            loadingBlock.contains("if isCursorMiniPresentationMode, state == .starting || state == .listening")
+                && loadingBlock.contains("scheduleMiniLoadingReveal()"),
+            "mini cursor dictation should debounce full loading UI instead of flashing it immediately"
+        )
 
         let headerContents = readRepoTextFile("Sources/UI/Overlay/OverlayHeaderView.swift")
         assertTrue(
-            headerContents.contains("state == .starting || state == .listening"),
+            headerContents.contains("state == .starting || state == .listening || (state == .drafting && !isError) || state == .success"),
             "mini cursor dictation should use the tiny centered header layout during startup"
+        )
+        assertTrue(
+            headerContents.contains("stopButton.isHidden = usesMiniCursorLayout || state != .listening")
+                && headerContents.contains("stopButton.frame = .zero"),
+            "mini cursor dictation should never leak the stop button into the tiny pill"
         )
 
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let readyModelStartBlock = sourceSlice(
+            contents,
+            from: "if appState.sttRouter.isModelLoaded {",
+            to: "startDictationAfterWarmup(sourceApp: sourceApp)"
+        )
+        assertTrue(
+            readyModelStartBlock.contains("beginDictationRecording(sourceApp: sourceApp)"),
+            "ready-model dictation should hand off directly to recording startup"
+        )
+        assertFalse(
+            readyModelStartBlock.contains("overlayController.showPanel"),
+            "ready-model dictation should not show an idle overlay before recording startup sets the first visible state"
+        )
+        let fastPathStartBlock = sourceSlice(
+            contents,
+            from: "case .skipLoadingAndStartRecording:",
+            to: "recordingStartRetryTask?.cancel()"
+        )
+        assertTrue(
+            fastPathStartBlock.contains("overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)"),
+            "starting dictation should force the current panel to the mini/compact size before async recording work"
+        )
+
+        let warmupStartBlock = sourceSlice(
+            contents,
+            from: "private func startDictationAfterWarmup(sourceApp: NSRunningApplication?)",
+            to: "startupTask = Task"
+        )
+        assertTrue(
+            warmupStartBlock.contains("overlayController.showMiniCursorStartingStateIfNeeded")
+                && warmupStartBlock.contains("updateLoadingOverlay(sourceApp: sourceApp)"),
+            "mini cursor dictation should show a tiny startup pill before any delayed model-loading UI"
+        )
+
+        let permissionErrorBlock = sourceSlice(
+            contents,
+            from: "private func presentMicrophonePermissionError(",
+            to: "overlayController.showError("
+        )
+        assertFalse(
+            permissionErrorBlock.contains("overlayController.showPanel"),
+            "permission errors should not pre-show an idle/mini panel before the real error panel"
+        )
+
         let transcribingStartBlock = sourceSlice(
             contents,
             from: "overlayController.state = .drafting",
