@@ -1004,6 +1004,15 @@ func testRepoCommandContract() {
                 && warmupStartBlock.contains("updateLoadingOverlay(sourceApp: sourceApp)"),
             "mini cursor dictation should show a tiny startup pill before any delayed model-loading UI"
         )
+        assertTrue(
+            contents.contains("hasStartupTask: startupTask != nil"),
+            "mini cursor model warmup should remain cancellable before the delayed loading reveal"
+        )
+        let lifecycleContents = readRepoTextFile("Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift")
+        assertTrue(
+            lifecycleContents.contains("hasStartupTask || hasRecordingStartTask"),
+            "pending startup tasks should be treated like recording-start tasks for stop/cancel decisions"
+        )
 
         let permissionErrorBlock = sourceSlice(
             contents,

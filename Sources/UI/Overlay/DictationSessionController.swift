@@ -716,6 +716,7 @@ class DictationSessionController: ObservableObject {
         let stopDecision = DictationRecordingStartLifecyclePolicy.stopDecision(
             isLoadingOverlay: overlayController.state == .loading,
             isListeningOverlay: overlayController.state == .listening,
+            hasStartupTask: startupTask != nil,
             hasRecordingStartTask: recordingStartRetryTask != nil,
             sttIsRecording: appState.sttRouter.isRecording
         )

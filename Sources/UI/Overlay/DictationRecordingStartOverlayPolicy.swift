@@ -24,10 +24,11 @@ struct DictationRecordingStartLifecyclePolicy {
     static func stopDecision(
         isLoadingOverlay: Bool,
         isListeningOverlay: Bool,
+        hasStartupTask: Bool,
         hasRecordingStartTask: Bool,
         sttIsRecording: Bool
     ) -> StopDecision {
-        if !sttIsRecording, (isLoadingOverlay || hasRecordingStartTask) {
+        if !sttIsRecording, (isLoadingOverlay || hasStartupTask || hasRecordingStartTask) {
             return .cancelPendingStart
         }
 
