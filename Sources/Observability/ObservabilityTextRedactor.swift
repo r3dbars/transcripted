@@ -60,6 +60,10 @@ enum ObservabilityTextRedactor {
 
         var result = trimmed
         var range = NSRange(result.startIndex..., in: result)
+        result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
+        range = NSRange(result.startIndex..., in: result)
+        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
+        range = NSRange(result.startIndex..., in: result)
         result = appSupportPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-path]")
         range = NSRange(result.startIndex..., in: result)
         result = userPathRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "/Users/****/")
@@ -88,10 +92,6 @@ enum ObservabilityTextRedactor {
         range = NSRange(result.startIndex..., in: result)
         result = secretAssignmentRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1=[redacted-secret]")
         range = NSRange(result.startIndex..., in: result)
-        result = emailRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-email]")
-        range = NSRange(result.startIndex..., in: result)
-        result = localHostnameRegex.stringByReplacingMatches(in: result, range: range, withTemplate: "[redacted-host]")
-
         return result
     }
 }
