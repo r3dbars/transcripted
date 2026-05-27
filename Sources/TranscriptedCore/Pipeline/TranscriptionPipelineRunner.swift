@@ -606,6 +606,7 @@ extension TranscriptionTaskManager {
                 transcriptDate: transcriptDate,
                 notifier: notifier
             )
+            markTaskTranscriptCommitted(taskId: taskId)
             return true
         }
 

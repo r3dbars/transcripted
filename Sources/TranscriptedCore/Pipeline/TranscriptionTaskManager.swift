@@ -24,6 +24,7 @@ public class TranscriptionTaskManager: ObservableObject {
     private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?)] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
     private var intentionallyCancelledTaskIds: Set<UUID> = []
+    private var committedTranscriptTaskIds: Set<UUID> = []
     var pendingSpeakerNamingRequests: [SpeakerNamingRequest] = []
     public let transcription: Transcription
 
@@ -896,6 +897,7 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTaskAudio.removeValue(forKey: taskId)
         preservedTaskIdsForShutdown.remove(taskId)
         intentionallyCancelledTaskIds.remove(taskId)
+        committedTranscriptTaskIds.remove(taskId)
         activeCount = max(0, activeCount - 1)
         backgroundTaskCount = max(0, backgroundTaskCount - 1)
 
@@ -914,7 +916,19 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTasks[taskId] != nil && !intentionallyCancelledTaskIds.contains(taskId)
     }
 
+    func markTaskTranscriptCommitted(taskId: UUID) {
+        committedTranscriptTaskIds.insert(taskId)
+    }
+
     private func finishCancelledTaskIfNeeded(taskId: UUID, error: Error? = nil) -> Bool {
+        if committedTranscriptTaskIds.contains(taskId) {
+            intentionallyCancelledTaskIds.remove(taskId)
+            AppLogger.pipeline.info("Preserving committed transcription task outcome after cancellation", [
+                "taskId": "\(taskId)"
+            ])
+            return false
+        }
+
         guard intentionallyCancelledTaskIds.contains(taskId) || error is CancellationError else {
             return false
         }

@@ -585,6 +585,44 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(manager.activeTasks.isEmpty)
     }
 
+    func testCancelAllAfterCommittedSideEffectsStillPublishesTranscript() async throws {
+        let statsStore = CancellingOnRecordStatsStore()
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "This should stay visible."),
+            diarization: MetadataStubDiarizationEngine(),
+            statsStore: statsStore
+        )
+        statsStore.onFirstRecord = {
+            Task { @MainActor in
+                manager.cancelAll()
+            }
+        }
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("committed-cancel-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("committed-cancel-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: outputFolder,
+            meetingTitle: "Committed cancel"
+        )
+
+        try await waitUntil(timeout: 3.0) {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: transcriptURL.path))
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(statsStore.recordedSessions.count, 1)
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+    }
+
     func testStopTimeoutFailedQueueCanKeepScratchAudioUntilItFinalizes() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -1517,6 +1555,45 @@ private final class MetadataCapturingStatsStore: StatsStore {
 
     func recordingExists(transcriptPath: String) -> Bool {
         recordedSessions.contains { $0.transcriptPath == transcriptPath }
+    }
+}
+
+@available(macOS 14.0, *)
+private final class CancellingOnRecordStatsStore: StatsStore {
+    private let base = MetadataCapturingStatsStore()
+    private let lock = NSLock()
+    private var didCallOnFirstRecord = false
+    var onFirstRecord: (() -> Void)?
+
+    var recordedSessions: [RecordingMetadata] {
+        base.recordedSessions
+    }
+
+    func recordSession(_ metadata: RecordingMetadata) {
+        base.recordSession(metadata)
+
+        let callback: (() -> Void)?
+        lock.lock()
+        if didCallOnFirstRecord {
+            callback = nil
+        } else {
+            didCallOnFirstRecord = true
+            callback = onFirstRecord
+        }
+        lock.unlock()
+        callback?()
+    }
+
+    func getTotalRecordingsCount() -> Int {
+        base.getTotalRecordingsCount()
+    }
+
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] {
+        base.getRecordings(from: startDate, to: endDate)
+    }
+
+    func recordingExists(transcriptPath: String) -> Bool {
+        base.recordingExists(transcriptPath: transcriptPath)
     }
 }
 
