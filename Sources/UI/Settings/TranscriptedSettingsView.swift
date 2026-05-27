@@ -32,6 +32,7 @@ struct TranscriptedSettingsView: View {
     @State private var showGeneralCorrections = false
     @State private var showCorrectionPreview = false
     @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
+    @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
@@ -1253,6 +1254,17 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Clean up pasted text",
                         message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
+                    )
+                )
+
+                DictationOverlayModeRow(
+                    selection: Binding(
+                        get: { dictationOverlayMode },
+                        set: { newValue in
+                            dictationOverlayMode = newValue
+                            DictationOverlayPresentationPreferences.setMode(newValue)
+                            trackSettingsAction("change_dictation_overlay_mode", page: .general)
+                        }
                     )
                 )
 

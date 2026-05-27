@@ -67,6 +67,7 @@ final class OverlayHeaderView: NSView {
     let waveformHost = WaveformHostView(frame: .zero)
     private let shortcutHint = NSTextField(labelWithString: "")
     private let stopButton = OverlayPrimaryButton(frame: .zero)
+    private var usesMiniCursorListeningLayout = false
     var onStopRequested: (() -> Void)?
 
     override init(frame: NSRect) {
@@ -124,6 +125,20 @@ final class OverlayHeaderView: NSView {
         let hintSize = shortcutHint.fittingSize
         let stopSize = stopButton.fittingSize
         let isCenteredListeningLayout = !waveformHost.isHidden && !stopButton.isHidden && shortcutHint.stringValue.isEmpty && spinner.isHidden
+
+        if usesMiniCursorListeningLayout {
+            modeLabel.frame = .zero
+            spinner.frame = .zero
+            stopButton.frame = .zero
+            shortcutHint.frame = .zero
+            waveformHost.frame = NSRect(
+                x: 10,
+                y: (h - 18) / 2,
+                width: max(0, bounds.width - 20),
+                height: 18
+            )
+            return
+        }
 
         if isCenteredListeningLayout {
             let compactPad: CGFloat = 10
@@ -238,8 +253,11 @@ final class OverlayHeaderView: NSView {
         dictationShortcutHint: String,
         loadingTitle: String?,
         isError: Bool = false,
+        isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
+        usesMiniCursorListeningLayout = state == .listening && isMiniCursorMode
+
         // Mode label text + color
         switch state {
         case .starting:
@@ -261,17 +279,18 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Dictation"
             modeLabel.textColor = OverlayTokens.textMuted
         }
+        modeLabel.isHidden = usesMiniCursorListeningLayout
 
         // Spinner visibility
         let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
-        spinner.isHidden = !showSpinner
+        spinner.isHidden = usesMiniCursorListeningLayout || !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
         // Waveform visibility
         waveformHost.isHidden = !meterPresentation.isVisible
         waveformHost.isActive = meterPresentation.isVisible
         waveformHost.level = meterPresentation.level
-        stopButton.isHidden = state != .listening
+        stopButton.isHidden = usesMiniCursorListeningLayout || state != .listening
 
         // Shortcut hint
         switch state {

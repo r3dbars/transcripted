@@ -210,9 +210,11 @@ class FloatingOverlayController {
             loadingElapsedSeconds: loadingElapsedSeconds,
             isTranscribing: sttRouter?.isTranscribing ?? false,
             isRecording: sttRouter?.isRecording ?? false,
+            isMiniCursorMode: isCursorMiniListeningMode,
             audioLevel: sttRouter?.audioLevel ?? 0,
             liveTranscript: sttRouter?.liveTranscript ?? ""
         )
+        updatePanelMouseBehavior()
     }
 
     // MARK: - Panel Show/Hide
@@ -325,7 +327,10 @@ class FloatingOverlayController {
     }
 
     func resizePanelToCompact() {
-        resizePanelInstant(to: NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight))
+        resizePanelInstant(to: preferredPanelSize(for: state))
+        if isCursorMiniListeningMode {
+            updateCursorFollowPosition(snap: true)
+        }
     }
 
     // MARK: - Hide Animations
@@ -603,6 +608,8 @@ class FloatingOverlayController {
             return NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelLoadingHeight)
         case .drafting where !errorMessage.isEmpty:
             return errorPanelSize()
+        case .listening where DictationOverlayPresentationPreferences.mode() == .cursorMini:
+            return NSSize(width: OverlayTokens.panelCursorMiniWidth, height: OverlayTokens.panelCursorMiniHeight)
         case .idle, .starting, .listening, .drafting, .success:
             return NSSize(width: OverlayTokens.panelCompactWidth, height: OverlayTokens.panelCompactHeight)
         }
@@ -617,8 +624,13 @@ class FloatingOverlayController {
 
     // MARK: - Cursor Following
 
+    private var isCursorMiniListeningMode: Bool {
+        state == .listening && DictationOverlayPresentationPreferences.mode() == .cursorMini
+    }
+
     private func updateCursorFollowTracking() {
-        guard isVisible, state == .listening else {
+        updatePanelMouseBehavior()
+        guard isVisible, isCursorMiniListeningMode else {
             stopCursorFollowTracking()
             return
         }
@@ -643,7 +655,7 @@ class FloatingOverlayController {
     }
 
     private func updateCursorFollowPosition(snap: Bool) {
-        guard let panel, isVisible, state == .listening else { return }
+        guard let panel, isVisible, isCursorMiniListeningMode else { return }
 
         let target = cursorFollowOrigin(
             for: NSEvent.mouseLocation,
@@ -657,6 +669,11 @@ class FloatingOverlayController {
             frame.origin.y += (target.y - frame.origin.y) * Self.cursorFollowSmoothing
         }
         panel.setFrameOrigin(frame.origin)
+    }
+
+    private func updatePanelMouseBehavior() {
+        guard isVisible else { return }
+        panel?.ignoresMouseEvents = isCursorMiniListeningMode
     }
 
     private func cursorFollowOrigin(for mouseLocation: NSPoint, panelSize: NSSize) -> NSPoint {

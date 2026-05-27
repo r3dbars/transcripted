@@ -152,6 +152,51 @@ struct GeneralToggleRow: View {
     }
 }
 
+struct DictationOverlayModeRow: View {
+    @Binding var selection: DictationOverlayPresentationMode
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                GeneralTitleLabel(
+                    title: "Dictation overlay",
+                    info: GeneralInfo(
+                        title: "Dictation overlay",
+                        message: "Text box keeps the current full overlay near the active text field. Mini cursor uses a tiny waveform that follows your pointer while you talk."
+                    )
+                )
+
+                Text(selection.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 10)
+
+            Picker("Dictation overlay", selection: $selection) {
+                ForEach(DictationOverlayPresentationMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+            .help(selection.detail)
+            .accessibilityLabel(Text("Dictation overlay"))
+            .accessibilityValue(Text(selection.title))
+            .accessibilityHint(Text(selection.detail))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: 54)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
 struct GeneralActionRow: View {
     let title: String
     let value: String
