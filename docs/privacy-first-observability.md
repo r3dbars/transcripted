@@ -142,6 +142,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - coarse buckets like `10_29s`, `50_149`, `4_plus`
 - stable trigger enums like `hotkey`, `menu`, `detected_prompt`
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
+- normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
 
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes

@@ -305,7 +305,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             result: "error",
             state: updateStatus.state,
             version: updateStatus.availableUpdateVersion,
-            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue
+            failureKind: UpdateFailureKind.classify(error, fallback: fallback).rawValue,
+            failureCode: UpdateFailureKind.diagnosticCode(error)
         )
     }
 
@@ -401,12 +402,16 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         result: String,
         state: UpdateStatus.State,
         version: String?,
-        failureKind: String? = nil
+        failureKind: String? = nil,
+        failureCode: String? = nil
     ) {
         var properties = baseUpdateTelemetryProperties(state: state, version: version)
         properties["result"] = result
         if let failureKind {
             properties["failure_kind"] = failureKind
+        }
+        if let failureCode {
+            properties["failure_code"] = failureCode
         }
         AnalyticsReporter.track("update_check_finished", properties: properties)
     }
@@ -512,6 +517,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
         let version = versionString(for: item)
         let state = UpdateStatus.State.updateAvailable(version: version)
         let failureKind = UpdateFailureKind.classify(error, fallback: .downloadFailed).rawValue
+        let failureCode = UpdateFailureKind.diagnosticCode(error)
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
         trackUpdateLifecycleEvent(
             "update_download_finished",
@@ -523,7 +529,8 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
             result: "download_failed",
             state: state,
             version: version,
-            failureKind: failureKind
+            failureKind: failureKind,
+            failureCode: failureCode
         )
     }
 

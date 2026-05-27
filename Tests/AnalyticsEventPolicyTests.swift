@@ -83,11 +83,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(updateSetting?.allowedProperties.contains("setting_id"), true, "update settings should preserve the changed toggle")
         assertEqual(updateCheckFinished?.allowedProperties.contains("result"), true, "update checks should preserve the coarse outcome")
         assertEqual(updateCheckFinished?.allowedProperties.contains("failure_kind"), true, "update failures should preserve the normalized failure kind")
+        assertEqual(updateCheckFinished?.allowedProperties.contains("failure_code"), true, "update failures should preserve coarse error-code buckets")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_id": "start_dictation",
                 "automatic_downloads_enabled": "true",
+                "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
                 "page_id": "home",
                 "setting_id": "menu_bar_start_dictation",
@@ -95,10 +97,11 @@ func testAnalyticsEventPolicy() {
                 "state": "ready_to_install",
                 "surface": "settings_about",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_kind", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "page_id", "setting_id", "source", "state", "surface"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
+        assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
         assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
         assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
