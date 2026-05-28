@@ -428,6 +428,7 @@ swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Network \
     -framework ScreenCaptureKit \
     -framework Sentry \
     -framework Sparkle \

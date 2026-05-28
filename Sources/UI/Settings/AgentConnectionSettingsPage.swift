@@ -387,10 +387,15 @@ struct AgentConnectionSettingsPage: View {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
             let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
-            let previewURL = workspaceURL.appendingPathComponent(
-                LiveMeetingCodexSession.previewFilename,
-                isDirectory: false
-            )
+            let previewURL: URL
+            if #available(macOS 14.0, *) {
+                previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            } else {
+                previewURL = workspaceURL.appendingPathComponent(
+                    LiveMeetingCodexSession.previewFilename,
+                    isDirectory: false
+                )
+            }
 
             if NSWorkspace.shared.open(previewURL) {
                 openedLiveMeetingPreview = true
@@ -400,7 +405,7 @@ struct AgentConnectionSettingsPage: View {
                 }
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([previewURL])
-                liveMeetingCodexSetupError = "The live preview file is ready, but could not be opened automatically."
+                liveMeetingCodexSetupError = "The live preview is ready at \(previewURL.absoluteString)."
             }
         } catch {
             liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"

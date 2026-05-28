@@ -329,6 +329,7 @@ enum AgentConnectionGuide {
         - Live transcript: \(session.liveTranscriptURL.path)
         - State file: \(session.stateURL.path)
         - Preview: \(session.previewURL.path)
+        - Codex browser preview: \(LiveMeetingCodexSession.previewServerURL.absoluteString)
 
         Rules:
         - Read `state.json` and `live_transcript.md` when I ask about the current meeting.
@@ -337,6 +338,7 @@ enum AgentConnectionGuide {
         - If `finalTranscriptPath` exists in `state.json`, read that final Markdown and prefer it for speaker names, diarization, quotes, decisions, and durable notes.
         - Do not change Transcripted's normal meeting output.
         - Keep live answers short and say when the stream is too sparse to answer.
+        - For a live transcript panel in Codex, open \(LiveMeetingCodexSession.previewServerURL.absoluteString) while Transcripted is running.
 
         Skill:
         - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)

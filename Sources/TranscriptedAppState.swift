@@ -88,6 +88,9 @@ class TranscriptedAppState: ObservableObject {
             startExistingInstallModelPrefetchIfNeeded()
         }
         startAudioStorageMaintenanceIfNeeded()
+        if #available(macOS 14.0, *) {
+            startLiveMeetingPreviewServerIfNeeded()
+        }
 
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")
@@ -169,6 +172,9 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
         contextCapture.unregisterHotkey()
+        if #available(macOS 14.0, *) {
+            LiveMeetingPreviewServer.shared.stop()
+        }
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)
             promptsObserver = nil
@@ -301,6 +307,22 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask = Task.detached(priority: .utility) {
             await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder
+            )
+        }
+    }
+
+    @available(macOS 14.0, *)
+    private func startLiveMeetingPreviewServerIfNeeded() {
+        guard LiveMeetingCodexPreferences.isEnabled() else { return }
+
+        do {
+            _ = try LiveMeetingPreviewServer.shared.start()
+        } catch {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "meeting",
+                event: "live_meeting_preview_server_start_failed",
+                message: error.localizedDescription
             )
         }
     }

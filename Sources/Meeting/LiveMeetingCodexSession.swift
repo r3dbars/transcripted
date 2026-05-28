@@ -72,6 +72,12 @@ final class LiveMeetingCodexSession {
     static let stateFilename = "state.json"
     static let setupFilename = "codex-live-meeting.md"
     static let previewFilename = "preview.html"
+    static let previewServerPort: UInt16 = 47834
+    static let previewServerPath = "/live-preview"
+
+    static var previewServerURL: URL {
+        URL(string: "http://127.0.0.1:\(previewServerPort)\(previewServerPath)")!
+    }
 
     static var defaultWorkspaceRoot: URL {
         FileManager.default.transcriptedAppSupportDir
@@ -361,6 +367,7 @@ final class LiveMeetingCodexSession {
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
         - `codex-live-meeting.md` is the setup prompt for a Codex thread.
         - `preview.html` is a self-refreshing live transcript preview you can open directly.
+        - `\(Self.previewServerURL.absoluteString)` is the Codex in-app browser preview while Transcripted is running.
 
         Important:
         - The live transcript is provisional.
@@ -405,6 +412,7 @@ final class LiveMeetingCodexSession {
         - Live transcript: \(liveTranscriptURL.path)
         - State: \(stateURL.path)
         - Preview: \(previewURL.path)
+        - Browser preview: \(Self.previewServerURL.absoluteString)
 
         How to work:
         1. Read `state.json`.
@@ -412,7 +420,7 @@ final class LiveMeetingCodexSession {
         3. Treat live text as provisional and source-labeled.
         4. Treat `[partial]` lines as live hypotheses that may change.
         5. Once `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
-        6. If I ask for a live view, open `preview.html` from this folder.
+        6. If I ask for a live view in Codex, open \(Self.previewServerURL.absoluteString). If Transcripted is closed, fall back to `preview.html` from this folder.
 
         Do not alter the normal Transcripted meeting output.
         """

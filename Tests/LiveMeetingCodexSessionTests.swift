@@ -36,7 +36,11 @@ func testLiveMeetingCodexSession() {
         let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
         assertTrue(previewText.contains("Status: idle"), "preview should embed the idle transcript")
         assertTrue(previewText.contains("http-equiv=\"refresh\""), "preview should refresh without a local server")
-        assertFalse(previewText.contains("local HTTP server"), "preview should not require a local HTTP server")
+        assertEqual(
+            LiveMeetingCodexSession.previewServerURL.absoluteString,
+            "http://127.0.0.1:47834/live-preview",
+            "Codex browser preview should use the stable local URL"
+        )
     }
 
     runSuite("LiveMeetingCodexSession lifecycle - streams provisional text and links final Markdown") {
