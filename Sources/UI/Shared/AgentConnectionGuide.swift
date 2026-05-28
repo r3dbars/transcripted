@@ -333,6 +333,7 @@ enum AgentConnectionGuide {
         Rules:
         - Read `state.json` and `live_transcript.md` when I ask about the current meeting.
         - Treat live text as provisional and source-labeled.
+        - Treat `[partial]` lines as live ASR hypotheses that may change.
         - If `finalTranscriptPath` exists in `state.json`, read that final Markdown and prefer it for speaker names, diarization, quotes, decisions, and durable notes.
         - Do not change Transcripted's normal meeting output.
         - Keep live answers short and say when the stream is too sparse to answer.

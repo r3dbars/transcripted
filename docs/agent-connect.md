@@ -111,6 +111,7 @@ The folder contains `state.json`, `live_transcript.md`,
 Rules:
 
 - the live sidecar is provisional
+- `[partial]` lines are live streaming ASR hypotheses and may change
 - the normal meeting Markdown still saves after stop
 - once `state.json` has `finalTranscriptPath`, Codex should read that final
   Markdown for participant names, diarization, and durable notes

@@ -24,7 +24,7 @@ In the live workspace:
 
 1. Read `state.json` first.
 2. If `status` is `recording`, read `live_transcript.md` and answer from the live sidecar.
-3. Keep source labels visible in your reasoning: `[Microphone]` and `[System]`.
+3. Keep source labels visible in your reasoning: `[Microphone]` and `[System]`. Lines marked `[partial]` are live hypotheses and may change.
 4. If `finalTranscriptPath` exists, read that Markdown file and prefer it for participant names, diarization, quotes, decisions, and durable notes.
 5. If the live stream is empty or too sparse, say that plainly instead of guessing.
 6. Keep live answers short unless the user asks for depth.

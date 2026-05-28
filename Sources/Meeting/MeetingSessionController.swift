@@ -168,6 +168,7 @@ final class MeetingSessionController: ObservableObject {
     private let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
     private let liveCodexSession = LiveMeetingCodexSession()
+    private let liveMeetingTranscriber = LiveMeetingTranscriber()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
@@ -196,6 +197,7 @@ final class MeetingSessionController: ObservableObject {
     private var latestSystemLevel: Float = 0
     private var liveCodexSessionIsActive = false
     private var liveCodexSessionAwaitingFinalTranscript = false
+    private var liveCodexSessionCanAttachFinalTranscript = false
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -383,8 +385,19 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        let resolvedMeetingTitle = MeetingRecordingTitlePolicy.resolve(
+            explicitTitle: suggestedTitle,
+            calendarTitle: calendarSuggestedTitleProvider?()
+        )
+        activeRecordingTrigger = trigger
+        activeRecordingSuggestedTitle = resolvedMeetingTitle
+        startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
+
         let started = await capture.startRecording()
         guard started else {
+            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
+            activeRecordingTrigger = .unknown
+            activeRecordingSuggestedTitle = nil
             let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
@@ -410,13 +423,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
-        activeRecordingTrigger = trigger
-        activeRecordingSuggestedTitle = MeetingRecordingTitlePolicy.resolve(
-            explicitTitle: suggestedTitle,
-            calendarTitle: calendarSuggestedTitleProvider?()
-        )
         state = .recording
-        startLiveCodexSessionIfNeeded(title: activeRecordingSuggestedTitle)
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
@@ -1420,22 +1427,50 @@ final class MeetingSessionController: ObservableObject {
         guard LiveMeetingCodexPreferences.isEnabled() else {
             liveCodexSessionIsActive = false
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
             return
         }
 
+        let canStartLiveBackend = !hasBackgroundTranscriptionWork
+        let backendStatus = canStartLiveBackend
+            ? "local_streaming_asr_initializing"
+            : "deferred_background_transcription_active"
+
         do {
-            try liveCodexSession.start(title: title)
+            try liveCodexSession.start(
+                title: title,
+                streamingBackendStatus: backendStatus
+            )
             liveCodexSessionIsActive = true
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = canStartLiveBackend
+            if canStartLiveBackend {
+                liveMeetingTranscriber.start(
+                    capture: capture,
+                    codexSession: liveCodexSession
+                )
+            } else {
+                try? liveCodexSession.updateStreamingBackendStatus(
+                    backendStatus,
+                    note: "Live ASR was deferred because another meeting transcript was already processing. The normal final transcript will still save through Transcripted."
+                )
+            }
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_started",
                 message: "Live Codex meeting sidecar started",
-                context: baseDiagnosticsContext()
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "live_backend_status": backendStatus,
+                        "live_backend_enabled": boolString(canStartLiveBackend)
+                    ]
+                )
             )
         } catch {
+            liveMeetingTranscriber.stop(capture: capture)
             liveCodexSessionIsActive = false
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -1452,10 +1487,20 @@ final class MeetingSessionController: ObservableObject {
     ) {
         guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
 
+        liveMeetingTranscriber.stop(capture: capture)
+        let willAwaitFinalTranscript = shouldAwaitFinalTranscript && liveCodexSessionCanAttachFinalTranscript
+
         do {
             try liveCodexSession.finish(status: status)
             liveCodexSessionIsActive = false
-            liveCodexSessionAwaitingFinalTranscript = shouldAwaitFinalTranscript
+            liveCodexSessionAwaitingFinalTranscript = willAwaitFinalTranscript
+            liveCodexSessionCanAttachFinalTranscript = willAwaitFinalTranscript
+            if shouldAwaitFinalTranscript && !willAwaitFinalTranscript {
+                try? liveCodexSession.updateStreamingBackendStatus(
+                    "final_transcript_attach_deferred",
+                    note: "Final transcript auto-linking was skipped because another transcript was already processing when this live session started."
+                )
+            }
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_finished",
@@ -1463,13 +1508,14 @@ final class MeetingSessionController: ObservableObject {
                 context: baseDiagnosticsContext(
                     extra: [
                         "live_codex_status": status.rawValue,
-                        "awaiting_final_transcript": boolString(shouldAwaitFinalTranscript)
+                        "awaiting_final_transcript": boolString(willAwaitFinalTranscript)
                     ]
                 )
             )
         } catch {
             liveCodexSessionIsActive = false
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -1486,6 +1532,7 @@ final class MeetingSessionController: ObservableObject {
         do {
             try liveCodexSession.attachFinalTranscript(url: url, title: title)
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_final_transcript_attached",
@@ -1494,6 +1541,7 @@ final class MeetingSessionController: ObservableObject {
             )
         } catch {
             liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",

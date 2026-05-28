@@ -49,7 +49,8 @@ func testLiveMeetingCodexSession() {
                 source: .microphone,
                 text: "We should keep the final transcript untouched.",
                 timestampSeconds: 65,
-                createdAt: Date(timeIntervalSince1970: 1_765_994_465)
+                createdAt: Date(timeIntervalSince1970: 1_765_994_465),
+                isFinal: false
             )
         )
         try? session.append(
@@ -67,7 +68,7 @@ func testLiveMeetingCodexSession() {
 
         let liveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
         assertTrue(liveText.contains("Title: Product Review"), "live transcript should include the title")
-        assertTrue(liveText.contains("**01:05** [Microphone]"), "mic lines should keep source label and timestamp")
+        assertTrue(liveText.contains("**01:05** [Microphone] [partial]"), "partial mic lines should keep source label and timestamp")
         assertTrue(liveText.contains("**01:10** [System]"), "system lines should keep source label and timestamp")
         assertTrue(liveText.contains("Recording stopped"), "stop should leave a handoff note")
 

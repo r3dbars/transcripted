@@ -65,7 +65,9 @@ The opt-in Codex live-meeting sidecar writes provisional files under:
 - live state: `~/Library/Application Support/Transcripted/CodexLiveMeeting/state.json`
 
 These files do not replace the normal saved meeting Markdown. Once a meeting is
-saved, `state.json` can point Codex at the final transcript path.
+saved, `state.json` can point Codex at the final transcript path. Lines marked
+`[partial]` in the live transcript are streaming ASR hypotheses, not durable
+diarized transcript output.
 
 Temporary audio scratch paths live under:
 
