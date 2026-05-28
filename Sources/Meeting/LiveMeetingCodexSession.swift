@@ -133,7 +133,6 @@ final class LiveMeetingCodexSession {
         try writeTextIfChanged(readmeText(), to: workspaceRoot.appendingPathComponent("README.md", isDirectory: false))
         try writeTextIfChanged(agentsText(), to: workspaceRoot.appendingPathComponent("AGENTS.md", isDirectory: false))
         try writeTextIfChanged(setupText(), to: setupURL)
-        try writeTextIfChanged(previewHTML(), to: previewURL)
 
         if !fileManager.fileExists(atPath: stateURL.path) {
             state.updatedAt = createdAt
@@ -143,6 +142,8 @@ final class LiveMeetingCodexSession {
         if !fileManager.fileExists(atPath: liveTranscriptURL.path) {
             try writeTextIfChanged(idleTranscriptText(), to: liveTranscriptURL)
         }
+
+        try writePreview()
     }
 
     func start(
@@ -167,6 +168,7 @@ final class LiveMeetingCodexSession {
 
             try writeTextIfChanged(liveTranscriptHeader(title: title, startedAt: startedAt), to: liveTranscriptURL)
             try writeState()
+            try writePreview()
         }
     }
 
@@ -183,6 +185,7 @@ final class LiveMeetingCodexSession {
             try appendText(line, to: liveTranscriptURL)
             state.updatedAt = entry.createdAt
             try writeState()
+            try writePreview()
         }
     }
 
@@ -208,6 +211,7 @@ final class LiveMeetingCodexSession {
                 break
             }
             try writeState()
+            try writePreview()
         }
     }
 
@@ -236,6 +240,7 @@ final class LiveMeetingCodexSession {
             """
             try appendText(text, to: liveTranscriptURL)
             try writeState()
+            try writePreview()
         }
     }
 
@@ -249,6 +254,7 @@ final class LiveMeetingCodexSession {
                 try appendText("\n\(note)\n", to: liveTranscriptURL)
             }
             try writeState()
+            try writePreview()
         }
     }
 
@@ -289,6 +295,12 @@ final class LiveMeetingCodexSession {
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
         fileManager.restrictFileToOwnerOnly(at: url)
+    }
+
+    private func writePreview() throws {
+        let transcript = (try? String(contentsOf: liveTranscriptURL, encoding: .utf8))
+            ?? idleTranscriptText()
+        try writeTextIfChanged(previewHTML(transcript: transcript), to: previewURL)
     }
 
     private static func timestamp(_ seconds: TimeInterval) -> String {
@@ -348,7 +360,7 @@ final class LiveMeetingCodexSession {
         - `live_transcript.md` is the provisional live transcript stream.
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
         - `codex-live-meeting.md` is the setup prompt for a Codex thread.
-        - `preview.html` is a small polling preview if you open this folder with a local web server.
+        - `preview.html` is a self-refreshing live transcript preview you can open directly.
 
         Important:
         - The live transcript is provisional.
@@ -400,60 +412,88 @@ final class LiveMeetingCodexSession {
         3. Treat live text as provisional and source-labeled.
         4. Treat `[partial]` lines as live hypotheses that may change.
         5. Once `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
-        6. If I ask for a live view, open `preview.html` from this folder through a local HTTP server.
+        6. If I ask for a live view, open `preview.html` from this folder.
 
         Do not alter the normal Transcripted meeting output.
         """
     }
 
-    private func previewHTML() -> String {
-        """
+    private func previewHTML(transcript: String) -> String {
+        let status = "\(state.status.rawValue) - \(state.streamingBackendStatus)"
+        let escapedStatus = Self.htmlEscaped(status)
+        let escapedNote = Self.htmlEscaped(state.note)
+        let escapedUpdatedAt = Self.htmlEscaped(Self.isoString(state.updatedAt))
+        let escapedTranscript = Self.htmlEscaped(transcript)
+        return """
         <!doctype html>
         <html lang="en">
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="refresh" content="1">
           <title>Transcripted Live Meeting</title>
           <style>
-            :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-            body { margin: 0; padding: 24px; background: Canvas; color: CanvasText; }
-            main { max-width: 880px; margin: 0 auto; }
-            header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-            h1 { font-size: 20px; margin: 0; }
-            #status { font-size: 13px; opacity: 0.72; }
-            pre { white-space: pre-wrap; word-wrap: break-word; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 8px; padding: 16px; min-height: 68vh; }
+            :root {
+              color-scheme: light dark;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+              background: Canvas;
+              color: CanvasText;
+            }
+            body { margin: 0; padding: 18px; }
+            main { max-width: 980px; margin: 0 auto; }
+            header {
+              display: grid;
+              grid-template-columns: 1fr auto;
+              gap: 12px;
+              align-items: start;
+              border-bottom: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+              padding-bottom: 12px;
+              margin-bottom: 14px;
+            }
+            h1 { font-size: 18px; margin: 0 0 4px; }
+            .meta { font-size: 12px; color: color-mix(in srgb, CanvasText 68%, transparent); line-height: 1.45; }
+            .status {
+              font-size: 12px;
+              padding: 5px 8px;
+              border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+              border-radius: 8px;
+              white-space: nowrap;
+            }
+            pre {
+              white-space: pre-wrap;
+              word-wrap: break-word;
+              font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+              margin: 0;
+              min-height: 72vh;
+            }
           </style>
         </head>
         <body>
           <main>
             <header>
-              <h1>Transcripted Live Meeting</h1>
-              <div id="status">Loading...</div>
+              <div>
+                <h1>Transcripted Live Meeting</h1>
+                <div class="meta">Updated \(escapedUpdatedAt)<br>\(escapedNote)</div>
+              </div>
+              <div class="status">\(escapedStatus)</div>
             </header>
-            <pre id="transcript"></pre>
+            <pre>\(escapedTranscript)</pre>
           </main>
           <script>
-            async function refresh() {
-              try {
-                const [stateResponse, transcriptResponse] = await Promise.all([
-                  fetch("state.json", { cache: "no-store" }),
-                  fetch("live_transcript.md", { cache: "no-store" })
-                ]);
-                const state = await stateResponse.json();
-                const transcript = await transcriptResponse.text();
-                document.getElementById("status").textContent = `${state.status} - ${state.streamingBackendStatus}`;
-                document.getElementById("transcript").textContent = transcript;
-                window.scrollTo(0, document.body.scrollHeight);
-              } catch (error) {
-                document.getElementById("status").textContent = "Open through a local HTTP server to enable polling";
-              }
-            }
-            refresh();
-            setInterval(refresh, 1000);
+            window.addEventListener("load", () => window.scrollTo(0, document.body.scrollHeight));
           </script>
         </body>
         </html>
         """
+    }
+
+    private static func htmlEscaped(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
 
     private static func isoString(_ date: Date) -> String {

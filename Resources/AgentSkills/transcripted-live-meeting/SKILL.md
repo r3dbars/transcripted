@@ -55,14 +55,6 @@ Only include sections that help.
 
 ## Preview
 
-If the user asks for a live transcript window, open `preview.html` from the workspace through a local HTTP server. A simple local command from the workspace is:
-
-```bash
-python3 -m http.server 47834 --bind 127.0.0.1
-```
-
-Then open:
-
-```text
-http://127.0.0.1:47834/preview.html
-```
+If the user asks for a live transcript window, open `preview.html` from the
+workspace. Transcripted rewrites it with the latest live transcript, so it can
+refresh directly without a local HTTP server.

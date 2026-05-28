@@ -308,6 +308,7 @@ func testAgentConnectionGuide() {
         let prompt = AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL)
         assertTrue(prompt.contains("Transcripted Live Meeting Codex Setup"), "prompt should name the live setup")
         assertTrue(prompt.contains("live_transcript.md"), "prompt should point Codex at the live transcript")
+        assertTrue(prompt.contains("preview.html"), "prompt should point Codex at the live preview")
         assertTrue(prompt.contains(AgentConnectionGuide.liveMeetingCodexSkill.id), "prompt should name the live skill")
         assertTrue(prompt.contains("Do not change Transcripted's normal meeting output"), "prompt should preserve normal output")
 

@@ -63,11 +63,13 @@ The opt-in Codex live-meeting sidecar writes provisional files under:
 - live Codex workspace: `~/Library/Application Support/Transcripted/CodexLiveMeeting/`
 - live transcript: `~/Library/Application Support/Transcripted/CodexLiveMeeting/live_transcript.md`
 - live state: `~/Library/Application Support/Transcripted/CodexLiveMeeting/state.json`
+- live preview: `~/Library/Application Support/Transcripted/CodexLiveMeeting/preview.html`
 
 These files do not replace the normal saved meeting Markdown. Once a meeting is
 saved, `state.json` can point Codex at the final transcript path. Lines marked
 `[partial]` in the live transcript are streaming ASR hypotheses, not durable
-diarized transcript output.
+diarized transcript output. `preview.html` is rewritten with the latest
+transcript so it can be opened directly without running a local web server.
 
 Temporary audio scratch paths live under:
 

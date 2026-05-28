@@ -98,6 +98,7 @@ This is an opt-in sidecar for Codex while a meeting is still recording.
 2. Go to `Agent`.
 3. Turn on `Live meeting in Codex`.
 4. Click `Open Live Codex Room`.
+5. Click `Open Live Preview` if you want a self-refreshing transcript page.
 
 Transcripted creates:
 
@@ -106,7 +107,7 @@ Transcripted creates:
 ```
 
 The folder contains `state.json`, `live_transcript.md`,
-`codex-live-meeting.md`, and `preview.html`.
+`codex-live-meeting.md`, and a self-refreshing `preview.html`.
 
 Rules:
 

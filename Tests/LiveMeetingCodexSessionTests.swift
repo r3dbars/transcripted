@@ -32,6 +32,11 @@ func testLiveMeetingCodexSession() {
             state?.liveTranscriptPath.hasSuffix(LiveMeetingCodexSession.liveTranscriptFilename) == true,
             "state should point at live transcript file"
         )
+
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("Status: idle"), "preview should embed the idle transcript")
+        assertTrue(previewText.contains("http-equiv=\"refresh\""), "preview should refresh without a local server")
+        assertFalse(previewText.contains("local HTTP server"), "preview should not require a local HTTP server")
     }
 
     runSuite("LiveMeetingCodexSession lifecycle - streams provisional text and links final Markdown") {
@@ -72,6 +77,13 @@ func testLiveMeetingCodexSession() {
         assertTrue(liveText.contains("**01:10** [System]"), "system lines should keep source label and timestamp")
         assertTrue(liveText.contains("Recording stopped"), "stop should leave a handoff note")
 
+        var previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(
+            previewText.contains("We should keep the final transcript untouched."),
+            "preview should embed current live transcript text"
+        )
+        assertTrue(previewText.contains("stopped - local_streaming_asr_stopped"), "preview should show current session state")
+
         var state = decodeLiveMeetingCodexState(at: session.stateURL)
         assertEqual(state?.status, .stopped, "state should record stopped status before final Markdown exists")
         assertNil(state?.finalTranscriptPath, "state should not invent a final transcript path")
@@ -92,6 +104,10 @@ func testLiveMeetingCodexSession() {
             updatedLiveText.contains("Prefer the final file for participant names"),
             "live transcript should tell Codex to prefer the final Markdown after save"
         )
+
+        previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("transcript_saved"), "preview should update after the final transcript is attached")
+        assertTrue(previewText.contains("Product Review.md"), "preview should include the final transcript handoff")
     }
 }
 

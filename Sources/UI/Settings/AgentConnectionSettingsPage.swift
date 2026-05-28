@@ -16,6 +16,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
     @State private var openedLiveMeetingCodexSetup = false
+    @State private var openedLiveMeetingPreview = false
     @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
@@ -183,15 +184,25 @@ struct AgentConnectionSettingsPage: View {
                 }
                 .toggleStyle(.switch)
 
-                SettingsInlineActionButton(
-                    title: openedLiveMeetingCodexSetup ? "Opened Live Codex" : "Open Live Codex Room",
-                    symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
-                    tone: .accent
-                ) {
-                    setupLiveMeetingCodex()
+                HStack(spacing: 10) {
+                    SettingsInlineActionButton(
+                        title: openedLiveMeetingCodexSetup ? "Opened Live Codex" : "Open Live Codex Room",
+                        symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
+                        tone: .accent
+                    ) {
+                        setupLiveMeetingCodex()
+                    }
+
+                    SettingsInlineActionButton(
+                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Live Preview",
+                        symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
+                        tone: .accent
+                    ) {
+                        openLiveMeetingPreview()
+                    }
                 }
 
-                Text("Codex reads a live sidecar while the meeting records. The final meeting Markdown still saves normally after stop.")
+                Text("Codex reads the live sidecar while the meeting records. Live Preview opens the same transcript as an auto-refreshing local page.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -366,6 +377,33 @@ struct AgentConnectionSettingsPage: View {
             }
         } catch {
             liveMeetingCodexSetupError = "Could not set up Live Codex: \(error.localizedDescription)"
+        }
+    }
+
+    private func openLiveMeetingPreview() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            let previewURL = workspaceURL.appendingPathComponent(
+                LiveMeetingCodexSession.previewFilename,
+                isDirectory: false
+            )
+
+            if NSWorkspace.shared.open(previewURL) {
+                openedLiveMeetingPreview = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    openedLiveMeetingPreview = false
+                }
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([previewURL])
+                liveMeetingCodexSetupError = "The live preview file is ready, but could not be opened automatically."
+            }
+        } catch {
+            liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
         }
     }
 
