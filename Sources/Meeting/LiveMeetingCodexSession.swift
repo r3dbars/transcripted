@@ -366,7 +366,7 @@ final class LiveMeetingCodexSession {
         - `live_transcript.md` is the provisional live transcript stream.
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
         - `codex-live-meeting.md` is the setup prompt for a Codex thread.
-        - `preview.html` is a self-refreshing live transcript preview you can open directly.
+        - `preview.html` is a live transcript preview snapshot. The local browser URL updates without full-page refreshes.
         - `\(Self.previewServerURL.absoluteString)` is the Codex in-app browser preview while Transcripted is running.
 
         Important:
@@ -438,7 +438,6 @@ final class LiveMeetingCodexSession {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <meta http-equiv="refresh" content="1">
           <title>Transcripted Live Meeting</title>
           <style>
             :root {
@@ -481,14 +480,68 @@ final class LiveMeetingCodexSession {
             <header>
               <div>
                 <h1>Transcripted Live Meeting</h1>
-                <div class="meta">Updated \(escapedUpdatedAt)<br>\(escapedNote)</div>
+                <div class="meta">Updated <span id="updated-at">\(escapedUpdatedAt)</span><br><span id="note">\(escapedNote)</span></div>
               </div>
-              <div class="status">\(escapedStatus)</div>
+              <div class="status" id="status">\(escapedStatus)</div>
             </header>
-            <pre>\(escapedTranscript)</pre>
+            <pre id="transcript">\(escapedTranscript)</pre>
           </main>
           <script>
-            window.addEventListener("load", () => window.scrollTo(0, document.body.scrollHeight));
+            const stateURL = window.location.protocol === "file:" ? "state.json" : "/state.json";
+            const transcriptURL = window.location.protocol === "file:" ? "live_transcript.md" : "/live_transcript.md";
+            const statusElement = document.getElementById("status");
+            const updatedAtElement = document.getElementById("updated-at");
+            const noteElement = document.getElementById("note");
+            const transcriptElement = document.getElementById("transcript");
+            let lastTranscript = transcriptElement.textContent;
+
+            function isNearBottom() {
+              return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+            }
+
+            async function refreshPreview() {
+              const shouldFollow = isNearBottom();
+              try {
+                const [stateResponse, transcriptResponse] = await Promise.all([
+                  fetch(`${stateURL}?t=${Date.now()}`, { cache: "no-store" }),
+                  fetch(`${transcriptURL}?t=${Date.now()}`, { cache: "no-store" })
+                ]);
+
+                if (stateResponse.ok) {
+                  const state = await stateResponse.json();
+                  statusElement.textContent = `${state.status} - ${state.streamingBackendStatus}`;
+                  updatedAtElement.textContent = state.updatedAt || "";
+                  noteElement.textContent = state.note || "";
+                }
+
+                if (transcriptResponse.ok) {
+                  const transcript = await transcriptResponse.text();
+                  if (transcript !== lastTranscript) {
+                    transcriptElement.textContent = transcript;
+                    lastTranscript = transcript;
+                    if (shouldFollow) {
+                      window.scrollTo(0, document.body.scrollHeight);
+                    }
+                  }
+                }
+              } catch (_) {
+                // Keep the current snapshot if Transcripted is restarting.
+              }
+            }
+
+            window.addEventListener("load", () => {
+              window.scrollTo(0, document.body.scrollHeight);
+              refreshPreview();
+              if (window.location.protocol !== "file:") {
+                window.setInterval(refreshPreview, 1000);
+              }
+            });
+
+            document.addEventListener("visibilitychange", () => {
+              if (!document.hidden) {
+                refreshPreview();
+              }
+            });
           </script>
         </body>
         </html>

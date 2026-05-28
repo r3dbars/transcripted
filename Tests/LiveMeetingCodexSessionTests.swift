@@ -35,7 +35,9 @@ func testLiveMeetingCodexSession() {
 
         let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
         assertTrue(previewText.contains("Status: idle"), "preview should embed the idle transcript")
-        assertTrue(previewText.contains("http-equiv=\"refresh\""), "preview should refresh without a local server")
+        assertFalse(previewText.contains("http-equiv=\"refresh\""), "preview should not full-page refresh")
+        assertTrue(previewText.contains("setInterval(refreshPreview, 1000)"), "preview should poll without strobing")
+        assertTrue(previewText.contains("/live_transcript.md"), "preview should hot-load the live transcript route")
         assertEqual(
             LiveMeetingCodexSession.previewServerURL.absoluteString,
             "http://127.0.0.1:47834/live-preview",

@@ -202,7 +202,7 @@ struct AgentConnectionSettingsPage: View {
                     }
                 }
 
-                Text("Codex reads the live sidecar while the meeting records. Live Preview opens the same transcript as an auto-refreshing local page.")
+                Text("Codex reads the live sidecar while the meeting records. Live Preview opens the same transcript as a local page that updates in place.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

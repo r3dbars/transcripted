@@ -70,8 +70,9 @@ These files do not replace the normal saved meeting Markdown. Once a meeting is
 saved, `state.json` can point Codex at the final transcript path. Lines marked
 `[partial]` in the live transcript are streaming ASR hypotheses, not durable
 diarized transcript output. `preview.html` is rewritten with the latest
-transcript so it can be opened directly in a normal browser. Transcripted also
-serves the same preview on loopback for Codex's in-app browser.
+transcript as a direct-file snapshot. Transcripted also serves the same preview
+on loopback for Codex's in-app browser, where it updates in place without
+full-page refreshes.
 
 Temporary audio scratch paths live under:
 
