@@ -629,7 +629,17 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             signal = "Reviewer says the current PR/task is ready for Justin's approval."
             action = "Review PR recommendation"
     elif automation.id == "transcripted-nightly-content-agent":
-        if "content score" in lower or "best content bet" in lower:
+        if contains_any(
+            lower,
+            (
+                "content score",
+                "best content bet",
+                "best candidate",
+                "approve, lightly edit, or skip",
+                "approve/edit/skip",
+                "claim guardrails",
+            ),
+        ):
             status = "needs_review"
             signal = "Content candidate is ready for Justin to approve, edit, or skip."
             action = "Approve/edit/skip content"
