@@ -41,6 +41,8 @@ func testLiveMeetingCodexSession() {
         assertTrue(previewText.contains("renderTranscript(lastTranscript)"), "preview should render a formatted transcript stream")
         assertTrue(previewText.contains("data-filter=\"microphone\""), "preview should include a microphone filter")
         assertTrue(previewText.contains("data-filter=\"system\""), "preview should include a system audio filter")
+        assertTrue(previewText.contains("data-handoff-action=\"brief\""), "preview should include a final transcript handoff brief action")
+        assertTrue(previewText.contains("navigator.clipboard.writeText"), "preview handoff actions should copy a Codex prompt")
         assertEqual(
             LiveMeetingCodexSession.previewServerURL.absoluteString,
             "http://127.0.0.1:47834/live-preview",
@@ -118,6 +120,10 @@ func testLiveMeetingCodexSession() {
         previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
         assertTrue(previewText.contains("transcript_saved"), "preview should update after the final transcript is attached")
         assertTrue(previewText.contains("Product Review.md"), "preview should include the final transcript handoff")
+        assertTrue(
+            previewText.contains("Recording done. Pull the final transcript into Codex?"),
+            "preview should ask for a final-transcript handoff after recording saves"
+        )
     }
 }
 

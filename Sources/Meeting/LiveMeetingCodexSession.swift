@@ -564,6 +564,50 @@ final class LiveMeetingCodexSession {
               background: rgba(255, 255, 255, 0.08);
               color: var(--text);
             }
+            .handoff {
+              display: grid;
+              grid-template-columns: minmax(0, 1fr) auto;
+              gap: 10px;
+              align-items: center;
+              padding: 8px 2px;
+              border-bottom: 1px solid var(--line);
+            }
+            .handoff[hidden] {
+              display: none;
+            }
+            .handoff-title {
+              margin: 0;
+              color: var(--text);
+              font-size: 13px;
+              font-weight: 720;
+              line-height: 1.35;
+            }
+            .handoff-detail {
+              margin: 2px 0 0;
+              color: var(--muted);
+              font-size: 11px;
+              line-height: 1.35;
+            }
+            .handoff-actions {
+              display: flex;
+              flex-wrap: wrap;
+              justify-content: flex-end;
+              gap: 6px;
+            }
+            .handoff-button {
+              border: 1px solid var(--line);
+              border-radius: 999px;
+              padding: 4px 8px;
+              background: rgba(255, 255, 255, 0.06);
+              color: var(--text);
+              font: inherit;
+              font-size: 11px;
+              cursor: pointer;
+            }
+            .handoff-button:hover {
+              border-color: rgba(255, 255, 255, 0.3);
+              background: rgba(255, 255, 255, 0.1);
+            }
             .stream {
               display: grid;
               gap: 0;
@@ -668,6 +712,12 @@ final class LiveMeetingCodexSession {
                 grid-template-columns: 50px minmax(0, 1fr);
                 gap: 6px 8px;
               }
+              .handoff {
+                grid-template-columns: 1fr;
+              }
+              .handoff-actions {
+                justify-content: flex-start;
+              }
             }
           </style>
         </head>
@@ -701,6 +751,18 @@ final class LiveMeetingCodexSession {
                 <button class="filter-button" type="button" data-filter="system" aria-pressed="false">System</button>
               </div>
             </header>
+            <section class="handoff" id="handoff" hidden>
+              <div>
+                <p class="handoff-title">Recording done. Pull the final transcript into Codex?</p>
+                <p class="handoff-detail" id="handoff-detail">Choose a quick ask, then paste it into the Codex chat.</p>
+              </div>
+              <div class="handoff-actions" aria-label="Final transcript actions">
+                <button class="handoff-button" type="button" data-handoff-action="brief">Brief</button>
+                <button class="handoff-button" type="button" data-handoff-action="actions">Actions</button>
+                <button class="handoff-button" type="button" data-handoff-action="decisions">Decisions</button>
+                <button class="handoff-button" type="button" data-handoff-action="next">Next steps</button>
+              </div>
+            </section>
             <section class="stream" id="transcript" aria-live="polite"></section>
             <textarea class="hidden" id="initial-transcript" readonly>\(escapedTranscript)</textarea>
           </main>
@@ -714,9 +776,13 @@ final class LiveMeetingCodexSession {
             const sourceSummaryElement = document.getElementById("source-summary");
             const transcriptElement = document.getElementById("transcript");
             const initialTranscriptElement = document.getElementById("initial-transcript");
+            const handoffElement = document.getElementById("handoff");
+            const handoffDetailElement = document.getElementById("handoff-detail");
             const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
+            const handoffButtons = Array.from(document.querySelectorAll("[data-handoff-action]"));
             let lastTranscript = initialTranscriptElement.value;
             let activeFilter = "all";
+            let currentState = {};
 
             function isNearBottom() {
               return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
@@ -733,6 +799,46 @@ final class LiveMeetingCodexSession {
 
             function displaySource(source) {
               return source === "system" ? "System" : "Mic";
+            }
+
+            function hasFinalTranscript(state) {
+              return Boolean(state && state.finalTranscriptPath);
+            }
+
+            function handoffPrompt(kind) {
+              const path = currentState.finalTranscriptPath || "the finalTranscriptPath in state.json";
+              const title = currentState.title ? ` for "${currentState.title}"` : "";
+              const base = `The recording${title} is done. Please read the final Transcripted Markdown at: ${path}. Use the final file as canonical, not the provisional live sidecar.`;
+              switch (kind) {
+              case "actions":
+                return `${base}\\n\\nGive me only the action items. Include owner, due date, and confidence when available. If owner or date is unclear, say unclear.`;
+              case "decisions":
+                return `${base}\\n\\nGive me the decisions made, open decisions, and any risks or unresolved questions. Keep it concise.`;
+              case "next":
+                return `${base}\\n\\nGive me the next steps I should take, ordered by urgency. Include suggested follow-up messages if useful.`;
+              default:
+                return `${base}\\n\\nGive me a concise meeting brief with summary, key decisions, action items, and next steps.`;
+              }
+            }
+
+            async function copyHandoffPrompt(kind) {
+              const prompt = handoffPrompt(kind);
+              try {
+                await navigator.clipboard.writeText(prompt);
+                handoffDetailElement.textContent = "Copied. Paste it into the Codex chat.";
+              } catch (_) {
+                handoffDetailElement.textContent = prompt;
+              }
+            }
+
+            function updateHandoff(state) {
+              currentState = state || {};
+              if (hasFinalTranscript(currentState)) {
+                handoffElement.hidden = false;
+                handoffDetailElement.textContent = "Choose a quick ask, then paste it into the Codex chat.";
+              } else {
+                handoffElement.hidden = true;
+              }
             }
 
             function parseTranscript(markdown) {
@@ -826,6 +932,12 @@ final class LiveMeetingCodexSession {
               });
             });
 
+            handoffButtons.forEach((button) => {
+              button.addEventListener("click", () => {
+                copyHandoffPrompt(button.dataset.handoffAction || "brief");
+              });
+            });
+
             async function refreshPreview() {
               const shouldFollow = isNearBottom();
               try {
@@ -841,6 +953,7 @@ final class LiveMeetingCodexSession {
                   titleElement.textContent = state.title || "Live Meeting";
                   updatedAtElement.textContent = state.updatedAt || "";
                   noteElement.textContent = state.note || "";
+                  updateHandoff(state);
                 }
 
                 if (transcriptResponse.ok) {
