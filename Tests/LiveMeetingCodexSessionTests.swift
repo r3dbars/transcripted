@@ -38,6 +38,9 @@ func testLiveMeetingCodexSession() {
         assertFalse(previewText.contains("http-equiv=\"refresh\""), "preview should not full-page refresh")
         assertTrue(previewText.contains("setInterval(refreshPreview, 1000)"), "preview should poll without strobing")
         assertTrue(previewText.contains("/live_transcript.md"), "preview should hot-load the live transcript route")
+        assertTrue(previewText.contains("renderTranscript(lastTranscript)"), "preview should render a formatted transcript stream")
+        assertTrue(previewText.contains("data-filter=\"microphone\""), "preview should include a microphone filter")
+        assertTrue(previewText.contains("data-filter=\"system\""), "preview should include a system audio filter")
         assertEqual(
             LiveMeetingCodexSession.previewServerURL.absoluteString,
             "http://127.0.0.1:47834/live-preview",
@@ -88,6 +91,7 @@ func testLiveMeetingCodexSession() {
             previewText.contains("We should keep the final transcript untouched."),
             "preview should embed current live transcript text"
         )
+        assertTrue(previewText.contains("class=\"stream\""), "preview should use the formatted stream container")
         assertTrue(previewText.contains("stopped - local_streaming_asr_stopped"), "preview should show current session state")
 
         var state = decodeLiveMeetingCodexState(at: session.stateURL)
