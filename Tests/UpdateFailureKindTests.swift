@@ -1,6 +1,16 @@
 import Foundation
 
 func testUpdateFailureKind() {
+    runSuite("UpdateFailureKind recognizes Sparkle no-update callbacks") {
+        let noUpdate = NSError(domain: "SUSparkleErrorDomain", code: 1001)
+        let appcastParse = NSError(domain: "SUSparkleErrorDomain", code: 1000)
+        let unrelated = NSError(domain: NSCocoaErrorDomain, code: 1001)
+
+        assertEqual(UpdateFailureKind.isNoUpdate(noUpdate), true, "Sparkle no-update code should not be treated as an update failure")
+        assertEqual(UpdateFailureKind.isNoUpdate(appcastParse), false, "other Sparkle appcast errors should stay failure candidates")
+        assertEqual(UpdateFailureKind.isNoUpdate(unrelated), false, "code 1001 outside Sparkle should not be reclassified")
+    }
+
     runSuite("UpdateFailureKind preserves explicit fallback when no error exists") {
         assertEqual(
             UpdateFailureKind.classify(nil, fallback: .sparkleBusy),

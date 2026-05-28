@@ -11,6 +11,14 @@ enum UpdateFailureKind: String {
     case sparkleBusy = "sparkle_busy"
     case unknown = "unknown"
 
+    static func isNoUpdate(_ error: Error?) -> Bool {
+        guard let error else { return false }
+
+        let nsError = error as NSError
+        return nsError.domain.lowercased().contains("sparkle")
+            && nsError.code == 1001
+    }
+
     static func diagnosticCode(_ error: Error?) -> String? {
         guard let error else { return nil }
 
