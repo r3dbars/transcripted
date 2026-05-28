@@ -429,6 +429,7 @@ final class LiveMeetingCodexSession {
     private func previewHTML(transcript: String) -> String {
         let status = "\(state.status.rawValue) - \(state.streamingBackendStatus)"
         let escapedStatus = Self.htmlEscaped(status)
+        let escapedDisplayStatus = Self.htmlEscaped(state.status.rawValue)
         let escapedNote = Self.htmlEscaped(state.note)
         let escapedUpdatedAt = Self.htmlEscaped(Self.isoString(state.updatedAt))
         let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
@@ -454,16 +455,14 @@ final class LiveMeetingCodexSession {
               --partial: #ffd166;
               --ready: #75e39c;
               font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-              background:
-                radial-gradient(circle at top left, rgba(101, 214, 173, 0.12), transparent 34rem),
-                linear-gradient(180deg, #11141a 0%, #0d0f13 100%);
+              background: #0f1115;
               color: var(--text);
             }
             * { box-sizing: border-box; }
             body {
               min-height: 100vh;
               margin: 0;
-              padding: 14px;
+              padding: 10px 12px 18px;
             }
             main {
               max-width: 980px;
@@ -475,37 +474,35 @@ final class LiveMeetingCodexSession {
               z-index: 2;
               display: grid;
               grid-template-columns: 1fr;
-              gap: 12px;
-              padding: 14px;
-              margin-bottom: 12px;
-              border: 1px solid var(--line);
-              border-radius: 10px;
-              background: color-mix(in srgb, var(--panel) 92%, transparent);
+              gap: 8px;
+              padding: 8px 2px 10px;
+              margin-bottom: 4px;
+              border-bottom: 1px solid var(--line);
+              background: color-mix(in srgb, var(--bg) 88%, transparent);
               backdrop-filter: blur(18px);
-              box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
             }
             .header-main {
               display: grid;
               grid-template-columns: 1fr auto;
-              gap: 12px;
+              gap: 10px;
               align-items: start;
             }
             h1 {
               margin: 0;
-              font-size: 18px;
+              font-size: 15px;
               font-weight: 760;
               letter-spacing: 0;
             }
             .subtitle {
-              margin-top: 4px;
+              margin-top: 2px;
               color: var(--muted);
-              font-size: 12px;
+              font-size: 11px;
               line-height: 1.35;
             }
             .status {
               justify-self: end;
-              font-size: 12px;
-              padding: 7px 10px;
+              font-size: 11px;
+              padding: 4px 8px;
               border: 1px solid rgba(117, 227, 156, 0.36);
               border-radius: 999px;
               background: rgba(117, 227, 156, 0.1);
@@ -513,22 +510,19 @@ final class LiveMeetingCodexSession {
               white-space: nowrap;
             }
             .meta-row {
-              display: grid;
-              grid-template-columns: repeat(3, minmax(0, 1fr));
-              gap: 8px;
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px 14px;
             }
             .meta-card {
               min-width: 0;
-              padding: 9px 10px;
-              border: 1px solid var(--line);
-              border-radius: 8px;
-              background: rgba(255, 255, 255, 0.035);
+              padding: 0;
             }
             .meta-label {
               display: block;
-              margin-bottom: 3px;
+              margin-bottom: 1px;
               color: var(--muted);
-              font-size: 10px;
+              font-size: 9px;
               font-weight: 700;
               letter-spacing: 0;
               text-transform: uppercase;
@@ -536,62 +530,62 @@ final class LiveMeetingCodexSession {
             .meta-value {
               overflow: hidden;
               color: var(--text);
-              font-size: 12px;
+              font-size: 11px;
               line-height: 1.35;
               text-overflow: ellipsis;
               white-space: nowrap;
             }
             .meta-note {
               display: block;
-              max-height: 4.1em;
-              overflow-y: auto;
+              max-width: min(100%, 640px);
+              overflow: hidden;
               overflow-wrap: anywhere;
-              white-space: normal;
+              text-overflow: ellipsis;
+              white-space: nowrap;
             }
             .toolbar {
               display: flex;
               flex-wrap: wrap;
-              gap: 8px;
+              gap: 6px;
               align-items: center;
             }
             .filter-button {
               border: 1px solid var(--line);
               border-radius: 999px;
-              padding: 6px 10px;
-              background: rgba(255, 255, 255, 0.04);
+              padding: 4px 8px;
+              background: transparent;
               color: var(--muted);
               font: inherit;
-              font-size: 12px;
+              font-size: 11px;
               cursor: pointer;
             }
             .filter-button[aria-pressed="true"] {
               border-color: rgba(255, 255, 255, 0.28);
-              background: rgba(255, 255, 255, 0.12);
+              background: rgba(255, 255, 255, 0.08);
               color: var(--text);
             }
             .stream {
               display: grid;
-              gap: 10px;
-              min-height: 70vh;
-              padding-bottom: 22px;
+              gap: 0;
+              align-content: start;
+              min-height: 0;
+              padding-bottom: 18px;
             }
             .utterance,
             .notice,
             .empty-state {
-              border: 1px solid var(--line);
-              border-radius: 10px;
-              background: color-mix(in srgb, var(--panel) 86%, transparent);
-              box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+              border-bottom: 1px solid var(--line);
             }
             .utterance {
               display: grid;
-              grid-template-columns: 78px minmax(0, 1fr);
-              gap: 12px;
-              padding: 12px;
+              grid-template-columns: 58px minmax(0, 1fr);
+              gap: 8px;
+              padding: 8px 2px;
+              align-items: start;
             }
             .time {
               color: var(--muted);
-              font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+              font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
             }
             .line-body {
               min-width: 0;
@@ -601,13 +595,12 @@ final class LiveMeetingCodexSession {
               flex-wrap: wrap;
               gap: 6px;
               align-items: center;
-              margin-bottom: 5px;
             }
             .source,
             .partial {
               border-radius: 999px;
-              padding: 3px 7px;
-              font-size: 11px;
+              padding: 2px 6px;
+              font-size: 10px;
               font-weight: 760;
               letter-spacing: 0;
             }
@@ -626,21 +619,21 @@ final class LiveMeetingCodexSession {
             .text {
               margin: 0;
               color: var(--text);
-              font-size: 14px;
-              line-height: 1.5;
+              font-size: 13px;
+              line-height: 1.42;
               overflow-wrap: anywhere;
             }
             .notice {
-              padding: 12px;
+              padding: 8px 2px;
               color: var(--muted);
-              font-size: 13px;
-              line-height: 1.45;
+              font-size: 12px;
+              line-height: 1.4;
             }
             .notice strong {
               color: var(--text);
             }
             .empty-state {
-              padding: 24px;
+              padding: 20px 2px;
               color: var(--muted);
               text-align: center;
             }
@@ -659,9 +652,7 @@ final class LiveMeetingCodexSession {
                 --system: #2458bd;
                 --partial: #936200;
                 --ready: #177245;
-                background:
-                  radial-gradient(circle at top left, rgba(8, 124, 92, 0.11), transparent 34rem),
-                  linear-gradient(180deg, #fbf7ee 0%, #f1ece3 100%);
+                background: #fbf7ee;
               }
             }
             @media (max-width: 680px) {
@@ -674,8 +665,8 @@ final class LiveMeetingCodexSession {
                 justify-self: start;
               }
               .utterance {
-                grid-template-columns: 1fr;
-                gap: 6px;
+                grid-template-columns: 50px minmax(0, 1fr);
+                gap: 6px 8px;
               }
             }
           </style>
@@ -688,7 +679,7 @@ final class LiveMeetingCodexSession {
                   <h1 id="meeting-title">\(escapedTitle)</h1>
                   <div class="subtitle">Transcripted live sidecar for Codex</div>
                 </div>
-                <div class="status" id="status">\(escapedStatus)</div>
+                <div class="status" id="status" title="\(escapedStatus)">\(escapedDisplayStatus)</div>
               </div>
               <div class="meta-row">
                 <div class="meta-card">
@@ -772,7 +763,12 @@ final class LiveMeetingCodexSession {
 
                 const trimmed = line.trim();
                 if (trimmed) {
-                  entries.push({ kind: "notice", text: trimmed });
+                  const previous = entries[entries.length - 1];
+                  if (previous && previous.kind === "notice") {
+                    previous.text = `${previous.text}\\n${trimmed}`;
+                  } else {
+                    entries.push({ kind: "notice", text: trimmed });
+                  }
                 }
               }
               return entries;
@@ -802,7 +798,7 @@ final class LiveMeetingCodexSession {
 
               transcriptElement.innerHTML = visibleEntries.map((entry) => {
                 if (entry.kind === "notice") {
-                  return `<div class="notice">${escapeHTML(entry.text)}</div>`;
+                  return `<div class="notice">${escapeHTML(entry.text).replace(/\\n/g, "<br>")}</div>`;
                 }
                 const partial = entry.partial ? '<span class="partial">Partial</span>' : "";
                 return `
@@ -840,7 +836,8 @@ final class LiveMeetingCodexSession {
 
                 if (stateResponse.ok) {
                   const state = await stateResponse.json();
-                  statusElement.textContent = `${state.status} - ${state.streamingBackendStatus}`;
+                  statusElement.textContent = state.status || "";
+                  statusElement.title = `${state.status || ""} - ${state.streamingBackendStatus || ""}`;
                   titleElement.textContent = state.title || "Live Meeting";
                   updatedAtElement.textContent = state.updatedAt || "";
                   noteElement.textContent = state.note || "";
