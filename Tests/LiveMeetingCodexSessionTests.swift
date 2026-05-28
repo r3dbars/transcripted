@@ -139,6 +139,32 @@ func testLiveMeetingCodexSession() {
             "preview should show automatic final-transcript handoff after recording saves"
         )
     }
+
+    runSuite("LiveMeetingCodexSession.ensureWorkspaceFiles - rebuilds automatic handoff from saved state") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        let finalURL = root.appendingPathComponent("Recovered Meeting.md", isDirectory: false)
+        try? session.start(
+            title: "Recovered Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        try? session.attachFinalTranscript(
+            url: finalURL,
+            title: "Recovered Meeting",
+            at: Date(timeIntervalSince1970: 1_765_994_560)
+        )
+        try? "stale idle marker".write(to: session.handoffURL, atomically: true, encoding: .utf8)
+
+        let reopenedSession = LiveMeetingCodexSession(workspaceRoot: root)
+        try? reopenedSession.ensureWorkspaceFiles(createdAt: Date(timeIntervalSince1970: 1_765_994_620))
+
+        let handoffText = (try? String(contentsOf: reopenedSession.handoffURL, encoding: .utf8)) ?? ""
+        assertTrue(handoffText.contains("Status: ready"), "reopened workspace should rebuild stale handoff as ready")
+        assertTrue(handoffText.contains(finalURL.path), "rebuilt handoff should keep the final transcript path")
+    }
 }
 
 private func decodeLiveMeetingCodexState(at url: URL) -> LiveMeetingCodexState? {

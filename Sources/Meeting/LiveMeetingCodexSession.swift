@@ -145,9 +145,7 @@ final class LiveMeetingCodexSession {
         try writeTextIfChanged(agentsText(), to: workspaceRoot.appendingPathComponent("AGENTS.md", isDirectory: false))
         try writeTextIfChanged(setupText(), to: setupURL)
 
-        if !fileManager.fileExists(atPath: handoffURL.path) {
-            try writeTextIfChanged(idleHandoffText(), to: handoffURL)
-        }
+        loadStoredStateIfAvailable()
 
         if !fileManager.fileExists(atPath: stateURL.path) {
             state.updatedAt = createdAt
@@ -158,6 +156,7 @@ final class LiveMeetingCodexSession {
             try writeTextIfChanged(idleTranscriptText(), to: liveTranscriptURL)
         }
 
+        try syncHandoffWithState(fallbackDate: createdAt)
         try writePreview()
     }
 
@@ -291,6 +290,47 @@ final class LiveMeetingCodexSession {
         let data = try encoder.encode(state)
         try data.write(to: stateURL, options: .atomic)
         fileManager.restrictFileToOwnerOnly(at: stateURL)
+    }
+
+    private func loadStoredStateIfAvailable() {
+        guard fileManager.fileExists(atPath: stateURL.path),
+              let data = try? Data(contentsOf: stateURL) else {
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let storedState = try? decoder.decode(LiveMeetingCodexState.self, from: data) {
+            state = storedState
+        }
+    }
+
+    private func syncHandoffWithState(fallbackDate: Date) throws {
+        let date = state.updatedAt.timeIntervalSince1970 > 0 ? state.updatedAt : fallbackDate
+        switch state.status {
+        case .idle:
+            try writeTextIfChanged(idleHandoffText(), to: handoffURL)
+        case .recording:
+            try writeTextIfChanged(
+                recordingHandoffText(title: state.title, startedAt: state.startedAt ?? date),
+                to: handoffURL
+            )
+        case .stopped:
+            try writeTextIfChanged(waitingHandoffText(title: state.title, stoppedAt: date), to: handoffURL)
+        case .transcriptSaved:
+            if let finalTranscriptPath = state.finalTranscriptPath, !finalTranscriptPath.isEmpty {
+                try writeTextIfChanged(
+                    finalHandoffText(url: URL(fileURLWithPath: finalTranscriptPath), title: state.title, savedAt: date),
+                    to: handoffURL
+                )
+            } else {
+                try writeTextIfChanged(waitingHandoffText(title: state.title, stoppedAt: date), to: handoffURL)
+            }
+        case .cancelled:
+            try writeTextIfChanged(cancelledHandoffText(title: state.title, endedAt: date), to: handoffURL)
+        case .failed:
+            try writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
+        }
     }
 
     private func writeTextIfChanged(_ text: String, to url: URL) throws {
