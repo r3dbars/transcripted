@@ -90,6 +90,31 @@ connected, otherwise read the saved Markdown folders:
 ~/Library/Application Support/Transcripted/captures/dictations
 ```
 
+## Live Meeting In Codex
+
+This is an opt-in sidecar for Codex while a meeting is still recording.
+
+1. Open Transcripted Settings.
+2. Go to `Agent`.
+3. Turn on `Live meeting in Codex`.
+4. Click `Open Live Codex Room`.
+
+Transcripted creates:
+
+```text
+~/Library/Application Support/Transcripted/CodexLiveMeeting/
+```
+
+The folder contains `state.json`, `live_transcript.md`,
+`codex-live-meeting.md`, and `preview.html`.
+
+Rules:
+
+- the live sidecar is provisional
+- the normal meeting Markdown still saves after stop
+- once `state.json` has `finalTranscriptPath`, Codex should read that final
+  Markdown for participant names, diarization, and durable notes
+
 ## Fallback Only: Web And Cowork
 
 Do not present web chat as a main setup path.

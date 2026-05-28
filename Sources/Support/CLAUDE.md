@@ -19,6 +19,7 @@
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
+- `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for writing a Codex live-meeting sidecar during meeting recording
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path

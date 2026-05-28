@@ -82,6 +82,10 @@ enum AgentConnectionGuide {
             .standardizedFileURL
     }
 
+    static var liveMeetingCodexFolder: URL {
+        LiveMeetingCodexSession.defaultWorkspaceRoot
+    }
+
     static let starterSkills = [
         AgentConnectionStarterSkill(
             id: "transcripted-summarize",
@@ -98,6 +102,14 @@ enum AgentConnectionGuide {
             detail: "Find what was said, when it happened, and where it came from."
         ),
     ]
+
+    static let liveMeetingCodexSkill = AgentConnectionStarterSkill(
+        id: "transcripted-live-meeting",
+        symbolName: "waveform",
+        title: "Live Meeting",
+        version: "0.1.0",
+        detail: "Read a provisional live meeting sidecar, then hand off to the final saved Markdown."
+    )
 
     static var agentSkillsFolder: URL {
         let fileManager = FileManager.default
@@ -276,6 +288,63 @@ enum AgentConnectionGuide {
     static func codexInboxOpenPrompt(inboxURL: URL = codexInboxFolder) -> String {
         """
         Set up this thread as my Transcripted Codex Inbox. Read \(codexInboxSetupFilename) in this folder, create the heartbeat automation described there, and tell me what you set up.
+        """
+    }
+
+    static func ensureLiveMeetingCodexWorkspace(
+        appSupportRoot: URL? = nil,
+        fileManager: FileManager = .default,
+        createdAt: Date = Date()
+    ) throws -> URL {
+        let workspaceURL = (appSupportRoot ?? fileManager.transcriptedAppSupportDir)
+            .appendingPathComponent(LiveMeetingCodexSession.workspaceFolderName, isDirectory: true)
+            .standardizedFileURL
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL, fileManager: fileManager)
+        try session.ensureWorkspaceFiles(createdAt: createdAt)
+        return workspaceURL
+    }
+
+    static func liveMeetingCodexSetupURL(workspaceURL: URL = liveMeetingCodexFolder) -> URL? {
+        var components = URLComponents()
+        components.scheme = "codex"
+        components.host = "threads"
+        components.path = "/new"
+        components.queryItems = [
+            URLQueryItem(name: "path", value: workspaceURL.standardizedFileURL.path),
+            URLQueryItem(name: "prompt", value: liveMeetingCodexOpenPrompt(workspaceURL: workspaceURL)),
+        ]
+        return components.url
+    }
+
+    static func liveMeetingCodexSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
+        return """
+        # Transcripted Live Meeting Codex Setup
+
+        Set this Codex thread up as my live Transcripted meeting room.
+
+        Local paths:
+        - Workspace: \(workspaceURL.standardizedFileURL.path)
+        - Setup prompt file: \(session.setupURL.path)
+        - Live transcript: \(session.liveTranscriptURL.path)
+        - State file: \(session.stateURL.path)
+        - Preview: \(session.previewURL.path)
+
+        Rules:
+        - Read `state.json` and `live_transcript.md` when I ask about the current meeting.
+        - Treat live text as provisional and source-labeled.
+        - If `finalTranscriptPath` exists in `state.json`, read that final Markdown and prefer it for speaker names, diarization, quotes, decisions, and durable notes.
+        - Do not change Transcripted's normal meeting output.
+        - Keep live answers short and say when the stream is too sparse to answer.
+
+        Skill:
+        - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)
+        """
+    }
+
+    static func liveMeetingCodexOpenPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        """
+        Use this thread as my Transcripted Live Meeting room. Read \(LiveMeetingCodexSession.setupFilename) in this folder and tell me when you are ready to watch the live transcript.
         """
     }
 

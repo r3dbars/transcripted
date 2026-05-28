@@ -167,6 +167,7 @@ final class MeetingSessionController: ObservableObject {
     private let storagePaths: CoreStoragePaths
     private let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
+    private let liveCodexSession = LiveMeetingCodexSession()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
@@ -193,6 +194,8 @@ final class MeetingSessionController: ObservableObject {
     private var audioInactivityDetector = MeetingAudioInactivityDetector()
     private var latestMicLevel: Float = 0
     private var latestSystemLevel: Float = 0
+    private var liveCodexSessionIsActive = false
+    private var liveCodexSessionAwaitingFinalTranscript = false
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -413,6 +416,7 @@ final class MeetingSessionController: ObservableObject {
             calendarTitle: calendarSuggestedTitleProvider?()
         )
         state = .recording
+        startLiveCodexSessionIfNeeded(title: activeRecordingSuggestedTitle)
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
         DiagnosticsTrail.record(
@@ -572,6 +576,11 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
+        let shouldAwaitFinalLiveCodexTranscript = files.micURL != nil && !stopResult.didTimeOut
+        finishLiveCodexSession(
+            status: shouldAwaitFinalLiveCodexTranscript ? .stopped : .failed,
+            shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
+        )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         let stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -801,6 +810,7 @@ final class MeetingSessionController: ObservableObject {
 
         let stopResult = await capture.stopAndDiscardFiles()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
+        finishLiveCodexSession(status: .cancelled, shouldAwaitFinalTranscript: false)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         let cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
@@ -1028,6 +1038,7 @@ final class MeetingSessionController: ObservableObject {
 
             let files = await capture.stopAndAwaitFiles()
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
+            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
             let meetingTitle = activeRecordingSuggestedTitle
             activeRecordingTrigger = .unknown
             activeRecordingSuggestedTitle = nil
@@ -1323,6 +1334,7 @@ final class MeetingSessionController: ObservableObject {
                 let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
                 self.lastSavedTranscriptURL = styled.url
                 self.lastSavedTitle = styled.title
+                self.attachLiveCodexFinalTranscriptIfNeeded(url: styled.url, title: styled.title)
                 let transcriptURL = styled.url
                 Task.detached(priority: .utility) {
                     await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
@@ -1400,6 +1412,94 @@ final class MeetingSessionController: ObservableObject {
                         "duration_ms": "\(Int(recordingDuration * 1000))"
                     ]
                 )
+            )
+        }
+    }
+
+    private func startLiveCodexSessionIfNeeded(title: String?) {
+        guard LiveMeetingCodexPreferences.isEnabled() else {
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = false
+            return
+        }
+
+        do {
+            try liveCodexSession.start(title: title)
+            liveCodexSessionIsActive = true
+            liveCodexSessionAwaitingFinalTranscript = false
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "live_codex_session_started",
+                message: "Live Codex meeting sidecar started",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = false
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_codex_session_start_failed",
+                message: "Live Codex meeting sidecar could not start",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
+    private func finishLiveCodexSession(
+        status: LiveMeetingCodexSessionStatus,
+        shouldAwaitFinalTranscript: Bool
+    ) {
+        guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
+
+        do {
+            try liveCodexSession.finish(status: status)
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = shouldAwaitFinalTranscript
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "live_codex_session_finished",
+                message: "Live Codex meeting sidecar finished recording",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "live_codex_status": status.rawValue,
+                        "awaiting_final_transcript": boolString(shouldAwaitFinalTranscript)
+                    ]
+                )
+            )
+        } catch {
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = false
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_codex_session_finish_failed",
+                message: "Live Codex meeting sidecar could not finish",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
+    private func attachLiveCodexFinalTranscriptIfNeeded(url: URL, title: String?) {
+        guard liveCodexSessionAwaitingFinalTranscript else { return }
+
+        do {
+            try liveCodexSession.attachFinalTranscript(url: url, title: title)
+            liveCodexSessionAwaitingFinalTranscript = false
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "live_codex_session_final_transcript_attached",
+                message: "Live Codex meeting sidecar attached the final transcript path",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            liveCodexSessionAwaitingFinalTranscript = false
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_codex_session_final_transcript_attach_failed",
+                message: "Live Codex meeting sidecar could not attach the final transcript path",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
         }
     }

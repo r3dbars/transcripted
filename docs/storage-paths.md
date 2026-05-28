@@ -58,6 +58,15 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
 
+The opt-in Codex live-meeting sidecar writes provisional files under:
+
+- live Codex workspace: `~/Library/Application Support/Transcripted/CodexLiveMeeting/`
+- live transcript: `~/Library/Application Support/Transcripted/CodexLiveMeeting/live_transcript.md`
+- live state: `~/Library/Application Support/Transcripted/CodexLiveMeeting/state.json`
+
+These files do not replace the normal saved meeting Markdown. Once a meeting is
+saved, `state.json` can point Codex at the final transcript path.
+
 Temporary audio scratch paths live under:
 
 - raw recordings: `~/Library/Application Support/Transcripted/tmp/recordings/`

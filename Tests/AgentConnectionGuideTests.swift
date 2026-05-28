@@ -235,8 +235,13 @@ func testAgentConnectionGuide() {
            let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any] {
             assertEqual(
                 manifest["bundle_version"] as? String,
-                "0.1.0",
+                "0.2.0",
                 "skill manifest should expose the starter bundle version"
+            )
+            let skills = manifest["skills"] as? [[String: Any]] ?? []
+            assertTrue(
+                skills.contains { $0["id"] as? String == AgentConnectionGuide.liveMeetingCodexSkill.id },
+                "skill manifest should include the live meeting skill"
             )
         } else {
             assertTrue(false, "skill manifest should be readable JSON")
@@ -260,6 +265,69 @@ func testAgentConnectionGuide() {
                 "skill file should use the same skill id as UI metadata: \(skill.id)"
             )
         }
+
+        let liveSkill = AgentConnectionGuide.liveMeetingCodexSkill
+        let liveSkillURL = skillsFolder.appendingPathComponent(liveSkill.relativeSkillPath, isDirectory: false)
+        assertTrue(
+            FileManager.default.fileExists(atPath: liveSkillURL.path),
+            "expected bundled live meeting skill file"
+        )
+        let liveSkillText = (try? String(contentsOf: liveSkillURL, encoding: .utf8)) ?? ""
+        assertTrue(
+            liveSkillText.contains("Version: \(liveSkill.version)"),
+            "live meeting skill file should carry the same version as UI metadata"
+        )
+        assertTrue(
+            liveSkillText.contains("name: \(liveSkill.id)"),
+            "live meeting skill file should use the same skill id as UI metadata"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.liveMeetingCodex - creates a live workspace and setup URL") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodexGuide-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let workspace = try? AgentConnectionGuide.ensureLiveMeetingCodexWorkspace(
+            appSupportRoot: root,
+            createdAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        let workspaceURL = workspace ?? root.appendingPathComponent(LiveMeetingCodexSession.workspaceFolderName, isDirectory: true)
+
+        assertNotNil(workspace, "live meeting Codex workspace should be created")
+        assertEqual(workspaceURL.lastPathComponent, "CodexLiveMeeting", "workspace should use a shell-friendly folder name")
+        assertTrue(
+            FileManager.default.fileExists(atPath: workspaceURL.appendingPathComponent("live_transcript.md").path),
+            "live workspace should include live transcript file"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: workspaceURL.appendingPathComponent("state.json").path),
+            "live workspace should include state file"
+        )
+
+        let prompt = AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL)
+        assertTrue(prompt.contains("Transcripted Live Meeting Codex Setup"), "prompt should name the live setup")
+        assertTrue(prompt.contains("live_transcript.md"), "prompt should point Codex at the live transcript")
+        assertTrue(prompt.contains(AgentConnectionGuide.liveMeetingCodexSkill.id), "prompt should name the live skill")
+        assertTrue(prompt.contains("Do not change Transcripted's normal meeting output"), "prompt should preserve normal output")
+
+        let url = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL)
+        assertNotNil(url, "live setup should produce a Codex deep link")
+        let deepLink = url ?? URL(fileURLWithPath: "/")
+        assertEqual(deepLink.scheme ?? "", "codex", "live setup should use the Codex URL scheme")
+        assertEqual(deepLink.host ?? "", "threads", "live setup should open a thread")
+        assertEqual(deepLink.path, "/new", "live setup should create a new thread")
+
+        let queryItems = URLComponents(url: deepLink, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        assertEqual(
+            queryItems.first { $0.name == "path" }?.value ?? "",
+            workspaceURL.standardizedFileURL.path,
+            "live setup should pass the workspace as the thread path"
+        )
+        assertTrue(
+            queryItems.first { $0.name == "prompt" }?.value?.contains(LiveMeetingCodexSession.setupFilename) == true,
+            "live setup prompt should point at the setup file"
+        )
     }
 
     runSuite("AgentConnectionGuide.portableMeetingBundle — embeds meeting and skills for any chat") {

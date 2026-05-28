@@ -15,7 +15,10 @@ struct AgentConnectionSettingsPage: View {
     @State private var copiedFolderPaths = false
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
+    @State private var openedLiveMeetingCodexSetup = false
+    @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
+    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -173,6 +176,34 @@ struct AgentConnectionSettingsPage: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $liveMeetingCodexEnabled) {
+                    Label("Live meeting in Codex", systemImage: "waveform")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .toggleStyle(.switch)
+
+                SettingsInlineActionButton(
+                    title: openedLiveMeetingCodexSetup ? "Opened Live Codex" : "Open Live Codex Room",
+                    symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
+                    tone: .accent
+                ) {
+                    setupLiveMeetingCodex()
+                }
+
+                Text("Codex reads a live sidecar while the meeting records. The final meeting Markdown still saves normally after stop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let liveMeetingCodexSetupError {
+                    Label(liveMeetingCodexSetupError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
                 SettingsInlineActionButton(title: "Get Claude Desktop", symbolName: "arrow.down.circle", tone: .accent) {
                     openClaudeDesktopDownload()
@@ -305,6 +336,36 @@ struct AgentConnectionSettingsPage: View {
             }
         } catch {
             codexInboxSetupError = "Could not set up Codex Inbox: \(error.localizedDescription)"
+        }
+    }
+
+    private func setupLiveMeetingCodex() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
+
+            guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
+                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+                liveMeetingCodexSetupError = "The setup prompt was copied. Open Codex and paste it."
+                return
+            }
+
+            if NSWorkspace.shared.open(setupURL) {
+                openedLiveMeetingCodexSetup = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    openedLiveMeetingCodexSetup = false
+                }
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+                liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
+            }
+        } catch {
+            liveMeetingCodexSetupError = "Could not set up Live Codex: \(error.localizedDescription)"
         }
     }
 

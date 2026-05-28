@@ -1,0 +1,4 @@
+interface:
+  display_name: "Live Meeting"
+  short_description: "Watch an active Transcripted meeting sidecar, then switch to the final Markdown."
+  default_prompt: "Watch this Transcripted live meeting workspace and answer from the current transcript."
