@@ -106,7 +106,7 @@ Transcripted creates:
 ~/Library/Application Support/Transcripted/CodexLiveMeeting/
 ```
 
-The folder contains `state.json`, `live_transcript.md`,
+The folder contains `state.json`, `live_transcript.md`, `codex-handoff.md`,
 `codex-live-meeting.md`, and `preview.html`. While Transcripted is running, the
 same preview updates in place at
 `http://127.0.0.1:47834/live-preview`.
@@ -116,6 +116,7 @@ Rules:
 - the live sidecar is provisional
 - `[partial]` lines are live streaming ASR hypotheses and may change
 - the normal meeting Markdown still saves after stop
+- after save, `codex-handoff.md` becomes the automatic marker that points Codex at the final transcript
 - once `state.json` has `finalTranscriptPath`, Codex should read that final
   Markdown for participant names, diarization, and durable notes
 

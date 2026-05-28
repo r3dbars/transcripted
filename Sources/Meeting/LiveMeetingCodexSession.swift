@@ -71,6 +71,7 @@ final class LiveMeetingCodexSession {
     static let liveTranscriptFilename = "live_transcript.md"
     static let stateFilename = "state.json"
     static let setupFilename = "codex-live-meeting.md"
+    static let handoffFilename = "codex-handoff.md"
     static let previewFilename = "preview.html"
     static let previewServerPort: UInt16 = 47834
     static let previewServerPath = "/live-preview"
@@ -124,6 +125,10 @@ final class LiveMeetingCodexSession {
         workspaceRoot.appendingPathComponent(Self.setupFilename, isDirectory: false)
     }
 
+    var handoffURL: URL {
+        workspaceRoot.appendingPathComponent(Self.handoffFilename, isDirectory: false)
+    }
+
     var previewURL: URL {
         workspaceRoot.appendingPathComponent(Self.previewFilename, isDirectory: false)
     }
@@ -139,6 +144,10 @@ final class LiveMeetingCodexSession {
         try writeTextIfChanged(readmeText(), to: workspaceRoot.appendingPathComponent("README.md", isDirectory: false))
         try writeTextIfChanged(agentsText(), to: workspaceRoot.appendingPathComponent("AGENTS.md", isDirectory: false))
         try writeTextIfChanged(setupText(), to: setupURL)
+
+        if !fileManager.fileExists(atPath: handoffURL.path) {
+            try writeTextIfChanged(idleHandoffText(), to: handoffURL)
+        }
 
         if !fileManager.fileExists(atPath: stateURL.path) {
             state.updatedAt = createdAt
@@ -173,6 +182,7 @@ final class LiveMeetingCodexSession {
             )
 
             try writeTextIfChanged(liveTranscriptHeader(title: title, startedAt: startedAt), to: liveTranscriptURL)
+            try writeTextIfChanged(recordingHandoffText(title: title, startedAt: startedAt), to: handoffURL)
             try writeState()
             try writePreview()
         }
@@ -205,14 +215,17 @@ final class LiveMeetingCodexSession {
                 state.streamingBackendStatus = "local_streaming_asr_stopped"
                 state.note = "Recording stopped. Waiting for Transcripted to finish and save the final meeting Markdown."
                 try appendText("\nRecording stopped. Waiting for final Transcripted transcript.\n", to: liveTranscriptURL)
+                try writeTextIfChanged(waitingHandoffText(title: state.title, stoppedAt: date), to: handoffURL)
             case .cancelled:
                 state.streamingBackendStatus = "cancelled"
                 state.note = "Recording cancelled. No final meeting transcript will be saved for this capture."
                 try appendText("\nRecording cancelled. No final transcript will be saved for this capture.\n", to: liveTranscriptURL)
+                try writeTextIfChanged(cancelledHandoffText(title: state.title, endedAt: date), to: handoffURL)
             case .failed:
                 state.streamingBackendStatus = "failed"
                 state.note = "Recording ended with an error. Check Transcripted for retry details."
                 try appendText("\nRecording ended with an error. Check Transcripted for retry details.\n", to: liveTranscriptURL)
+                try writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
             case .idle, .recording, .transcriptSaved:
                 break
             }
@@ -245,6 +258,7 @@ final class LiveMeetingCodexSession {
             Prefer the final file for participant names, diarization, and durable meeting notes.
             """
             try appendText(text, to: liveTranscriptURL)
+            try writeTextIfChanged(finalHandoffText(url: url, title: state.title, savedAt: date), to: handoffURL)
             try writeState()
             try writePreview()
         }
@@ -356,6 +370,99 @@ final class LiveMeetingCodexSession {
         """
     }
 
+    private func idleHandoffText() -> String {
+        """
+        # Transcripted Codex Handoff
+
+        Status: idle
+
+        No finished meeting is ready yet.
+        Codex should use `live_transcript.md` only while a meeting is recording.
+
+        """
+    }
+
+    private func recordingHandoffText(title: String?, startedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Codex Handoff
+
+        Status: recording
+        \(titleLine)Started: \(Self.isoString(startedAt))
+        Live transcript path: \(liveTranscriptURL.path)
+        State path: \(stateURL.path)
+
+        Codex should treat the live transcript as provisional until this file changes to `Status: ready`.
+
+        """
+    }
+
+    private func waitingHandoffText(title: String?, stoppedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Codex Handoff
+
+        Status: waiting_for_final_transcript
+        \(titleLine)Stopped: \(Self.isoString(stoppedAt))
+        Live transcript path: \(liveTranscriptURL.path)
+        State path: \(stateURL.path)
+
+        Recording has stopped. Wait for Transcripted to write the final Markdown before using durable notes.
+
+        """
+    }
+
+    private func cancelledHandoffText(title: String?, endedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Codex Handoff
+
+        Status: cancelled
+        \(titleLine)Ended: \(Self.isoString(endedAt))
+
+        No final transcript will be handed off for this recording.
+
+        """
+    }
+
+    private func failedHandoffText(title: String?, endedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Codex Handoff
+
+        Status: failed
+        \(titleLine)Ended: \(Self.isoString(endedAt))
+
+        Transcripted could not finish this recording. Check Transcripted for retry details before summarizing.
+
+        """
+    }
+
+    private func finalHandoffText(url: URL, title: String?, savedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Codex Handoff
+
+        Status: ready
+        \(titleLine)Saved: \(Self.isoString(savedAt))
+        Final transcript path: \(url.standardizedFileURL.path)
+        Live transcript path: \(liveTranscriptURL.path)
+        State path: \(stateURL.path)
+
+        Codex automatic behavior:
+        - Treat this file as the post-recording handoff marker.
+        - Read the final transcript path above as soon as a Codex watcher sees this file change.
+        - Use the final Markdown as canonical. Do not summarize from `live_transcript.md` once this is ready.
+        - Produce a concise meeting brief with summary, decisions, action items, and next steps unless the user asks for something narrower.
+
+        """
+    }
+
+    private func handoffTitleLine(_ title: String?) -> String {
+        guard let title, !title.isEmpty else { return "" }
+        return "Title: \(title)\n"
+    }
+
     private func readmeText() -> String {
         """
         # Transcripted Live Meeting for Codex
@@ -365,6 +472,7 @@ final class LiveMeetingCodexSession {
         Files:
         - `live_transcript.md` is the provisional live transcript stream.
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
+        - `codex-handoff.md` is the automatic Codex handoff marker for the final transcript.
         - `codex-live-meeting.md` is the setup prompt for a Codex thread.
         - `preview.html` is a live transcript preview snapshot. The local browser URL updates without full-page refreshes.
         - `\(Self.previewServerURL.absoluteString)` is the Codex in-app browser preview while Transcripted is running.
@@ -373,7 +481,7 @@ final class LiveMeetingCodexSession {
         - The live transcript is provisional.
         - Lines marked `[partial]` are streaming ASR hypotheses and may change.
         - The normal Transcripted meeting Markdown still saves in the capture library after stop.
-        - Once `state.json` has `finalTranscriptPath`, prefer that final Markdown for names, diarization, and durable notes.
+        - Once `codex-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, prefer that final Markdown for names, diarization, and durable notes.
 
         Workspace:
         \(workspaceRoot.path)
@@ -389,13 +497,14 @@ final class LiveMeetingCodexSession {
         Start with:
         - `state.json`
         - `live_transcript.md`
+        - `codex-handoff.md`
         - `codex-live-meeting.md`
 
         Rules:
         - Treat `live_transcript.md` as provisional while `status` is `recording`.
         - Treat `[partial]` lines as live hypotheses.
         - Keep source labels like `[Microphone]` and `[System]` in mind.
-        - If `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
+        - If `codex-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
         - Do not change Transcripted's meeting files unless the user asks.
         - Keep live answers short. Say when the live stream is too sparse to answer.
         """
@@ -411,6 +520,7 @@ final class LiveMeetingCodexSession {
         - Workspace: \(workspaceRoot.path)
         - Live transcript: \(liveTranscriptURL.path)
         - State: \(stateURL.path)
+        - Automatic handoff: \(handoffURL.path)
         - Preview: \(previewURL.path)
         - Browser preview: \(Self.previewServerURL.absoluteString)
 
@@ -419,7 +529,7 @@ final class LiveMeetingCodexSession {
         2. While status is `recording`, read `live_transcript.md` whenever I ask about the meeting.
         3. Treat live text as provisional and source-labeled.
         4. Treat `[partial]` lines as live hypotheses that may change.
-        5. Once `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
+        5. Once `codex-handoff.md` says `Status: ready` or `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
         6. If I ask for a live view in Codex, open \(Self.previewServerURL.absoluteString). If Transcripted is closed, fall back to `preview.html` from this folder.
 
         Do not alter the normal Transcripted meeting output.
@@ -566,9 +676,7 @@ final class LiveMeetingCodexSession {
             }
             .handoff {
               display: grid;
-              grid-template-columns: minmax(0, 1fr) auto;
-              gap: 10px;
-              align-items: center;
+              gap: 2px;
               padding: 8px 2px;
               border-bottom: 1px solid var(--line);
             }
@@ -587,26 +695,6 @@ final class LiveMeetingCodexSession {
               color: var(--muted);
               font-size: 11px;
               line-height: 1.35;
-            }
-            .handoff-actions {
-              display: flex;
-              flex-wrap: wrap;
-              justify-content: flex-end;
-              gap: 6px;
-            }
-            .handoff-button {
-              border: 1px solid var(--line);
-              border-radius: 999px;
-              padding: 4px 8px;
-              background: rgba(255, 255, 255, 0.06);
-              color: var(--text);
-              font: inherit;
-              font-size: 11px;
-              cursor: pointer;
-            }
-            .handoff-button:hover {
-              border-color: rgba(255, 255, 255, 0.3);
-              background: rgba(255, 255, 255, 0.1);
             }
             .stream {
               display: grid;
@@ -712,12 +800,6 @@ final class LiveMeetingCodexSession {
                 grid-template-columns: 50px minmax(0, 1fr);
                 gap: 6px 8px;
               }
-              .handoff {
-                grid-template-columns: 1fr;
-              }
-              .handoff-actions {
-                justify-content: flex-start;
-              }
             }
           </style>
         </head>
@@ -753,14 +835,8 @@ final class LiveMeetingCodexSession {
             </header>
             <section class="handoff" id="handoff" hidden>
               <div>
-                <p class="handoff-title">Recording done. Pull the final transcript into Codex?</p>
-                <p class="handoff-detail" id="handoff-detail">Choose a quick ask, then paste it into the Codex chat.</p>
-              </div>
-              <div class="handoff-actions" aria-label="Final transcript actions">
-                <button class="handoff-button" type="button" data-handoff-action="brief">Brief</button>
-                <button class="handoff-button" type="button" data-handoff-action="actions">Actions</button>
-                <button class="handoff-button" type="button" data-handoff-action="decisions">Decisions</button>
-                <button class="handoff-button" type="button" data-handoff-action="next">Next steps</button>
+                <p class="handoff-title">Final transcript ready for Codex.</p>
+                <p class="handoff-detail" id="handoff-detail">Codex handoff marker updated. Use the final Markdown as the canonical meeting source.</p>
               </div>
             </section>
             <section class="stream" id="transcript" aria-live="polite"></section>
@@ -779,7 +855,6 @@ final class LiveMeetingCodexSession {
             const handoffElement = document.getElementById("handoff");
             const handoffDetailElement = document.getElementById("handoff-detail");
             const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
-            const handoffButtons = Array.from(document.querySelectorAll("[data-handoff-action]"));
             let lastTranscript = initialTranscriptElement.value;
             let activeFilter = "all";
             let currentState = {};
@@ -805,37 +880,11 @@ final class LiveMeetingCodexSession {
               return Boolean(state && state.finalTranscriptPath);
             }
 
-            function handoffPrompt(kind) {
-              const path = currentState.finalTranscriptPath || "the finalTranscriptPath in state.json";
-              const title = currentState.title ? ` for "${currentState.title}"` : "";
-              const base = `The recording${title} is done. Please read the final Transcripted Markdown at: ${path}. Use the final file as canonical, not the provisional live sidecar.`;
-              switch (kind) {
-              case "actions":
-                return `${base}\\n\\nGive me only the action items. Include owner, due date, and confidence when available. If owner or date is unclear, say unclear.`;
-              case "decisions":
-                return `${base}\\n\\nGive me the decisions made, open decisions, and any risks or unresolved questions. Keep it concise.`;
-              case "next":
-                return `${base}\\n\\nGive me the next steps I should take, ordered by urgency. Include suggested follow-up messages if useful.`;
-              default:
-                return `${base}\\n\\nGive me a concise meeting brief with summary, key decisions, action items, and next steps.`;
-              }
-            }
-
-            async function copyHandoffPrompt(kind) {
-              const prompt = handoffPrompt(kind);
-              try {
-                await navigator.clipboard.writeText(prompt);
-                handoffDetailElement.textContent = "Copied. Paste it into the Codex chat.";
-              } catch (_) {
-                handoffDetailElement.textContent = prompt;
-              }
-            }
-
             function updateHandoff(state) {
               currentState = state || {};
               if (hasFinalTranscript(currentState)) {
                 handoffElement.hidden = false;
-                handoffDetailElement.textContent = "Choose a quick ask, then paste it into the Codex chat.";
+                handoffDetailElement.textContent = "Codex handoff marker updated. Use the final Markdown as the canonical meeting source.";
               } else {
                 handoffElement.hidden = true;
               }
@@ -929,12 +978,6 @@ final class LiveMeetingCodexSession {
                   candidate.setAttribute("aria-pressed", String(candidate === button));
                 });
                 renderTranscript(lastTranscript);
-              });
-            });
-
-            handoffButtons.forEach((button) => {
-              button.addEventListener("click", () => {
-                copyHandoffPrompt(button.dataset.handoffAction || "brief");
               });
             });
 

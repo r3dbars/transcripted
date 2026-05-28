@@ -63,11 +63,13 @@ The opt-in Codex live-meeting sidecar writes provisional files under:
 - live Codex workspace: `~/Library/Application Support/Transcripted/CodexLiveMeeting/`
 - live transcript: `~/Library/Application Support/Transcripted/CodexLiveMeeting/live_transcript.md`
 - live state: `~/Library/Application Support/Transcripted/CodexLiveMeeting/state.json`
+- automatic Codex handoff: `~/Library/Application Support/Transcripted/CodexLiveMeeting/codex-handoff.md`
 - live preview file: `~/Library/Application Support/Transcripted/CodexLiveMeeting/preview.html`
 - live Codex browser preview while Transcripted is running: `http://127.0.0.1:47834/live-preview`
 
 These files do not replace the normal saved meeting Markdown. Once a meeting is
-saved, `state.json` can point Codex at the final transcript path. Lines marked
+saved, `codex-handoff.md` switches to `Status: ready` and `state.json` can
+point Codex at the final transcript path. Lines marked
 `[partial]` in the live transcript are streaming ASR hypotheses, not durable
 diarized transcript output. `preview.html` is rewritten with the latest
 transcript as a direct-file snapshot. Transcripted also serves the same preview

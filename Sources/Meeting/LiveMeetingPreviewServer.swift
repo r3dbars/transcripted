@@ -120,6 +120,8 @@ final class LiveMeetingPreviewServer {
             return fileResponse(filename: LiveMeetingCodexSession.previewFilename, contentType: "text/html; charset=utf-8")
         case "/live-transcript", "/live_transcript.md":
             return fileResponse(filename: LiveMeetingCodexSession.liveTranscriptFilename, contentType: "text/markdown; charset=utf-8")
+        case "/handoff", "/codex-handoff.md":
+            return fileResponse(filename: LiveMeetingCodexSession.handoffFilename, contentType: "text/markdown; charset=utf-8")
         case "/state", "/state.json":
             return fileResponse(filename: LiveMeetingCodexSession.stateFilename, contentType: "application/json; charset=utf-8")
         case "/favicon.ico":
