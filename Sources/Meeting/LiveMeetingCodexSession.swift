@@ -603,7 +603,22 @@ final class LiveMeetingCodexSession {
         let status = "\(state.status.rawValue) - \(state.streamingBackendStatus)"
         let escapedStatus = Self.htmlEscaped(status)
         let escapedDisplayStatus = Self.htmlEscaped(state.status.rawValue)
-        let escapedNote = Self.htmlEscaped(state.note)
+        let statusLine: String
+        switch state.status {
+        case .recording:
+            statusLine = "Recording locally - Codex has live context."
+        case .transcriptSaved:
+            statusLine = "Final transcript ready - notes can guide the follow-up."
+        case .stopped:
+            statusLine = "Recording stopped - waiting for the final transcript."
+        case .cancelled:
+            statusLine = "Recording cancelled."
+        case .failed:
+            statusLine = "Recording needs attention in Transcripted."
+        case .idle:
+            statusLine = "Start a meeting to give Codex live context."
+        }
+        let escapedStatusLine = Self.htmlEscaped(statusLine)
         let escapedUpdatedAt = Self.htmlEscaped(Self.isoString(state.updatedAt))
         let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
         let escapedTranscript = Self.htmlEscaped(transcript)
@@ -835,6 +850,186 @@ final class LiveMeetingCodexSession {
             .hidden {
               display: none;
             }
+            .live-note {
+              display: grid;
+              min-height: calc(100vh - 28px);
+              grid-template-rows: auto auto 1fr auto auto;
+              gap: 16px;
+            }
+            .note-header {
+              position: static;
+              display: grid;
+              gap: 12px;
+              padding: 26px 8px 0;
+              margin: 0;
+              border: 0;
+              background: transparent;
+              backdrop-filter: none;
+            }
+            .note-topline {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              color: var(--muted);
+              font-size: 12px;
+            }
+            .live-dot {
+              width: 8px;
+              height: 8px;
+              border-radius: 999px;
+              background: var(--ready);
+              box-shadow: 0 0 0 5px rgba(117, 227, 156, 0.09);
+            }
+            .note-header h1 {
+              color: var(--text);
+              font-size: clamp(32px, 6vw, 52px);
+              font-weight: 620;
+              line-height: 1.05;
+            }
+            .chips {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px;
+            }
+            .chip {
+              border: 1px solid var(--line);
+              border-radius: 999px;
+              padding: 7px 12px;
+              color: rgba(243, 245, 247, 0.72);
+              font-size: 13px;
+              line-height: 1;
+            }
+            .local-status {
+              margin: 6px 0 0;
+              color: var(--muted);
+              font-size: 13px;
+              line-height: 1.4;
+            }
+            .scratchpad {
+              display: grid;
+              min-height: 360px;
+              padding: 10px 8px;
+            }
+            .scratchpad textarea {
+              width: 100%;
+              min-height: 340px;
+              resize: vertical;
+              border: 0;
+              outline: 0;
+              background: transparent;
+              color: var(--text);
+              font: inherit;
+              font-size: 22px;
+              line-height: 1.45;
+            }
+            .scratchpad textarea::placeholder {
+              color: rgba(243, 245, 247, 0.34);
+            }
+            .scratchpad-help {
+              margin: 8px 0 0;
+              color: rgba(243, 245, 247, 0.36);
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            .transcript-toggle {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              width: calc(100% - 16px);
+              margin: 0 8px;
+              border: 1px solid var(--line);
+              border-radius: 18px;
+              padding: 13px 14px;
+              background: rgba(255, 255, 255, 0.03);
+              color: var(--text);
+              font: inherit;
+              font-size: 14px;
+              cursor: pointer;
+            }
+            .transcript-count {
+              color: var(--muted);
+              font-size: 12px;
+            }
+            .transcript-shell {
+              max-height: 42vh;
+              overflow: auto;
+              margin: 0 8px;
+              border: 1px solid var(--line);
+              border-radius: 18px;
+              background: rgba(255, 255, 255, 0.025);
+            }
+            .transcript-shell[hidden] {
+              display: none;
+            }
+            .transcript-shell .stream {
+              padding: 0 12px 8px;
+            }
+            .recorder-dock {
+              position: sticky;
+              bottom: 0;
+              display: grid;
+              grid-template-columns: auto minmax(0, 1fr) auto;
+              gap: 12px;
+              align-items: center;
+              margin: 0 0 4px;
+              border: 1px solid var(--line);
+              border-radius: 999px;
+              padding: 12px 14px;
+              background: rgba(43, 45, 45, 0.92);
+              box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+              backdrop-filter: blur(22px);
+            }
+            .recorder-left {
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            .record-dot {
+              width: 12px;
+              height: 12px;
+              border-radius: 999px;
+              background: #ff5f57;
+              box-shadow: 0 0 0 6px rgba(255, 95, 87, 0.13);
+            }
+            .stop-square {
+              width: 13px;
+              height: 13px;
+              border-radius: 3px;
+              background: rgba(243, 245, 247, 0.72);
+            }
+            .dock-field {
+              min-width: 0;
+              border: 0;
+              outline: 0;
+              background: transparent;
+              color: var(--text);
+              font: inherit;
+              font-size: 15px;
+            }
+            .dock-field::placeholder {
+              color: rgba(243, 245, 247, 0.48);
+            }
+            .waveform {
+              display: flex;
+              align-items: center;
+              gap: 3px;
+              min-width: 72px;
+            }
+            .waveform span {
+              width: 3px;
+              height: var(--h);
+              border-radius: 999px;
+              background: var(--ready);
+              opacity: 0.88;
+            }
+            .live-pill {
+              border-radius: 999px;
+              padding: 5px 9px;
+              background: rgba(117, 227, 156, 0.11);
+              color: var(--ready);
+              font-size: 12px;
+              white-space: nowrap;
+            }
             @media (prefers-color-scheme: light) {
               :root {
                 --bg: #f4f0e8;
@@ -867,34 +1062,20 @@ final class LiveMeetingCodexSession {
           </style>
         </head>
         <body>
-          <main>
-            <header>
-              <div class="header-main">
-                <div>
-                  <h1 id="meeting-title">\(escapedTitle)</h1>
-                  <div class="subtitle">Transcripted live sidecar for Codex</div>
-                </div>
-                <div class="status" id="status" title="\(escapedStatus)">\(escapedDisplayStatus)</div>
+          <main class="live-note">
+            <header class="note-header">
+              <div class="note-topline">
+                <span class="live-dot" aria-hidden="true"></span>
+                <span id="status" title="\(escapedStatus)">\(escapedDisplayStatus)</span>
+                <span id="updated-at" hidden>\(escapedUpdatedAt)</span>
               </div>
-              <div class="meta-row">
-                <div class="meta-card">
-                  <span class="meta-label">Updated</span>
-                  <span class="meta-value" id="updated-at">\(escapedUpdatedAt)</span>
-                </div>
-                <div class="meta-card">
-                  <span class="meta-label">Source</span>
-                  <span class="meta-value" id="source-summary">Mic + system</span>
-                </div>
-                <div class="meta-card">
-                  <span class="meta-label">State</span>
-                  <span class="meta-value meta-note" id="note">\(escapedNote)</span>
-                </div>
+              <h1 id="meeting-title">\(escapedTitle)</h1>
+              <div class="chips" aria-label="Meeting details">
+                <span class="chip">Today</span>
+                <span class="chip">Me</span>
+                <span class="chip">Transcripted</span>
               </div>
-              <div class="toolbar" aria-label="Transcript filters">
-                <button class="filter-button" type="button" data-filter="all" aria-pressed="true">All</button>
-                <button class="filter-button" type="button" data-filter="microphone" aria-pressed="false">Mic</button>
-                <button class="filter-button" type="button" data-filter="system" aria-pressed="false">System</button>
-              </div>
+              <p class="local-status" id="note">\(escapedStatusLine)</p>
             </header>
             <section class="handoff" id="handoff" hidden>
               <div>
@@ -902,8 +1083,35 @@ final class LiveMeetingCodexSession {
                 <p class="handoff-detail" id="handoff-detail">Codex handoff marker updated. Use the final Markdown as the canonical meeting source.</p>
               </div>
             </section>
-            <section class="stream" id="transcript" aria-live="polite"></section>
+            <section class="scratchpad" aria-label="Meeting scratchpad">
+              <textarea id="scratchpad" placeholder="Write notes" spellcheck="true"></textarea>
+              <p class="scratchpad-help">Notes stay here while you record. Later we can combine them with the final transcript.</p>
+            </section>
+            <button class="transcript-toggle" id="transcript-toggle" type="button" aria-expanded="false">
+              <span>View live transcript</span>
+              <span class="transcript-count" id="source-summary">Waiting</span>
+            </button>
+            <section class="transcript-shell" id="transcript-shell" hidden>
+              <section class="stream" id="transcript" aria-live="polite"></section>
+            </section>
             <textarea class="hidden" id="initial-transcript" readonly>\(escapedTranscript)</textarea>
+            <footer class="recorder-dock" aria-label="Live recording controls">
+              <div class="recorder-left">
+                <span class="record-dot" aria-hidden="true"></span>
+                <div class="waveform" aria-hidden="true">
+                  <span style="--h: 8px"></span>
+                  <span style="--h: 14px"></span>
+                  <span style="--h: 20px"></span>
+                  <span style="--h: 12px"></span>
+                  <span style="--h: 18px"></span>
+                  <span style="--h: 9px"></span>
+                  <span style="--h: 15px"></span>
+                </div>
+                <span class="stop-square" aria-hidden="true"></span>
+              </div>
+              <input class="dock-field" type="text" placeholder="Ask about this meeting" aria-label="Ask about this meeting">
+              <span class="live-pill">Live</span>
+            </footer>
           </main>
           <script>
             const stateURL = window.location.protocol === "file:" ? "state.json" : "/state.json";
@@ -917,10 +1125,15 @@ final class LiveMeetingCodexSession {
             const initialTranscriptElement = document.getElementById("initial-transcript");
             const handoffElement = document.getElementById("handoff");
             const handoffDetailElement = document.getElementById("handoff-detail");
+            const transcriptToggle = document.getElementById("transcript-toggle");
+            const transcriptShell = document.getElementById("transcript-shell");
+            const scratchpadElement = document.getElementById("scratchpad");
             const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
+            const scratchpadKey = "transcripted-live-meeting-scratchpad";
             let lastTranscript = initialTranscriptElement.value;
             let activeFilter = "all";
             let currentState = {};
+            let transcriptOpen = false;
 
             function isNearBottom() {
               return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
@@ -941,6 +1154,34 @@ final class LiveMeetingCodexSession {
 
             function hasFinalTranscript(state) {
               return Boolean(state && state.finalTranscriptPath);
+            }
+
+            function friendlyStatus(state) {
+              if (!state || !state.status) {
+                return "Start a meeting to give Codex live context.";
+              }
+
+              if (state.status === "recording") {
+                return "Recording locally - Codex has live context.";
+              }
+
+              if (state.status === "transcript_saved") {
+                return "Final transcript ready - notes can guide the follow-up.";
+              }
+
+              if (state.status === "stopped") {
+                return "Recording stopped - waiting for the final transcript.";
+              }
+
+              if (state.status === "cancelled") {
+                return "Recording cancelled.";
+              }
+
+              if (state.status === "failed") {
+                return "Recording needs attention in Transcripted.";
+              }
+
+              return "Start a meeting to give Codex live context.";
             }
 
             function updateHandoff(state) {
@@ -999,12 +1240,13 @@ final class LiveMeetingCodexSession {
               });
               const hasMic = entries.some((entry) => entry.kind === "utterance" && entry.source === "microphone");
               const hasSystem = entries.some((entry) => entry.kind === "utterance" && entry.source === "system");
+              const snippetLabel = entries.length === 1 ? "1 snippet" : `${entries.length} snippets`;
               if (hasMic && hasSystem) {
-                sourceSummaryElement.textContent = "Mic + system";
+                sourceSummaryElement.textContent = `Mic + system - ${snippetLabel}`;
               } else if (hasMic) {
-                sourceSummaryElement.textContent = "Mic only";
+                sourceSummaryElement.textContent = `Mic - ${snippetLabel}`;
               } else if (hasSystem) {
-                sourceSummaryElement.textContent = "System only";
+                sourceSummaryElement.textContent = `System - ${snippetLabel}`;
               } else {
                 sourceSummaryElement.textContent = "Waiting";
               }
@@ -1044,8 +1286,20 @@ final class LiveMeetingCodexSession {
               });
             });
 
+            transcriptToggle.addEventListener("click", () => {
+              transcriptOpen = !transcriptOpen;
+              transcriptShell.hidden = !transcriptOpen;
+              transcriptToggle.setAttribute("aria-expanded", String(transcriptOpen));
+              transcriptToggle.querySelector("span").textContent = transcriptOpen ? "Hide live transcript" : "View live transcript";
+            });
+
+            scratchpadElement.value = window.localStorage.getItem(scratchpadKey) || "";
+            scratchpadElement.addEventListener("input", () => {
+              window.localStorage.setItem(scratchpadKey, scratchpadElement.value);
+            });
+
             async function refreshPreview() {
-              const shouldFollow = isNearBottom();
+              const shouldFollow = transcriptOpen && isNearBottom();
               try {
                 const [stateResponse, transcriptResponse] = await Promise.all([
                   fetch(`${stateURL}?t=${Date.now()}`, { cache: "no-store" }),
@@ -1058,7 +1312,7 @@ final class LiveMeetingCodexSession {
                   statusElement.title = `${state.status || ""} - ${state.streamingBackendStatus || ""}`;
                   titleElement.textContent = state.title || "Live Meeting";
                   updatedAtElement.textContent = state.updatedAt || "";
-                  noteElement.textContent = state.note || "";
+                  noteElement.textContent = friendlyStatus(state);
                   updateHandoff(state);
                 }
 
@@ -1079,7 +1333,6 @@ final class LiveMeetingCodexSession {
 
             window.addEventListener("load", () => {
               renderTranscript(lastTranscript);
-              window.scrollTo(0, document.body.scrollHeight);
               refreshPreview();
               if (window.location.protocol !== "file:") {
                 window.setInterval(refreshPreview, 1000);
