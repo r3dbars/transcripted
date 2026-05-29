@@ -100,6 +100,7 @@ func testClaudeDesktopIntegrationInstaller() {
         assertTrue(status.isInstalled, "installed convenience flag should be true")
         assertTrue(status.installedBinaryMatchesBundled, "installed helper should match bundled helper")
         assertEqual(status.configuredCommandPath, binaryURL.path, "status should expose configured command")
+        assertNil(status.attentionMessage, "installed helper should not show a repair warning")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — detects stale installed helper") {
@@ -136,6 +137,137 @@ func testClaudeDesktopIntegrationInstaller() {
             status.attentionMessage,
             "Claude Desktop is using an older Transcripted helper. Update now to replace it.",
             "stale helper should have a direct user-facing repair reason"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns when bundled helper is missing") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeMissingBundleTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: nil
+        )
+
+        assertEqual(
+            status.attentionMessage,
+            "This app build does not include Transcripted direct tools yet.",
+            "missing bundled helper should explain that the current app build cannot install direct tools"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns before repairing unreadable config") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeUnreadableConfigStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "{ invalid json".write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertFalse(status.configIsReadable, "invalid Claude Desktop config should be marked unreadable")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop config is not readable JSON. Install will back it up and write a clean config.",
+            "unreadable config should surface the backup-and-rewrite repair path"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns when installed helper is missing") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeMissingInstalledHelperTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(commandPath: installedBinaryURL.path, configURL: configURL)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "config pointing at a missing helper should need repair")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop direct tools are missing. Install will copy a fresh helper.",
+            "missing installed helper should explain that repair will copy a fresh binary"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns when config points elsewhere") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeWrongHelperStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let otherBinaryURL = tempRoot
+            .appendingPathComponent("other", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(commandPath: otherBinaryURL.path, configURL: configURL)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "config pointing at another helper should need repair")
+        assertTrue(status.installedBinaryMatchesBundled, "the installed helper itself can be current while config points elsewhere")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop points at another Transcripted helper. Repair will update the config.",
+            "wrong configured helper should explain that repair updates Claude Desktop config"
         )
     }
 
