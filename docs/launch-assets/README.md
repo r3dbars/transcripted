@@ -44,6 +44,9 @@ Keep the spoken/written pitch short:
 > saves clean local Markdown, so Claude, Codex, Obsidian, and other agents can
 > use the spoken context that normally disappears.
 
+Before posting, include the install requirements anywhere the channel allows:
+Apple Silicon Mac, macOS 26 or later.
+
 ## Safety Notes
 
 The captured media uses synthetic demo meetings and dictations. Do not replace
