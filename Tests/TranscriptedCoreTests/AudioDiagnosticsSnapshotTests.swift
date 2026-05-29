@@ -35,6 +35,11 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.privacySafeContext["mic_raw_peak"], "0.03000")
         XCTAssertEqual(snapshot.privacySafeContext["mic_processed_peak"], "0.36000")
         XCTAssertEqual(snapshot.privacySafeContext["system_peak"], "0.25000")
+        // Issue #500: the captured-device input scalar is always reported (even
+        // as "unavailable" when the device exposes no readable scalar) so the
+        // scalar-drop sub-mechanism stays detectable on the device we actually
+        // record from, not just the system default input.
+        XCTAssertNotNil(snapshot.privacySafeContext["captured_input_volume_during"])
     }
 
     func testSnapshotResetsSignalDiagnosticsForNewRecording() {
