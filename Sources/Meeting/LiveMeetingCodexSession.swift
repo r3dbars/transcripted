@@ -602,24 +602,22 @@ final class LiveMeetingCodexSession {
     private func previewHTML(transcript: String) -> String {
         let status = "\(state.status.rawValue) - \(state.streamingBackendStatus)"
         let escapedStatus = Self.htmlEscaped(status)
-        let escapedDisplayStatus = Self.htmlEscaped(state.status.rawValue)
         let statusLine: String
         switch state.status {
         case .recording:
-            statusLine = "Recording locally - Codex has live context."
+            statusLine = "Recording locally"
         case .transcriptSaved:
-            statusLine = "Final transcript ready - notes can guide the follow-up."
+            statusLine = "Transcript saved"
         case .stopped:
-            statusLine = "Recording stopped - waiting for the final transcript."
+            statusLine = "Waiting for transcript"
         case .cancelled:
             statusLine = "Recording cancelled."
         case .failed:
-            statusLine = "Recording needs attention in Transcripted."
+            statusLine = "Needs attention"
         case .idle:
-            statusLine = "Start a meeting to give Codex live context."
+            statusLine = "Not recording"
         }
-        let escapedStatusLine = Self.htmlEscaped(statusLine)
-        let escapedUpdatedAt = Self.htmlEscaped(Self.isoString(state.updatedAt))
+        let escapedDisplayStatus = Self.htmlEscaped(statusLine)
         let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
         let escapedTranscript = Self.htmlEscaped(transcript)
         return """
@@ -633,8 +631,6 @@ final class LiveMeetingCodexSession {
             :root {
               color-scheme: light dark;
               --bg: #0f1115;
-              --panel: #171a20;
-              --panel-2: #1f232b;
               --text: #f3f5f7;
               --muted: #98a1ad;
               --line: rgba(255, 255, 255, 0.11);
@@ -656,106 +652,8 @@ final class LiveMeetingCodexSession {
               max-width: 980px;
               margin: 0 auto;
             }
-            header {
-              position: sticky;
-              top: 0;
-              z-index: 2;
-              display: grid;
-              grid-template-columns: 1fr;
-              gap: 8px;
-              padding: 8px 2px 10px;
-              margin-bottom: 4px;
-              border-bottom: 1px solid var(--line);
-              background: color-mix(in srgb, var(--bg) 88%, transparent);
-              backdrop-filter: blur(18px);
-            }
-            .header-main {
-              display: grid;
-              grid-template-columns: 1fr auto;
-              gap: 10px;
-              align-items: start;
-            }
-            h1 {
-              margin: 0;
-              font-size: 15px;
-              font-weight: 760;
-              letter-spacing: 0;
-            }
-            .subtitle {
-              margin-top: 2px;
-              color: var(--muted);
-              font-size: 11px;
-              line-height: 1.35;
-            }
-            .status {
-              justify-self: end;
-              font-size: 11px;
-              padding: 4px 8px;
-              border: 1px solid rgba(117, 227, 156, 0.36);
-              border-radius: 999px;
-              background: rgba(117, 227, 156, 0.1);
-              color: var(--ready);
-              white-space: nowrap;
-            }
-            .meta-row {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 8px 14px;
-            }
-            .meta-card {
-              min-width: 0;
-              padding: 0;
-            }
-            .meta-label {
-              display: block;
-              margin-bottom: 1px;
-              color: var(--muted);
-              font-size: 9px;
-              font-weight: 700;
-              letter-spacing: 0;
-              text-transform: uppercase;
-            }
-            .meta-value {
-              overflow: hidden;
-              color: var(--text);
-              font-size: 11px;
-              line-height: 1.35;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            }
-            .meta-note {
-              display: block;
-              max-width: min(100%, 640px);
-              overflow: hidden;
-              overflow-wrap: anywhere;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            }
-            .toolbar {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 6px;
-              align-items: center;
-            }
-            .filter-button {
-              border: 1px solid var(--line);
-              border-radius: 999px;
-              padding: 4px 8px;
-              background: transparent;
-              color: var(--muted);
-              font: inherit;
-              font-size: 11px;
-              cursor: pointer;
-            }
-            .filter-button[aria-pressed="true"] {
-              border-color: rgba(255, 255, 255, 0.28);
-              background: rgba(255, 255, 255, 0.08);
-              color: var(--text);
-            }
             .handoff {
-              display: grid;
-              gap: 2px;
-              padding: 8px 2px;
+              padding: 0 8px 12px;
               border-bottom: 1px solid var(--line);
             }
             .handoff[hidden] {
@@ -763,15 +661,8 @@ final class LiveMeetingCodexSession {
             }
             .handoff-title {
               margin: 0;
-              color: var(--text);
-              font-size: 13px;
-              font-weight: 720;
-              line-height: 1.35;
-            }
-            .handoff-detail {
-              margin: 2px 0 0;
               color: var(--muted);
-              font-size: 11px;
+              font-size: 13px;
               line-height: 1.35;
             }
             .stream {
@@ -853,13 +744,13 @@ final class LiveMeetingCodexSession {
             .live-note {
               display: grid;
               min-height: calc(100vh - 28px);
-              grid-template-rows: auto auto 1fr auto auto;
-              gap: 16px;
+              grid-template-rows: auto auto 1fr auto;
+              gap: 14px;
             }
             .note-header {
               position: static;
               display: grid;
-              gap: 12px;
+              gap: 10px;
               padding: 26px 8px 0;
               margin: 0;
               border: 0;
@@ -881,38 +772,20 @@ final class LiveMeetingCodexSession {
               box-shadow: 0 0 0 5px rgba(117, 227, 156, 0.09);
             }
             .note-header h1 {
+              margin: 0;
               color: var(--text);
-              font-size: clamp(32px, 6vw, 52px);
+              font-size: clamp(28px, 5vw, 44px);
               font-weight: 620;
               line-height: 1.05;
             }
-            .chips {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 8px;
-            }
-            .chip {
-              border: 1px solid var(--line);
-              border-radius: 999px;
-              padding: 7px 12px;
-              color: rgba(243, 245, 247, 0.72);
-              font-size: 13px;
-              line-height: 1;
-            }
-            .local-status {
-              margin: 6px 0 0;
-              color: var(--muted);
-              font-size: 13px;
-              line-height: 1.4;
-            }
             .scratchpad {
               display: grid;
-              min-height: 360px;
+              min-height: 420px;
               padding: 10px 8px;
             }
             .scratchpad textarea {
               width: 100%;
-              min-height: 340px;
+              min-height: 420px;
               resize: vertical;
               border: 0;
               outline: 0;
@@ -924,12 +797,6 @@ final class LiveMeetingCodexSession {
             }
             .scratchpad textarea::placeholder {
               color: rgba(243, 245, 247, 0.34);
-            }
-            .scratchpad-help {
-              margin: 8px 0 0;
-              color: rgba(243, 245, 247, 0.36);
-              font-size: 12px;
-              line-height: 1.4;
             }
             .transcript-toggle {
               display: flex;
@@ -968,9 +835,10 @@ final class LiveMeetingCodexSession {
               position: sticky;
               bottom: 0;
               display: grid;
-              grid-template-columns: auto minmax(0, 1fr) auto;
+              grid-template-columns: auto auto;
               gap: 12px;
               align-items: center;
+              justify-content: space-between;
               margin: 0 0 4px;
               border: 1px solid var(--line);
               border-radius: 999px;
@@ -997,18 +865,6 @@ final class LiveMeetingCodexSession {
               border-radius: 3px;
               background: rgba(243, 245, 247, 0.72);
             }
-            .dock-field {
-              min-width: 0;
-              border: 0;
-              outline: 0;
-              background: transparent;
-              color: var(--text);
-              font: inherit;
-              font-size: 15px;
-            }
-            .dock-field::placeholder {
-              color: rgba(243, 245, 247, 0.48);
-            }
             .waveform {
               display: flex;
               align-items: center;
@@ -1033,8 +889,6 @@ final class LiveMeetingCodexSession {
             @media (prefers-color-scheme: light) {
               :root {
                 --bg: #f4f0e8;
-                --panel: #fffaf0;
-                --panel-2: #f3eadc;
                 --text: #1f2328;
                 --muted: #69707a;
                 --line: rgba(31, 35, 40, 0.12);
@@ -1047,13 +901,6 @@ final class LiveMeetingCodexSession {
             }
             @media (max-width: 680px) {
               body { padding: 10px; }
-              .header-main,
-              .meta-row {
-                grid-template-columns: 1fr;
-              }
-              .status {
-                justify-self: start;
-              }
               .utterance {
                 grid-template-columns: 50px minmax(0, 1fr);
                 gap: 6px 8px;
@@ -1067,28 +914,17 @@ final class LiveMeetingCodexSession {
               <div class="note-topline">
                 <span class="live-dot" aria-hidden="true"></span>
                 <span id="status" title="\(escapedStatus)">\(escapedDisplayStatus)</span>
-                <span id="updated-at" hidden>\(escapedUpdatedAt)</span>
               </div>
               <h1 id="meeting-title">\(escapedTitle)</h1>
-              <div class="chips" aria-label="Meeting details">
-                <span class="chip">Today</span>
-                <span class="chip">Me</span>
-                <span class="chip">Transcripted</span>
-              </div>
-              <p class="local-status" id="note">\(escapedStatusLine)</p>
             </header>
             <section class="handoff" id="handoff" hidden>
-              <div>
-                <p class="handoff-title">Final transcript ready for Codex.</p>
-                <p class="handoff-detail" id="handoff-detail">Codex handoff marker updated. Use the final Markdown as the canonical meeting source.</p>
-              </div>
+              <p class="handoff-title">Transcript saved.</p>
             </section>
             <section class="scratchpad" aria-label="Meeting scratchpad">
               <textarea id="scratchpad" placeholder="Write notes" spellcheck="true"></textarea>
-              <p class="scratchpad-help">Notes stay here while you record. Later we can combine them with the final transcript.</p>
             </section>
             <button class="transcript-toggle" id="transcript-toggle" type="button" aria-expanded="false">
-              <span>View live transcript</span>
+              <span>Transcript</span>
               <span class="transcript-count" id="source-summary">Waiting</span>
             </button>
             <section class="transcript-shell" id="transcript-shell" hidden>
@@ -1109,7 +945,6 @@ final class LiveMeetingCodexSession {
                 </div>
                 <span class="stop-square" aria-hidden="true"></span>
               </div>
-              <input class="dock-field" type="text" placeholder="Ask about this meeting" aria-label="Ask about this meeting">
               <span class="live-pill">Live</span>
             </footer>
           </main>
@@ -1118,21 +953,15 @@ final class LiveMeetingCodexSession {
             const transcriptURL = window.location.protocol === "file:" ? "live_transcript.md" : "/live_transcript.md";
             const statusElement = document.getElementById("status");
             const titleElement = document.getElementById("meeting-title");
-            const updatedAtElement = document.getElementById("updated-at");
-            const noteElement = document.getElementById("note");
             const sourceSummaryElement = document.getElementById("source-summary");
             const transcriptElement = document.getElementById("transcript");
             const initialTranscriptElement = document.getElementById("initial-transcript");
             const handoffElement = document.getElementById("handoff");
-            const handoffDetailElement = document.getElementById("handoff-detail");
             const transcriptToggle = document.getElementById("transcript-toggle");
             const transcriptShell = document.getElementById("transcript-shell");
             const scratchpadElement = document.getElementById("scratchpad");
-            const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
             const scratchpadKey = "transcripted-live-meeting-scratchpad";
             let lastTranscript = initialTranscriptElement.value;
-            let activeFilter = "all";
-            let currentState = {};
             let transcriptOpen = false;
 
             function isNearBottom() {
@@ -1158,19 +987,19 @@ final class LiveMeetingCodexSession {
 
             function friendlyStatus(state) {
               if (!state || !state.status) {
-                return "Start a meeting to give Codex live context.";
+                return "Not recording";
               }
 
               if (state.status === "recording") {
-                return "Recording locally - Codex has live context.";
+                return "Recording locally";
               }
 
               if (state.status === "transcript_saved") {
-                return "Final transcript ready - notes can guide the follow-up.";
+                return "Transcript saved";
               }
 
               if (state.status === "stopped") {
-                return "Recording stopped - waiting for the final transcript.";
+                return "Waiting for transcript";
               }
 
               if (state.status === "cancelled") {
@@ -1178,17 +1007,15 @@ final class LiveMeetingCodexSession {
               }
 
               if (state.status === "failed") {
-                return "Recording needs attention in Transcripted.";
+                return "Needs attention";
               }
 
-              return "Start a meeting to give Codex live context.";
+              return "Not recording";
             }
 
             function updateHandoff(state) {
-              currentState = state || {};
-              if (hasFinalTranscript(currentState)) {
+              if (hasFinalTranscript(state)) {
                 handoffElement.hidden = false;
-                handoffDetailElement.textContent = "Codex handoff marker updated. Use the final Markdown as the canonical meeting source.";
               } else {
                 handoffElement.hidden = true;
               }
@@ -1235,28 +1062,15 @@ final class LiveMeetingCodexSession {
 
             function renderTranscript(markdown) {
               const entries = parseTranscript(markdown);
-              const visibleEntries = entries.filter((entry) => {
-                return entry.kind !== "utterance" || activeFilter === "all" || entry.source === activeFilter;
-              });
-              const hasMic = entries.some((entry) => entry.kind === "utterance" && entry.source === "microphone");
-              const hasSystem = entries.some((entry) => entry.kind === "utterance" && entry.source === "system");
               const snippetLabel = entries.length === 1 ? "1 snippet" : `${entries.length} snippets`;
-              if (hasMic && hasSystem) {
-                sourceSummaryElement.textContent = `Mic + system - ${snippetLabel}`;
-              } else if (hasMic) {
-                sourceSummaryElement.textContent = `Mic - ${snippetLabel}`;
-              } else if (hasSystem) {
-                sourceSummaryElement.textContent = `System - ${snippetLabel}`;
-              } else {
-                sourceSummaryElement.textContent = "Waiting";
-              }
+              sourceSummaryElement.textContent = entries.length > 0 ? snippetLabel : "Empty";
 
-              if (visibleEntries.length === 0) {
+              if (entries.length === 0) {
                 transcriptElement.innerHTML = '<div class="empty-state">Waiting for live transcript text.</div>';
                 return;
               }
 
-              transcriptElement.innerHTML = visibleEntries.map((entry) => {
+              transcriptElement.innerHTML = entries.map((entry) => {
                 if (entry.kind === "notice") {
                   return `<div class="notice">${escapeHTML(entry.text).replace(/\\n/g, "<br>")}</div>`;
                 }
@@ -1276,21 +1090,11 @@ final class LiveMeetingCodexSession {
               }).join("");
             }
 
-            filterButtons.forEach((button) => {
-              button.addEventListener("click", () => {
-                activeFilter = button.dataset.filter || "all";
-                filterButtons.forEach((candidate) => {
-                  candidate.setAttribute("aria-pressed", String(candidate === button));
-                });
-                renderTranscript(lastTranscript);
-              });
-            });
-
             transcriptToggle.addEventListener("click", () => {
               transcriptOpen = !transcriptOpen;
               transcriptShell.hidden = !transcriptOpen;
               transcriptToggle.setAttribute("aria-expanded", String(transcriptOpen));
-              transcriptToggle.querySelector("span").textContent = transcriptOpen ? "Hide live transcript" : "View live transcript";
+              transcriptToggle.querySelector("span").textContent = transcriptOpen ? "Hide transcript" : "Transcript";
             });
 
             scratchpadElement.value = window.localStorage.getItem(scratchpadKey) || "";
@@ -1308,11 +1112,9 @@ final class LiveMeetingCodexSession {
 
                 if (stateResponse.ok) {
                   const state = await stateResponse.json();
-                  statusElement.textContent = state.status || "";
+                  statusElement.textContent = friendlyStatus(state);
                   statusElement.title = `${state.status || ""} - ${state.streamingBackendStatus || ""}`;
                   titleElement.textContent = state.title || "Live Meeting";
-                  updatedAtElement.textContent = state.updatedAt || "";
-                  noteElement.textContent = friendlyStatus(state);
                   updateHandoff(state);
                 }
 
