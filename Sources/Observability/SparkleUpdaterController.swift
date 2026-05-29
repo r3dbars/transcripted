@@ -492,6 +492,11 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        if UpdateFailureKind.isNoUpdate(error) {
+            markNoUpdateAvailable(from: updater)
+            return
+        }
+
         markUpdateCheckFailed(from: updater, error: error)
     }
 
