@@ -132,6 +132,11 @@ func testClaudeDesktopIntegrationInstaller() {
 
         assertEqual(status.state, .needsRepair, "stale installed helper should be repaired even when config points at it")
         assertFalse(status.installedBinaryMatchesBundled, "status should expose stale helper mismatch")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop is using an older Transcripted helper. Update now to replace it.",
+            "stale helper should have a direct user-facing repair reason"
+        )
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL — uses Helpers bundle location only") {
