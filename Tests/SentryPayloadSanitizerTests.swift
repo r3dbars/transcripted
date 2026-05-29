@@ -235,6 +235,29 @@ func testSentryPayloadSanitizer() {
         assertEqual(nested?["state"] as? String, "recording", "safe nested values should remain")
     }
 
+    runSuite("SentryPayloadSanitizer drops automatic app identifiers") {
+        let sanitized = SentryPayloadSanitizer.sanitizeEventContexts([
+            "app": [
+                "app_identifier": "com.private.customer-app",
+                "app_name": "Private Customer App",
+                "app_version": "1.1.44",
+            ],
+            "device": [
+                "name": "Justin's MacBook Pro",
+                "model": "Mac15,6",
+            ],
+        ])
+
+        let app = sanitized["app"]
+        assertNil(app?["app_identifier"], "bundle-like app identifiers should not leave the app")
+        assertNil(app?["app_name"], "app names should not leave the app")
+        assertEqual(app?["app_version"] as? String, "1.1.44", "coarse app version should remain")
+
+        let device = sanitized["device"]
+        assertNil(device?["name"], "raw device names should not leave the app")
+        assertEqual(device?["model"] as? String, "Mac15,6", "coarse hardware model should remain")
+    }
+
     runSuite("SentryPayloadSanitizer matches the shared regression corpus") {
         for testCase in corpus.cases {
             let sanitized = SentryPayloadSanitizer.sanitizeText(testCase.input)
