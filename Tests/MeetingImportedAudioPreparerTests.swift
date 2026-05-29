@@ -172,6 +172,173 @@ func testMeetingImportedAudioPreparer() async {
             "unrecognized tokens should not produce a date so the resolver falls back to the file system"
         )
     }
+
+    runSuite("MeetingImportedAudioPreparer treats only genuine recording tags as recording dates") {
+        assertTrue(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "comn/creationdate"),
+            "the common creation-date tag is a recording date"
+        )
+        assertTrue(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdrc recordingtime"),
+            "the ID3 recording-time frame is a recording date"
+        )
+        assertTrue(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "quicktimemetadatacreationdate"),
+            "the QuickTime creation-date tag is a recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "itsk/purchasedate"),
+            "an iTunes purchase date must never be treated as the recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tenc encodingtime"),
+            "an encode time must never be treated as the recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdtg taggingtime"),
+            "a tagging time must never be treated as the recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "id3/tdrl releasetime"),
+            "a release date must never be treated as the recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "albumreleasedate"),
+            "an album release date must never be treated as the recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "modificationdate"),
+            "a modification date is not a recording date for matching purposes"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isRecordingDateMetadata(keyString: "title"),
+            "non-date metadata is not a recording date"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer ranks explicit creation tags above looser recording tags") {
+        assertEqual(
+            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "comn/creationdate"),
+            0,
+            "explicit creation tags rank highest"
+        )
+        assertEqual(
+            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "id3/tdrc recordingtime"),
+            1,
+            "recording-time tags rank below explicit creation tags"
+        )
+        assertEqual(
+            MeetingImportedAudioPreparer.recordingDatePriority(forKeyString: "somethingelse"),
+            2,
+            "anything else ranks last"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer uses the earliest reliable file-system timestamp") {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let recordedDay = now.addingTimeInterval(-90 * 86_400)
+        let laterEdit = recordedDay.addingTimeInterval(3_600)
+        let dummy = URL(fileURLWithPath: "/dev/null")
+
+        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+            from: dummy,
+            sourceAttributes: [.creationDate: recordedDay, .modificationDate: laterEdit],
+            now: now
+        )
+        assertNotNil(resolved, "an old creation date is reliable")
+        assertTrue(
+            abs(resolved!.timeIntervalSince(recordedDay)) < 1,
+            "the earliest reliable timestamp should win"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer ignores a copy-time creation date but keeps a preserved mtime") {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let copyTime = now.addingTimeInterval(-5)
+        let originalRecording = now.addingTimeInterval(-30 * 86_400)
+        let dummy = URL(fileURLWithPath: "/dev/null")
+
+        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+            from: dummy,
+            sourceAttributes: [.creationDate: copyTime, .modificationDate: originalRecording],
+            now: now
+        )
+        assertNotNil(resolved, "a preserved modification date is still usable")
+        assertTrue(
+            abs(resolved!.timeIntervalSince(originalRecording)) < 1,
+            "a copy-time creation date must not win over the preserved recording time"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer reports no reliable date when every timestamp is the import act") {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let dummy = URL(fileURLWithPath: "/dev/null")
+
+        let resolved = MeetingImportedAudioPreparer.reliableFilesystemDate(
+            from: dummy,
+            sourceAttributes: [
+                .creationDate: now.addingTimeInterval(-3),
+                .modificationDate: now.addingTimeInterval(-1)
+            ],
+            now: now
+        )
+        assertNil(
+            resolved,
+            "a freshly downloaded file has no reliable source date, so the caller falls back to the import date"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer rejects implausible embedded dates") {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        assertTrue(
+            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(-30 * 86_400), now: now),
+            "a recent embedded recording date is plausible"
+        )
+        assertTrue(
+            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(30), now: now),
+            "minor forward clock skew should still be accepted"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: 0), now: now),
+            "the 1970 Unix epoch is a sentinel, not a recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(Date(timeIntervalSince1970: -2_082_844_800), now: now),
+            "the 1904 QuickTime epoch is a sentinel, not a recording date"
+        )
+        assertFalse(
+            MeetingImportedAudioPreparer.isPlausibleEmbeddedDate(now.addingTimeInterval(3_600), now: now),
+            "a date an hour in the future is never a real recording time"
+        )
+    }
+
+    await runSuite("MeetingImportedAudioPreparer prefers a preserved recording time over the copy date end-to-end") {
+        let root = temporaryImportAudioPreparerRoot()
+        let sourceURL = root.appendingPathComponent("Downloaded_Call.wav")
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let originalRecording = Date().addingTimeInterval(-45 * 86_400)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: Data([0, 1, 2, 3]))
+        try! FileManager.default.setAttributes(
+            [
+                .creationDate: Date(),
+                .modificationDate: originalRecording,
+                .posixPermissions: 0o644
+            ],
+            ofItemAtPath: sourceURL.path
+        )
+
+        let prepared = try! await MeetingImportedAudioPreparer.prepareImportedAudio(
+            from: sourceURL,
+            scratchDirectory: scratchURL
+        )
+
+        assertTrue(
+            abs(prepared.recordingDate.timeIntervalSince(originalRecording)) < 2,
+            "imported audio should use the preserved recording time, not the copy/download date"
+        )
+    }
 }
 
 private func assertImportedAudioPreparationError(
