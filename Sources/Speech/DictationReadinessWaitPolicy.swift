@@ -14,11 +14,13 @@ enum DictationReadinessWaitAction: Equatable {
 
 struct DictationReadinessWaitPolicy {
     private static let refreshesBeforeRecoveryStart = 4
+    private static let startFailuresBeforeForcedRecovery = 3
     private static let maxRecoveryStartAttempts = 2
 
     static func action(
         isRecovering: Bool,
         inputFormatReady: Bool,
+        readyStartFailures: Int = 0,
         readinessRefreshes: Int = 0,
         forcedRecoveryAttempts: Int = 0,
         forcedRecoveryRefreshThreshold: Int = TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
@@ -31,6 +33,11 @@ struct DictationReadinessWaitPolicy {
         }
 
         if inputFormatReady {
+            let nextForcedRecoveryThreshold = startFailuresBeforeForcedRecovery * (forcedRecoveryAttempts + 1)
+            if readyStartFailures >= nextForcedRecoveryThreshold,
+               forcedRecoveryAttempts < maxForcedRecoveryAttempts {
+                return .forceInputRecovery
+            }
             return .startRecording
         }
 
