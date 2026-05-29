@@ -50,6 +50,16 @@ enum MeetingImportedAudioPreparationError: LocalizedError, Equatable {
 }
 
 enum MeetingImportedAudioPreparer {
+    /// A source timestamp within this window of the import is treated as the copy
+    /// or download act rather than the original recording time (issue #850).
+    static let copyDetectionWindow: TimeInterval = 120
+
+    /// Embedded dates before this are treated as malformed/sentinel values — e.g.
+    /// the 1904 QuickTime epoch or the 1970 Unix epoch written by buggy encoders —
+    /// rather than real recording times (issue #850). 1990-01-01 UTC predates any
+    /// consumer digital recorder that embeds creation metadata.
+    static let earliestPlausibleRecordingDate = Date(timeIntervalSince1970: 631_152_000)
+
     static func prepareImportedAudio(
         from sourceURL: URL,
         scratchDirectory: URL = MeetingStoragePaths.recordingsScratch
@@ -128,25 +138,66 @@ enum MeetingImportedAudioPreparer {
 
     private static func recordingDate(
         from sourceURL: URL,
-        sourceAttributes: [FileAttributeKey: Any]
+        sourceAttributes: [FileAttributeKey: Any],
+        now: Date = Date()
     ) async -> Date {
-        if let embeddedDate = await embeddedRecordingDate(from: sourceURL) {
+        // Prefer a date the recorder embedded in the file: it describes when the
+        // audio was actually captured, which is what an imported note should show.
+        // Ignore implausible dates (future, or sentinel/zero values) so a bogus tag
+        // never becomes the note date — fall through to the file system instead.
+        if let embeddedDate = await embeddedRecordingDate(from: sourceURL),
+           isPlausibleEmbeddedDate(embeddedDate, now: now) {
             return embeddedDate
         }
 
+        // Otherwise fall back to the source file's own timestamps, but only when
+        // they look like the original recording rather than a copy or download.
+        if let filesystemDate = reliableFilesystemDate(
+            from: sourceURL,
+            sourceAttributes: sourceAttributes,
+            now: now
+        ) {
+            return filesystemDate
+        }
+
+        // Last resort (issue #850): creation date unavailable or unreliable, so
+        // use the import time.
+        return now
+    }
+
+    /// Whether an embedded recording date looks like a real capture time. Rejects
+    /// sentinel/zero dates written by buggy encoders and anything in the future, so
+    /// the resolver falls through to the file system rather than stamping the note
+    /// with a bogus date (issue #850).
+    static func isPlausibleEmbeddedDate(_ date: Date, now: Date) -> Bool {
+        date >= earliestPlausibleRecordingDate
+            && date.timeIntervalSince(now) <= copyDetectionWindow
+    }
+
+    /// Best file-system estimate of when the source audio was recorded. Copies,
+    /// downloads, and AirDrops only ever push a file's timestamps forward, so the
+    /// earliest timestamp is the closest lower bound on the original recording.
+    /// Any timestamp inside the import window is the copy act itself and is
+    /// discarded as unreliable (issue #850).
+    static func reliableFilesystemDate(
+        from sourceURL: URL,
+        sourceAttributes: [FileAttributeKey: Any],
+        now: Date
+    ) -> Date? {
+        var candidates: [Date] = []
         if let creationDate = sourceAttributes[.creationDate] as? Date {
-            return creationDate
+            candidates.append(creationDate)
+        } else if let resourceDate = try? sourceURL
+            .resourceValues(forKeys: [.creationDateKey]).creationDate {
+            candidates.append(resourceDate)
         }
-
-        if let resourceDate = try? sourceURL.resourceValues(forKeys: [.creationDateKey]).creationDate {
-            return resourceDate
-        }
-
         if let modificationDate = sourceAttributes[.modificationDate] as? Date {
-            return modificationDate
+            candidates.append(modificationDate)
         }
 
-        return Date()
+        return candidates
+            .filter { now.timeIntervalSince($0) >= copyDetectionWindow }
+            .min()
     }
 
     private static func embeddedRecordingDate(from sourceURL: URL) async -> Date? {
@@ -161,32 +212,83 @@ enum MeetingImportedAudioPreparer {
         }
 
         let metadata = (try? await asset.load(.metadata)) ?? []
-        var dates: [Date] = []
-        for item in metadata where isRecordingDateMetadata(item) {
-            if let date = await metadataDate(item) {
-                dates.append(date)
+        var best: (priority: Int, date: Date)?
+        for item in metadata {
+            let keyString = metadataKeyString(for: item)
+            guard isRecordingDateMetadata(keyString: keyString),
+                  let date = await metadataDate(item) else { continue }
+            let priority = recordingDatePriority(forKeyString: keyString)
+            // Prefer the most explicit creation/recording tag. Earlier code took
+            // the globally earliest matched date, which let a stray tag win.
+            if let current = best {
+                if priority < current.priority
+                    || (priority == current.priority && date < current.date) {
+                    best = (priority, date)
+                }
+            } else {
+                best = (priority, date)
             }
         }
-        return dates.sorted().first
+        return best?.date
     }
 
-    private static func isRecordingDateMetadata(_ item: AVMetadataItem) -> Bool {
-        let fields = [
+    /// Lowercased identifier/key text used to classify a metadata item.
+    static func metadataKeyString(for item: AVMetadataItem) -> String {
+        [
             item.identifier?.rawValue,
             item.commonKey?.rawValue,
             item.keySpace?.rawValue,
             item.key.map { String(describing: $0) }
         ]
-        let joined = fields
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
+        .compactMap { $0 }
+        .joined(separator: " ")
+        .lowercased()
+    }
 
-        return joined.contains("creation")
-            || joined.contains("created")
-            || joined.contains("recorded")
-            || joined.contains("recordingdate")
-            || joined.contains("date")
+    static func isRecordingDateMetadata(_ item: AVMetadataItem) -> Bool {
+        isRecordingDateMetadata(keyString: metadataKeyString(for: item))
+    }
+
+    /// True only for metadata that records when the audio was captured. Dates that
+    /// describe something else — store purchase, encode/tagging time, release or
+    /// album date — are rejected so they can never become the note date (#850).
+    static func isRecordingDateMetadata(keyString: String) -> Bool {
+        let nonRecordingMarkers = [
+            "purchase",   // iTunes purchaseDate
+            "encod",      // encodedBy / encodingTime / TENC / TSSE
+            "tagging",    // TDTG tagging time
+            "release",    // TDRL / TDOR / originalReleaseTime / albumReleaseDate
+            "publish",
+            "album",
+            "modif"       // modification date
+        ]
+        if nonRecordingMarkers.contains(where: keyString.contains) {
+            return false
+        }
+
+        let recordingMarkers = [
+            "creationdate",
+            "creation",
+            "created",
+            "recordingdate",
+            "recordingtime",
+            "recorded",
+            "tdrc"        // ID3v2.4 recording time
+        ]
+        return recordingMarkers.contains(where: keyString.contains)
+    }
+
+    /// Ranks recording-date metadata so an explicit creation tag wins over a looser
+    /// recording tag, and both win over anything generic. Lower is better.
+    static func recordingDatePriority(forKeyString keyString: String) -> Int {
+        if keyString.contains("creation") || keyString.contains("created") {
+            return 0
+        }
+        if keyString.contains("recording") || keyString.contains("recorded")
+            || keyString.contains("tdrc") {
+            return 1
+        }
+        return 2
     }
 
     static func metadataDate(

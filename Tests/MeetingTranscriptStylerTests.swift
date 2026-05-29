@@ -16,6 +16,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
         testMeetingTranscriptStylerRestrictsRewrittenTranscript()
+        testMeetingTranscriptStylerPreservesImportedRecordingDate()
     }
 }
 
@@ -81,6 +82,34 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
     assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
     assertEqual(styled.url.lastPathComponent, "Customer Interview April.md", "Explicit titles should drive the final transcript filename")
     assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
+}
+
+private func testMeetingTranscriptStylerPreservesImportedRecordingDate() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // The styler renames an imported note off its Call_<date> stem to a title
+    // stem. It must not drop or rewrite the recording date carried in the front
+    // matter — preserving that source date end-to-end is the point of issue #850.
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleImportedTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updatedMarkdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+
+    assertEqual(
+        styled.url.lastPathComponent,
+        "Customer Interview April.md",
+        "Imported notes should still be renamed to their explicit title"
+    )
+    assertTrue(
+        updatedMarkdown.contains("date: \"2026-04-07\""),
+        "Restyling must preserve the imported recording date in the front matter"
+    )
+    assertTrue(
+        updatedMarkdown.contains("time: \"09:14:00\""),
+        "Restyling must preserve the imported recording time in the front matter"
+    )
 }
 
 private func testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead() {
