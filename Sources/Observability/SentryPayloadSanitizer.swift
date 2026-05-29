@@ -13,6 +13,7 @@ enum SentryPayloadSanitizer {
         "email",
         "error",
         "file",
+        "identifier",
         "name",
         "password",
         "path",
