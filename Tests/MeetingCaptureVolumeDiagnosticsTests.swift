@@ -136,4 +136,77 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["quiet_mic_recovered"], "false", "normal raw mic should not be classified as a quiet-mic recovery")
         assertEqual(context["quiet_mic_unrecovered"], "false", "normal raw mic should not be classified as a quiet-mic failure")
     }
+
+    runSuite("MeetingCaptureVolumeDiagnostics classifies a scalar-drop attenuation (issue 500 Bug A)") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.30000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.200",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_dropped"], "true", "a large input scalar drop should register")
+        assertEqual(context["input_volume_scalar_available"], "true", "a readable scalar should be reported available")
+        assertEqual(context["attenuation_kind"], "scalar_drop", "quiet mic with a dropped input scalar is the WebRTC scalar-drop case")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics classifies voice-processing attenuation when the scalar held (issue 500 Bug B)") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "default_input_volume_during": "0.800",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.07000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.800",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_dropped"], "false", "a flat input scalar should not look like a drop")
+        assertEqual(context["input_volume_scalar_available"], "true", "a readable scalar should be reported available")
+        assertEqual(context["attenuation_kind"], "voice_processed", "quiet mic with an unchanged input scalar is the voice-processing case")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics still classifies voice processing when the scalar is unreadable") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "unavailable",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.07000",
+            ],
+            afterStopContext: [:]
+        )
+
+        assertEqual(context["input_volume_scalar_available"], "false", "an unreadable scalar should be reported unavailable")
+        assertEqual(context["attenuation_kind"], "voice_processed", "a quiet mic with no visible scalar drop is still the voice-processing case")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics reports no attenuation for a healthy mic") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "mic_raw_peak": "0.18000",
+                "mic_processed_peak": "0.25000",
+            ],
+            afterStopContext: [:]
+        )
+
+        assertEqual(context["attenuation_kind"], "none", "a normal-level mic should not be flagged as attenuated")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics reports unavailable attenuation without mic peaks") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_output_volume_before": "0.740",
+                "default_output_volume_during": "0.740",
+            ],
+            afterStopContext: [:]
+        )
+
+        assertEqual(context["attenuation_kind"], "unavailable", "missing mic peaks should not become false attenuation confidence")
+    }
 }

@@ -9,7 +9,9 @@ struct AnalyticsEventPolicy: Equatable {
     }
 
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
+        "attenuation_kind",
         "buffer_success_bucket",
+        "captured_input_volume_during",
         "default_input_volume_after",
         "default_input_volume_before",
         "default_input_volume_changed",
@@ -29,6 +31,7 @@ struct AnalyticsEventPolicy: Equatable {
         "input_channels",
         "input_device_class",
         "input_rate_hz",
+        "input_volume_scalar_available",
         "mic_processing",
         "mic_processed_peak",
         "mic_raw_peak",
