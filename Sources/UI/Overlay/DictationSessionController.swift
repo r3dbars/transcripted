@@ -334,6 +334,7 @@ class DictationSessionController: ObservableObject {
         let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
+        var readyStartFailures = 0
         var recoveryStartAttempts = 0
         var readinessRefreshes = 0
         var forcedReadinessRecoveries = 0
@@ -393,6 +394,7 @@ class DictationSessionController: ObservableObject {
             switch DictationReadinessWaitPolicy.action(
                 isRecovering: isRecovering,
                 inputFormatReady: inputFormatReady,
+                readyStartFailures: readyStartFailures,
                 readinessRefreshes: readinessRefreshes,
                 forcedRecoveryAttempts: forcedReadinessRecoveries,
                 recoveryStartAttempts: recoveryStartAttempts,
@@ -508,6 +510,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
 
+                readyStartFailures += 1
                 DiagnosticsTrail.record(
                     logger: appState.logger,
                     level: .warning,
