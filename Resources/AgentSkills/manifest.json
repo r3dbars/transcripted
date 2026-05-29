@@ -21,10 +21,10 @@
     {
       "id": "transcripted-live-meeting",
       "display_name": "Live Meeting",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "status": "experimental",
       "path": "transcripted-live-meeting/SKILL.md",
-      "description": "Watch a provisional live meeting sidecar, then switch to the final saved Markdown."
+      "description": "Answer from a local live meeting sidecar, then switch to the final saved Markdown."
     }
   ],
   "iteration": {

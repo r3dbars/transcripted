@@ -155,6 +155,7 @@ final class LiveMeetingCodexSession {
         if !fileManager.fileExists(atPath: liveTranscriptURL.path) {
             try writeTextIfChanged(idleTranscriptText(), to: liveTranscriptURL)
         }
+        try rewriteLiveTranscriptStatus(state.status.rawValue)
 
         try syncHandoffWithState(fallbackDate: createdAt)
         try writePreview()
@@ -213,16 +214,19 @@ final class LiveMeetingCodexSession {
             case .stopped:
                 state.streamingBackendStatus = "local_streaming_asr_stopped"
                 state.note = "Recording stopped. Waiting for Transcripted to finish and save the final meeting Markdown."
+                try rewriteLiveTranscriptStatus(status.rawValue)
                 try appendText("\nRecording stopped. Waiting for final Transcripted transcript.\n", to: liveTranscriptURL)
                 try writeTextIfChanged(waitingHandoffText(title: state.title, stoppedAt: date), to: handoffURL)
             case .cancelled:
                 state.streamingBackendStatus = "cancelled"
                 state.note = "Recording cancelled. No final meeting transcript will be saved for this capture."
+                try rewriteLiveTranscriptStatus(status.rawValue)
                 try appendText("\nRecording cancelled. No final transcript will be saved for this capture.\n", to: liveTranscriptURL)
                 try writeTextIfChanged(cancelledHandoffText(title: state.title, endedAt: date), to: handoffURL)
             case .failed:
                 state.streamingBackendStatus = "failed"
                 state.note = "Recording ended with an error. Check Transcripted for retry details."
+                try rewriteLiveTranscriptStatus(status.rawValue)
                 try appendText("\nRecording ended with an error. Check Transcripted for retry details.\n", to: liveTranscriptURL)
                 try writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
             case .idle, .recording, .transcriptSaved:
@@ -242,6 +246,7 @@ final class LiveMeetingCodexSession {
             state.updatedAt = date
             state.finalTranscriptPath = transcriptPath
             state.note = "Final Transcripted Markdown is ready. Prefer the final file for names, diarization, and durable notes."
+            try rewriteLiveTranscriptStatus(state.status.rawValue)
 
             let titleLine: String
             if let title, !title.isEmpty {
@@ -355,6 +360,21 @@ final class LiveMeetingCodexSession {
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
         fileManager.restrictFileToOwnerOnly(at: url)
+    }
+
+    private func rewriteLiveTranscriptStatus(_ status: String) throws {
+        let existing = (try? String(contentsOf: liveTranscriptURL, encoding: .utf8)) ?? idleTranscriptText()
+        var lines = existing
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+
+        if let statusIndex = lines.firstIndex(where: { $0.hasPrefix("Status: ") }) {
+            lines[statusIndex] = "Status: \(status)"
+        } else {
+            lines.insert("Status: \(status)", at: min(2, lines.count))
+        }
+
+        try writeTextIfChanged(lines.joined(separator: "\n"), to: liveTranscriptURL)
     }
 
     private func writePreview() throws {
@@ -544,9 +564,11 @@ final class LiveMeetingCodexSession {
         - Treat `live_transcript.md` as provisional while `status` is `recording`.
         - Treat `[partial]` lines as live hypotheses.
         - Keep source labels like `[Microphone]` and `[System]` in mind.
+        - If mic and system audio appear duplicated, say that plainly when it matters.
         - If `codex-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
         - Do not change Transcripted's meeting files unless the user asks.
         - Keep live answers short. Say when the live stream is too sparse to answer.
+        - Keep the workflow local. Do not ask the user to paste the transcript elsewhere.
         """
     }
 
@@ -571,6 +593,7 @@ final class LiveMeetingCodexSession {
         4. Treat `[partial]` lines as live hypotheses that may change.
         5. Once `codex-handoff.md` says `Status: ready` or `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
         6. If I ask for a live view in Codex, open \(Self.previewServerURL.absoluteString). If Transcripted is closed, fall back to `preview.html` from this folder.
+        7. Keep this local. Do not ask me to copy the transcript into another tool.
 
         Do not alter the normal Transcripted meeting output.
         """

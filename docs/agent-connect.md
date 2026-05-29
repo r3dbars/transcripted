@@ -93,6 +93,7 @@ connected, otherwise read the saved Markdown folders:
 ## Live Meeting In Codex
 
 This is an opt-in sidecar for Codex while a meeting is still recording.
+The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 
 1. Open Transcripted Settings.
 2. Go to `Agent`.
@@ -119,6 +120,9 @@ Rules:
 - after save, `codex-handoff.md` becomes the automatic marker that points Codex at the final transcript
 - once `state.json` has `finalTranscriptPath`, Codex should read that final
   Markdown for participant names, diarization, and durable notes
+- live questions should be answered locally from the current sidecar
+- if mic and system audio are duplicated, Codex should say so instead of
+  treating both as separate speakers
 
 ## Fallback Only: Web And Cowork
 

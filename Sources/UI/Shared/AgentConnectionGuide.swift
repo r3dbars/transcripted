@@ -107,8 +107,8 @@ enum AgentConnectionGuide {
         id: "transcripted-live-meeting",
         symbolName: "waveform",
         title: "Live Meeting",
-        version: "0.1.0",
-        detail: "Read a provisional live meeting sidecar, then hand off to the final saved Markdown."
+        version: "0.2.0",
+        detail: "Answer from a local live meeting sidecar, then hand off to the final saved Markdown."
     )
 
     static var agentSkillsFolder: URL {

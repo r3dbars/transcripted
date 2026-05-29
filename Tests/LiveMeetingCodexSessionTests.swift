@@ -90,6 +90,7 @@ func testLiveMeetingCodexSession() {
 
         let liveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
         assertTrue(liveText.contains("Title: Product Review"), "live transcript should include the title")
+        assertTrue(liveText.contains("Status: stopped"), "live transcript status should match stopped state")
         assertTrue(liveText.contains("**01:05** [Microphone] [partial]"), "partial mic lines should keep source label and timestamp")
         assertTrue(liveText.contains("**01:10** [System]"), "system lines should keep source label and timestamp")
         assertTrue(liveText.contains("Recording stopped"), "stop should leave a handoff note")
@@ -127,6 +128,10 @@ func testLiveMeetingCodexSession() {
 
         let updatedLiveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
         assertTrue(
+            updatedLiveText.contains("Status: transcript_saved"),
+            "live transcript status should match final saved state"
+        )
+        assertTrue(
             updatedLiveText.contains("Prefer the final file for participant names"),
             "live transcript should tell Codex to prefer the final Markdown after save"
         )
@@ -157,6 +162,15 @@ func testLiveMeetingCodexSession() {
             at: Date(timeIntervalSince1970: 1_765_994_560)
         )
         try? "stale idle marker".write(to: session.handoffURL, atomically: true, encoding: .utf8)
+        try? """
+        # Live Transcripted Meeting
+
+        Status: recording
+        Title: Recovered Meeting
+
+        ## Live Transcript
+        **00:01** [Microphone] stale but useful text
+        """.write(to: session.liveTranscriptURL, atomically: true, encoding: .utf8)
 
         let reopenedSession = LiveMeetingCodexSession(workspaceRoot: root)
         try? reopenedSession.ensureWorkspaceFiles(createdAt: Date(timeIntervalSince1970: 1_765_994_620))
@@ -164,6 +178,10 @@ func testLiveMeetingCodexSession() {
         let handoffText = (try? String(contentsOf: reopenedSession.handoffURL, encoding: .utf8)) ?? ""
         assertTrue(handoffText.contains("Status: ready"), "reopened workspace should rebuild stale handoff as ready")
         assertTrue(handoffText.contains(finalURL.path), "rebuilt handoff should keep the final transcript path")
+
+        let liveText = (try? String(contentsOf: reopenedSession.liveTranscriptURL, encoding: .utf8)) ?? ""
+        assertTrue(liveText.contains("Status: transcript_saved"), "reopened workspace should repair stale live status")
+        assertTrue(liveText.contains("stale but useful text"), "reopened workspace should keep existing live transcript text")
     }
 }
 
