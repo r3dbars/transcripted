@@ -22,6 +22,30 @@ struct ClaudeDesktopIntegrationStatus: Equatable {
     var isInstalled: Bool {
         state == .installed
     }
+
+    var attentionMessage: String? {
+        if !bundledBinaryExists {
+            return "This app build does not include Transcripted direct tools yet."
+        }
+
+        if !configIsReadable {
+            return "Claude Desktop config is not readable JSON. Install will back it up and write a clean config."
+        }
+
+        guard state == .needsRepair else {
+            return nil
+        }
+
+        if !installedBinaryExists {
+            return "Claude Desktop direct tools are missing. Install will copy a fresh helper."
+        }
+
+        if !installedBinaryMatchesBundled {
+            return "Claude Desktop is using an older Transcripted helper. Update now to replace it."
+        }
+
+        return "Claude Desktop points at another Transcripted helper. Repair will update the config."
+    }
 }
 
 struct ClaudeDesktopIntegrationInstallResult: Equatable {
