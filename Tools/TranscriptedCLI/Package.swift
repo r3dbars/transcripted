@@ -11,11 +11,13 @@ let fileManager = FileManager.default
 let depsModulesRoot = "\(repoRoot)/deps-modules"
 let depsFrameworksRoot = "\(repoRoot)/deps-frameworks"
 let depsLibsRoot = "\(repoRoot)/deps-libs"
+let enableDiarization = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_DIARIZATION"] == "1"
 let fluidAudioModuleCandidates = [
     "\(depsModulesRoot)/FluidAudio.swiftmodule",
     "\(depsModulesRoot)/FluidAudio.swiftmodule/arm64-apple-macos.swiftmodule",
 ]
-let hasDiarizationDeps = fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
+let hasDiarizationDeps = enableDiarization
+    && fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
     && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
     && fileManager.fileExists(atPath: "\(depsFrameworksRoot)/ESpeakNG.framework")
 

@@ -72,7 +72,7 @@ swift run transcripted-cli context-recent
 swift run transcripted-cli context-search "roadmap"
 swift run transcripted-cli read-meeting "Product review"
 swift run transcripted-cli list-dictations --count 5
-swift run transcripted-cli diarize /path/to/audio.wav --json
+TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1 swift run transcripted-cli diarize /path/to/audio.wav --json
 ```
 
 ## Common Retrieval Recipes
@@ -104,16 +104,17 @@ Binary path after build:
 .build/debug/transcripted-cli
 ```
 
-When the repo-level dependency bundle is missing, `swift build` still builds the
-local context commands so agent retrieval can work on a fresh checkout. The
-offline audio commands (`diarize` and `batch`) then exit with an explicit
-instruction to run `bash build-deps.sh` from the repo root before rebuilding.
+By default, `swift build` builds the local context commands without linking the
+offline diarization dependency bundle, so agent retrieval works on a fresh
+checkout. The offline audio commands (`diarize` and `batch`) then exit with an
+explicit instruction to run `bash build-deps.sh` from the repo root and rebuild
+with `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1` when diarization is needed.
 
 ## Gotchas
 
 - the context commands and the diarization commands serve different users, do not describe the whole package as diarization-only
 - direct dictation or meeting file reads should keep using `CLIPathSecurity` so filename inputs cannot escape the resolved Transcripted data roots
-- the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` first when those are missing
+- the diarization commands depend on repo-level artifacts, so run `bash build-deps.sh` and rebuild with `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1` when those are needed
 - retrieval-only commands should still build and run even when the diarization bundle is absent
 - `swift test` currently covers the agent-facing context path resolver and context-store loading behavior
 - the default context resolver prefers the app-selected capture library when Transcripted has one, then falls back to the current Transcripted capture folders, then Draft-era exports, then `~/Documents/Transcripted/`

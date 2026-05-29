@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-#if TRANSCRIPTEDCLI_WITH_DIARIZATION
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
 
 struct Batch: AsyncParsableCommand {
@@ -133,7 +133,7 @@ struct Batch: AsyncParsableCommand {
     var ext: String = "m4a"
 
     func run() async throws {
-        throw ValidationError("Offline diarization dependencies are unavailable. Run `bash build-deps.sh` from the repo root, then rebuild `transcripted-cli`.")
+        throw ValidationError("Offline diarization dependencies are unavailable. Run `bash build-deps.sh` from the repo root, then rebuild with `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1`.")
     }
 }
 #endif
