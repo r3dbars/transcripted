@@ -483,6 +483,37 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - existing Sparkle sessions do not start app-owned timeouts") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let checkBlock = sourceSlice(
+            controller,
+            from: "private func beginObservedUpdateCheckIfPossible() -> Bool",
+            to: "private func syncReadiness("
+        )
+        let existingSessionBlock = sourceSlice(
+            checkBlock,
+            from: "if updater.sessionInProgress",
+            to: "guard updater.canCheckForUpdates"
+        )
+
+        assertTrue(existingSessionBlock.contains("syncReadiness(from: updater)"), "existing Sparkle sessions should only sync visible readiness")
+        assertFalse(existingSessionBlock.contains("beginObservedUpdateCheck()"), "existing Sparkle sessions should not start a new timeout timer")
+    }
+
+    runSuite("Repo command contract - Sparkle no-update results are successful checks") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let failureKind = readRepoTextFile("Sources/Observability/UpdateFailureKind.swift")
+        let noUpdateBlock = sourceSlice(
+            controller,
+            from: "func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error)",
+            to: "func updaterDidNotFindUpdate(_ updater: SPUUpdater)"
+        )
+
+        assertTrue(noUpdateBlock.contains("UpdateFailureKind.isNoUpdateFound(error)"), "Sparkle no-update errors should be detected before failure telemetry")
+        assertTrue(noUpdateBlock.contains("markNoUpdateAvailable(from: updater)"), "Sparkle no-update errors should track up_to_date/no_change, not error")
+        assertTrue(failureKind.contains("sparkleNoUpdateErrorCode = 1001"), "SUNoUpdateError should stay mapped to Sparkle's public no-update code")
+    }
+
     runSuite("Repo command contract - Sparkle download failures include diagnostic codes") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
         let downloadFailureBlock = sourceSlice(

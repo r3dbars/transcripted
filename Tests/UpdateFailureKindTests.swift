@@ -14,6 +14,17 @@ func testUpdateFailureKind() {
         )
     }
 
+    runSuite("UpdateFailureKind detects Sparkle no-update results") {
+        let noUpdate = NSError(domain: "SUSparkleErrorDomain", code: 1001)
+        let parseFailure = NSError(domain: "SUSparkleErrorDomain", code: 1000)
+        let urlFailure = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
+
+        assertEqual(UpdateFailureKind.isNoUpdateFound(noUpdate), true, "Sparkle no-update should not count as an update failure")
+        assertEqual(UpdateFailureKind.isNoUpdateFound(parseFailure), false, "other Sparkle errors should stay actionable")
+        assertEqual(UpdateFailureKind.isNoUpdateFound(urlFailure), false, "network errors should stay actionable")
+        assertEqual(UpdateFailureKind.isNoUpdateFound(nil), false, "missing errors should not look like no-update results")
+    }
+
     runSuite("UpdateFailureKind classifies offline and unreachable network errors") {
         let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)
         let timedOut = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)
@@ -29,17 +40,17 @@ func testUpdateFailureKind() {
     runSuite("UpdateFailureKind classifies Sparkle-style text failures") {
         let badAppcast = NSError(
             domain: "SUSparkleErrorDomain",
-            code: 1001,
+            code: 1000,
             userInfo: [NSLocalizedDescriptionKey: "Could not parse appcast XML"]
         )
         let signature = NSError(
             domain: "SUSparkleErrorDomain",
-            code: 1002,
+            code: 3001,
             userInfo: [NSLocalizedDescriptionKey: "Update signature verification failed"]
         )
         let download = NSError(
             domain: "SUSparkleErrorDomain",
-            code: 1003,
+            code: 2001,
             userInfo: [NSLocalizedDescriptionKey: "Download failed before completion"]
         )
 

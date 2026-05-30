@@ -99,7 +99,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             // Sparkle recommends forcing launch-time background checks, if
             // desired, immediately after the updater has started and only when
             // automatic checks are enabled.
-            guard beginObservedUpdateCheckIfPossible(allowExistingSession: true) else { return }
+            guard beginObservedUpdateCheckIfPossible() else { return }
             updaterController.updater.checkForUpdatesInBackground()
         } else {
             refreshUpdateStatus()
@@ -112,7 +112,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return
         }
 
-        guard beginObservedUpdateCheckIfPossible(allowExistingSession: true) else { return }
+        guard beginObservedUpdateCheckIfPossible() else { return }
         updaterController.checkForUpdates(nil)
     }
 
@@ -123,7 +123,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             return
         }
 
-        guard beginObservedUpdateCheckIfPossible(allowExistingSession: false) else { return }
+        guard beginObservedUpdateCheckIfPossible() else { return }
         updaterController.updater.checkForUpdateInformation()
     }
 
@@ -170,7 +170,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         )
 
         guard updaterController.updater.automaticallyDownloadsUpdates,
-              beginObservedUpdateCheckIfPossible(allowExistingSession: false) else { return }
+              beginObservedUpdateCheckIfPossible() else { return }
         updaterController.updater.checkForUpdatesInBackground()
     }
 
@@ -217,14 +217,10 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
     }
 
-    private func beginObservedUpdateCheckIfPossible(allowExistingSession: Bool) -> Bool {
+    private func beginObservedUpdateCheckIfPossible() -> Bool {
         let updater = updaterController.updater
         if updater.sessionInProgress {
-            if allowExistingSession {
-                beginObservedUpdateCheck()
-            } else {
-                syncReadiness(from: updater)
-            }
+            syncReadiness(from: updater)
             return false
         }
 
@@ -492,6 +488,11 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        guard !UpdateFailureKind.isNoUpdateFound(error) else {
+            markNoUpdateAvailable(from: updater)
+            return
+        }
+
         markUpdateCheckFailed(from: updater, error: error)
     }
 
