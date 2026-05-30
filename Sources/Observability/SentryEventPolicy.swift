@@ -27,6 +27,8 @@ struct SentryEventPolicy: Equatable {
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
         "capture_quality",
+        "captured_input_volume_changed",
+        "captured_input_volume_dropped",
         "default_input_class",
         "default_input_volume_changed",
         "default_input_volume_dropped",

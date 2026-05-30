@@ -473,6 +473,44 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // Input volume on the device meetings actually capture from after input
+    // selection has run. This can differ from the default input on Bluetooth
+    // fallback routes.
+    private var _recordingStartCapturedInputVolume = "unavailable"
+    private var _recordingStartCapturedInputDeviceID: AudioDeviceID?
+
+    var recordingStartCapturedInputDeviceID: AudioDeviceID? {
+        routeVolumeDiagnosticsLock.lock()
+        defer { routeVolumeDiagnosticsLock.unlock() }
+        return _recordingStartCapturedInputDeviceID
+    }
+
+    func recordRecordingStartCapturedInput(deviceID: AudioDeviceID?) {
+        let volume = AudioRouteVolumeSnapshot.inputVolumeString(for: deviceID)
+        let validDeviceID = deviceID?.isValid == true ? deviceID : nil
+
+        routeVolumeDiagnosticsLock.lock()
+        defer { routeVolumeDiagnosticsLock.unlock() }
+        _recordingStartCapturedInputDeviceID = validDeviceID
+        _recordingStartCapturedInputVolume = volume
+    }
+
+    func resetRecordingStartCapturedInput() {
+        routeVolumeDiagnosticsLock.lock()
+        defer { routeVolumeDiagnosticsLock.unlock() }
+        _recordingStartCapturedInputDeviceID = nil
+        _recordingStartCapturedInputVolume = "unavailable"
+    }
+
+    func recordingStartCapturedInputVolume(matching deviceID: AudioDeviceID?) -> String {
+        guard let deviceID, deviceID.isValid else { return "unavailable" }
+
+        routeVolumeDiagnosticsLock.lock()
+        defer { routeVolumeDiagnosticsLock.unlock() }
+        guard _recordingStartCapturedInputDeviceID == deviceID else { return "unavailable" }
+        return _recordingStartCapturedInputVolume
+    }
+
     // System audio status observation
     private var systemAudioCancellable: AnyCancellable?
     // Protected by systemSilenceLock — written from callback thread, reset on main thread
@@ -735,6 +773,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSignalDiagnostics()
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
+        resetRecordingStartCapturedInput()
         resetSilenceTracking()  // Start fresh silence tracking
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking

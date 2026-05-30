@@ -71,6 +71,16 @@ enum MeetingCaptureVolumeDiagnostics {
             context["\(prefix)_volume_dropped"] = change.droppedState
         }
 
+        let capturedInputVolumeBefore = context["captured_input_volume_before"]
+        let capturedInputVolumeCurrent = context["captured_input_volume_after"] ?? context["captured_input_volume_during"]
+        let capturedInputContextPresent = capturedInputVolumeBefore != nil || capturedInputVolumeCurrent != nil
+        let capturedInputChange = volumeChange(
+            before: capturedInputVolumeBefore,
+            after: capturedInputVolumeCurrent
+        )
+        context["captured_input_volume_changed"] = capturedInputChange.changedState
+        context["captured_input_volume_dropped"] = capturedInputChange.droppedState
+
         let quietMicState = quietMicRecoveryState(
             rawPeak: context["mic_raw_peak"],
             processedPeak: context["mic_processed_peak"]
@@ -84,14 +94,23 @@ enum MeetingCaptureVolumeDiagnostics {
         // whether the hardware even exposes a readable input scalar (often
         // absent on Apple Silicon built-in mics), which is what makes the
         // scalar-drop case detectable in the first place.
-        let inputScalarAvailable = inputScalarReadable(
+        let capturedInputScalarAvailable = inputScalarReadable(
+            before: capturedInputVolumeBefore,
+            current: capturedInputVolumeCurrent
+        )
+        let defaultInputScalarAvailable = inputScalarReadable(
             before: context["default_input_volume_before"],
             current: context["default_input_volume_after"] ?? context["default_input_volume_during"]
         )
+        let inputScalarAvailable = capturedInputContextPresent ? capturedInputScalarAvailable : defaultInputScalarAvailable
         context["input_volume_scalar_available"] = inputScalarAvailable ? "true" : "false"
         context["attenuation_kind"] = attenuationKind(
             quietMic: quietMicState,
-            inputVolumeDropped: context["default_input_volume_dropped"]
+            inputVolumeDropped: selectedInputVolumeDropState(
+                captured: capturedInputChange.droppedState,
+                capturedContextPresent: capturedInputContextPresent,
+                defaultInput: context["default_input_volume_dropped"]
+            )
         )
 
         context["output_ducking_detected"] = outputDuckingState(
@@ -162,6 +181,14 @@ enum MeetingCaptureVolumeDiagnostics {
 
     private static func inputScalarReadable(before: String?, current: String?) -> Bool {
         scalarValue(before) != nil || scalarValue(current) != nil
+    }
+
+    private static func selectedInputVolumeDropState(
+        captured: String,
+        capturedContextPresent: Bool,
+        defaultInput: String?
+    ) -> String? {
+        capturedContextPresent ? captured : defaultInput
     }
 
     /// Classify which issue #500 sub-mechanism (if any) attenuated the mic on
