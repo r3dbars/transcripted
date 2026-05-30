@@ -113,7 +113,7 @@ Rule of thumb:
 - `Sources/Accessibility/CLAUDE.md`
   Focused-editor AX metadata, overlay placement, and paste-back context.
 - `Sources/Beta/CLAUDE.md`
-  Beta-build configuration and archived beta-worker boundaries.
+  Current `BETA_BUILD` shell, removed proxy-token path, and archived beta-worker handoff.
 - `Sources/Dictation/CLAUDE.md`
   Dictation persistence, daily Markdown files, and timeout helpers.
 - `Sources/Meeting/CLAUDE.md`
