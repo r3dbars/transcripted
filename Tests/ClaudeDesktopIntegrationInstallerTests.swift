@@ -107,6 +107,111 @@ func testClaudeDesktopIntegrationInstaller() {
         assertEqual(transcriptedCommandPath(inSnippet: snippet), commandPath, "snippet JSON should remain parseable when a path contains a newline")
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — writes command paths with spaces") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSpacedCommandConfigTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let backupURL = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: commandPath,
+            configURL: configURL
+        )
+
+        assertNil(backupURL, "fresh config with a spaced helper path should not create a backup")
+        assertEqual(
+            transcriptedCommandPath(inConfigAt: configURL),
+            commandPath,
+            "Claude config should preserve helper paths with spaces"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — escapes quotes and backslashes") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeQuotedCommandConfigTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let backupURL = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: commandPath,
+            configURL: configURL
+        )
+
+        assertNil(backupURL, "fresh config with escaped helper characters should not create a backup")
+        assertEqual(
+            transcriptedCommandPath(inConfigAt: configURL),
+            commandPath,
+            "Claude config should escape quotes and backslashes without changing the helper path"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — escapes newline command paths") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeNewlineCommandConfigTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let backupURL = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: commandPath,
+            configURL: configURL
+        )
+
+        assertNil(backupURL, "fresh config with an escaped newline helper path should not create a backup")
+        assertEqual(
+            transcriptedCommandPath(inConfigAt: configURL),
+            commandPath,
+            "Claude config should remain parseable when the helper path contains a newline"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — replaces stale Transcripted command safely") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeReplaceCommandConfigTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let commandPath = #"Managed "Helpers"/Transcripted Direct Tools/transcripted-mcp"#
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? """
+        {
+          "mcpServers": {
+            "notes": {
+              "command": "notes-helper"
+            },
+            "transcripted": {
+              "command": "stale-helper"
+            }
+          }
+        }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let backupURL = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: commandPath,
+            configURL: configURL
+        )
+
+        let servers = mcpServers(inConfigAt: configURL)
+        let notes = servers?["notes"] as? [String: Any]
+        assertNil(backupURL, "valid config with a stale Transcripted command should be repaired without backup")
+        assertEqual(notes?["command"] as? String, "notes-helper", "repair should preserve unrelated MCP servers")
+        assertEqual(
+            transcriptedCommandPath(inConfigAt: configURL),
+            commandPath,
+            "repair should replace the stale Transcripted helper command with an escaped path"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — creates missing config with secure permissions") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeFreshConfigTests-\(UUID().uuidString)", isDirectory: true)
