@@ -141,6 +141,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - booleans as `"true"` / `"false"`
 - coarse buckets like `10_29s`, `50_149`, `4_plus`
 - stable trigger enums like `hotkey`, `menu`, `detected_prompt`
+- retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
 

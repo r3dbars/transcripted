@@ -155,6 +155,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationStartFailed?.allowedProperties.contains("trigger"), true, "dictation start failures should preserve trigger attribution")
         assertEqual(dictationStartFailed?.allowedProperties.contains("route_shape"), true, "dictation start failures should preserve safe route shape")
         assertEqual(dictationStartFailed?.allowedProperties.contains("selection_reason"), true, "dictation start failures should preserve coarse device-selection reason")
+        assertEqual(dictationStartFailed?.allowedProperties.contains("start_attempt_bucket"), true, "dictation start failures should bucket retry-loop attempts")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -173,6 +174,8 @@ func testAnalyticsEventPolicy() {
                 "route_shape": "bluetooth_input_to_bluetooth_output",
                 "sample_flow_started": "false",
                 "selection_reason": "noBuiltInFallbackAvailable",
+                "start_attempt_bucket": "10_plus",
+                "start_attempts": "12",
                 "trigger": "hotkey",
             ],
             allowedKeys: dictationStartFailed?.allowedProperties ?? []
@@ -183,6 +186,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["route_shape"], "bluetooth_input_to_bluetooth_output", "safe route shape should survive sanitization")
         assertEqual(sanitized["hfp_suspected"], "true", "Bluetooth HFP suspicion should survive as a boolean")
         assertEqual(sanitized["sample_flow_started"], "false", "sample flow state should survive as a boolean")
+        assertEqual(sanitized["start_attempt_bucket"], "10_plus", "retry count bucket should survive sanitization")
+        assertNil(sanitized["start_attempts"], "raw retry count should stay out of analytics")
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
     }
 

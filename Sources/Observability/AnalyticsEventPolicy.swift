@@ -387,6 +387,7 @@ struct AnalyticsEventPolicy: Equatable {
             name: "dictation_start_failed",
             allowedProperties: dictationRouteDiagnosticProperties.union(Set([
                 "failure_kind",
+                "start_attempt_bucket",
                 "trigger",
             ]))
         ),
