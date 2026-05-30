@@ -818,6 +818,54 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationStatus.attentionMessage — stays quiet when installed") {
+        let status = claudeDesktopStatusFixture(state: .installed)
+
+        assertNil(status.attentionMessage, "installed Claude helper should not show a repair warning")
+    }
+
+    runSuite("ClaudeDesktopIntegrationStatus.attentionMessage — stays quiet before first install") {
+        let status = claudeDesktopStatusFixture(
+            state: .notInstalled,
+            installedBinaryExists: false,
+            configExists: false,
+            configuredCommandPath: nil
+        )
+
+        assertNil(status.attentionMessage, "fresh setup should invite install without a warning banner")
+    }
+
+    runSuite("ClaudeDesktopIntegrationStatus.attentionMessage — prioritizes missing bundled helper") {
+        let status = claudeDesktopStatusFixture(
+            state: .needsRepair,
+            bundledBinaryExists: false,
+            installedBinaryMatchesBundled: false,
+            configIsReadable: false
+        )
+
+        assertEqual(
+            status.attentionMessage,
+            "This app build does not include Transcripted direct tools yet.",
+            "missing bundled helper should be the first visible blocker"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationStatus.attentionMessage — prioritizes unreadable config before helper update") {
+        let status = claudeDesktopStatusFixture(
+            state: .needsRepair,
+            installedBinaryExists: true,
+            installedBinaryMatchesBundled: false,
+            configExists: true,
+            configIsReadable: false
+        )
+
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop config is not readable JSON. Install will back it up and write a clean config.",
+            "unreadable config should warn about backup before stale-helper repair"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — copies helper, writes config, and reads self-test") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeInstallFlowTests-\(UUID().uuidString)", isDirectory: true)
@@ -1514,6 +1562,33 @@ private func writeSelfTestHelper(
     """
     try script.write(to: url, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: url.path)
+}
+
+private func claudeDesktopStatusFixture(
+    state: ClaudeDesktopIntegrationStatus.State,
+    installedBinaryExists: Bool = true,
+    bundledBinaryExists: Bool = true,
+    installedBinaryMatchesBundled: Bool = true,
+    configExists: Bool = true,
+    configIsReadable: Bool = true,
+    claudeDesktopLikelyInstalled: Bool = true,
+    configuredCommandPath: String? = "managed-helper"
+) -> ClaudeDesktopIntegrationStatus {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("TranscriptedClaudeStatusFixture", isDirectory: true)
+    return ClaudeDesktopIntegrationStatus(
+        state: state,
+        configURL: root.appendingPathComponent("claude_desktop_config.json", isDirectory: false),
+        installedBinaryURL: root.appendingPathComponent("transcripted-mcp", isDirectory: false),
+        bundledBinaryURL: root.appendingPathComponent("bundled-transcripted-mcp", isDirectory: false),
+        configuredCommandPath: configuredCommandPath,
+        installedBinaryExists: installedBinaryExists,
+        bundledBinaryExists: bundledBinaryExists,
+        installedBinaryMatchesBundled: installedBinaryMatchesBundled,
+        configExists: configExists,
+        configIsReadable: configIsReadable,
+        claudeDesktopLikelyInstalled: claudeDesktopLikelyInstalled
+    )
 }
 
 private func mcpServers(inConfigAt configURL: URL) -> [String: Any]? {
