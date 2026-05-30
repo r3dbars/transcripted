@@ -271,6 +271,198 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — copies helper, writes config, and reads self-test") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallFlowTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":2,"dictation_file_count":3}
+        """)
+
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+
+            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "installed helper should be executable")
+            assertTrue(
+                FileManager.default.contentsEqual(atPath: bundledBinaryURL.path, andPath: installedBinaryURL.path),
+                "installed helper should match the bundled helper"
+            )
+            assertNil(result.backupURL, "fresh config should not create a backup")
+            assertEqual(result.selfTest.ok, true, "self-test should decode successful helper output")
+            assertEqual(result.selfTest.meetingFileCount, 2, "meeting count should come from helper self-test")
+            assertEqual(result.selfTest.dictationFileCount, 3, "dictation count should come from helper self-test")
+
+            let commandPath = transcriptedCommandPath(inConfigAt: configURL)
+            assertEqual(commandPath, installedBinaryURL.path, "Claude config should point at the installed helper")
+        } catch {
+            assertTrue(false, "install should succeed with an executable bundled helper: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — backs up invalid config during install") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallBackupTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "{ invalid json".write(to: configURL, atomically: true, encoding: .utf8)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":0,"dictation_file_count":0}
+        """)
+
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+
+            assertNotNil(result.backupURL, "invalid Claude config should be backed up during install")
+            if let backupURL = result.backupURL,
+               let backupContents = try? String(contentsOf: backupURL, encoding: .utf8) {
+                assertEqual(backupContents, "{ invalid json", "backup should preserve the unreadable config")
+            } else {
+                assertTrue(false, "backup file should be readable")
+            }
+            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "repaired config should point at installed helper")
+        } catch {
+            assertTrue(false, "install should repair unreadable config after backing it up: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — preserves other MCP servers") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallPreserveTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? """
+        {
+          "mcpServers": {
+            "notes": {
+              "command": "notes-helper"
+            }
+          }
+        }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":1}
+        """)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+
+            let servers = mcpServers(inConfigAt: configURL)
+            let notes = servers?["notes"] as? [String: Any]
+            assertEqual(notes?["command"] as? String, "notes-helper", "install should preserve existing MCP server entries")
+            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "install should add Transcripted server entry")
+        } catch {
+            assertTrue(false, "install should preserve valid config while adding Transcripted: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — rejects missing bundled helper without touching config") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallMissingBundleTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+            assertTrue(false, "install should reject a missing bundled helper")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(error, .bundledBinaryMissing(bundledBinaryURL), "missing bundled helper should be reported clearly")
+            assertFalse(FileManager.default.fileExists(atPath: configURL.path), "failed install should not create Claude config")
+            assertFalse(FileManager.default.fileExists(atPath: installedBinaryURL.path), "failed install should not create installed helper")
+        } catch {
+            assertTrue(false, "missing bundled helper should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — reports self-test failure") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallSelfTestFailureTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: "helper failed", exitCode: 7)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+            assertTrue(false, "install should surface helper self-test failures")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestFailed(status: 7, output: "helper failed\n"),
+                "self-test failure should include exit status and helper output"
+            )
+            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "failed self-test should still leave the copied helper for inspection")
+            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "config should show which helper failed self-test")
+        } catch {
+            assertTrue(false, "self-test failure should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL — uses Helpers bundle location only") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeBundleTests-\(UUID().uuidString)", isDirectory: true)
@@ -321,4 +513,34 @@ func testClaudeDesktopIntegrationInstaller() {
         )
         assertEqual(helpersResult?.path, helperURL.path, "Helpers location should be accepted")
     }
+}
+
+private func writeSelfTestHelper(
+    to url: URL,
+    stdout: String,
+    exitCode: Int = 0
+) throws {
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let script = """
+    #!/bin/sh
+    cat <<'EOF'
+    \(stdout)
+    EOF
+    exit \(exitCode)
+    """
+    try script.write(to: url, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: url.path)
+}
+
+private func mcpServers(inConfigAt configURL: URL) -> [String: Any]? {
+    guard let data = try? Data(contentsOf: configURL),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return root["mcpServers"] as? [String: Any]
+}
+
+private func transcriptedCommandPath(inConfigAt configURL: URL) -> String? {
+    let transcripted = mcpServers(inConfigAt: configURL)?["transcripted"] as? [String: Any]
+    return transcripted?["command"] as? String
 }
