@@ -913,6 +913,122 @@ func testClaudeDesktopIntegrationInstaller() {
         }
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — decodes current helper schema extras") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestSchemaExtrasTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: helperURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","meeting_directories":["meetings","older-meetings"],"dictation_directories":["dictations"],"index_directory":"index","meeting_file_count":0,"dictation_file_count":0}
+        """)
+
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(result.ok, "healthy helper output should be accepted")
+            assertEqual(result.meetingsDirectory, "meetings", "primary meeting directory should still decode when helper emits directory arrays")
+            assertEqual(result.dictationsDirectory, "dictations", "primary dictation directory should still decode when helper emits directory arrays")
+            assertEqual(result.meetingFileCount, 0, "empty meeting libraries should be valid")
+            assertEqual(result.dictationFileCount, 0, "empty dictation libraries should be valid")
+        } catch {
+            assertTrue(false, "current helper self-test schema should decode even with extra directory arrays: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — rejects unhealthy helper output") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestUnhealthyTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let output = #"{"ok":false,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":0,"dictation_file_count":0}"#
+        try? writeSelfTestHelper(to: helperURL, stdout: output)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(false, "self-test should reject a helper that reports ok=false")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestReportedUnhealthy(output: "\(output)\n"),
+                "ok=false self-test output should be reported as an unhealthy helper"
+            )
+            assertEqual(
+                error.errorDescription,
+                "Transcripted direct tools did not pass the local check.",
+                "unhealthy self-test output should not expose raw helper JSON to users"
+            )
+        } catch {
+            assertTrue(false, "unhealthy self-test output should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — preserves diagnostics for unhealthy helper output") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestUnhealthyDiagnosticsTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let output = #"{"ok":false,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":0}"#
+        try? writeSelfTestHelper(to: helperURL, stdout: output, stderr: "diagnostic: index unavailable")
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(false, "self-test should reject unhealthy output even when the process exits successfully")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestReportedUnhealthy(output: "\(output)\ndiagnostic: index unavailable\n"),
+                "unhealthy self-test errors should keep helper diagnostics for debugging"
+            )
+        } catch {
+            assertTrue(false, "unhealthy self-test output should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — reports unhealthy self-test output") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallUnhealthySelfTestTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let output = #"{"ok":false,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":0,"dictation_file_count":0}"#
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: output)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+            assertTrue(false, "install should surface a helper self-test that reports ok=false")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestReportedUnhealthy(output: "\(output)\n"),
+                "install should report unhealthy self-test output from the copied helper"
+            )
+            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "unhealthy self-test should leave the copied helper for inspection")
+            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "config should show which helper reported an unhealthy self-test")
+        } catch {
+            assertTrue(false, "unhealthy install self-test output should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — rejects incomplete success payload") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeSelfTestIncompletePayloadTests-\(UUID().uuidString)", isDirectory: true)

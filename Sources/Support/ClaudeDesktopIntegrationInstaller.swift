@@ -77,6 +77,7 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
     case bundledBinaryMissing(URL?)
     case installedBinaryNotExecutable(URL)
     case selfTestFailed(status: Int32, output: String)
+    case selfTestReportedUnhealthy(output: String)
     case selfTestOutputUnreadable(String)
 
     var errorDescription: String? {
@@ -93,6 +94,8 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
             return trimmed.isEmpty
                 ? "Transcripted direct tools did not pass the local check."
                 : trimmed
+        case .selfTestReportedUnhealthy:
+            return "Transcripted direct tools did not pass the local check."
         case .selfTestOutputUnreadable:
             return "Transcripted direct tools ran, but the health check output could not be read."
         }
@@ -311,7 +314,13 @@ enum ClaudeDesktopIntegrationInstaller {
         }
 
         do {
-            return try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: stdoutData)
+            let selfTest = try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: stdoutData)
+            guard selfTest.ok else {
+                throw ClaudeDesktopIntegrationError.selfTestReportedUnhealthy(output: output)
+            }
+            return selfTest
+        } catch let error as ClaudeDesktopIntegrationError {
+            throw error
         } catch {
             throw ClaudeDesktopIntegrationError.selfTestOutputUnreadable(output)
         }
