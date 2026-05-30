@@ -682,6 +682,140 @@ func testClaudeDesktopIntegrationInstaller() {
         }
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — decodes successful helper output") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestDecodeTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: helperURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":6,"dictation_file_count":7}
+        """)
+
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(result.ok, "self-test ok flag should decode from helper JSON")
+            assertEqual(result.meetingsDirectory, "meetings", "meeting directory should decode from snake-case helper JSON")
+            assertEqual(result.dictationsDirectory, "dictations", "dictation directory should decode from snake-case helper JSON")
+            assertEqual(result.indexDirectory, "index", "index directory should decode from snake-case helper JSON")
+            assertEqual(result.meetingFileCount, 6, "meeting count should decode from helper JSON")
+            assertEqual(result.dictationFileCount, 7, "dictation count should decode from helper JSON")
+        } catch {
+            assertTrue(false, "valid helper self-test JSON should decode: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — ignores stderr on successful helper output") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestStderrSuccessTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(
+            to: helperURL,
+            stdout: """
+            {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":2}
+            """,
+            stderr: "diagnostic: helper checked local capture folders"
+        )
+
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertEqual(result.meetingFileCount, 1, "successful stderr diagnostics should not poison JSON decoding")
+            assertEqual(result.dictationFileCount, 2, "helper stdout should remain the self-test contract")
+        } catch {
+            assertTrue(false, "successful helper stderr output should be ignored: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — rejects incomplete success payload") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestIncompletePayloadTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: helperURL, stdout: #"{"ok":true}"#)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(false, "self-test should reject incomplete success JSON")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestOutputUnreadable("{\"ok\":true}\n"),
+                "partial self-test JSON should be reported as unreadable output"
+            )
+        } catch {
+            assertTrue(false, "incomplete self-test output should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — rejects non-executable helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestNonExecutableTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: helperURL.path)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(false, "self-test should refuse to launch a non-executable helper")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .installedBinaryNotExecutable(helperURL),
+                "non-executable helper should be reported before launch"
+            )
+        } catch {
+            assertTrue(false, "non-executable helper should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — includes stderr from failed helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestFailureStderrTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(
+            to: helperURL,
+            stdout: "stdout detail",
+            stderr: "stderr detail",
+            exitCode: 9
+        )
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL)
+            assertTrue(false, "self-test should surface failed helper output")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestFailed(status: 9, output: "stdout detail\nstderr detail\n"),
+                "failed helper output should include stdout and stderr"
+            )
+            assertEqual(
+                error.errorDescription,
+                "stdout detail\nstderr detail",
+                "user-facing self-test failure copy should trim combined helper output"
+            )
+        } catch {
+            assertTrue(false, "failed helper should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — rejects unreadable success output") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeSelfTestUnreadableTests-\(UUID().uuidString)", isDirectory: true)
@@ -792,14 +926,26 @@ func testClaudeDesktopIntegrationInstaller() {
 private func writeSelfTestHelper(
     to url: URL,
     stdout: String,
+    stderr: String = "",
     exitCode: Int = 0
 ) throws {
     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let script = """
+    var script = """
     #!/bin/sh
     cat <<'EOF'
     \(stdout)
     EOF
+
+    """
+    if !stderr.isEmpty {
+        script += """
+        cat >&2 <<'EOF'
+        \(stderr)
+        EOF
+
+        """
+    }
+    script += """
     exit \(exitCode)
     """
     try script.write(to: url, atomically: true, encoding: .utf8)
