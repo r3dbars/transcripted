@@ -1672,12 +1672,12 @@ def render_html(payload: dict[str, Any]) -> str:
     step_items = "\n".join(f"<li>{escape(step)}</li>" for step in payload["human_next_steps"][:4])
     safe_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["safe_to_execute"][:4])
     ignore_items_html = "\n".join(f"<li>{escape(item)}</li>" for item in payload["ignore"])
-    accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"][:4])
     recommendation_items = "\n".join(f"<li>{escape(item)}</li>" for item in payload["human_next_steps"][:4])
-    if not accomplishment_items:
-        accomplishment_items = "<li>No overnight accomplishments were captured.</li>"
     if not recommendation_items:
         recommendation_items = "<li>No human action needed right now.</li>"
+    accomplishment_items = "\n".join(f"<li>{escape(item)}</li>" for item in ceo["accomplishments"][:6])
+    if not accomplishment_items:
+        accomplishment_items = "<li>No overnight accomplishments were captured.</li>"
 
     dau_unknown = dau["current"] == "DAU unknown"
     hard_blocked_count = len(hard_blocked_lanes)
@@ -1894,6 +1894,7 @@ p {{ margin: 0; }}
 .focus-section {{ border-color: #b9c9dd; }}
 .actions-section {{ border-left: 4px solid var(--blue); }}
 .focus-section h2, .actions-section h2 {{ margin: 0 0 10px; font-size: 16px; }}
+.lead-answer {{ color: var(--ink); font-size: 16px; line-height: 1.35; margin: 0; }}
 .focus-section .plain-list {{ gap: 0; }}
 .focus-section .plain-list li {{
   background: transparent;
@@ -2094,10 +2095,7 @@ a:hover {{ text-decoration: underline; }}
 
   <section class="section focus-section">
     <h2>What happened last night</h2>
-    <ul class="plain-list">
-      <li><strong>{escape(bottom_line)}</strong></li>
-      {accomplishment_items}
-    </ul>
+    <p class="lead-answer"><strong>{escape(bottom_line)}</strong></p>
   </section>
 
   <section class="section actions-section">
@@ -2136,6 +2134,13 @@ a:hover {{ text-decoration: underline; }}
             <p>Average daily active devices: {escape(averages['last_7'])} over the last complete week.</p>
           </div>
         </div>
+      </section>
+      <section class="detail-section">
+        <header>
+          <h2>What changed</h2>
+          <p>Folded lane context for debugging, not the morning answer.</p>
+        </header>
+        <ul class="compact-list">{accomplishment_items}</ul>
       </section>
       <section class="detail-section">
         <header>
