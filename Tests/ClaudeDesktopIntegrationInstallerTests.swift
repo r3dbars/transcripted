@@ -74,6 +74,39 @@ func testClaudeDesktopIntegrationInstaller() {
         assertEqual(transcripted["command"] as? String, "/tmp/transcripted-mcp", "Transcripted command should be written after repair")
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.configSnippet — emits parseable MCP config") {
+        let commandPath = "Managed Helpers/transcripted-mcp"
+
+        let snippet = ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
+
+        assertEqual(transcriptedCommandPath(inSnippet: snippet), commandPath, "snippet should decode to the requested helper command")
+        assertEqual(mcpServerNames(inSnippet: snippet), ["transcripted"], "snippet should include only the Transcripted MCP server")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.configSnippet — preserves command paths with spaces") {
+        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
+
+        let snippet = ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
+
+        assertEqual(transcriptedCommandPath(inSnippet: snippet), commandPath, "snippet JSON should preserve spaces in helper paths")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.configSnippet — escapes quoted and backslash paths") {
+        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
+
+        let snippet = ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
+
+        assertEqual(transcriptedCommandPath(inSnippet: snippet), commandPath, "snippet JSON should escape quotes and backslashes without changing the path")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.configSnippet — escapes newline paths") {
+        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
+
+        let snippet = ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
+
+        assertEqual(transcriptedCommandPath(inSnippet: snippet), commandPath, "snippet JSON should remain parseable when a path contains a newline")
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — creates missing config with secure permissions") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeFreshConfigTests-\(UUID().uuidString)", isDirectory: true)
@@ -1110,5 +1143,22 @@ private func mcpServers(inConfigAt configURL: URL) -> [String: Any]? {
 
 private func transcriptedCommandPath(inConfigAt configURL: URL) -> String? {
     let transcripted = mcpServers(inConfigAt: configURL)?["transcripted"] as? [String: Any]
+    return transcripted?["command"] as? String
+}
+
+private func mcpServers(inSnippet snippet: String) -> [String: Any]? {
+    guard let data = snippet.data(using: .utf8),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return root["mcpServers"] as? [String: Any]
+}
+
+private func mcpServerNames(inSnippet snippet: String) -> [String] {
+    mcpServers(inSnippet: snippet)?.keys.sorted() ?? []
+}
+
+private func transcriptedCommandPath(inSnippet snippet: String) -> String? {
+    let transcripted = mcpServers(inSnippet: snippet)?["transcripted"] as? [String: Any]
     return transcripted?["command"] as? String
 }

@@ -211,15 +211,23 @@ enum ClaudeDesktopIntegrationInstaller {
     }
 
     static func configSnippet(commandPath: String = installedMCPBinaryURL.path) -> String {
-        """
-        {
-          "mcpServers": {
-            "\(serverName)": {
-              "command": "\(commandPath)"
-            }
-          }
+        let root: [String: Any] = [
+            "mcpServers": [
+                serverName: [
+                    "command": commandPath
+                ]
+            ]
+        ]
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ),
+              let snippet = String(data: data, encoding: .utf8) else {
+            return #"{"mcpServers":{"\#(serverName)":{"command":""}}}"#
         }
-        """
+
+        return snippet
     }
 
     static func installBundledBinary(
