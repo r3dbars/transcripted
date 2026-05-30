@@ -274,6 +274,168 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — stays installed with extra Transcripted server fields") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeExtraServerFieldsStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? """
+        {
+          "mcpServers": {
+            "transcripted": {
+              "args": ["--self-test"],
+              "command": "\(installedBinaryURL.path)",
+              "env": {
+                "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"
+              }
+            }
+          }
+        }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .installed, "extra server fields should not make a matching helper need repair")
+        assertEqual(status.configuredCommandPath, installedBinaryURL.path, "status should still read the Transcripted command")
+        assertNil(status.attentionMessage, "installed helper with extra fields should not show a repair warning")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — repairs malformed MCP server map") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeMalformedServerMapStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? #"{"mcpServers":["not","a","map"]}"#.write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "valid config with malformed mcpServers should need repair")
+        assertTrue(status.configIsReadable, "malformed server map should not be treated like unreadable JSON")
+        assertNil(status.configuredCommandPath, "malformed server map should not invent a command")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop points at another Transcripted helper. Repair will update the config.",
+            "malformed server map should route users to config repair"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — repairs non-object Transcripted server") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeNonObjectServerStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? #"{"mcpServers":{"transcripted":"helper"}}"#.write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "non-object Transcripted server should need repair")
+        assertNil(status.configuredCommandPath, "non-object Transcripted server should not decode a command")
+        assertTrue(status.installedBinaryMatchesBundled, "matching helper should not be treated as stale")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop points at another Transcripted helper. Repair will update the config.",
+            "non-object Transcripted server should route users to config repair"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — repairs non-string command") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeNonStringCommandStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? #"{"mcpServers":{"transcripted":{"command":["not","a","string"]}}}"#.write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "non-string command should need config repair")
+        assertNil(status.configuredCommandPath, "non-string command should not be exposed as a helper path")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop points at another Transcripted helper. Repair will update the config.",
+            "non-string command should route users to config repair"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — prompts repair when config is missing but helper exists") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeMissingConfigStatusTests-\(UUID().uuidString)", isDirectory: true)
