@@ -554,6 +554,15 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         cancelObservedUpdateCheckTimeout()
         if let error {
+            if UpdateFailureKind.isNoUpdate(error) {
+                guard !didTrackCurrentUpdateCycleFailure else { return }
+                if case .noUpdateAvailable = updateStatus.state {
+                    return
+                }
+                markNoUpdateAvailable(from: updater)
+                return
+            }
+
             guard !didTrackCurrentUpdateCycleFailure else { return }
             markUpdateCheckFailed(from: updater, error: error)
             return

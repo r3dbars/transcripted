@@ -483,6 +483,29 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sparkle no-update finish cycles stay successful") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let finishCycleBlock = sourceSlice(
+            controller,
+            from: "func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?)",
+            to: "func updaterWillRelaunchApplication"
+        )
+
+        let noUpdateCheck = finishCycleBlock.range(of: "UpdateFailureKind.isNoUpdate(error)")
+        let noUpdateHandler = finishCycleBlock.range(of: "markNoUpdateAvailable(from: updater)")
+        let failureHandler = finishCycleBlock.range(of: "markUpdateCheckFailed(from: updater, error: error)")
+
+        assertNotNil(noUpdateCheck, "Sparkle 1001 finish-cycle errors should be detected as no-update outcomes")
+        assertNotNil(noUpdateHandler, "Sparkle no-update finish cycles should use the success path")
+        assertNotNil(failureHandler, "real finish-cycle errors should still use the failure path")
+        if let noUpdateCheck, let failureHandler {
+            assertTrue(
+                noUpdateCheck.lowerBound < failureHandler.lowerBound,
+                "no-update finish cycles should be handled before the generic failure path"
+            )
+        }
+    }
+
     runSuite("Repo command contract - Sparkle download failures include diagnostic codes") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
         let downloadFailureBlock = sourceSlice(
