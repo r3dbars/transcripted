@@ -103,6 +103,146 @@ func testClaudeDesktopIntegrationInstaller() {
         assertNil(status.attentionMessage, "installed helper should not show a repair warning")
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — treats fresh helper-ready setup as not installed") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeFreshStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .notInstalled, "fresh setup with bundled helper should invite install, not repair")
+        assertFalse(status.isInstalled, "fresh setup should not be marked installed")
+        assertTrue(status.bundledBinaryExists, "status should expose that the app can install direct tools")
+        assertNil(status.configuredCommandPath, "fresh setup should not invent a configured command")
+        assertNil(status.attentionMessage, "fresh setup should not show a repair warning")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — prompts repair when config is missing but helper exists") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeMissingConfigStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "missing Claude config with an installed helper should need repair")
+        assertFalse(status.configExists, "status should expose the missing config")
+        assertTrue(status.installedBinaryMatchesBundled, "matching helper should not be treated as stale")
+        assertNotNil(status.attentionMessage, "missing config repair should be visible to the settings UI")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — treats non-executable helper as missing") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeNonExecutableStatusTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(commandPath: installedBinaryURL.path, configURL: configURL)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "non-executable helper should need repair")
+        assertFalse(status.installedBinaryExists, "non-executable helper should not count as installed")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop direct tools are missing. Install will copy a fresh helper.",
+            "non-executable helper should use the fresh-copy repair message"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — prioritizes unreadable config over stale helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeConfigPrecedenceTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "{ invalid json".write(to: configURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let status = ClaudeDesktopIntegrationInstaller.currentStatus(
+            configURL: configURL,
+            installedBinaryURL: installedBinaryURL,
+            bundledBinaryURL: bundledBinaryURL
+        )
+
+        assertEqual(status.state, .needsRepair, "unreadable config with stale helper should need repair")
+        assertFalse(status.configIsReadable, "invalid config should be marked unreadable")
+        assertFalse(status.installedBinaryMatchesBundled, "status should still expose stale helper details")
+        assertEqual(
+            status.attentionMessage,
+            "Claude Desktop config is not readable JSON. Install will back it up and write a clean config.",
+            "config repair should be the first visible action before helper replacement"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — detects stale installed helper") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeStaleHelperTests-\(UUID().uuidString)", isDirectory: true)
