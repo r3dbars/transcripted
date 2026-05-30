@@ -208,6 +208,58 @@ func testAgentConnectionGuide() {
         )
     }
 
+    runSuite("AgentConnectionGuide.mcpConfigExample — emits parseable Claude config") {
+        let configExample = AgentConnectionGuide.mcpConfigExample
+        let expectedCommandPath = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
+
+        assertEqual(
+            agentGuideTranscriptedCommandPath(inConfig: configExample),
+            expectedCommandPath,
+            "Claude setup JSON should decode to the installed helper path"
+        )
+        assertEqual(
+            agentGuideMCPServerNames(inConfig: configExample),
+            ["transcripted"],
+            "Claude setup JSON should only include Transcripted's server entry"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — preserves paths with spaces") {
+        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
+
+        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
+
+        assertEqual(
+            agentGuideTranscriptedCommandPath(inConfig: configExample),
+            commandPath,
+            "agent-facing Claude JSON should preserve helper paths with spaces"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — escapes quotes and backslashes") {
+        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
+
+        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
+
+        assertEqual(
+            agentGuideTranscriptedCommandPath(inConfig: configExample),
+            commandPath,
+            "agent-facing Claude JSON should escape quotes and backslashes without changing the path"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — escapes newline paths") {
+        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
+
+        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
+
+        assertEqual(
+            agentGuideTranscriptedCommandPath(inConfig: configExample),
+            commandPath,
+            "agent-facing Claude JSON should remain parseable when helper paths contain newlines"
+        )
+    }
+
     runSuite("AgentConnectionGuide.folderPathsText — stays computed from current storage paths") {
         let source = readAgentConnectionGuideSource()
         let folderText = AgentConnectionGuide.folderPathsText
@@ -329,4 +381,21 @@ private func readAgentConnectionGuideSource() -> String {
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent("Sources/UI/Shared/AgentConnectionGuide.swift")
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+private func agentGuideMCPServers(inConfig config: String) -> [String: Any]? {
+    guard let data = config.data(using: .utf8),
+          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    return root["mcpServers"] as? [String: Any]
+}
+
+private func agentGuideMCPServerNames(inConfig config: String) -> [String] {
+    agentGuideMCPServers(inConfig: config)?.keys.sorted() ?? []
+}
+
+private func agentGuideTranscriptedCommandPath(inConfig config: String) -> String? {
+    let transcripted = agentGuideMCPServers(inConfig: config)?["transcripted"] as? [String: Any]
+    return transcripted?["command"] as? String
 }
