@@ -131,4 +131,46 @@ func testAnalyticsReporter() {
             "large retry spikes should stay privacy-safe and dashboard-stable"
         )
     }
+
+    runSuite("AnalyticsReporter queueDepthBucket keeps empty meeting queues explicit") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(0),
+            "0",
+            "empty meeting queues should stay distinguishable from queued work"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket preserves a single queued job") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(1),
+            "1",
+            "one queued meeting job should stay visible as a single-job backlog"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket groups small meeting backlogs") {
+        assertEqual(AnalyticsReporter.queueDepthBucket(2), "2_3", "two queued meeting jobs should enter the small backlog bucket")
+        assertEqual(AnalyticsReporter.queueDepthBucket(3), "2_3", "three queued meeting jobs should stay in the small backlog bucket")
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket caps larger meeting backlogs") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(4),
+            "4_plus",
+            "four or more queued meeting jobs should be bucketed instead of exposing raw depth"
+        )
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(21),
+            "4_plus",
+            "large queued meeting backlogs should stay coarse for analytics"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket treats invalid negative depths as empty") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(-3),
+            "0",
+            "invalid negative depths should fail closed to the empty queue bucket"
+        )
+    }
 }
