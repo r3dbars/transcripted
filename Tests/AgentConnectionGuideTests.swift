@@ -224,6 +224,16 @@ func testAgentConnectionGuide() {
         )
     }
 
+    runSuite("AgentConnectionGuide.mcpConfigExample — matches installer formatter") {
+        let expectedCommandPath = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
+
+        assertEqual(
+            AgentConnectionGuide.mcpConfigExample,
+            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: expectedCommandPath),
+            "agent-facing Claude JSON should stay aligned with the installer formatter"
+        )
+    }
+
     runSuite("AgentConnectionGuide.mcpConfigExampleText — preserves paths with spaces") {
         let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
 
@@ -233,6 +243,16 @@ func testAgentConnectionGuide() {
             agentGuideTranscriptedCommandPath(inConfig: configExample),
             commandPath,
             "agent-facing Claude JSON should preserve helper paths with spaces"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for spaced paths") {
+        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
+
+        assertEqual(
+            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
+            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
+            "spaced helper paths should use the same formatter as the installer"
         )
     }
 
@@ -248,6 +268,16 @@ func testAgentConnectionGuide() {
         )
     }
 
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for escaped paths") {
+        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
+
+        assertEqual(
+            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
+            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
+            "escaped helper paths should not drift between setup copy and installer output"
+        )
+    }
+
     runSuite("AgentConnectionGuide.mcpConfigExampleText — escapes newline paths") {
         let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
 
@@ -257,6 +287,16 @@ func testAgentConnectionGuide() {
             agentGuideTranscriptedCommandPath(inConfig: configExample),
             commandPath,
             "agent-facing Claude JSON should remain parseable when helper paths contain newlines"
+        )
+    }
+
+    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for newline paths") {
+        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
+
+        assertEqual(
+            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
+            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
+            "newline helper paths should still share the installer's JSON escaping"
         )
     }
 
