@@ -31,6 +31,7 @@ class ParakeetEngine: ObservableObject {
     private var recoveredRecordingTimeline = RecordedAudioTimeline()
     private var preservingRecordingAcrossRecovery = false
     private nonisolated(unsafe) var nativeSampleRate: Double = 48000
+    private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     private let pendingSamplesLock = NSLock()
     private var pendingSamples: [Float] = []
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
@@ -1443,14 +1444,21 @@ class ParakeetEngine: ObservableObject {
 
                 if !self.didReceiveAudioSamples && frameLength > 0 {
                     self.didReceiveAudioSamples = true
+                    let startToFirstSampleMs = self.audioStartReferenceTime.map {
+                        Int((CFAbsoluteTimeGetCurrent() - $0) * 1000)
+                    }
                     Task { @MainActor in
+                        var context = [
+                            "sample_rate": "\(effectiveSampleRate)",
+                            "channels": "\(bufferFormat.channelCount)",
+                            "frames": "\(frameLength)"
+                        ]
+                        if let startToFirstSampleMs {
+                            context["start_to_first_sample_ms"] = "\(startToFirstSampleMs)"
+                        }
                         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "audio_samples_detected",
                             message: "Audio samples started flowing",
-                            context: [
-                                "sample_rate": "\(effectiveSampleRate)",
-                                "channels": "\(bufferFormat.channelCount)",
-                                "frames": "\(frameLength)"
-                            ])
+                            context: context)
                     }
                 }
 
@@ -1837,6 +1845,7 @@ class ParakeetEngine: ObservableObject {
             return false
         }
         audioStartInProgress = true
+        audioStartReferenceTime = CFAbsoluteTimeGetCurrent()
         audioGraphGeneration += 1
         var startGeneration = audioGraphGeneration
         defer {

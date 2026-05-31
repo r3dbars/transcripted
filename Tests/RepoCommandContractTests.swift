@@ -939,6 +939,14 @@ func testRepoCommandContract() {
             "performance budget should report per-stage stop latency and identify the slowest stop segment"
         )
         assertTrue(
+            contents.contains("dictation_request_to_recording_ms"),
+            "performance budget should surface true request-to-recording timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "performance budget should surface audio-flow timing when logs include it"
+        )
+        assertTrue(
             contents.contains("--stats PATH"),
             "performance budget should support optional meeting throughput stats"
         )
@@ -1053,6 +1061,14 @@ func testRepoCommandContract() {
             "fast dictation start should emit a measurable local proof event"
         )
         assertTrue(
+            fastPathBlock.contains("request_to_recording_ms"),
+            "fast dictation start should measure request-to-recording latency, not only CoreAudio start time"
+        )
+        assertTrue(
+            fastPathBlock.contains("pre_recording_overhead_ms"),
+            "fast dictation start should expose non-CoreAudio overhead for future autoeval runs"
+        )
+        assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
             "fast dictation start fallback should emit a local proof event"
         )
@@ -1097,6 +1113,14 @@ func testRepoCommandContract() {
                 && contents.contains("\"stop_to_paste_bucket\"")
                 && contents.contains("\"stop_to_done_bucket\""),
             "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
+        )
+    }
+
+    runSuite("Repo command contract - audio sample flow start stays measurable") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "audio_samples_detected should include start-to-first-buffer latency for dictation start autoevals"
         )
     }
 

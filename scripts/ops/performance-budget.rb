@@ -275,6 +275,14 @@ if options[:events_path]
       .map { |event| [event["_time"], float_or_nil(event.fetch("context", {})["start_ms"])] }
       .select { |time, value| time && value }
     dictation_fast_start_ms = dictation_fast_starts.map { |_, value| value }
+    dictation_request_to_recording_ms = events
+      .select { |event| ["dictation_recording_fast_start", "dictation_started_after_wait"].include?(event["event"]) }
+      .map { |event| float_or_nil(event.fetch("context", {})["request_to_recording_ms"]) }
+      .compact
+    dictation_start_to_first_sample_ms = events
+      .select { |event| event["event"] == "audio_samples_detected" }
+      .map { |event| float_or_nil(event.fetch("context", {})["start_to_first_sample_ms"]) }
+      .compact
     first_fast_start_time = dictation_fast_starts.map(&:first).min
     fast_start_fallback_events = if first_fast_start_time
       events.select do |event|
@@ -353,6 +361,10 @@ if options[:events_path]
       startup_p90: percentile(startup_durations, 0.90),
       dictation_fast_start_samples: dictation_fast_start_ms.length,
       dictation_fast_start_p95: percentile(dictation_fast_start_ms, 0.95),
+      dictation_request_to_recording_samples: dictation_request_to_recording_ms.length,
+      dictation_request_to_recording_p95: percentile(dictation_request_to_recording_ms, 0.95),
+      dictation_start_to_first_sample_samples: dictation_start_to_first_sample_ms.length,
+      dictation_start_to_first_sample_p95: percentile(dictation_start_to_first_sample_ms, 0.95),
       dictation_fast_start_fallback_events: fast_start_fallback_events.length,
       dictation_stop_latency_samples: dictation_stop_latency_events.length,
       dictation_stop_to_paste_p95: percentile(dictation_stop_to_paste_ms, 0.95),
@@ -427,6 +439,14 @@ if runtime_summary
   puts "Dictation fast-start samples: #{runtime_summary[:dictation_fast_start_samples]}"
   if runtime_summary[:dictation_fast_start_p95]
     puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"
+  end
+  puts "Dictation request-to-recording samples: #{runtime_summary[:dictation_request_to_recording_samples]}"
+  if runtime_summary[:dictation_request_to_recording_p95]
+    puts "Dictation request-to-recording p95: #{format("%.1fms", runtime_summary[:dictation_request_to_recording_p95])}"
+  end
+  puts "Dictation start-to-first-sample samples: #{runtime_summary[:dictation_start_to_first_sample_samples]}"
+  if runtime_summary[:dictation_start_to_first_sample_p95]
+    puts "Dictation start-to-first-sample p95: #{format("%.1fms", runtime_summary[:dictation_start_to_first_sample_p95])}"
   end
   puts "Dictation fast-start fallback/retry events: #{runtime_summary[:dictation_fast_start_fallback_events]}"
   puts "Dictation stop latency samples: #{runtime_summary[:dictation_stop_latency_samples]}"
