@@ -191,6 +191,72 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy preserves zero-attempt start failure buckets") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "microphone_permission_denied",
+                "start_attempt_bucket": "0",
+                "trigger": "menu",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["failure_kind"], "microphone_permission_denied", "permission failures should keep their normalized failure kind")
+        assertEqual(sanitized["start_attempt_bucket"], "0", "immediate failures should preserve the zero-attempt bucket")
+        assertEqual(sanitized["trigger"], "menu", "non-hotkey triggers should remain attributable")
+    }
+
+    runSuite("AnalyticsEventPolicy drops raw dictation timeout counters") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "microphone_start_timeout",
+                "forced_readiness_recoveries": "2",
+                "readiness_refreshes": "4",
+                "recovery_start_attempts": "3",
+                "start_attempt_bucket": "4_9",
+                "start_attempts": "7",
+                "trigger": "hotkey",
+                "wait_ms": "12000",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["start_attempt_bucket"], "4_9", "only the coarse retry bucket should survive")
+        assertNil(sanitized["forced_readiness_recoveries"], "raw recovery counts should stay out of analytics")
+        assertNil(sanitized["readiness_refreshes"], "raw readiness refresh counts should stay out of analytics")
+        assertNil(sanitized["recovery_start_attempts"], "raw recovery start counts should stay out of analytics")
+        assertNil(sanitized["start_attempts"], "raw retry counts should stay out of analytics")
+        assertNil(sanitized["wait_ms"], "raw wait durations should stay out of analytics")
+    }
+
+    runSuite("AnalyticsEventPolicy drops raw dictation device labels") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "audio_device": "Desk microphone",
+                "default_input_name": "Desk microphone",
+                "failure_kind": "microphone_start_timeout",
+                "input_device_class": "built_in",
+                "output_device_name": "Desk speakers",
+                "route_shape": "built_in_input_to_built_in_output",
+                "start_attempt_bucket": "2_3",
+                "trigger": "hotkey",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["input_device_class"], "built_in", "coarse input class should survive")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_built_in_output", "coarse route shape should survive")
+        assertNil(sanitized["audio_device"], "raw audio device names should stay out of analytics")
+        assertNil(sanitized["default_input_name"], "raw input names should stay out of analytics")
+        assertNil(sanitized["output_device_name"], "raw output names should stay out of analytics")
+    }
+
     runSuite("AnalyticsEventPolicy allows dictation audio route lifecycle events") {
         let changed = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_changed")
         let finished = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_recovery_finished")
