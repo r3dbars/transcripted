@@ -16,7 +16,7 @@
 - `MeetingFailureExplanation.swift` — maps meeting outcomes into retryability, artifact-retention, user-visible state, and privacy-safe telemetry fields
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
-- `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in Codex live-meeting workspace; it must not replace or mutate the normal saved meeting transcript pipeline
+- `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
 - `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
@@ -60,7 +60,7 @@
 - `MeetingPromptDetector` can prompt from either upcoming calendar events or recently active supported meeting apps (Zoom, Teams, Webex, FaceTime, plus browser-hosted providers like Google Meet).
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
-- Live Codex meeting mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
+- Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
 - `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.

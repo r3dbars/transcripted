@@ -17,6 +17,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var codexInboxSetupError: String?
     @State private var openedLiveMeetingCodexSetup = false
     @State private var openedLiveMeetingPreview = false
+    @State private var copiedLiveMeetingCoworkSetup = false
     @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
@@ -90,7 +91,7 @@ struct AgentConnectionSettingsPage: View {
                             Label("Web chats are fallback only", systemImage: "globe")
                                 .font(.subheadline.weight(.semibold))
 
-                            Text("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use them for a pasted meeting or granted folders, not full Transcripted memory.")
+                            Text("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Cowork needs the sidecar folder granted for live meetings.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -179,14 +180,19 @@ struct AgentConnectionSettingsPage: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(isOn: $liveMeetingCodexEnabled) {
-                    Label("Live meeting in Codex", systemImage: "waveform")
+                    Label("Live meeting sidecar", systemImage: "waveform")
                         .font(.subheadline.weight(.semibold))
                 }
                 .toggleStyle(.switch)
+                .onChange(of: liveMeetingCodexEnabled) { _, enabled in
+                    if enabled {
+                        prepareLiveMeetingSidecarWorkspace()
+                    }
+                }
 
                 HStack(spacing: 10) {
                     SettingsInlineActionButton(
-                        title: openedLiveMeetingCodexSetup ? "Opened Live Codex" : "Open Live Codex Room",
+                        title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
                         symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
                         tone: .accent
                     ) {
@@ -194,7 +200,15 @@ struct AgentConnectionSettingsPage: View {
                     }
 
                     SettingsInlineActionButton(
-                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Live Preview",
+                        title: copiedLiveMeetingCoworkSetup ? "Copied Cowork" : "Copy for Cowork",
+                        symbolName: copiedLiveMeetingCoworkSetup ? "checkmark" : "doc.on.doc",
+                        tone: .accent
+                    ) {
+                        copyLiveMeetingCoworkSetup()
+                    }
+
+                    SettingsInlineActionButton(
+                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Preview",
                         symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
                         tone: .accent
                     ) {
@@ -202,7 +216,7 @@ struct AgentConnectionSettingsPage: View {
                     }
                 }
 
-                Text("Codex reads the live sidecar while the meeting records. Live Preview opens the same transcript as a local page that updates in place.")
+                Text("Use the same local sidecar from Codex or Claude Cowork. Codex can open the workspace directly; Cowork gets a copied setup prompt and folder path.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -376,7 +390,38 @@ struct AgentConnectionSettingsPage: View {
                 liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
             }
         } catch {
-            liveMeetingCodexSetupError = "Could not set up Live Codex: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+        }
+    }
+
+    private func prepareLiveMeetingSidecarWorkspace() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            _ = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+        } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyLiveMeetingCoworkSetup() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
+            copiedLiveMeetingCoworkSetup = true
+            NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                copiedLiveMeetingCoworkSetup = false
+            }
+        } catch {
+            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
         }
     }
 

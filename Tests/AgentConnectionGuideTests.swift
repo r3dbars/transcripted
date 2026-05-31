@@ -295,7 +295,7 @@ func testAgentConnectionGuide() {
         let workspaceURL = workspace ?? root.appendingPathComponent(LiveMeetingCodexSession.workspaceFolderName, isDirectory: true)
 
         assertNotNil(workspace, "live meeting Codex workspace should be created")
-        assertEqual(workspaceURL.lastPathComponent, "CodexLiveMeeting", "workspace should use a shell-friendly folder name")
+        assertEqual(workspaceURL.lastPathComponent, "AgentLiveMeeting", "workspace should use a shell-friendly folder name")
         assertTrue(
             FileManager.default.fileExists(atPath: workspaceURL.appendingPathComponent("live_transcript.md").path),
             "live workspace should include live transcript file"
@@ -304,10 +304,15 @@ func testAgentConnectionGuide() {
             FileManager.default.fileExists(atPath: workspaceURL.appendingPathComponent("state.json").path),
             "live workspace should include state file"
         )
+        assertTrue(
+            FileManager.default.fileExists(atPath: workspaceURL.appendingPathComponent("agent-watcher-state.json").path),
+            "live workspace should include watcher state file"
+        )
 
         let prompt = AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL)
-        assertTrue(prompt.contains("Transcripted Live Meeting Codex Setup"), "prompt should name the live setup")
+        assertTrue(prompt.contains("Transcripted Live Meeting Sidecar Setup"), "prompt should name the live setup")
         assertTrue(prompt.contains("live_transcript.md"), "prompt should point Codex at the live transcript")
+        assertTrue(prompt.contains("agent-watcher-state.json"), "prompt should point agents at watcher state")
         assertTrue(prompt.contains("preview.html"), "prompt should point Codex at the live preview")
         assertTrue(
             prompt.contains("http://127.0.0.1:47834/live-preview"),
@@ -333,6 +338,12 @@ func testAgentConnectionGuide() {
             queryItems.first { $0.name == "prompt" }?.value?.contains(LiveMeetingCodexSession.setupFilename) == true,
             "live setup prompt should point at the setup file"
         )
+
+        let coworkPrompt = AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL)
+        assertTrue(coworkPrompt.contains("Transcripted Live Meeting Cowork Setup"), "Cowork setup should be named clearly")
+        assertTrue(coworkPrompt.contains(workspaceURL.path), "Cowork setup should include the workspace path")
+        assertTrue(coworkPrompt.contains("agent-watcher-state.json"), "Cowork setup should suppress repeated handled transcripts")
+        assertTrue(coworkPrompt.contains("grant that folder"), "Cowork setup should explain folder access when blocked")
     }
 
     runSuite("AgentConnectionGuide.portableMeetingBundle — embeds meeting and skills for any chat") {

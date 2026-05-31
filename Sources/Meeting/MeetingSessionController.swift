@@ -1458,7 +1458,7 @@ final class MeetingSessionController: ObservableObject {
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_started",
-                message: "Live Codex meeting sidecar started",
+                message: "Live meeting sidecar started",
                 context: baseDiagnosticsContext(
                     extra: [
                         "live_backend_status": backendStatus,
@@ -1475,7 +1475,7 @@ final class MeetingSessionController: ObservableObject {
                 level: .warning,
                 engine: "meeting",
                 event: "live_codex_session_start_failed",
-                message: "Live Codex meeting sidecar could not start",
+                message: "Live meeting sidecar could not start",
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
         }
@@ -1504,7 +1504,7 @@ final class MeetingSessionController: ObservableObject {
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_finished",
-                message: "Live Codex meeting sidecar finished recording",
+                message: "Live meeting sidecar finished recording",
                 context: baseDiagnosticsContext(
                     extra: [
                         "live_codex_status": status.rawValue,
@@ -1520,7 +1520,7 @@ final class MeetingSessionController: ObservableObject {
                 level: .warning,
                 engine: "meeting",
                 event: "live_codex_session_finish_failed",
-                message: "Live Codex meeting sidecar could not finish",
+                message: "Live meeting sidecar could not finish",
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
         }
@@ -1536,7 +1536,7 @@ final class MeetingSessionController: ObservableObject {
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "live_codex_session_final_transcript_attached",
-                message: "Live Codex meeting sidecar attached the final transcript path",
+                message: "Live meeting sidecar attached the final transcript path",
                 context: baseDiagnosticsContext()
             )
         } catch {
@@ -1546,7 +1546,7 @@ final class MeetingSessionController: ObservableObject {
                 level: .warning,
                 engine: "meeting",
                 event: "live_codex_session_final_transcript_attach_failed",
-                message: "Live Codex meeting sidecar could not attach the final transcript path",
+                message: "Live meeting sidecar could not attach the final transcript path",
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
         }

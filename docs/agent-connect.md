@@ -90,25 +90,26 @@ connected, otherwise read the saved Markdown folders:
 ~/Library/Application Support/Transcripted/captures/dictations
 ```
 
-## Live Meeting In Codex
+## Live Meeting Sidecar
 
-This is an opt-in sidecar for Codex while a meeting is still recording.
+This is an opt-in sidecar for Codex or Claude Cowork while a meeting is still recording.
 The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 
 1. Open Transcripted Settings.
 2. Go to `Agent`.
-3. Turn on `Live meeting in Codex`.
-4. Click `Open Live Codex Room`.
-5. Click `Open Live Preview` if you want a live transcript page, or open `http://127.0.0.1:47834/live-preview` in Codex's in-app browser.
+3. Turn on `Live meeting sidecar`.
+4. Click `Open in Codex`, or click `Copy for Cowork` and paste that setup prompt into Claude Cowork.
+5. Click `Open Preview` if you want a live transcript page, or open `http://127.0.0.1:47834/live-preview` in Codex's in-app browser.
 
 Transcripted creates:
 
 ```text
-~/Library/Application Support/Transcripted/CodexLiveMeeting/
+~/Library/Application Support/Transcripted/AgentLiveMeeting/
 ```
 
-The folder contains `state.json`, `live_transcript.md`, `codex-handoff.md`,
-`codex-live-meeting.md`, and `preview.html`. While Transcripted is running, the
+The folder contains `state.json`, `live_transcript.md`, `agent-handoff.md`,
+`agent-watcher-state.json`, `agent-live-meeting.md`, and `preview.html`.
+While Transcripted is running, the
 same preview updates in place at
 `http://127.0.0.1:47834/live-preview`.
 
@@ -117,14 +118,16 @@ Rules:
 - the live sidecar is provisional
 - `[partial]` lines are live streaming ASR hypotheses and may change
 - the normal meeting Markdown still saves after stop
-- after save, `codex-handoff.md` becomes the automatic marker that points Codex at the final transcript
-- once `state.json` has `finalTranscriptPath`, Codex should read that final
+- after save, `agent-handoff.md` becomes the automatic marker that points the agent at the final transcript
+- once `state.json` has `finalTranscriptPath`, the agent should read that final
   Markdown for participant names, diarization, and durable notes
+- before a watcher wakes the user about a ready final transcript, it should check
+  `agent-watcher-state.json` and stay quiet if the final path was already handled
 - live questions should be answered locally from the current sidecar
-- if mic and system audio are duplicated, Codex should say so instead of
+- if mic and system audio are duplicated, the agent should say so instead of
   treating both as separate speakers
 
-## Fallback Only: Web And Cowork
+## Fallback Only: Web Chat
 
 Do not present web chat as a main setup path.
 
@@ -132,7 +135,6 @@ This includes:
 
 - Claude web
 - ChatGPT web
-- Cowork or shared browser sessions
 - mobile chats
 
 These are usually a bad full-library experience because the chat cannot

@@ -29,6 +29,10 @@ func testLiveMeetingCodexSession() {
             FileManager.default.fileExists(atPath: session.handoffURL.path),
             "workspace should include automatic Codex handoff marker"
         )
+        assertTrue(
+            FileManager.default.fileExists(atPath: session.watcherStateURL.path),
+            "workspace should include agent watcher state"
+        )
 
         let state = decodeLiveMeetingCodexState(at: session.stateURL)
         assertEqual(state?.status, .idle, "new workspace should start idle")
@@ -54,6 +58,11 @@ func testLiveMeetingCodexSession() {
         assertFalse(previewText.contains("navigator.clipboard.writeText"), "preview should not require manual prompt copying")
         let handoffText = (try? String(contentsOf: session.handoffURL, encoding: .utf8)) ?? ""
         assertTrue(handoffText.contains("Status: idle"), "new handoff marker should start idle")
+        let watcherStateText = (try? String(contentsOf: session.watcherStateURL, encoding: .utf8)) ?? ""
+        assertTrue(
+            watcherStateText.contains("\"lastHandledFinalTranscriptPath\": null"),
+            "watcher state should start without a handled final transcript"
+        )
         assertEqual(
             LiveMeetingCodexSession.previewServerURL.absoluteString,
             "http://127.0.0.1:47834/live-preview",
@@ -130,6 +139,10 @@ func testLiveMeetingCodexSession() {
             handoffText.contains("Read the final transcript path above"),
             "handoff marker should tell Codex to read the final transcript automatically"
         )
+        assertTrue(
+            handoffText.contains("agent-watcher-state.json"),
+            "handoff marker should tell agents how to avoid repeated old transcript wakeups"
+        )
 
         let updatedLiveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
         assertTrue(
@@ -168,6 +181,14 @@ func testLiveMeetingCodexSession() {
         )
         try? "stale idle marker".write(to: session.handoffURL, atomically: true, encoding: .utf8)
         try? """
+        {
+          "version": 1,
+          "lastHandledFinalTranscriptPath": "\(finalURL.path)",
+          "lastHandledAt": "2025-12-18T10:04:20Z",
+          "note": "already handled"
+        }
+        """.write(to: session.watcherStateURL, atomically: true, encoding: .utf8)
+        try? """
         # Live Transcripted Meeting
 
         Status: recording
@@ -187,6 +208,9 @@ func testLiveMeetingCodexSession() {
         let liveText = (try? String(contentsOf: reopenedSession.liveTranscriptURL, encoding: .utf8)) ?? ""
         assertTrue(liveText.contains("Status: transcript_saved"), "reopened workspace should repair stale live status")
         assertTrue(liveText.contains("stale but useful text"), "reopened workspace should keep existing live transcript text")
+
+        let watcherStateText = (try? String(contentsOf: reopenedSession.watcherStateURL, encoding: .utf8)) ?? ""
+        assertTrue(watcherStateText.contains("already handled"), "reopened workspace should preserve agent watcher state")
     }
 }
 

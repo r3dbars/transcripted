@@ -107,8 +107,8 @@ enum AgentConnectionGuide {
         id: "transcripted-live-meeting",
         symbolName: "waveform",
         title: "Live Meeting",
-        version: "0.2.0",
-        detail: "Answer from a local live meeting sidecar, then hand off to the final saved Markdown."
+        version: "0.2.1",
+        detail: "Answer from a local live meeting sidecar in Codex or Cowork, then hand off to the final saved Markdown."
     )
 
     static var agentSkillsFolder: URL {
@@ -319,15 +319,17 @@ enum AgentConnectionGuide {
     static func liveMeetingCodexSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
         let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
         return """
-        # Transcripted Live Meeting Codex Setup
+        # Transcripted Live Meeting Sidecar Setup
 
-        Set this Codex thread up as my live Transcripted meeting room.
+        Set this agent chat up as my live Transcripted meeting room.
 
         Local paths:
         - Workspace: \(workspaceURL.standardizedFileURL.path)
         - Setup prompt file: \(session.setupURL.path)
         - Live transcript: \(session.liveTranscriptURL.path)
         - State file: \(session.stateURL.path)
+        - Handoff file: \(session.handoffURL.path)
+        - Watcher state: \(session.watcherStateURL.path)
         - Preview: \(session.previewURL.path)
         - Codex browser preview: \(LiveMeetingCodexSession.previewServerURL.absoluteString)
 
@@ -336,12 +338,44 @@ enum AgentConnectionGuide {
         - Treat live text as provisional and source-labeled.
         - Treat `[partial]` lines as live ASR hypotheses that may change.
         - If `finalTranscriptPath` exists in `state.json`, read that final Markdown and prefer it for speaker names, diarization, quotes, decisions, and durable notes.
+        - Before waking me about a ready final transcript, check `agent-watcher-state.json`. Stay quiet if `lastHandledFinalTranscriptPath` already matches.
+        - After handling a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
         - Do not change Transcripted's normal meeting output.
         - Keep live answers short and say when the stream is too sparse to answer.
         - For a live transcript panel in Codex, open \(LiveMeetingCodexSession.previewServerURL.absoluteString) while Transcripted is running.
 
         Skill:
         - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)
+        """
+    }
+
+    static func liveMeetingCoworkSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
+        return """
+        # Transcripted Live Meeting Cowork Setup
+
+        Use Claude Cowork as my live Transcripted meeting room.
+
+        If you can access local folders, use this workspace:
+        \(workspaceURL.standardizedFileURL.path)
+
+        Start with:
+        - \(session.setupURL.path)
+        - \(session.stateURL.path)
+        - \(session.liveTranscriptURL.path)
+        - \(session.handoffURL.path)
+        - \(session.watcherStateURL.path)
+        - \(session.previewURL.path)
+
+        Rules:
+        - While `state.json` says `recording`, answer from `live_transcript.md`.
+        - Treat live text as provisional. `[partial]` lines may change.
+        - Preserve `[Microphone]` and `[System]` source labels when they matter.
+        - If `finalTranscriptPath` exists or `agent-handoff.md` says `Status: ready`, use the final Markdown as the source of truth.
+        - Before posting a post-meeting brief or waking me about the ready transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` already matches, stay quiet unless I ask.
+        - After handling a ready final transcript, update `agent-watcher-state.json` with the final path and current time.
+        - Do not change Transcripted's normal meeting output.
+        - If you cannot access the workspace folder, ask me to grant that folder or paste the current `live_transcript.md`.
         """
     }
 
@@ -355,7 +389,7 @@ enum AgentConnectionGuide {
         """
         I use Transcripted on my Mac.
 
-        This is fallback setup for a web chat or Cowork session.
+        This is fallback setup for a web chat or Cowork session that cannot use the live sidecar folder.
 
         I may have granted you access to my Transcripted folders in this chat. Use those granted folders first.
 

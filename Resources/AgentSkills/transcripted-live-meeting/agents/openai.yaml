@@ -1,4 +1,4 @@
 interface:
   display_name: "Live Meeting"
-  short_description: "Answer from a local live meeting sidecar, then switch to the final Markdown."
-  default_prompt: "Use this local Transcripted live meeting sidecar as my Codex meeting room. Answer from the current live transcript while recording, then switch to the final Markdown when it is ready."
+  short_description: "Answer from a local live meeting sidecar in Codex or Cowork, then switch to the final Markdown."
+  default_prompt: "Use this local Transcripted live meeting sidecar as my meeting room. Answer from the current live transcript while recording, then switch to the final Markdown when it is ready."

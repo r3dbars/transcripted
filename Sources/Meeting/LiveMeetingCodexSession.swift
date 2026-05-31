@@ -67,11 +67,12 @@ struct LiveMeetingCodexState: Codable, Equatable {
 }
 
 final class LiveMeetingCodexSession {
-    static let workspaceFolderName = "CodexLiveMeeting"
+    static let workspaceFolderName = "AgentLiveMeeting"
     static let liveTranscriptFilename = "live_transcript.md"
     static let stateFilename = "state.json"
-    static let setupFilename = "codex-live-meeting.md"
-    static let handoffFilename = "codex-handoff.md"
+    static let setupFilename = "agent-live-meeting.md"
+    static let handoffFilename = "agent-handoff.md"
+    static let watcherStateFilename = "agent-watcher-state.json"
     static let previewFilename = "preview.html"
     static let previewServerPort: UInt16 = 47834
     static let previewServerPath = "/live-preview"
@@ -109,7 +110,7 @@ final class LiveMeetingCodexSession {
                 .path,
             finalTranscriptPath: nil,
             streamingBackendStatus: "pending_local_streaming_asr_adapter",
-            note: "Live Codex sidecar is ready. Final Transcripted meeting Markdown still saves normally after recording stops."
+            note: "Live meeting sidecar is ready. Final Transcripted meeting Markdown still saves normally after recording stops."
         )
     }
 
@@ -127,6 +128,10 @@ final class LiveMeetingCodexSession {
 
     var handoffURL: URL {
         workspaceRoot.appendingPathComponent(Self.handoffFilename, isDirectory: false)
+    }
+
+    var watcherStateURL: URL {
+        workspaceRoot.appendingPathComponent(Self.watcherStateFilename, isDirectory: false)
     }
 
     var previewURL: URL {
@@ -155,6 +160,9 @@ final class LiveMeetingCodexSession {
         if !fileManager.fileExists(atPath: liveTranscriptURL.path) {
             try writeTextIfChanged(idleTranscriptText(), to: liveTranscriptURL)
         }
+        if !fileManager.fileExists(atPath: watcherStateURL.path) {
+            try writeTextIfChanged(initialWatcherStateText(), to: watcherStateURL)
+        }
         try rewriteLiveTranscriptStatus(state.status.rawValue)
 
         try syncHandoffWithState(fallbackDate: createdAt)
@@ -178,7 +186,7 @@ final class LiveMeetingCodexSession {
                 liveTranscriptPath: liveTranscriptURL.standardizedFileURL.path,
                 finalTranscriptPath: nil,
                 streamingBackendStatus: streamingBackendStatus,
-                note: "This is a provisional live sidecar for Codex. The final Transcripted Markdown is written by the normal meeting pipeline."
+                note: "This is a provisional live sidecar for agents. The final Transcripted Markdown is written by the normal meeting pipeline."
             )
 
             try writeTextIfChanged(liveTranscriptHeader(title: title, startedAt: startedAt), to: liveTranscriptURL)
@@ -402,7 +410,7 @@ final class LiveMeetingCodexSession {
 
         Status: idle
 
-        Enable Live Meeting in Codex from Transcripted Settings > Agent, then start a meeting.
+        Enable Live Meeting Sidecar from Transcripted Settings > Agent, then start a meeting.
         Transcripted will still save the normal final meeting Markdown after recording stops.
 
         """
@@ -421,7 +429,7 @@ final class LiveMeetingCodexSession {
         Status: recording\(titleLine)
         Started: \(Self.isoString(startedAt))
 
-        This file is a provisional live sidecar for Codex.
+        This file is a provisional live sidecar for agents.
         Transcripted still saves the normal final meeting Markdown after recording stops.
         Streaming backend: local Parakeet streaming ASR sidecar.
 
@@ -432,12 +440,12 @@ final class LiveMeetingCodexSession {
 
     private func idleHandoffText() -> String {
         """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: idle
 
         No finished meeting is ready yet.
-        Codex should use `live_transcript.md` only while a meeting is recording.
+        Agents should use `live_transcript.md` only while a meeting is recording.
 
         """
     }
@@ -445,14 +453,14 @@ final class LiveMeetingCodexSession {
     private func recordingHandoffText(title: String?, startedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: recording
         \(titleLine)Started: \(Self.isoString(startedAt))
         Live transcript path: \(liveTranscriptURL.path)
         State path: \(stateURL.path)
 
-        Codex should treat the live transcript as provisional until this file changes to `Status: ready`.
+        Agents should treat the live transcript as provisional until this file changes to `Status: ready`.
 
         """
     }
@@ -460,7 +468,7 @@ final class LiveMeetingCodexSession {
     private func waitingHandoffText(title: String?, stoppedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: waiting_for_final_transcript
         \(titleLine)Stopped: \(Self.isoString(stoppedAt))
@@ -475,7 +483,7 @@ final class LiveMeetingCodexSession {
     private func cancelledHandoffText(title: String?, endedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: cancelled
         \(titleLine)Ended: \(Self.isoString(endedAt))
@@ -488,7 +496,7 @@ final class LiveMeetingCodexSession {
     private func failedHandoffText(title: String?, endedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: failed
         \(titleLine)Ended: \(Self.isoString(endedAt))
@@ -501,7 +509,7 @@ final class LiveMeetingCodexSession {
     private func finalHandoffText(url: URL, title: String?, savedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
-        # Transcripted Codex Handoff
+        # Transcripted Agent Handoff
 
         Status: ready
         \(titleLine)Saved: \(Self.isoString(savedAt))
@@ -509,9 +517,11 @@ final class LiveMeetingCodexSession {
         Live transcript path: \(liveTranscriptURL.path)
         State path: \(stateURL.path)
 
-        Codex automatic behavior:
+        Agent automatic behavior:
         - Treat this file as the post-recording handoff marker.
-        - Read the final transcript path above as soon as a Codex watcher sees this file change.
+        - Read the final transcript path above as soon as a watcher sees this file change.
+        - Check `\(Self.watcherStateFilename)` before waking the user; stay quiet if `lastHandledFinalTranscriptPath` already matches this final transcript.
+        - After handling this final transcript, update `\(Self.watcherStateFilename)` with the final path and current time.
         - Use the final Markdown as canonical. Do not summarize from `live_transcript.md` once this is ready.
         - Produce a concise meeting brief with summary, decisions, action items, and next steps unless the user asks for something narrower.
 
@@ -525,23 +535,25 @@ final class LiveMeetingCodexSession {
 
     private func readmeText() -> String {
         """
-        # Transcripted Live Meeting for Codex
+        # Transcripted Live Meeting Sidecar
 
         This folder is a live sidecar workspace for an active Transcripted meeting.
 
         Files:
         - `live_transcript.md` is the provisional live transcript stream.
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
-        - `codex-handoff.md` is the automatic Codex handoff marker for the final transcript.
-        - `codex-live-meeting.md` is the setup prompt for a Codex thread.
+        - `agent-handoff.md` is the automatic handoff marker for the final transcript.
+        - `agent-watcher-state.json` is agent-owned memory for the last final transcript already handled.
+        - `agent-live-meeting.md` is the setup prompt for Codex or Claude Cowork.
         - `preview.html` is a live transcript preview snapshot. The local browser URL updates without full-page refreshes.
-        - `\(Self.previewServerURL.absoluteString)` is the Codex in-app browser preview while Transcripted is running.
+        - `\(Self.previewServerURL.absoluteString)` is the live browser preview while Transcripted is running.
 
         Important:
         - The live transcript is provisional.
         - Lines marked `[partial]` are streaming ASR hypotheses and may change.
         - The normal Transcripted meeting Markdown still saves in the capture library after stop.
-        - Once `codex-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, prefer that final Markdown for names, diarization, and durable notes.
+        - Once `agent-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, prefer that final Markdown for names, diarization, and durable notes.
+        - After an agent handles a ready final transcript, update `agent-watcher-state.json` so repeat watchers stay quiet.
 
         Workspace:
         \(workspaceRoot.path)
@@ -550,22 +562,25 @@ final class LiveMeetingCodexSession {
 
     private func agentsText() -> String {
         """
-        # Transcripted Live Meeting for Codex
+        # Transcripted Live Meeting Sidecar
 
-        You are in a Transcripted live-meeting sidecar workspace.
+        You are in a Transcripted live-meeting sidecar workspace for Codex or Claude Cowork.
 
         Start with:
         - `state.json`
         - `live_transcript.md`
-        - `codex-handoff.md`
-        - `codex-live-meeting.md`
+        - `agent-handoff.md`
+        - `agent-watcher-state.json`
+        - `agent-live-meeting.md`
 
         Rules:
         - Treat `live_transcript.md` as provisional while `status` is `recording`.
         - Treat `[partial]` lines as live hypotheses.
         - Keep source labels like `[Microphone]` and `[System]` in mind.
         - If mic and system audio appear duplicated, say that plainly when it matters.
-        - If `codex-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
+        - If `agent-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
+        - Before handling a ready final transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` matches the ready final path, stay quiet unless the user asks.
+        - After handling a ready final transcript, update `lastHandledFinalTranscriptPath` and `lastHandledAt` in `agent-watcher-state.json`.
         - Do not change Transcripted's meeting files unless the user asks.
         - Keep live answers short. Say when the live stream is too sparse to answer.
         - Keep the workflow local. Do not ask the user to paste the transcript elsewhere.
@@ -574,15 +589,16 @@ final class LiveMeetingCodexSession {
 
     private func setupText() -> String {
         """
-        # Transcripted Live Meeting Codex Setup
+        # Transcripted Live Meeting Agent Setup
 
-        Use this Codex thread as my live Transcripted meeting room.
+        Use this agent chat as my live Transcripted meeting room.
 
         Local paths:
         - Workspace: \(workspaceRoot.path)
         - Live transcript: \(liveTranscriptURL.path)
         - State: \(stateURL.path)
         - Automatic handoff: \(handoffURL.path)
+        - Watcher state: \(watcherStateURL.path)
         - Preview: \(previewURL.path)
         - Browser preview: \(Self.previewServerURL.absoluteString)
 
@@ -591,11 +607,24 @@ final class LiveMeetingCodexSession {
         2. While status is `recording`, read `live_transcript.md` whenever I ask about the meeting.
         3. Treat live text as provisional and source-labeled.
         4. Treat `[partial]` lines as live hypotheses that may change.
-        5. Once `codex-handoff.md` says `Status: ready` or `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
-        6. If I ask for a live view in Codex, open \(Self.previewServerURL.absoluteString). If Transcripted is closed, fall back to `preview.html` from this folder.
-        7. Keep this local. Do not ask me to copy the transcript into another tool.
+        5. Once `agent-handoff.md` says `Status: ready` or `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
+        6. Before posting a post-meeting brief or waking me about the ready transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` already matches the ready final path, stay quiet unless I ask.
+        7. After you handle a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
+        8. For Codex, open \(Self.previewServerURL.absoluteString) for the live view while Transcripted is running. For Claude Cowork, use the same workspace files or `preview.html` if folder access is granted.
+        9. Keep this local. Do not ask me to copy the transcript into another tool.
 
         Do not alter the normal Transcripted meeting output.
+        """
+    }
+
+    private func initialWatcherStateText() -> String {
+        """
+        {
+          "version": 1,
+          "lastHandledFinalTranscriptPath": null,
+          "lastHandledAt": null,
+          "note": "An agent may update this file after handling a final transcript so repeat watchers stay quiet."
+        }
         """
     }
 

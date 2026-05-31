@@ -58,23 +58,25 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
 
-The opt-in Codex live-meeting sidecar writes provisional files under:
+The opt-in live-meeting sidecar for Codex or Claude Cowork writes provisional files under:
 
-- live Codex workspace: `~/Library/Application Support/Transcripted/CodexLiveMeeting/`
-- live transcript: `~/Library/Application Support/Transcripted/CodexLiveMeeting/live_transcript.md`
-- live state: `~/Library/Application Support/Transcripted/CodexLiveMeeting/state.json`
-- automatic Codex handoff: `~/Library/Application Support/Transcripted/CodexLiveMeeting/codex-handoff.md`
-- live preview file: `~/Library/Application Support/Transcripted/CodexLiveMeeting/preview.html`
-- live Codex browser preview while Transcripted is running: `http://127.0.0.1:47834/live-preview`
+- live sidecar workspace: `~/Library/Application Support/Transcripted/AgentLiveMeeting/`
+- live transcript: `~/Library/Application Support/Transcripted/AgentLiveMeeting/live_transcript.md`
+- live state: `~/Library/Application Support/Transcripted/AgentLiveMeeting/state.json`
+- automatic agent handoff: `~/Library/Application Support/Transcripted/AgentLiveMeeting/agent-handoff.md`
+- agent watcher state: `~/Library/Application Support/Transcripted/AgentLiveMeeting/agent-watcher-state.json`
+- live preview file: `~/Library/Application Support/Transcripted/AgentLiveMeeting/preview.html`
+- live browser preview while Transcripted is running: `http://127.0.0.1:47834/live-preview`
 
 These files do not replace the normal saved meeting Markdown. Once a meeting is
-saved, `codex-handoff.md` switches to `Status: ready` and `state.json` can
-point Codex at the final transcript path. Lines marked
+saved, `agent-handoff.md` switches to `Status: ready` and `state.json` can
+point the agent at the final transcript path. `agent-watcher-state.json` lets
+Codex or Cowork record the last final transcript it already handled so repeat
+watchers stay quiet. Lines marked
 `[partial]` in the live transcript are streaming ASR hypotheses, not durable
 diarized transcript output. `preview.html` is rewritten with the latest
 transcript as a direct-file snapshot. Transcripted also serves the same preview
-on loopback for Codex's in-app browser, where it updates in place without
-full-page refreshes.
+on loopback, where it updates in place without full-page refreshes.
 
 Temporary audio scratch paths live under:
 
