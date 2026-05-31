@@ -177,7 +177,10 @@ enum RecentCaptureLoader {
     static func load(
         dictationLimit: Int,
         meetingLimit: Int,
-        includeDictationCounts: Bool = false
+        includeDictationCounts: Bool = false,
+        meetingDirectory: URL? = nil,
+        dictationDirectory: URL? = nil,
+        today: Date = Date()
     ) async -> RecentCaptureSnapshot {
         let taskBox = LoadTaskBox()
 
@@ -187,18 +190,21 @@ enum RecentCaptureLoader {
                     return emptySnapshot()
                 }
 
-                let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit)
+                let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit, directory: meetingDirectory)
                 guard !Task.isCancelled else {
                     return emptySnapshot()
                 }
 
-                let dictations = DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
+                let dictations = DictationTranscriptStore.recentSavedDictations(
+                    limit: dictationLimit,
+                    directory: dictationDirectory
+                )
                 guard !Task.isCancelled else {
                     return emptySnapshot()
                 }
 
                 let dictationCounts = includeDictationCounts
-                    ? DictationTranscriptStore.savedDictationCounts()
+                    ? DictationTranscriptStore.savedDictationCounts(directory: dictationDirectory, today: today)
                     : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
 
                 guard !Task.isCancelled else {
@@ -245,10 +251,10 @@ private final class LoadTaskBox: @unchecked Sendable {
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
 
-    static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
+    static func loadRecent(limit: Int = 3, directory: URL? = nil) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }
 
-        let dir = MeetingStoragePaths.transcriptsFolder
+        let dir = directory ?? MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
 

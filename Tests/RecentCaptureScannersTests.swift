@@ -1,6 +1,6 @@
 import Foundation
 
-func testRecentCaptureScanners() {
+func testRecentCaptureScanners() async {
     runSuite("RecentMeetingSpeakerStatus.detect flags generic speaker labels") {
         let markdown = """
         # Design review
@@ -247,4 +247,170 @@ func testRecentCaptureScanners() {
             "idle saved meetings with retained audio should stay re-transcribable"
         )
     }
+
+    await runSuite("RecentCaptureLoader keeps Home dashboard loading bounded with a large local history") {
+        let fm = FileManager.default
+        let root = temporaryRecentCapturePerformanceRoot(fileManager: fm)
+        let meetingDir = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictationDir = root.appendingPathComponent("dictations", isDirectory: true)
+        let today = recentCapturePerformanceDate(year: 2026, month: 5, day: 31)
+        defer { try? fm.removeItem(at: root) }
+
+        do {
+            try fm.createDirectory(at: meetingDir, withIntermediateDirectories: true)
+            try fm.createDirectory(at: dictationDir, withIntermediateDirectories: true)
+            try writeRecentCapturePerformanceMeetings(count: 500, directory: meetingDir, fileManager: fm, today: today)
+            try writeRecentCapturePerformanceDictations(
+                dayCount: 120,
+                entriesPerDay: 3,
+                directory: dictationDir,
+                today: today
+            )
+        } catch {
+            assertTrue(false, "performance fixture setup should succeed: \(error)")
+            return
+        }
+
+        let startedAt = Date()
+        let snapshot = await RecentCaptureLoader.load(
+            dictationLimit: 5,
+            meetingLimit: 5,
+            includeDictationCounts: true,
+            meetingDirectory: meetingDir,
+            dictationDirectory: dictationDir,
+            today: today
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+        let m1FriendlyBudgetSeconds = 2.5
+
+        assertEqual(snapshot.meetings.count, 5, "Home should only prepare the visible recent meetings")
+        assertEqual(snapshot.dictations.count, 5, "Home should only prepare the visible recent dictations")
+        assertEqual(snapshot.dictationCounts.total, 360, "Home stats should still count the whole dictation history")
+        assertEqual(snapshot.dictationCounts.today, 3, "Home stats should count today's dictations")
+        assertEqual(snapshot.dictationCounts.totalWords, 2_160, "Home stats should sum dictated words")
+        assertTrue(
+            elapsed < m1FriendlyBudgetSeconds,
+            String(format: "Home recent-capture load took %.3fs, expected under %.1fs on an M1-friendly fixture", elapsed, m1FriendlyBudgetSeconds)
+        )
+    }
+}
+
+private func temporaryRecentCapturePerformanceRoot(fileManager: FileManager) -> URL {
+    fileManager.temporaryDirectory.appendingPathComponent(
+        "TranscriptedRecentCapturePerformance-\(UUID().uuidString)",
+        isDirectory: true
+    )
+}
+
+private func writeRecentCapturePerformanceMeetings(
+    count: Int,
+    directory: URL,
+    fileManager: FileManager,
+    today: Date
+) throws {
+    for index in 0..<count {
+        let recordedAt = today.addingTimeInterval(TimeInterval(-index * 60))
+        let title = String(format: "Performance Meeting %03d", index)
+        let transcript = """
+        ---
+        capture_type: meeting
+        title: "\(title)"
+        date: 2026-05-31
+        time: 10:00:00
+        duration: "12:30"
+        mic_utterances: 1
+        system_utterances: 1
+        total_word_count: 18
+        ---
+
+        ## Transcript
+
+        **00:01**  [Mic/Justin]
+        Checking the home screen load.
+
+        **00:04**  [System/Maya]
+        The settings panel should stay responsive.
+        """
+        let url = directory.appendingPathComponent(String(format: "Meeting_%03d.md", index))
+        try transcript.write(to: url, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes(
+            [
+                .creationDate: recordedAt,
+                .modificationDate: recordedAt
+            ],
+            ofItemAtPath: url.path
+        )
+    }
+}
+
+private func writeRecentCapturePerformanceDictations(
+    dayCount: Int,
+    entriesPerDay: Int,
+    directory: URL,
+    today: Date
+) throws {
+    let calendar = recentCapturePerformanceCalendar()
+    let dayFormatter = recentCaptureDayFormatter()
+    let isoFormatter = ISO8601DateFormatter()
+    isoFormatter.formatOptions = [.withInternetDateTime]
+
+    for dayOffset in 0..<dayCount {
+        guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: today) else {
+            continue
+        }
+
+        let dayString = dayFormatter.string(from: day)
+        var sections: [String] = [
+            """
+            ---
+            title: "Dictations for \(dayString)"
+            date: \(dayString)
+            capture_type: dictation_day
+            ---
+
+            # Dictations for \(dayString)
+            """
+        ]
+
+        for entryIndex in 0..<entriesPerDay {
+            let capturedAt = day.addingTimeInterval(TimeInterval(entryIndex * 600))
+            sections.append(
+                """
+                ## 10:0\(entryIndex) AM - Performance entry \(entryIndex)
+
+                Entry ID: `dictation-\(dayOffset)-\(entryIndex)`
+                Captured: \(isoFormatter.string(from: capturedAt))
+                Source app: Notes
+                Delivery: pasted
+                Words: 6
+                Characters: 42
+
+                one two three four five six
+                """
+            )
+        }
+
+        let url = directory.appendingPathComponent("Dictations_\(dayString).md")
+        try sections.joined(separator: "\n\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+private func recentCapturePerformanceDate(year: Int, month: Int, day: Int) -> Date {
+    let calendar = recentCapturePerformanceCalendar()
+    return DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: year, month: month, day: day, hour: 12)
+        .date ?? Date(timeIntervalSince1970: 0)
+}
+
+private func recentCapturePerformanceCalendar() -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+private func recentCaptureDayFormatter() -> DateFormatter {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter
 }
