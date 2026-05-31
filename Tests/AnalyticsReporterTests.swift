@@ -95,4 +95,40 @@ func testAnalyticsReporter() {
         assertEqual(properties["distinct_id"], "anonymous-device", "default distinct id should remain")
         assertEqual(properties["session_id"], "session-1", "default session id should remain")
     }
+
+    runSuite("AnalyticsReporter countBucket keeps zero start attempts explicit") {
+        assertEqual(
+            AnalyticsReporter.countBucket(0),
+            "0",
+            "start-failure telemetry should preserve that no recording attempt ran"
+        )
+    }
+
+    runSuite("AnalyticsReporter countBucket preserves a single start attempt") {
+        assertEqual(
+            AnalyticsReporter.countBucket(1),
+            "1",
+            "one failed recording attempt should stay distinguishable from retry loops"
+        )
+    }
+
+    runSuite("AnalyticsReporter countBucket groups midrange retry attempts") {
+        assertEqual(AnalyticsReporter.countBucket(2), "2_3", "two attempts should enter the first retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(3), "2_3", "three attempts should stay in the first retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(4), "4_9", "four attempts should enter the repeated retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(9), "4_9", "nine attempts should remain below the high retry bucket")
+    }
+
+    runSuite("AnalyticsReporter countBucket caps unexpected retry spikes") {
+        assertEqual(
+            AnalyticsReporter.countBucket(10),
+            "10_plus",
+            "ten or more failed starts should be bucketed instead of exposing raw counts"
+        )
+        assertEqual(
+            AnalyticsReporter.countBucket(37),
+            "10_plus",
+            "large retry spikes should stay privacy-safe and dashboard-stable"
+        )
+    }
 }
