@@ -96,6 +96,55 @@ func testAnalyticsReporter() {
         assertEqual(properties["session_id"], "session-1", "default session id should remain")
     }
 
+    runSuite("AnalyticsReporter default properties fall back when build metadata is unavailable") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "session-1",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["app_version"], "unknown", "missing app version should not remove default metadata")
+        assertEqual(properties["build_version"], "unknown", "missing build version should not remove default metadata")
+        assertEqual(properties["os_major"], "15", "OS major version should still be present")
+    }
+
+    runSuite("AnalyticsReporter default properties trim session identifiers") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "  session-1  ",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["session_id"], "session-1", "session identifiers should be trimmed before analytics capture")
+    }
+
+    runSuite("AnalyticsReporter default properties omit blank session identifiers") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "   ",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertNil(properties["session_id"], "blank session identifiers should not be sent as analytics metadata")
+    }
+
+    runSuite("AnalyticsReporter default properties cap long session identifiers") {
+        let longSessionID = String(repeating: "session-fragment-", count: 8)
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: longSessionID,
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        let sessionID = properties["session_id"] ?? ""
+        assertTrue(sessionID.count <= 83, "session identifiers should honor the analytics value cap")
+        assertTrue(sessionID.hasSuffix("..."), "capped session identifiers should keep the truncation marker")
+    }
+
     runSuite("AnalyticsReporter wordCountBucket keeps tiny captures coarse") {
         assertEqual(
             AnalyticsReporter.wordCountBucket(5),
