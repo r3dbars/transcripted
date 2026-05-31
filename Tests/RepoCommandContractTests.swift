@@ -933,6 +933,20 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation audio start exposes stage timings") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("dictation_audio_start_timing"),
+            "dictation start autoevals need a local stage-timing event"
+        )
+        assertTrue(
+            contents.contains("audio_input_snapshot_read_ms")
+                && contents.contains("audio_tap_install_ms")
+                && contents.contains("audio_engine_start_ms"),
+            "stage timing should cover audio snapshot read, tap install, and engine start"
+        )
+    }
+
     runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let sizeBlock = sourceSlice(

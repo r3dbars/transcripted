@@ -248,3 +248,139 @@ The remaining high-value tests are:
 1. Collect 20 live Bluetooth-output starts on this branch.
 2. If Bluetooth still has p95 spikes, test only override/route-settle knobs there.
 3. If built-in needs more speed anyway, add stage timing inside `audioInputSnapshot` and `installTapAndStartEngine`; do not guess at cache changes without that split.
+
+## Continued Loop - Stage Timing And Prepare Knob
+
+### Bluetooth-Output Case
+
+Status: blocked for this run.
+
+Commands:
+
+```bash
+which SwitchAudioSource || true
+system_profiler SPAudioDataType -json
+```
+
+Result:
+
+- `SwitchAudioSource` was not installed.
+- CoreAudio only reported `MacBook Pro Microphone` and `MacBook Pro Speakers`.
+- No Bluetooth output route was available to switch to, so 20 Bluetooth-output samples could not be collected.
+
+### Measurement Patch - Audio Start Stage Timing
+
+Added a local `dictation_audio_start_timing` event with:
+
+- `audio_input_selection_load_ms`
+- `audio_input_device_check_ms`
+- `audio_input_snapshot_read_ms`
+- `audio_input_override_settle_sleep_ms`
+- `audio_input_settled_snapshot_read_ms`
+- `audio_input_total_ms`
+- `audio_tap_remove_ms`
+- `audio_tap_install_ms`
+- `audio_engine_prepare_ms`
+- `audio_engine_start_ms`
+- `audio_start_work_ms`
+
+Command:
+
+```bash
+bash build.sh --no-open
+# launch /Users/redbars/transcripted-latest/build/Transcripted.app
+# warm once, then run 20 Right Option start/stop cycles
+```
+
+Instrumented built-in route result:
+
+| Cutoff | Samples | Metric | p50 | p90 | p95 | Max | Guardrails |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `2026-05-31T20:09:41Z` | 20 | `request_to_recording_ms` | 95 ms | 106 ms | 106 ms | 106 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:09:41Z` | 20 | `pre_recording_overhead_ms` | 10 ms | 15 ms | 18 ms | 18 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:09:41Z` | 20 | `start_ms` | 85 ms | 91 ms | 97 ms | 97 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:09:41Z` | 20 | `start_to_first_sample_ms` | 189 ms | 195 ms | 200 ms | 200 ms | 4800-frame first buffers |
+
+Stage timing summary:
+
+| Stage | Samples | p50 | p90 | p95 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `audio_input_selection_load_ms` | 20 | 0 ms | 0 ms | 1 ms | 1 ms |
+| `audio_input_snapshot_read_ms` | 20 | 16 ms | 18 ms | 19 ms | 19 ms |
+| `audio_input_total_ms` | 20 | 17 ms | 19 ms | 19 ms | 19 ms |
+| `audio_tap_remove_ms` | 20 | 0 ms | 0 ms | 0 ms | 0 ms |
+| `audio_tap_install_ms` | 20 | 0 ms | 0 ms | 0 ms | 0 ms |
+| `audio_engine_prepare_ms` | 20 | 21 ms | 25 ms | 28 ms | 28 ms |
+| `audio_engine_start_ms` | 20 | 45 ms | 47 ms | 49 ms | 49 ms |
+| `audio_start_work_ms` | 20 | 66 ms | 72 ms | 78 ms | 78 ms |
+
+Decision:
+
+- Keep the measurement event for now. It proved route lookup is not the built-in p95 problem.
+- Cache route/device lookup is ruled out for the built-in route because selection load was 0-1 ms and no device override check ran.
+- The actual built-in hot chunk is CoreAudio prepare/start, not app route lookup.
+
+### Tested Knob - Skip Explicit `audioEngine.prepare()`
+
+Changed the start path to call `audioEngine.start()` without a separate `audioEngine.prepare()` call. `AVAudioEngine.start()` can prepare implicitly, so this tests whether the explicit prepare is only duplicating work.
+
+Command:
+
+```bash
+bash build.sh --no-open
+# launch /Users/redbars/transcripted-latest/build/Transcripted.app
+# warm once, then run 20 Right Option start/stop cycles
+```
+
+Result:
+
+| Cutoff | Samples | Metric | p50 | p90 | p95 | Max | Guardrails |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `2026-05-31T20:15:13Z` | 20 | `request_to_recording_ms` | 93 ms | 97 ms | 98 ms | 98 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:15:13Z` | 20 | `pre_recording_overhead_ms` | 9 ms | 11 ms | 11 ms | 11 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:15:13Z` | 20 | `start_ms` | 85 ms | 87 ms | 88 ms | 88 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:15:13Z` | 20 | `start_to_first_sample_ms` | 189 ms | 192 ms | 193 ms | 193 ms | 4800-frame first buffers |
+
+Stage comparison:
+
+| Stage | With explicit prepare p95 | Skip explicit prepare p95 | Decision |
+| --- | ---: | ---: | --- |
+| `audio_engine_prepare_ms` | 28 ms | 0 ms | removed |
+| `audio_engine_start_ms` | 49 ms | 69 ms | start absorbs some work |
+| `audio_start_work_ms` | 78 ms | 69 ms | 9 ms p95 win |
+| `request_to_recording_ms` | 106 ms | 98 ms | 8 ms p95 win |
+| `start_ms` | 97 ms | 88 ms | 9 ms p95 win |
+
+Decision: keep as a small win.
+
+This is not the requested 20-30% win, but it is measured, isolated, and had no fallback/retry/timeout regression in 20 samples.
+
+### Updated Knob Ledger
+
+| Knob | Status | Evidence |
+| --- | --- | --- |
+| Stage timing inside `audioInputSnapshot` / tap / engine start | Kept | Added `dictation_audio_start_timing`; 20/20 starts emitted timing events. |
+| Cache route/device lookup on built-in route | Ruled out | Selection load p95 was 1 ms; no override device check ran on built-in route. |
+| Further preferred-input override delay tuning | Blocked | Needs Bluetooth-output route; current machine only exposed built-in input/output. |
+| First audio buffer cadence via tap buffer | Rejected | 1024 -> 256 kept 4800-frame first buffers and did not improve p95. |
+| Overlay/UI pre-start work | Ruled out for now | `pre_recording_overhead_ms` p95 was 11-18 ms, below the requested 20-30% win by itself. |
+| Diagnostics/logging hot path | Ruled out for primary start win | Stage data shows CoreAudio start work dominates; post-start delivery/transcription logging is outside request-to-recording. |
+| Skip explicit `audioEngine.prepare()` | Kept | p95 request-to-recording 106 -> 98 ms in the instrumented run, with no guardrail events. |
+| Keep engine running between starts | Ruled out | Would likely keep mic hardware active after stop, weakening privacy/battery expectations. |
+
+### Current Verdict
+
+Built-in route: small measured win, no 20-30% win.
+
+Bluetooth-output route: blocked until a Bluetooth output device is connected.
+
+Best next run:
+
+1. Connect Bluetooth output and rerun the 20-sample branch sampler.
+2. If Bluetooth still spikes, tune only the route/override path.
+3. If no Bluetooth route is available, treat this as a built-in-route no-win except for the kept 8-9 ms p95 prepare/start cleanup.
+
+Verification:
+
+- `bash run-tests.sh` - 2938 passed, 0 failed.
+- `bash build.sh --no-open` - build, signing, launch smoke, and performance budget passed.

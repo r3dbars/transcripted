@@ -64,10 +64,12 @@ struct ParakeetAudioInputSnapshot {
     let selection: DictationInputDeviceSelection?
     let selectionApplication: ParakeetInputDeviceApplication?
     let engineWasRunning: Bool
+    let stageTimings: [String: Int]
 }
 
 struct ParakeetAudioStartSnapshot {
     let engineWasRunning: Bool
+    let stageTimings: [String: Int]
 }
 
 struct ParakeetInputDeviceApplication {
