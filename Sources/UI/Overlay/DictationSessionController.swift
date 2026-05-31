@@ -907,11 +907,11 @@ class DictationSessionController: ObservableObject {
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             let pasteOutcome = self.pasteWithClipboardRestore(text)
+            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let autoSendOutcome = await self.performAutoEnterIfNeeded(
                 text: text,
                 delivery: pasteOutcome.delivery
             )
-            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
