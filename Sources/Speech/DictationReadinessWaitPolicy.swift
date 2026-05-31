@@ -41,14 +41,15 @@ struct DictationReadinessWaitPolicy {
             return .startRecording
         }
 
+        let refreshedEnoughForRecoveryStart = readinessRefreshes >= refreshesBeforeRecoveryStart
         let shouldTryRecoveryStart = readinessRefreshTimedOut
-            || readinessRefreshes >= refreshesBeforeRecoveryStart
+            || refreshedEnoughForRecoveryStart
         if shouldTryRecoveryStart,
            recoveryStartAttempts == 0 {
             return .startRecoveryRecording
         }
 
-        if shouldTryRecoveryStart,
+        if refreshedEnoughForRecoveryStart,
            forcedRecoveryAttempts > 0,
            forcedRecoveryAttempts < maxForcedRecoveryAttempts,
            recoveryStartAttempts < maxRecoveryStartAttempts {

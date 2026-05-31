@@ -219,6 +219,19 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .startRecoveryRecording, "after a hard input recovery, one more guarded recovery start should be allowed")
     }
 
+    runSuite("DictationReadinessWaitPolicy — stale timeout does not rush post-recovery start") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 0,
+            forcedRecoveryAttempts: 1,
+            recoveryStartAttempts: 1,
+            readinessRefreshTimedOut: true
+        )
+
+        assertEqual(action, .refreshInputReadiness, "after hard recovery, a stale timeout flag should wait for fresh readiness refreshes before another recovery start")
+    }
+
     runSuite("DictationReadinessWaitPolicy — recovery start is bounded before forced recovery") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
