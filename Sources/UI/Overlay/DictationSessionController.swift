@@ -181,14 +181,18 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    private func trackDictationStartFailed(_ failureKind: String) {
+    private func trackDictationStartFailed(
+        _ failureKind: String,
+        extra: [String: String] = [:]
+    ) {
+        var properties = extra
+        properties["failure_kind"] = failureKind
+        properties["trigger"] = currentDictationTrigger.rawValue
+
         AnalyticsReporter.track(
             "dictation_start_failed",
             properties: dictationAnalyticsProperties(
-                extra: [
-                    "failure_kind": failureKind,
-                    "trigger": currentDictationTrigger.rawValue,
-                ]
+                extra: properties
             )
         )
     }
@@ -565,7 +569,12 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        trackDictationStartFailed(cleanupPlan.outcome)
+        trackDictationStartFailed(
+            cleanupPlan.outcome,
+            extra: [
+                "start_attempt_bucket": AnalyticsReporter.countBucket(startAttempts)
+            ]
+        )
         if cleanupPlan.reportRuntimeStall {
             appState.runtimeDiagnostics.recordStall(
                 kind: "dictation",
