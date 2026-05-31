@@ -384,3 +384,139 @@ Verification:
 
 - `bash run-tests.sh` - 2938 passed, 0 failed.
 - `bash build.sh --no-open` - build, signing, launch smoke, and performance budget passed.
+
+## Continued Loop - Slow-Path Recovery Knobs
+
+This lane scores the fallback wait path separately from normal built-in starts. It should not be mixed into the normal p95 score because the recovery path only runs after the ready-engine fast start cannot start recording.
+
+### Current Audio Route Availability
+
+Command:
+
+```bash
+system_profiler SPAudioDataType -json | ruby -rjson -e 'data=JSON.parse(STDIN.read); devices=(data["SPAudioDataType"]||[]).flat_map{|x| x["_items"]||[]}; puts devices.map{|d| [d["_name"], d["coreaudio_default_audio_input_device"], d["coreaudio_default_audio_output_device"]].compact.join(" | ")}; bluetooth=devices.select{|d| d.to_s.downcase.include?("bluetooth") || d.to_s.downcase.include?("airpods")}; warn "bluetooth_count=#{bluetooth.length}"'
+```
+
+Result:
+
+```text
+bluetooth_count=0
+MacBook Pro Microphone | spaudio_yes
+MacBook Pro Speakers | spaudio_yes
+```
+
+No Bluetooth route is currently available for fresh route-recovery samples.
+
+### Historical Recovery Signal
+
+Command:
+
+```bash
+ruby -rjson -e 'path=File.expand_path("~/Library/Application Support/Transcripted/logs/events.jsonl"); counts=Hash.new(0); waits=[]; recovery_starts=[]; File.foreach(path){|line| begin; e=JSON.parse(line); rescue JSON::ParserError; next; end; event=e["event"]||e["name"]; ctx=e["context"]||e["properties"]||{}; next unless event; if %w[dictation_recording_recovery_start dictation_readiness_refresh_timeout microphone_start_timeout dictation_started_after_wait].include?(event); route=ctx["route_shape"]||"unknown"; counts[[event,route]]+=1; waits << ctx["wait_ms"].to_i if event=="dictation_started_after_wait" && ctx["wait_ms"]; recovery_starts << ctx["readiness_refreshes"].to_i if event=="dictation_recording_recovery_start" && ctx["readiness_refreshes"]; end}; counts.sort.each{|(event,route),count| puts "#{event},#{route},#{count}"}; if waits.any?; s=waits.sort; p95=s[((s.length-1)*0.95).ceil]; puts "started_after_wait_wait_ms:n=#{s.length},p50=#{s[s.length/2]},p95=#{p95},max=#{s[-1]}"; end; if recovery_starts.any?; hist=Hash.new(0); recovery_starts.each{|v| hist[v]+=1}; puts "recovery_start_readiness_refreshes=#{hist.sort.to_h}"; end'
+```
+
+Result:
+
+| Event | Route | Count |
+| --- | --- | ---: |
+| `dictation_readiness_refresh_timeout` | `built_in_input_to_bluetooth_output` | 1 |
+| `dictation_readiness_refresh_timeout` | `built_in_input_to_built_in_output` | 1 |
+| `dictation_recording_recovery_start` | `built_in_input_to_bluetooth_output` | 5 |
+| `dictation_recording_recovery_start` | `built_in_input_to_built_in_output` | 1 |
+| `dictation_started_after_wait` | `built_in_input_to_bluetooth_output` | 3 |
+| `dictation_started_after_wait` | `built_in_input_to_built_in_output` | 62 |
+| `microphone_start_timeout` | `built_in_input_to_bluetooth_output` | 2 |
+
+Historical `dictation_started_after_wait` values: `n=65`, `p50=386 ms`, `p95=681 ms`, `max=6547 ms`.
+
+Recovery-start refresh counts seen historically: `{0=>1, 1=>1, 4=>4}`.
+
+This is useful context, but it is not a clean fresh branch corpus. The Bluetooth-output recovery path cannot be proven better or worse until Bluetooth output is connected again.
+
+### Deterministic Policy Score
+
+Command:
+
+```bash
+ruby -c scripts/ops/dictation-recovery-autoeval.rb
+ruby scripts/ops/dictation-recovery-autoeval.rb
+ruby scripts/ops/dictation-recovery-autoeval.rb --details
+```
+
+Result:
+
+The existing `scripts/ops/dictation-recovery-autoeval.rb` scorer had drifted from the live policy constants. This pass updated its baseline to match current code:
+
+- poll interval: `100 ms`
+- refresh interval: `300 ms`
+- refresh timeout: `900 ms`
+- forced recovery threshold: `5` refreshes
+- ready-start attempt cap: `2`
+
+Knob summary after fixing the scorer:
+
+| Knob | p95 ms | p95 delta | Max ms | Max delta | Unexpected failures | Starts | Start delta | Refreshes | Refresh delta | Recovery starts | Forced | Refresh timeouts | Mic timeouts |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 1990 | 0 | 1990 | 0 | 0 | 17 | 0 | 21 | 0 | 7 | 5 | 1 | 1 |
+| poll_75ms | 2140 | +150 | 2140 | +150 | 0 | 17 | 0 | 19 | -2 | 7 | 5 | 1 | 1 |
+| poll_50ms | 2040 | +50 | 2040 | +50 | 0 | 17 | 0 | 20 | -1 | 7 | 5 | 1 | 1 |
+| refresh_interval_200ms | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
+| refresh_interval_150ms | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
+| refresh_timeout_600ms | 3800 | +1810 | 3800 | +1810 | 2 | 21 | +4 | 42 | +21 | 10 | 8 | 13 | 3 |
+| recovery_start_after_3_refreshes | 2020 | +30 | 2020 | +30 | 0 | 18 | +1 | 16 | -5 | 7 | 6 | 1 | 1 |
+| recovery_start_after_2_refreshes | 2020 | +30 | 2020 | +30 | 0 | 20 | +3 | 13 | -8 | 8 | 7 | 1 | 1 |
+| max_ready_start_attempts_1 | 1990 | 0 | 1990 | 0 | 0 | 17 | 0 | 20 | -1 | 7 | 7 | 1 | 1 |
+| force_after_4_refreshes | 1800 | -190 | 1800 | -190 | 0 | 14 | -3 | 14 | -7 | 2 | 7 | 1 | 1 |
+| combo_poll100_refresh200_attempts2 | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
+
+Important per-scenario regressions from `--details`:
+
+| Knob | Regressed scenario | Delta | Why it was rejected |
+| --- | --- | ---: | --- |
+| `refresh_interval_200ms` | `bluetooth_late_ready_stale_flag` | +600 ms | Starts recovery earlier, wastes the guarded attempt, then waits for forced recovery. |
+| `refresh_interval_150ms` | `bluetooth_late_ready_stale_flag` | +600 ms | Same regression as 200 ms with no extra p95 gain. |
+| `refresh_timeout_600ms` | `selected_input_stale_until_force` | timeout | Adds false stale-refresh failures. |
+| `refresh_timeout_600ms` | `ready_flag_start_keeps_failing` | timeout | Turns an expected success into `microphone_start_timeout`. |
+| `recovery_start_after_3_refreshes` | `bluetooth_late_ready_stale_flag` | +900 ms | Starts too early and loses the useful guarded attempt. |
+| `recovery_start_after_2_refreshes` | `bluetooth_reconnect_stale_flag` | +900 ms | Too aggressive for Bluetooth route settle. |
+| `max_ready_start_attempts_1` | `first_start_fails_retry_succeeds` | +600 ms | Forces hard recovery instead of allowing the cheap retry. |
+| `force_after_4_refreshes` | `bluetooth_reconnect_stale_flag` | +680 ms | Skips the faster guarded recovery start and forces a slower rebuild. |
+
+Decision:
+
+- `dictationReadinessPollInterval`: rejected. 75 ms and 50 ms worsened aggregate p95 in the deterministic suite.
+- `dictationReadinessRefreshInterval`: rejected. 200 ms/150 ms improved aggregate p95 by 270 ms, but increased starts/refreshes/forced recoveries and regressed the late Bluetooth settle scenario by 600 ms.
+- `dictationReadinessRefreshTimeout`: rejected. 600 ms created 2 unexpected failures and 3 simulated microphone timeouts.
+- recovery-start threshold: rejected. Starting after 3 or 2 refreshes regressed late Bluetooth scenarios by 900 ms.
+- ready-start attempt cap: rejected. One attempt regressed cheap retry success by 600 ms and repeated ready-start failure recovery by 700 ms.
+- forced recovery threshold: rejected. Forcing after 4 refreshes improved aggregate p95 by 190 ms, but regressed Bluetooth reconnect by 680 ms.
+- `dictationRecoveryBudget` 6 s: ruled out for latency. Lowering it only fails faster; raising it worsens start latency. Keep the current budget unless the metric changes to recovery success rate.
+- forced recovery attempt budget: ruled out for this latency goal. The scorer already keeps attempts bounded; more attempts would increase worst-case latency and fewer attempts would reduce recovery chance.
+
+### Final Knob Ledger
+
+| Knob | Status | Decision |
+| --- | --- | --- |
+| Stage timing inside `audioInputSnapshot` / tap / engine start | Kept | Added `dictation_audio_start_timing`; proved CoreAudio start work dominates built-in p95. |
+| Cache route/device lookup until route changes | Ruled out for built-in | Selection load p95 was 1 ms; no built-in override check ran. |
+| Preferred-input override delay tuning | Kept then blocked | The safe ready-route skip is kept; deeper Bluetooth tuning is blocked without Bluetooth output. |
+| First audio buffer cadence via tap buffer | Rejected | 1024 -> 256 did not reduce 4800-frame first buffers or improve p95. |
+| Overlay/UI pre-start work | Ruled out | `pre_recording_overhead_ms` p95 was 11-18 ms, too small for the requested win. |
+| Diagnostics/logging hot path | Ruled out | Stage timing shows post-start diagnostics are not the request-to-recording bottleneck. |
+| Skip explicit `audioEngine.prepare()` | Kept | Built-in p95 request-to-recording improved 106 -> 98 ms with no guardrail events. |
+| Keep engine running between starts | Ruled out | Would keep mic hardware active after stop and weaken privacy/battery expectations. |
+| Recovery poll interval | Rejected | 75 ms and 50 ms worsened deterministic p95. |
+| Recovery refresh interval | Rejected | 200 ms/150 ms improved aggregate p95 but regressed late Bluetooth settle by 600 ms and increased starts/refreshes/forced recoveries. |
+| Recovery refresh timeout | Rejected | 600 ms created 2 unexpected failures and 3 simulated microphone timeouts. |
+| Recovery start threshold | Rejected | Earlier recovery starts regressed Bluetooth settle scenarios by 900 ms. |
+| Recovery budget | Ruled out | Lower budget fails faster rather than starting faster; higher budget worsens latency. |
+
+## Final Verdict
+
+Built-in route: no 20-30% win found. The kept measured win is small: p95 request-to-recording improved 106 -> 98 ms, and p95 start improved 97 -> 88 ms in the instrumented run.
+
+Bluetooth-output route: blocked by missing hardware in the current environment. The prior safe improvement for ready Bluetooth routes is kept, but deeper route-settle tuning cannot be scored right now.
+
+Slow recovery route: no safe code change kept. After updating the deterministic scorer to current constants, every recovery knob either worsened p95, created failure regressions, or improved aggregate p95 while hurting a Bluetooth-settle scenario enough to reject it.
+
+Conclusion: this autoeval found a small built-in-route keeper and then hit a clear no-win/blocker boundary for the remaining knobs.
