@@ -113,3 +113,63 @@ Results:
 - No live post-change Bluetooth-output sample was captured from this worktree build because the installed `/Applications/Transcripted.app` was already running. I did not interrupt it.
 - The next autoeval loop should collect 10-20 live starts on the Bluetooth-output route and confirm no increase in fallback events or `microphone_start_timeout`.
 - Full-log historical p95 still contains old samples; use fresh samples or a bounded time window for future scoring.
+
+## Continued Loop Notes
+
+This is not a final "done forever" verdict. Experiment 1 found a real bottleneck, but the normal built-in fast path still needed more scrutiny.
+
+Normal built-in path from current logs:
+
+| Metric | Samples | p50 | p90 | p95 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `start_ms` (`sttRouter.startRecording()`) | 410 | 87 ms | 120 ms | 134 ms | 402 ms |
+| `audio_engine_started` -> fast-start event | 408 | 3 ms | 4 ms | 5 ms | 11 ms |
+| fast-start event -> `audio_samples_detected` | 410 | 102 ms | 104 ms | 104 ms | 124 ms |
+
+Interpretation:
+
+- Normal built-in dictation is fast, but it is not fully proven end-to-end.
+- Existing logs say post-start event/log/UI work is tiny, around 3-5 ms p95.
+- First audio-buffer arrival is consistently about 100 ms after fast-start, with 4800-frame buffers.
+- The old metric missed true request-to-recording time, so the next code change adds that instrumentation.
+
+### Experiment 2 - Add Missing End-to-End Timing
+
+Added fields for future samples:
+
+- `request_to_recording_ms` on `dictation_recording_fast_start` and `dictation_started_after_wait`
+- `pre_recording_overhead_ms` on fast-start success/fallback
+- `start_to_first_sample_ms` on `audio_samples_detected`
+
+Also updated `scripts/ops/performance-budget.rb` so it prints request-to-recording and start-to-first-sample p95 when logs include those fields.
+
+Decision: keep as measurement infrastructure. This is not a claimed speed win.
+
+### Rejected Experiment - Eager Sample-Buffer Reserve
+
+`ParakeetEngine.startRecording()` reserves capacity for a 30-minute Float buffer. That looked suspicious, so I microbenchmarked the exact reserve size:
+
+```bash
+swift -e 'import Foundation
+let count = 86_400_000
+var times: [Double] = []
+for _ in 0..<10 {
+  var values: [Float] = []
+  let start = CFAbsoluteTimeGetCurrent()
+  values.reserveCapacity(count)
+  times.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+  values.removeAll(keepingCapacity: false)
+}
+print(times)'
+```
+
+Result: p50 `0.000 ms`, max `0.013 ms`.
+
+Decision: reject as a start-latency knob. It may still be worth a memory-footprint pass, but it is not the current dictation-start p95 problem.
+
+Still-open knobs:
+
+- stage timing inside `audioInputSnapshot`
+- whether route lookup can be cached safely
+- whether first-sample cadence can move below about 100 ms without weakening AirPods/HFP compatibility
+- live 10-20 sample proof on both built-in and Bluetooth-output routes
