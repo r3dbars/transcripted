@@ -97,6 +97,46 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .startRecording, "ready input should start recording")
     }
 
+    runSuite("DictationReadinessWaitPolicy — caps repeated ready-input start attempts") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            recordingStartAttempts: 3,
+            readinessRefreshes: 10
+        )
+
+        assertEqual(action, .forceInputRecovery, "repeated failed starts should force a hard idle graph recovery instead of refreshing the same stuck route")
+        assertTrue(
+            DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
+                inputFormatReady: true,
+                recordingStartAttempts: 3
+            ),
+            "the retry limiter should be visible to diagnostics code"
+        )
+    }
+
+    runSuite("DictationReadinessWaitPolicy — exhausted start attempts fall back to refresh after forced recovery budget") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            recordingStartAttempts: 3,
+            forcedRecoveryAttempts: 2,
+            maxForcedRecoveryAttempts: 2
+        )
+
+        assertEqual(action, .refreshInputReadiness, "the hard recovery path should stay bounded inside one dictation start")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — unready input is not treated as start-budget exhausted") {
+        assertFalse(
+            DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
+                inputFormatReady: false,
+                recordingStartAttempts: 3
+            ),
+            "the start-attempt limiter only applies after the route says it is ready"
+        )
+    }
+
     runSuite("DictationReadinessWaitPolicy — stuck recovery timeout becomes refreshable") {
         var recovery = ParakeetRecoveryState()
         let generation = recovery.beginConfigChange()

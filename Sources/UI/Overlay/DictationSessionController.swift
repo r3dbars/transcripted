@@ -338,6 +338,8 @@ class DictationSessionController: ObservableObject {
         var readinessRefreshes = 0
         var forcedReadinessRecoveries = 0
         var readinessRefreshTimedOut = false
+        var recordingStartAttemptsSinceRecovery = 0
+        var startAttemptLimitReported = false
         var nextReadinessRefreshAt = startedAt
         let readinessRefresher = DictationReadinessRefreshRunner()
         defer {
@@ -393,6 +395,7 @@ class DictationSessionController: ObservableObject {
             switch DictationReadinessWaitPolicy.action(
                 isRecovering: isRecovering,
                 inputFormatReady: inputFormatReady,
+                recordingStartAttempts: recordingStartAttemptsSinceRecovery,
                 readinessRefreshes: readinessRefreshes,
                 forcedRecoveryAttempts: forcedReadinessRecoveries,
                 recoveryStartAttempts: recoveryStartAttempts,
@@ -402,6 +405,27 @@ class DictationSessionController: ObservableObject {
                 break
 
             case .refreshInputReadiness:
+                if DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
+                    inputFormatReady: inputFormatReady,
+                    recordingStartAttempts: recordingStartAttemptsSinceRecovery
+                ), !startAttemptLimitReported {
+                    startAttemptLimitReported = true
+                    DiagnosticsTrail.record(
+                        logger: appState.logger,
+                        level: .warning,
+                        engine: "dictation",
+                        event: "dictation_recording_start_attempts_limited",
+                        message: "Dictation held further microphone starts after repeated failures",
+                        context: dictationContext(
+                            extra: [
+                                "start_attempts": "\(startAttempts)",
+                                "readiness_refreshes": "\(readinessRefreshes)",
+                                "is_recovering": "\(isRecovering)",
+                                "format_ready": "\(inputFormatReady)"
+                            ]
+                        )
+                    )
+                }
                 if now >= nextReadinessRefreshAt {
                     if readinessRefresher.start(appState: appState) {
                         readinessRefreshes += 1
@@ -410,12 +434,20 @@ class DictationSessionController: ObservableObject {
                 }
 
             case .forceInputRecovery:
+                let forceReason = DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
+                    inputFormatReady: inputFormatReady,
+                    recordingStartAttempts: recordingStartAttemptsSinceRecovery
+                )
+                    ? "dictation_recording_start_attempts_exhausted"
+                    : "dictation_readiness_wait_stalled"
                 if readinessRefresher.startForcedRecovery(
                     appState: appState,
-                    reason: "dictation_readiness_wait_stalled"
+                    reason: forceReason
                 ) {
                     forcedReadinessRecoveries += 1
                     readinessRefreshes = 0
+                    recordingStartAttemptsSinceRecovery = 0
+                    startAttemptLimitReported = false
                     nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
 
@@ -476,6 +508,7 @@ class DictationSessionController: ObservableObject {
 
             case .startRecording:
                 startAttempts += 1
+                recordingStartAttemptsSinceRecovery += 1
                 let started = await appState.sttRouter.startRecording()
                 guard !Task.isCancelled, isDictating else {
                     if started {
