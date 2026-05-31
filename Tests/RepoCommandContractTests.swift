@@ -102,6 +102,11 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
         let probe = readRepoTextFile("scripts/ops/health-probe.sh")
         let docs = readRepoTextFile("docs/ops-credentials.md")
+        let firstValueEvents = sourceSlice(
+            probe,
+            from: "first_value_events=",
+            to: "  query="
+        )
 
         for event in [
             "dictation_completed",
@@ -110,7 +115,7 @@ func testRepoCommandContract() {
             "onboarding_agent_cta_clicked"
         ] {
             assertTrue(
-                probe.contains(event) && docs.contains(event),
+                firstValueEvents.contains(event) && docs.contains(event),
                 "PostHog first-value probe and docs should include \(event)"
             )
         }
