@@ -770,7 +770,28 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
-        guard audioInactivityWarning != nil else { return }
+        guard let warning = audioInactivityWarning else { return }
+        if automatic, !warning.automaticStopAllowed {
+            let diagnostics = currentAudioInactivityDiagnostics()
+            applyAudioInactivityEvent(audioInactivityDetector.dismissWarning())
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_audio_inactivity_timeout_deferred",
+                message: "Meeting audio inactivity auto-stop deferred because capture route looked degraded",
+                context: baseDiagnosticsContext(
+                    extra: diagnostics.merging(
+                        [
+                            "duration_ms": "\(Int(recordingDuration * 1000))",
+                            "warning_kind": warning.kind.rawValue,
+                            "automatic_stop_allowed": boolString(warning.automaticStopAllowed)
+                        ],
+                        uniquingKeysWith: { _, new in new }
+                    )
+                )
+            )
+            return
+        }
         let reason: StopReason = automatic ? .audioInactivityTimeout : .audioInactivityPrompt
 
         DiagnosticsTrail.record(
@@ -1388,23 +1409,42 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    private func currentAudioInactivityDiagnostics() -> [String: String] {
+        let snapshot = capture.pipelineDiagnosticsSnapshot()
+        return MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: meetingCaptureAnalyticsProperties(snapshot: snapshot),
+            afterStopContext: [:]
+        )
+    }
+
     private func applyAudioInactivityEvent(_ event: MeetingAudioInactivityDetector.Event) {
         switch event {
         case .none:
             return
         case .warningStarted(let warning):
-            audioInactivityWarning = warning
+            let diagnostics = currentAudioInactivityDiagnostics()
+            let presentedWarning = MeetingAudioInactivityRecoveryPolicy.warning(
+                from: warning,
+                durationSeconds: recordingDuration,
+                diagnostics: diagnostics
+            )
+            audioInactivityWarning = presentedWarning
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
                 event: "meeting_audio_inactivity_warning_started",
                 message: "No meeting audio detected",
                 context: baseDiagnosticsContext(
-                    extra: [
-                        "inactive_ms": "\(Int(warning.inactiveDuration * 1000))",
-                        "countdown_seconds": "\(warning.countdownSeconds)",
-                        "duration_ms": "\(Int(recordingDuration * 1000))"
-                    ]
+                    extra: diagnostics.merging(
+                        [
+                            "inactive_ms": "\(Int(warning.inactiveDuration * 1000))",
+                            "countdown_seconds": "\(warning.countdownSeconds)",
+                            "duration_ms": "\(Int(recordingDuration * 1000))",
+                            "warning_kind": presentedWarning.kind.rawValue,
+                            "automatic_stop_allowed": boolString(presentedWarning.automaticStopAllowed)
+                        ],
+                        uniquingKeysWith: { _, new in new }
+                    )
                 )
             )
         case .warningCleared:
