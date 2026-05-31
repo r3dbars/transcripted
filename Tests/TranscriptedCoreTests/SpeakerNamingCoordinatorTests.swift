@@ -300,7 +300,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testHandleNamingCompleteRegression1143CoalescesSplitRowsAndSkipsNoDialogSpeaker() async throws {
+    func testHandleNamingCompleteAppleMacOS1RCoalescesSplitRowsAndSkipsNoDialogSpeaker() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
         let firstSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
@@ -338,6 +338,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             MarkdownUtterance(timestamp: "00:01", source: "System", label: "Speaker 1", text: "First fragment.", diarizerSpeakerId: 1),
             MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
         ]
+        // APPLE-MACOS-1R / feedback reference 9c7145eb55f54878:
+        // one real remote speaker split into two rows, plus a detected row with no dialog.
         let styledTranscript = """
         ---
         transcript_id: "\(transcriptId.uuidString)"
@@ -378,6 +380,20 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         # Styled Meeting
 
         Recorded Apr 10, 2026 at 3:01 PM  •  1:30  •  4 words  •  3 turns
+
+        ## Channel & Speaker Analytics
+
+        ### Meeting Audio (Remote Participants)
+        - **Utterances:** 2
+        - **Words:** ~4
+        - **Speaking Time:** 00:06
+        - **Speakers Detected:** 3
+
+        #### Remote Speaker Breakdown
+
+        - **Speaker 1:** 1 utterances, ~2 words, 00:03
+        - **Speaker 2:** 1 utterances, ~2 words, 00:03
+        - **Speaker 3:** 0 utterances, ~0 words, 00:00
 
         ## Transcript
 
@@ -431,6 +447,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Grigory]"), savedTranscript)
         XCTAssertTrue(savedTranscript.contains("**00:05**  [System/Grigory]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 2 utterances, ~4 words, 00:06"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("- **Speaker 3:**"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/Speaker 3]"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("[System/Known Phantom]"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains(#"name: "Known Phantom""#), savedTranscript)
 
