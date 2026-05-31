@@ -15,7 +15,7 @@ enum DictationReadinessWaitAction: Equatable {
 struct DictationReadinessWaitPolicy {
     private static let refreshesBeforeRecoveryStart = 4
     private static let maxRecoveryStartAttempts = 2
-    private static let maxRecordingStartAttempts = 3
+    private static let maxRecordingStartAttempts = 2
 
     static func recordingStartAttemptsExhausted(
         inputFormatReady: Bool,

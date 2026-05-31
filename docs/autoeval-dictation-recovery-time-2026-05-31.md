@@ -2,35 +2,45 @@
 
 ## Verdict
 
-Winner: keep the input-override settle change already on this branch.
+Winner: keep the bounded recovery-loop combo.
 
-When Transcripted applies a preferred dictation input override and the immediate
-CoreAudio snapshot is already ready, the app now skips the old fixed 300 ms
-settle delay. It still waits when the route is stale or invalid, so it does not
-pretend to be listening before recording can actually start.
+Changes kept:
+
+- Poll the dictation readiness wait loop every 100 ms instead of 150 ms.
+- Force hard input-readiness recovery after 5 stale refreshes instead of 6.
+- Cap ready-flag microphone start failures at 2 attempts instead of 3.
+
+Controlled recovery harness result:
+
+- Baseline slow-path p95/max: 2440 ms / 2440 ms.
+- Winning combo p95/max: 1990 ms / 1990 ms.
+- Change: -450 ms p95 and max, -1 start attempt, no new unexpected success
+  failures, no new `microphone_start_timeout`.
+
+This is the fastest safe combo from the expanded pass. More aggressive knobs
+looked tempting, but they either started recovery too early for late Bluetooth
+settling or increased refresh/rebuild churn.
 
 ## Metric
 
-- Primary: time from dictation start request to listening when dictation does
-  not cleanly hit the ready fast path, measured by `dictation_started_after_wait`
-  `wait_ms`.
-- Secondary: counts of `dictation_recording_retry`,
-  `dictation_fast_start_fell_back_to_wait` / `audio_start_deferred`,
-  `microphone_start_timeout`, guarded recovery starts, forced input recoveries,
-  and readiness refresh timeouts.
-- Guardrails: no fake listening before real recording, no infinite retries, no
-  extra `microphone_start_timeout`, privacy-safe route diagnostics only, and
-  green build/tests.
+- Primary: request-to-listening time for dictation starts that miss the clean
+  ready fast path.
+- Secondary: start attempts, guarded recovery starts, forced recoveries,
+  refresh timeouts, and `microphone_start_timeout`.
+- Guardrails: no fake listening before real recording, no infinite retry loops,
+  no worse ready-fast-path behavior, bounded hard recovery, privacy-safe
+  diagnostics only, and green build/tests.
 
-## Event Sources
+## Event And Test Sources
 
-- Runtime events: `~/Library/Application Support/Transcripted/logs/events.jsonl`
-- Build performance gate: `scripts/ops/performance-budget.rb`
-- Synthetic guardrail: `bash run-daily-audio-reliability.sh --synthetic`
-- Manual recovery checklist reference:
-  `docs/qa-parakeet-start-failure-smoke.md`
+- Live event log: `~/Library/Application Support/Transcripted/logs/events.jsonl`
+- Controlled policy harness:
+  `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
+- Build budget: `scripts/ops/performance-budget.rb`
+- Synthetic reliability check: `bash run-daily-audio-reliability.sh --synthetic`
+- Manual checklist reference: `docs/qa-parakeet-start-failure-smoke.md`
 
-Relevant event names found in code:
+Existing relevant events found in code/logs:
 
 - `dictation_recording_fast_start`
 - `dictation_fast_start_fell_back_to_wait`
@@ -42,128 +52,153 @@ Relevant event names found in code:
 - `audio_start_deferred`
 - `audio_format_unavailable`
 - `audio_engine_start_failed`
-- `device_change_rewarm_deferred`
-- `device_change_recovery_deferred`
 - `microphone_start_timeout`
+- `audio_samples_detected`
 
-## Baseline Raw Results
+## Historical Baseline
 
-Source file:
-
-```text
-~/Library/Application Support/Transcripted/logs/events.jsonl
-```
+Command source: live local events log, refreshed on 2026-05-31.
 
 Raw slice:
 
 ```text
-events_total=14270
-first=2026-05-09T11:01:58Z
-last=2026-05-31T19:06:41Z
+events_total=15053
+first=2026-05-09T11:01:58.936Z
+last=2026-05-31T19:56:36.271Z
 ```
-
-Baseline metrics:
 
 | Metric | Raw result |
 | --- | ---: |
-| `dictation_started_after_wait` samples | 64 |
+| `dictation_started_after_wait` samples | 65 |
 | wait min | 349 ms |
 | wait p50 | 386 ms |
-| wait p90 | 402 ms |
-| wait p95 | 455 ms |
+| wait p90 | 407 ms |
+| wait p95 | 681 ms |
 | wait max | 6547 ms |
 | `dictation_recording_retry` | 61 |
-| fallback-to-wait-like events | 65 |
-| `dictation_recording_recovery_start` | 5 |
+| `dictation_fast_start_fell_back_to_wait` | 5 |
+| `dictation_recording_recovery_start` | 6 |
 | `input_readiness_recovery_forced` | 4 |
-| `dictation_readiness_refresh_timeout` | 1 |
+| `dictation_readiness_refresh_timeout` | 2 |
 | `microphone_start_timeout` | 2 |
-| audio start / format failures | 8 |
-| `dictation_input_device_override_settled` | 403 |
+| `audio_format_unavailable` | 6 |
+| `audio_engine_start_failed` | 0 |
+| `audio_samples_detected` start-to-first-sample p95 | 232 ms |
 
-By route:
+Last 24h recovery counts:
 
-| Route | Samples | p50 | p90 | p95 | Max |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| built-in input to built-in output | 61 | 386 ms | 399 ms | 402 ms | 455 ms |
-| built-in input to Bluetooth output | 3 | 717 ms | 6547 ms | 6547 ms | 6547 ms |
+```text
+dictation_started_after_wait=1
+dictation_fast_start_fell_back_to_wait=1
+dictation_recording_retry=0
+dictation_recording_recovery_start=1
+dictation_readiness_refresh_timeout=1
+input_readiness_recovery_forced=0
+microphone_start_timeout=0
+```
 
-Last 24h recovery counts were all zero for `dictation_started_after_wait`,
-`dictation_recording_retry`, fallback-to-wait, guarded recovery starts, forced
-input recovery, and `microphone_start_timeout`, so the recovery baseline is
-historical rather than a fresh live repro.
+The live log is useful for failure shape, but it is not enough to compare knobs:
+the hard cases are sparse and depend on physical route timing. The harness below
+is the repeatable scoring command for knob testing.
 
-## Recovery Scenarios Checked
+## Controlled Baseline
 
-| Scenario | Evidence |
-| --- | --- |
-| App just launched | 703 `app_launched` events; current last-24h logs had no recovery waits/timeouts. |
-| Wake from sleep | 4 `wake_recovery` and 2 `wake_hotkey_recovery_failed` events in the log set. |
-| Bluetooth reconnect/switch | 262 `default_input_device_changed`, 703 `device_change_rewarm_deferred`, and 253 `prewarm_invalid_format` events. |
-| Selected route stale | 6 `audio_format_unavailable` and 2 `audio_route_not_settled` events. |
-| First start fails, retry succeeds | 62 after-wait starts had more than one start attempt. |
-| Format ready but start fails | 61 ready-format start-deferred/retry events. |
-| Recovery waits too long before refresh | 1 `dictation_readiness_refresh_timeout` and 4 `input_readiness_recovery_forced` events. |
+Command:
+
+```bash
+ruby scripts/ops/dictation-recovery-autoeval.rb --details
+```
+
+Baseline raw results:
+
+| Scenario | Outcome | Time | Normal | Recovery | Refreshes | Forced | Timeouts | Reason |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| fast_ready_no_recovery | success | 85 ms | 1 | 0 | 0 | 0 | 0 | ready_start |
+| cold_launch_unready_then_ready | success | 840 ms | 1 | 0 | 3 | 0 | 0 | ready_start |
+| wake_recovery_finishes | success | 1290 ms | 1 | 0 | 0 | 0 | 0 | ready_start |
+| bluetooth_reconnect_stale_flag | success | 1170 ms | 0 | 1 | 4 | 0 | 0 | recovery_start |
+| bluetooth_late_ready_stale_flag | success | 1170 ms | 0 | 1 | 4 | 0 | 0 | recovery_start |
+| slow_refresh_would_recover | success | 2440 ms | 1 | 1 | 0 | 1 | 0 | ready_start |
+| selected_input_stale_until_force | success | 2440 ms | 1 | 1 | 0 | 1 | 0 | ready_start |
+| first_start_fails_retry_succeeds | success | 330 ms | 2 | 0 | 1 | 0 | 0 | ready_start |
+| ready_flag_start_keeps_failing | success | 1600 ms | 4 | 0 | 0 | 1 | 0 | ready_start |
+| refresh_times_out_then_recovery_start | success | 1000 ms | 0 | 1 | 1 | 0 | 1 | recovery_start |
+| unrecoverable_route_times_out | timeout | 6000 ms | 0 | 2 | 5 | 2 | 0 | microphone_start_timeout |
 
 ## Knobs Tested
 
-| # | Knob | Change | Raw result | Decision |
+| # | Knob | Status | Raw result | Decision |
 | ---: | --- | --- | --- | --- |
-| 1 | Skip fixed input-override settle delay when immediate format is ready | 300 ms -> 0 ms only for `.ready`; keep 300 ms for `.routeNotSettled` / `.invalid` | Recovery projection: 3 eligible Bluetooth-output after-wait samples. All waits p95 455 -> 417 ms. Bluetooth waits p50 717 -> 417 ms. Max 6547 -> 6247 ms. | Keep |
-| 2 | Readiness polling interval | Considered 150 ms -> lower | Logs show common built-in waits are dominated by one recovery delay plus actual start, not by polling alone. Would add more UI/CoreAudio polling with weak evidence. | Reject |
-| 3 | Readiness refresh interval | Considered 0.3 s -> lower | Timeout path already has a 0.9 s stale-refresh guard; route-settling failures were mostly stale Bluetooth output, not slow refresh cadence. | Reject |
-| 4 | Forced recovery threshold | Considered forcing earlier than 6 refreshes | Historical hard cases still had `.routeNotSettled`; earlier hard rebuilds risk more rebuild churn without proof of fewer timeouts. | Reject |
-| 5 | Device recovery timeout budget | Considered reducing 4 s | Could reduce the 6547 ms outlier, but there are 78 idle recovery-deferred events and no local success-duration event proving 3 s is safe. | Reject |
-| 6 | Max start attempts before hard recovery | Already bounded by policy | Existing policy caps normal ready-input starts and recovery starts; changing it would risk more retries rather than fewer. | No change |
-| 7 | Trust stale ready state | Keep current distrust | Code already requires not recovering plus ready format before normal start; recovery attempts are explicitly marked. | No change |
-| 8 | Move failure cleanup/reporting off critical path | Not applicable | Timeout cleanup is after the 6 s budget and does not improve start-to-listening. | Reject |
+| 1 | Poll interval 150 -> 100 ms | kept | p95 2440 -> 2290 ms, starts unchanged, refreshes +1 | Safe responsiveness win |
+| 2 | Poll interval 150 -> 75 ms | rejected | p95 unchanged, refreshes +4 | More churn for no p95 win |
+| 3 | Refresh interval 300 -> 200 ms | rejected | p95 unchanged | No standalone win |
+| 4 | Refresh interval 300 -> 150 ms | rejected | p95 -570 ms but starts +2, refreshes +5, forced +2, Bluetooth +700 ms | Too much churn and Bluetooth regression |
+| 5 | Recovery start after 3 refreshes | rejected | Bluetooth early case -300 ms, late Bluetooth +1300 ms, p95 +30 ms | Burns guarded attempt too early |
+| 6 | Recovery start after 2 refreshes | rejected | cold launch -290 ms, Bluetooth +1300 ms, starts +2, forced +2 | Too aggressive |
+| 7 | Ready-start cap 3 -> 2 | kept | ready-flag-start-failing 1600 -> 1350 ms, starts -1 | Fewer retries without hurting first-fail retry-success |
+| 8 | Ready-start cap 3 -> 1 | rejected | first-fail retry-success +600 ms, ready-flag-start-failing +500 ms, forced +2 | Removes useful single retry |
+| 9 | Forced recovery threshold 6 -> 5 | kept | p95 2440 -> 2140 ms, starts unchanged, forced unchanged, refreshes +2 | Earlier hard recovery after one guarded start |
+| 10 | Forced recovery threshold 6 -> 4 | rejected | p95 -540 ms but Bluetooth +730 ms, recovery starts -5, forced +2 | Rebuilds too early |
+| 11 | Combo: poll100 + force5 | tested | p95 1990 ms, starts unchanged, refreshes +3 | Good, but keep attempt cap too |
+| 12 | Combo: poll100 + ready cap 2 | tested | p95 2290 ms, starts -1 | Safe but smaller win |
+| 13 | Combo: poll100 + force5 + ready cap 2 | kept | p95 2440 -> 1990 ms, starts 18 -> 17, forced unchanged, no new timeouts | Best safe overall |
+| 14 | Combo: poll100 + refresh200 + ready cap 2 | rejected | p95 1920 ms, but late Bluetooth +750 ms, refreshes +4, forced +1 | Faster aggregate, worse route-switch guardrail |
+| 15 | Device recovery timeout 4 s -> lower | ruled out | Historical logs have no successful device-recovery duration event | Too likely to abandon slow real hardware |
+| 16 | Recovery budget 6 s -> lower | ruled out | Would only make failure faster, not recovery more reliable | Risks false timeouts |
+| 17 | Audio tap buffer size | not run | An unrelated worktree change appeared, but this pass did not test it | Kept out of this commit |
 
-Projection command for the kept knob:
+Winning combo raw scenario deltas:
 
-```bash
-ruby -rjson -rtime - "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"
-```
-
-Projection output:
-
-```text
-eligible_recovery_wait_samples=3
-all_waits count=64 p50=386.0->386.0 p90=402.0->400.0 p95=455.0->417.0 max=6547.0->6247.0
-bluetooth_waits count=3 p50=717.0->417.0 p90=6547.0->6247.0 p95=6547.0->6247.0 max=6547.0->6247.0
-eligible_rows:
-2026-05-19T11:13:18Z built_in_input_to_bluetooth_output 681.0->381.0
-2026-05-20T17:30:35Z built_in_input_to_bluetooth_output 717.0->417.0
-2026-05-27T01:08:08Z built_in_input_to_bluetooth_output 6547.0->6247.0
-```
+| Scenario | Baseline | Winner | Delta |
+| --- | ---: | ---: | ---: |
+| fast_ready_no_recovery | 85 ms | 85 ms | 0 |
+| cold_launch_unready_then_ready | 840 ms | 790 ms | -50 |
+| wake_recovery_finishes | 1290 ms | 1290 ms | 0 |
+| bluetooth_reconnect_stale_flag | 1170 ms | 1120 ms | -50 |
+| bluetooth_late_ready_stale_flag | 1170 ms | 1120 ms | -50 |
+| slow_refresh_would_recover | 2440 ms | 1990 ms | -450 |
+| selected_input_stale_until_force | 2440 ms | 1990 ms | -450 |
+| first_start_fails_retry_succeeds | 330 ms | 280 ms | -50 |
+| ready_flag_start_keeps_failing | 1600 ms | 1200 ms | -400 |
+| refresh_times_out_then_recovery_start | 1000 ms | 1000 ms | 0 |
+| unrecoverable_route_times_out | 6000 ms | 6000 ms | 0 |
 
 ## Kept Changes
 
-- `Sources/Speech/ParakeetEngine.swift`
-  - Checks immediate audio format readiness after applying a preferred input
-    override.
-  - Returns immediately when the format is `.ready`.
-  - Keeps the old settle wait when the route is stale or invalid.
-- `Sources/Speech/ParakeetStartRecordingFailurePolicy.swift`
-  - Adds `ParakeetInputOverrideSettlePolicy`.
-- `Tests/ParakeetStartRecordingFailurePolicyTests.swift`
-  - Covers ready, route-not-settled, and invalid settle decisions.
+- `Sources/Support/TranscriptedConstants.swift`
+  - `dictationReadinessPollInterval`: 150 ms -> 100 ms.
+  - `dictationReadinessForcedRecoveryRefreshes`: 6 -> 5.
+- `Sources/Speech/DictationReadinessWaitPolicy.swift`
+  - Ready-format start failure cap: 3 -> 2.
+- `Tests/DictationReadinessWaitPolicyTests.swift`
+  - Updated retry-cap assertions and added default forced-threshold coverage.
+- `scripts/ops/dictation-recovery-autoeval.rb`
+  - Added repeatable controlled recovery harness for this class of changes.
 
 ## Rejected Attempts
 
-- Did not lower polling/refresh intervals. The measured recovery waits do not
-  prove those are the dominant delay, and lower intervals would increase churn.
-- Did not reduce the 4 s device recovery timeout. It might help one outlier but
-  could prematurely abandon slower real device recovery.
-- Did not raise retry counts. The goal is fewer retries and clearer failure, not
-  more attempts.
-- Did not change timeout cleanup. It happens after the recovery budget is
-  exhausted, so it does not reduce start-to-listening.
+- Did not lower refresh interval. The best-looking refresh interval run created
+  more starts, refreshes, and forced recoveries, and regressed late Bluetooth.
+- Did not lower guarded recovery start threshold. It helps if Bluetooth is ready
+  early, but late Bluetooth burns the one guarded attempt and gets slower.
+- Did not force after 4 refreshes. It rebuilds before the guarded recovery start
+  can prove whether audio is already recordable.
+- Did not cap ready starts at 1. One retry is still useful and tested.
+- Did not reduce device recovery timeout or total recovery budget. Those would
+  make failure faster without proving recovery is safer.
+- Did not include the unrelated `audioTapBufferSize` 1024 -> 256 worktree
+  change. It was not tested in this autoeval.
 
 ## Tests Run
 
 ```bash
+ruby -c scripts/ops/dictation-recovery-autoeval.rb
+ruby scripts/ops/dictation-recovery-autoeval.rb --details
 bash build.sh --no-open
 bash run-tests.sh
+bash run-integration-smoke.sh
+swift test
+bash run-e2e-smoke.sh
 bash run-daily-audio-reliability.sh --synthetic
 ruby -c scripts/ops/performance-budget.rb
 ruby scripts/ops/performance-budget.rb --allow-missing-parakeet-model --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"
@@ -171,28 +206,39 @@ ruby scripts/ops/performance-budget.rb --allow-missing-parakeet-model --events "
 
 Results:
 
-- `bash build.sh --no-open`: passed. The build's built-in performance budget
-  passed.
-- `bash run-tests.sh`: passed, 2929 passed / 0 failed.
+- Harness: passed; winning combo p95/max 1990 ms.
+- `bash build.sh --no-open`: passed, including built-in performance budget.
+- `bash run-tests.sh`: passed, 2936 passed / 0 failed.
+- `bash run-integration-smoke.sh`: passed.
+- `swift test`: passed, 339 passed / 0 failed / 1 skipped live capture test.
+- `bash run-e2e-smoke.sh`: passed.
 - `bash run-daily-audio-reliability.sh --synthetic`: passed, 72 passed / 0
   failed / 0 skipped.
 - `ruby -c scripts/ops/performance-budget.rb`: passed.
-- Full historical `performance-budget.rb --events --stats`: failed on existing
-  transcription and meeting throughput budgets, not on dictation recovery
-  metrics. It does not currently score `dictation_started_after_wait`.
+- Full historical `performance-budget.rb --events --stats`: failed existing
+  non-recovery budgets: dictation transcription p95 RTF 0.053 > 0.050 and
+  meeting processing p95 RTF 0.065 > 0.050.
 
 ## Remaining Risks
 
-- This is a historical projection plus unit/build verification, not a fresh live
-  Bluetooth recovery capture from this exact build.
-- The biggest 6547 ms case is mostly route-settling/device-recovery timeout, so
-  the kept change only shaves the final ready override settle delay from it.
-- There is no local event for successful device-recovery duration, which makes
-  lowering `audioDeviceRecoveryTimeout` too speculative.
+- Live Bluetooth reconnect/sleep testing was not run because it needs physical
+  route manipulation and microphone capture. The deterministic harness covers
+  those timing shapes, but it is still not a hardware trace.
+- The historical 6547 ms outlier is still a device/route settling long tail.
+  This patch should shorten the recovery loop before hard rebuild, but it does
+  not prove every physical device will settle under 2 seconds.
+- The new harness is intentionally conservative and synthetic. It should be
+  rerun with fresh hardware logs as soon as a route-switch capture is available.
 
 ## Next Run
 
-Capture 10-20 fresh starts on a Bluetooth-output route from this branch and
-compare `dictation_started_after_wait`, `dictation_recording_retry`,
-`dictation_recording_recovery_start`, and `microphone_start_timeout` against the
-baseline above.
+Run 10-20 fresh dictation starts each for built-in input, Bluetooth reconnect,
+and wake-from-sleep on this branch. Compare:
+
+- `dictation_started_after_wait.wait_ms`
+- `dictation_started_after_wait.request_to_recording_ms`
+- `dictation_recording_retry`
+- `dictation_recording_recovery_start`
+- `input_readiness_recovery_forced`
+- `dictation_readiness_refresh_timeout`
+- `microphone_start_timeout`

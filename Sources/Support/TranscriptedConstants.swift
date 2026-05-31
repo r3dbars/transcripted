@@ -108,7 +108,7 @@ enum TranscriptedConstants {
     static let dictationRecoveryBudget: TimeInterval = 6.0
 
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
-    static let dictationReadinessPollInterval: UInt64 = 150_000_000  // 150ms
+    static let dictationReadinessPollInterval: UInt64 = 100_000_000  // 100ms
 
     /// Minimum interval between active readiness refreshes while dictation waits.
     /// This lets a failed recovery get unstuck without hammering CoreAudio.
@@ -120,7 +120,7 @@ enum TranscriptedConstants {
 
     /// Number of active readiness refreshes before a user-started dictation
     /// performs a hard idle audio graph rebuild.
-    static let dictationReadinessForcedRecoveryRefreshes: Int = 6
+    static let dictationReadinessForcedRecoveryRefreshes: Int = 5
 
     /// Max hard recovery attempts inside one user-started dictation wait.
     static let dictationReadinessForcedRecoveryAttempts: Int = 2

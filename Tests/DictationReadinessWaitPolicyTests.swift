@@ -88,6 +88,24 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .waitForRecovery, "active device recovery should not be interrupted by the forced recovery threshold")
     }
 
+    runSuite("DictationReadinessWaitPolicy — default forced recovery threshold is bounded") {
+        let belowThreshold = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes - 1,
+            recoveryStartAttempts: 1
+        )
+        assertEqual(belowThreshold, .refreshInputReadiness, "one refresh before the default threshold should keep the route refreshable")
+
+        let atThreshold = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
+            recoveryStartAttempts: 1
+        )
+        assertEqual(atThreshold, .forceInputRecovery, "the default threshold should force one hard input recovery")
+    }
+
     runSuite("DictationReadinessWaitPolicy — starts recording when input is ready") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
@@ -101,7 +119,7 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            recordingStartAttempts: 3,
+            recordingStartAttempts: 2,
             readinessRefreshes: 10
         )
 
@@ -109,7 +127,7 @@ func testDictationReadinessWaitPolicy() {
         assertTrue(
             DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
                 inputFormatReady: true,
-                recordingStartAttempts: 3
+                recordingStartAttempts: 2
             ),
             "the retry limiter should be visible to diagnostics code"
         )
@@ -119,7 +137,7 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            recordingStartAttempts: 3,
+            recordingStartAttempts: 2,
             forcedRecoveryAttempts: 2,
             maxForcedRecoveryAttempts: 2
         )
@@ -131,7 +149,7 @@ func testDictationReadinessWaitPolicy() {
         assertFalse(
             DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
                 inputFormatReady: false,
-                recordingStartAttempts: 3
+                recordingStartAttempts: 2
             ),
             "the start-attempt limiter only applies after the route says it is ready"
         )
