@@ -173,4 +173,45 @@ func testAnalyticsReporter() {
             "invalid negative depths should fail closed to the empty queue bucket"
         )
     }
+
+    runSuite("AnalyticsReporter durationBucket keeps short captures coarse") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 5),
+            "lt_10s",
+            "short dictation and meeting durations should stay in the shortest coarse bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter durationBucket switches buckets at second boundaries") {
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 10), "10_29s", "ten seconds should enter the next bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 30), "30_119s", "thirty seconds should enter the next bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 120), "2_9m", "two minutes should enter the minutes bucket")
+    }
+
+    runSuite("AnalyticsReporter durationBucket keeps upper edges in their current bucket") {
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 29.9), "10_29s", "values below thirty seconds should stay in the second bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 119.9), "30_119s", "values below two minutes should stay in the midrange bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 599.9), "2_9m", "values below ten minutes should stay in the short meeting bucket")
+    }
+
+    runSuite("AnalyticsReporter durationBucket caps long sessions") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 1800),
+            "30m_plus",
+            "thirty minutes or more should stay bucketed instead of exposing raw duration"
+        )
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 7200),
+            "30m_plus",
+            "multi-hour sessions should stay in the same coarse analytics bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter durationBucket treats invalid negative durations as short") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: -1),
+            "lt_10s",
+            "invalid negative durations should fail closed to the shortest duration bucket"
+        )
+    }
 }
