@@ -1360,7 +1360,19 @@ class ParakeetEngine: ObservableObject {
             return snapshot
         }
 
-        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+        let immediateReadiness = audioFormatReadiness(
+            outputFormat: snapshot.outputFormat,
+            hwFormat: snapshot.hwFormat,
+            selection: snapshot.selection
+        )
+        let overrideSettleDelay = ParakeetInputOverrideSettlePolicy.delayNanoseconds(
+            afterImmediateReadiness: immediateReadiness
+        )
+        if overrideSettleDelay == 0 {
+            return snapshot
+        }
+
+        try? await Task.sleep(nanoseconds: overrideSettleDelay)
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
             throw CancellationError()
         }
