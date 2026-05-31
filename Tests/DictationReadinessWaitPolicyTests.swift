@@ -88,6 +88,24 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .waitForRecovery, "active device recovery should not be interrupted by the forced recovery threshold")
     }
 
+    runSuite("DictationReadinessWaitPolicy — default forced recovery threshold is bounded") {
+        let belowThreshold = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes - 1,
+            recoveryStartAttempts: 1
+        )
+        assertEqual(belowThreshold, .refreshInputReadiness, "one refresh before the default threshold should keep the route refreshable")
+
+        let atThreshold = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
+            recoveryStartAttempts: 1
+        )
+        assertEqual(atThreshold, .forceInputRecovery, "the default threshold should force one hard input recovery")
+    }
+
     runSuite("DictationReadinessWaitPolicy — starts recording when input is ready") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
@@ -101,18 +119,18 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            readyStartFailures: 2,
+            readyStartFailures: 1,
             forcedRecoveryAttempts: 0
         )
 
-        assertEqual(action, .startRecording, "a couple of failed starts should still use the normal start path")
+        assertEqual(action, .startRecording, "one failed start should still use the normal start path")
     }
 
     runSuite("DictationReadinessWaitPolicy — repeated ready start failures force recovery") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            readyStartFailures: 3,
+            readyStartFailures: 2,
             forcedRecoveryAttempts: 0
         )
 
@@ -123,7 +141,7 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            readyStartFailures: 3,
+            readyStartFailures: 2,
             forcedRecoveryAttempts: 1
         )
 
@@ -134,7 +152,7 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            readyStartFailures: 6,
+            readyStartFailures: 4,
             forcedRecoveryAttempts: 1
         )
 
@@ -145,7 +163,7 @@ func testDictationReadinessWaitPolicy() {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            readyStartFailures: 6,
+            readyStartFailures: 4,
             forcedRecoveryAttempts: 2,
             maxForcedRecoveryAttempts: 2
         )
