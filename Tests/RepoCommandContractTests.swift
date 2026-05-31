@@ -485,16 +485,33 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Sparkle no-update finish cycles stay successful") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let didNotFindBlock = sourceSlice(
+            controller,
+            from: "func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error)",
+            to: "func updaterDidNotFindUpdate(_ updater: SPUUpdater)"
+        )
         let finishCycleBlock = sourceSlice(
             controller,
             from: "func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?)",
             to: "func updaterWillRelaunchApplication"
         )
 
+        let didNotFindNoUpdateCheck = didNotFindBlock.range(of: "UpdateFailureKind.isNoUpdate(error)")
+        let didNotFindNoUpdateHandler = didNotFindBlock.range(of: "markNoUpdateAvailable(from: updater)")
+        let didNotFindFailureHandler = didNotFindBlock.range(of: "markUpdateCheckFailed(from: updater, error: error)")
         let noUpdateCheck = finishCycleBlock.range(of: "UpdateFailureKind.isNoUpdate(error)")
         let noUpdateHandler = finishCycleBlock.range(of: "markNoUpdateAvailable(from: updater)")
         let failureHandler = finishCycleBlock.range(of: "markUpdateCheckFailed(from: updater, error: error)")
 
+        assertNotNil(didNotFindNoUpdateCheck, "Sparkle 1001 did-not-find callbacks should be detected as no-update outcomes")
+        assertNotNil(didNotFindNoUpdateHandler, "Sparkle no-update did-not-find callbacks should use the success path")
+        assertNotNil(didNotFindFailureHandler, "real did-not-find errors should still use the failure path")
+        if let didNotFindNoUpdateCheck, let didNotFindFailureHandler {
+            assertTrue(
+                didNotFindNoUpdateCheck.lowerBound < didNotFindFailureHandler.lowerBound,
+                "no-update did-not-find callbacks should be handled before the generic failure path"
+            )
+        }
         assertNotNil(noUpdateCheck, "Sparkle 1001 finish-cycle errors should be detected as no-update outcomes")
         assertNotNil(noUpdateHandler, "Sparkle no-update finish cycles should use the success path")
         assertNotNil(failureHandler, "real finish-cycle errors should still use the failure path")
