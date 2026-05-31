@@ -173,3 +173,78 @@ Still-open knobs:
 - whether route lookup can be cached safely
 - whether first-sample cadence can move below about 100 ms without weakening AirPods/HFP compatibility
 - live 10-20 sample proof on both built-in and Bluetooth-output routes
+
+## Continued Loop - Fresh Branch Samples
+
+Branch build tested:
+
+- Branch: `codex/dictation-start-autoeval`
+- App path: `/Users/redbars/transcripted-latest/build/Transcripted.app`
+- Trigger: synthetic Right Option physical-key event
+- Route: `built_in_input_to_built_in_output`
+- Sample method: warm model once, then 20 start/stop cycles with TextEdit as the paste target
+
+Fresh built-in baseline from branch build:
+
+| Cutoff | Samples | Metric | p50 | p90 | p95 | Max | Guardrails |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `2026-05-31T19:48:16Z` | 20 intended starts | `request_to_recording_ms` | 88 ms | 93 ms | 98 ms | 100 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:48:16Z` | 20 intended starts | `pre_recording_overhead_ms` | 10 ms | 12 ms | 13 ms | 14 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:48:16Z` | 20 intended starts | `start_ms` | 78 ms | 88 ms | 91 ms | 91 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:48:16Z` | 20 intended starts | `start_to_first_sample_ms` | 183 ms | 192 ms | 196 ms | 196 ms | 4800-frame first buffers |
+
+Same-cadence 1024-buffer rerun:
+
+| Cutoff | Samples | Metric | p50 | p90 | p95 | Max | Guardrails |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `2026-05-31T20:01:08Z` | 20 | `request_to_recording_ms` | 94 ms | 100 ms | 100 ms | 100 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:01:08Z` | 20 | `pre_recording_overhead_ms` | 10 ms | 11 ms | 11 ms | 11 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:01:08Z` | 20 | `start_ms` | 84 ms | 89 ms | 90 ms | 90 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T20:01:08Z` | 20 | `start_to_first_sample_ms` | 189 ms | 194 ms | 194 ms | 194 ms | 4800-frame first buffers |
+
+### Tested Knob - Tap Buffer Size
+
+Changed `TranscriptedConstants.audioTapBufferSize` from `1024` to `256`, rebuilt, warmed the model, then ran the same 20-cycle sampler.
+
+Result:
+
+| Cutoff | Samples | Metric | p50 | p90 | p95 | Max | Guardrails |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | --- |
+| `2026-05-31T19:55:59Z` | 20 | `request_to_recording_ms` | 89 ms | 100 ms | 102 ms | 102 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:55:59Z` | 20 | `pre_recording_overhead_ms` | 9 ms | 12 ms | 13 ms | 13 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:55:59Z` | 20 | `start_ms` | 80 ms | 87 ms | 93 ms | 93 ms | 0 fallback / 0 retry / 0 timeout |
+| `2026-05-31T19:55:59Z` | 20 | `start_to_first_sample_ms` | 185 ms | 192 ms | 198 ms | 198 ms | 4800-frame first buffers |
+
+Decision: reject and revert.
+
+Why:
+
+- It did not reduce the actual first buffer size. The first buffer stayed at 4800 frames.
+- It did not improve request-to-recording p95.
+- It did not improve start-to-first-sample p95.
+
+An earlier aggressive sampler run started again while the overlay was still in the short no-speech cleanup state and caused one `audio_format_read_timeout`. That was treated as a harness error, not as the knob score. The clean rerun above had no fallback, retry, or timeout events.
+
+### Current Knob Ledger
+
+| Knob | Status | Evidence |
+| --- | --- | --- |
+| Skip ready input-override settle delay | Kept | Historical Bluetooth-output projection improved p95 from 555 ms to 255 ms while keeping the wait for unready routes. |
+| Add end-to-end timing fields | Kept | Enabled live scoring for `request_to_recording_ms`, `pre_recording_overhead_ms`, and `start_to_first_sample_ms`. |
+| Eager sample-buffer reserve | Rejected | Microbench max was 0.013 ms. Not a start-latency problem. |
+| Tap buffer size 1024 -> 256 | Rejected | Same 4800-frame first buffers; p95 `start_to_first_sample_ms` was 198 ms vs 194 ms on same-cadence 1024 rerun. |
+| Overlay/UI pre-start work | Ruled out for now | `pre_recording_overhead_ms` p95 is 11-13 ms, so even deleting it all cannot hit a 20-30% win. |
+| Diagnostics/logging hot path | Ruled out for primary metric | The primary request-to-recording fields are captured before the expensive post-start delivery/transcription path. |
+| Cache route/device lookup on normal built-in route | Ruled out for current route | Built-in route uses `selection_reason=defaultIsSafe` with no input override; no live evidence of lookup cost in the 20-sample runs. |
+| Preferred-input override delay beyond kept fix | Blocked | Needs live Bluetooth-output samples. Current branch samples were built-in input to built-in output only. |
+| Slow-path recovery knobs | Separate lane | Relevant to fallback recovery, not normal ready-engine p95. Do not mix into the normal fast-start score. |
+
+### Next Experiments
+
+The normal built-in path is now probably close to the floor for this route: p95 request-to-recording is about 100 ms and p95 first sample is about 194 ms.
+
+The remaining high-value tests are:
+
+1. Collect 20 live Bluetooth-output starts on this branch.
+2. If Bluetooth still has p95 spikes, test only override/route-settle knobs there.
+3. If built-in needs more speed anyway, add stage timing inside `audioInputSnapshot` and `installTapAndStartEngine`; do not guess at cache changes without that split.
