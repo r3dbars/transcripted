@@ -221,6 +221,16 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
+    private static func elapsedMilliseconds(since start: CFAbsoluteTime) -> Int {
+        max(0, Int((CFAbsoluteTimeGetCurrent() - start) * 1000))
+    }
+
+    private static func timingContext(_ timings: [String: Int]) -> [String: String] {
+        timings.reduce(into: [:]) { context, entry in
+            context[entry.key] = "\(entry.value)"
+        }
+    }
+
     private static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
         audioEngine.inputNode.removeTap(onBus: 0)
         if audioEngine.isRunning {
@@ -1328,13 +1338,20 @@ class ParakeetEngine: ObservableObject {
         recoveryGeneration: UInt64? = nil,
         allowsBuiltInBluetoothFallback: Bool = true
     ) async throws -> ParakeetAudioInputSnapshot {
+        let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
+        let selectionStartedAt = CFAbsoluteTimeGetCurrent()
         let selection = Self.loadDictationInputDeviceSelection(
             allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
         )
+        var stageTimings = [
+            "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
+        ]
         if let selection, selection.didOverrideDefault {
+            let deviceCheckStartedAt = CFAbsoluteTimeGetCurrent()
             let shouldApplyOverride = try await runTimedAudioEngineWork(operation: "\(operation)_device_check") { engine in
                 engine.inputNode.auAudioUnit.deviceID != selection.selectedInput.id
             }
+            stageTimings["audio_input_device_check_ms"] = Self.elapsedMilliseconds(since: deviceCheckStartedAt)
             if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
                 throw CancellationError()
             }
@@ -1347,17 +1364,27 @@ class ParakeetEngine: ObservableObject {
             throw CancellationError()
         }
         let snapshotGraphGeneration = audioGraphGeneration
-        let snapshot = try await runTimedAudioEngineWork(operation: "\(operation)_snapshot") { audioEngine in
+        let snapshotReadStartedAt = CFAbsoluteTimeGetCurrent()
+        let snapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_snapshot") { audioEngine in
             let inputNode = audioEngine.inputNode
             let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
-            return ParakeetAudioInputSnapshot(
+            return (
                 outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
                 hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
-                selection: selection,
                 selectionApplication: selectionApplication,
                 engineWasRunning: audioEngine.isRunning
             )
         }
+        stageTimings["audio_input_snapshot_read_ms"] = Self.elapsedMilliseconds(since: snapshotReadStartedAt)
+        stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
+        let snapshot = ParakeetAudioInputSnapshot(
+            outputFormat: snapshotResult.outputFormat,
+            hwFormat: snapshotResult.hwFormat,
+            selection: selection,
+            selectionApplication: snapshotResult.selectionApplication,
+            engineWasRunning: snapshotResult.engineWasRunning,
+            stageTimings: stageTimings
+        )
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
             throw CancellationError()
         }
@@ -1381,22 +1408,33 @@ class ParakeetEngine: ObservableObject {
             return snapshot
         }
 
+        let settleSleepStartedAt = CFAbsoluteTimeGetCurrent()
         try? await Task.sleep(nanoseconds: overrideSettleDelay)
+        stageTimings["audio_input_override_settle_sleep_ms"] = Self.elapsedMilliseconds(since: settleSleepStartedAt)
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
             throw CancellationError()
         }
 
         let settledGraphGeneration = audioGraphGeneration
-        let settledSnapshot = try await runTimedAudioEngineWork(operation: "\(operation)_settled_snapshot") { audioEngine in
+        let settledSnapshotStartedAt = CFAbsoluteTimeGetCurrent()
+        let settledSnapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_settled_snapshot") { audioEngine in
             let inputNode = audioEngine.inputNode
-            return ParakeetAudioInputSnapshot(
+            return (
                 outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
                 hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
-                selection: selection,
-                selectionApplication: snapshot.selectionApplication,
                 engineWasRunning: audioEngine.isRunning
             )
         }
+        stageTimings["audio_input_settled_snapshot_read_ms"] = Self.elapsedMilliseconds(since: settledSnapshotStartedAt)
+        stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
+        let settledSnapshot = ParakeetAudioInputSnapshot(
+            outputFormat: settledSnapshotResult.outputFormat,
+            hwFormat: settledSnapshotResult.hwFormat,
+            selection: selection,
+            selectionApplication: snapshot.selectionApplication,
+            engineWasRunning: settledSnapshotResult.engineWasRunning,
+            stageTimings: stageTimings
+        )
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
             throw CancellationError()
         }
@@ -1431,8 +1469,13 @@ class ParakeetEngine: ObservableObject {
             operation: "start_recording",
             cleanupAfterLateCompletion: Self.cleanUpLateAudioStart(on:)
         ) { audioEngine in
+            let workStartedAt = CFAbsoluteTimeGetCurrent()
+            var stageTimings: [String: Int] = [:]
             let inputNode = audioEngine.inputNode
+            let tapRemoveStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.removeTap(onBus: 0)
+            stageTimings["audio_tap_remove_ms"] = Self.elapsedMilliseconds(since: tapRemoveStartedAt)
+            let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -1502,13 +1545,23 @@ class ParakeetEngine: ObservableObject {
                     self?.audioLevel = normalized
                 }
             }
+            stageTimings["audio_tap_install_ms"] = Self.elapsedMilliseconds(since: tapInstallStartedAt)
 
             let engineWasRunning = audioEngine.isRunning
             if !wasPrewarmed || !audioEngine.isRunning {
-                audioEngine.prepare()
+                stageTimings["audio_engine_prepare_ms"] = 0
+                let engineStartStartedAt = CFAbsoluteTimeGetCurrent()
                 try audioEngine.start()
+                stageTimings["audio_engine_start_ms"] = Self.elapsedMilliseconds(since: engineStartStartedAt)
+            } else {
+                stageTimings["audio_engine_prepare_ms"] = 0
+                stageTimings["audio_engine_start_ms"] = 0
             }
-            return ParakeetAudioStartSnapshot(engineWasRunning: engineWasRunning)
+            stageTimings["audio_start_work_ms"] = Self.elapsedMilliseconds(since: workStartedAt)
+            return ParakeetAudioStartSnapshot(
+                engineWasRunning: engineWasRunning,
+                stageTimings: stageTimings
+            )
         }
     }
 
@@ -2010,6 +2063,25 @@ class ParakeetEngine: ObservableObject {
                 }
                 inputTapInstalled = true
                 isEnginePrewarmed = true
+
+                var timingContext = dictationRouteAnalyticsContext(
+                    outputFormat: snapshot.outputFormat,
+                    hwFormat: snapshot.hwFormat,
+                    selection: snapshot.selection,
+                    extra: [
+                        "engine_running_before_start": "\(startSnapshot.engineWasRunning)",
+                        "start_mode": isRecoveryAttempt ? "recovery" : "normal",
+                    ]
+                )
+                timingContext.merge(Self.timingContext(snapshot.stageTimings)) { current, _ in current }
+                timingContext.merge(Self.timingContext(startSnapshot.stageTimings)) { current, _ in current }
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "parakeet",
+                    event: "dictation_audio_start_timing",
+                    message: "Dictation audio start stage timing",
+                    context: timingContext
+                )
 
                 if !startSnapshot.engineWasRunning && isEnginePrewarmed {
                     EventReporter.shared.capture(level: .info, engine: "parakeet",
