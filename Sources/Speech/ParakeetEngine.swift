@@ -2290,6 +2290,20 @@ class ParakeetEngine: ObservableObject {
         recordingInterrupted = true
     }
 
+    func loadRecordedSamplesForDictationBenchmark(_ samples: [Float], sampleRate: Double) {
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
+        sampleBuffer = samples
+        recoveredRecordingTimeline.removeAll(keepingCapacity: true)
+        preservingRecordingAcrossRecovery = false
+        nativeSampleRate = sampleRate
+        isRecording = false
+        isTranscribing = false
+        recordingInterrupted = false
+        audioLevel = 0
+    }
+
     private func drainRecordedSamplesForInference() async -> (nativeSampleCount: Int, samples16k: [Float])? {
         drainPendingSamplesIntoSampleBuffer()
 
