@@ -1,6 +1,6 @@
 import Foundation
 
-func testRecentCaptureScanners() {
+func testRecentCaptureScanners() async {
     runSuite("RecentMeetingSpeakerStatus.detect flags generic speaker labels") {
         let markdown = """
         # Design review
@@ -247,4 +247,159 @@ func testRecentCaptureScanners() {
             "idle saved meetings with retained audio should stay re-transcribable"
         )
     }
+
+    await testRecentCaptureLoader()
+}
+
+func testRecentCaptureLoader() async {
+    await runSuite("RecentCaptureLoader returns newest rows and requested dictation counts from a temp library") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Older Sync",
+                date: recentLoaderDate("2026-05-17T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("older.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Newer Sync",
+                date: recentLoaderDate("2026-05-18T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("newer.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "older dictation words",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-17T13:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "newer dictation words now",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-05-18T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 2,
+                meetingLimit: 2,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.map(\.title), ["Newer Sync", "Older Sync"], "meetings should be newest-first")
+            assertEqual(snapshot.dictations.map(\.text), ["newer dictation words now", "older dictation words"], "dictations should be newest-first")
+            assertEqual(snapshot.dictationCounts.total, 2, "requested dictation counts should include all entries")
+            assertEqual(snapshot.dictationCounts.totalWords, 7, "requested dictation counts should include word totals")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader cancellation returns no stale rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            for index in 0..<200 {
+                let date = Date(timeIntervalSince1970: 1_779_470_400 - Double(index * 60))
+                try? writeRecentLoaderMeeting(
+                    title: "Canceled Sync \(index)",
+                    date: date,
+                    to: meetingsRoot.appendingPathComponent("meeting-\(index).md", isDirectory: false)
+                )
+                _ = try? DictationTranscriptStore.save(
+                    text: "canceled dictation \(index)",
+                    sourceApp: nil,
+                    delivery: .copied,
+                    createdAt: date,
+                    directory: dictationsRoot
+                )
+            }
+
+            let task = Task {
+                await RecentCaptureLoader.load(
+                    dictationLimit: 10,
+                    meetingLimit: 10,
+                    includeDictationCounts: true
+                )
+            }
+            task.cancel()
+            let snapshot = await task.value
+
+            assertEqual(snapshot.meetings.count, 0, "canceled loads should not publish meeting rows")
+            assertEqual(snapshot.dictations.count, 0, "canceled loads should not publish dictation rows")
+            assertEqual(snapshot.dictationCounts.total, 0, "canceled loads should not publish stale counts")
+        }
+    }
+}
+
+private func withTemporaryRecentCaptureLibrary(
+    _ body: (URL) async -> Void
+) async {
+    let fm = FileManager.default
+    let root = URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("build/recent-capture-loader-tests", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let captureRoot = root.appendingPathComponent("captures", isDirectory: true)
+    let previous = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+
+    try? fm.createDirectory(
+        at: captureRoot.appendingPathComponent("meetings", isDirectory: true),
+        withIntermediateDirectories: true
+    )
+    try? fm.createDirectory(
+        at: captureRoot.appendingPathComponent("dictations", isDirectory: true),
+        withIntermediateDirectories: true
+    )
+    UserDefaults.standard.set(captureRoot.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+
+    await body(captureRoot)
+
+    if let previous {
+        UserDefaults.standard.set(previous, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+    } else {
+        UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+    }
+    try? fm.removeItem(at: root)
+}
+
+private func writeRecentLoaderMeeting(title: String, date: Date, to url: URL) throws {
+    let markdown = """
+    ---
+    title: "\(title)"
+    capture_type: meeting
+    date: "\(recentLoaderFormat(date, "yyyy-MM-dd"))"
+    time: "\(recentLoaderFormat(date, "HH:mm:ss"))"
+    duration: "10:00"
+    total_word_count: 5
+    mic_utterances: 1
+    system_utterances: 1
+    ---
+
+    # \(title)
+
+    ## Transcript
+
+    **00:01** [Mic/You]
+    Synthetic test meeting.
+
+    **00:04** [System/Alex]
+    Synthetic response.
+    """
+    try markdown.write(to: url, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes(
+        [.creationDate: date, .modificationDate: date],
+        ofItemAtPath: url.path
+    )
+}
+
+private func recentLoaderDate(_ string: String) -> Date {
+    ISO8601DateFormatter().date(from: string) ?? Date(timeIntervalSince1970: 0)
+}
+
+private func recentLoaderFormat(_ date: Date, _ pattern: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = pattern
+    return formatter.string(from: date)
 }
