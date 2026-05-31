@@ -99,6 +99,27 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
+        let probe = readRepoTextFile("scripts/ops/health-probe.sh")
+        let docs = readRepoTextFile("docs/ops-credentials.md")
+
+        for event in [
+            "dictation_completed",
+            "onboarding_first_dictation_saved",
+            "meeting_transcript_saved",
+            "onboarding_agent_cta_clicked"
+        ] {
+            assertTrue(
+                probe.contains(event) && docs.contains(event),
+                "PostHog first-value probe and docs should include \(event)"
+            )
+        }
+        assertTrue(
+            probe.contains("first_value_events=") && probe.contains("first_value_events_7d"),
+            "PostHog probe should keep the aggregate first-value event count"
+        )
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
