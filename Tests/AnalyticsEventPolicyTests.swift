@@ -110,6 +110,89 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {
+        let started = AnalyticsEventPolicy.policy(forEvent: "update_download_started")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "update_download_finished")
+
+        assertEqual(started?.allowedProperties.contains("automatic_downloads_enabled"), true, "download starts should preserve automatic-download state")
+        assertEqual(started?.allowedProperties.contains("state"), true, "download starts should preserve update state")
+        assertEqual(started?.allowedProperties.contains("version"), true, "download starts should preserve the public app version")
+        assertEqual(finished?.allowedProperties.contains("failure_kind"), true, "download finishes should preserve normalized failure kind")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "state": "downloading",
+                "version": "1.2.3",
+            ],
+            allowedKeys: started?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic-download state should survive sanitization")
+        assertEqual(sanitized["state"], "downloading", "download state should survive sanitization")
+        assertEqual(sanitized["version"], "1.2.3", "public update version should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves failed update download classification") {
+        let finished = AnalyticsEventPolicy.policy(forEvent: "update_download_finished")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "false",
+                "failure_kind": "download_failed",
+                "state": "available",
+                "version": "1.2.3",
+            ],
+            allowedKeys: finished?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["automatic_downloads_enabled"], "false", "manual downloads should remain distinguishable from automatic downloads")
+        assertEqual(sanitized["failure_kind"], "download_failed", "normalized download failure kind should survive")
+        assertEqual(sanitized["state"], "available", "failed downloads should keep their post-failure state")
+        assertEqual(sanitized["version"], "1.2.3", "failed downloads should keep the public app version")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves ready-to-install update state") {
+        let ready = AnalyticsEventPolicy.policy(forEvent: "update_ready_to_install")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: ready?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["automatic_downloads_enabled"], "true", "ready-to-install telemetry should preserve automatic-download state")
+        assertEqual(sanitized["state"], "ready_to_install", "ready-to-install state should survive sanitization")
+        assertEqual(sanitized["version"], "1.2.3", "ready-to-install telemetry should preserve the public app version")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps relaunch update telemetry narrow") {
+        let relaunching = AnalyticsEventPolicy.policy(forEvent: "update_relaunching")
+
+        assertEqual(relaunching?.allowedProperties.contains("version"), true, "relaunch telemetry should preserve the public app version")
+        assertEqual(relaunching?.allowedProperties.contains("state"), false, "relaunch telemetry should not add redundant update state")
+        assertEqual(relaunching?.allowedProperties.contains("automatic_downloads_enabled"), false, "relaunch telemetry should not add settings state")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "download_url": "redacted",
+                "error_message": "redacted",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: relaunching?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["version"], "1.2.3", "relaunch telemetry should keep the public app version")
+        assertNil(sanitized["automatic_downloads_enabled"], "relaunch telemetry should stay narrow")
+        assertNil(sanitized["download_url"], "raw download locations should stay out of analytics")
+        assertNil(sanitized["error_message"], "raw update errors should stay out of analytics")
+        assertNil(sanitized["state"], "relaunch telemetry should not duplicate lifecycle state")
+    }
+
     runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
         let unclean = AnalyticsEventPolicy.policy(forEvent: "app_unclean_shutdown_detected")
         let stall = AnalyticsEventPolicy.policy(forEvent: "app_session_stall_detected")
