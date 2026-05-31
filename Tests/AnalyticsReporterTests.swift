@@ -96,6 +96,47 @@ func testAnalyticsReporter() {
         assertEqual(properties["session_id"], "session-1", "default session id should remain")
     }
 
+    runSuite("AnalyticsReporter wordCountBucket keeps tiny captures coarse") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(5),
+            "lt_10",
+            "tiny dictations and meetings should stay in the smallest coarse bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket switches buckets at exact boundaries") {
+        assertEqual(AnalyticsReporter.wordCountBucket(10), "10_49", "ten words should enter the next bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(50), "50_149", "fifty words should enter the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(150), "150_299", "one hundred fifty words should enter the long-capture bucket")
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket keeps upper edges in their current bucket") {
+        assertEqual(AnalyticsReporter.wordCountBucket(49), "10_49", "forty-nine words should stay below the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(149), "50_149", "one hundred forty-nine words should stay in the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(299), "150_299", "two hundred ninety-nine words should stay below the capped bucket")
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket caps long transcripts") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(300),
+            "300_plus",
+            "three hundred or more words should be bucketed instead of exposing raw length"
+        )
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(5_000),
+            "300_plus",
+            "large transcripts should stay in the same coarse analytics bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket treats invalid negative counts as tiny") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(-4),
+            "lt_10",
+            "invalid negative word counts should fail closed to the smallest bucket"
+        )
+    }
+
     runSuite("AnalyticsReporter countBucket keeps zero start attempts explicit") {
         assertEqual(
             AnalyticsReporter.countBucket(0),
