@@ -102,6 +102,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let defaultInputVolumeDuring: String
     public let defaultOutputVolumeDuring: String
     public let defaultSystemOutputVolumeDuring: String
+    public let capturedInputVolumeBefore: String
     // Input volume scalar read from the device meetings actually capture from
     // (which can differ from the default input device). Lets issue #500
     // scalar-drop detection stay correct when the meeting input policy
@@ -111,6 +112,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public var privacySafeContext: [String: String] {
         [
             "buffer_success_bucket": bufferSuccessBucket,
+            "captured_input_volume_before": capturedInputVolumeBefore,
             "captured_input_volume_during": capturedInputVolumeDuring,
             "default_input_volume_before": defaultInputVolumeBefore,
             "default_input_volume_during": defaultInputVolumeDuring,
@@ -156,7 +158,8 @@ extension Audio {
         let inputDevice = try? AudioObjectID.readDefaultInputDevice()
         let outputDevice = try? AudioObjectID.readDefaultOutputDevice()
         let systemOutputDevice = try? AudioObjectID.readDefaultSystemOutputDevice()
-        let actualInputDevice = currentInputDeviceID() ?? inputDevice
+        let currentCapturedInputDevice = currentInputDeviceID()
+        let actualInputDevice = currentCapturedInputDevice ?? inputDevice
         let inputFormat = currentInputFormatSnapshot()
         let systemFormat = systemAudioCapture?.audioFormat
         let signalSnapshot = signalDiagnosticsSnapshot
@@ -193,7 +196,8 @@ extension Audio {
             defaultInputVolumeDuring: routeVolumeDuring.defaultInputVolume,
             defaultOutputVolumeDuring: routeVolumeDuring.defaultOutputVolume,
             defaultSystemOutputVolumeDuring: routeVolumeDuring.defaultSystemOutputVolume,
-            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: actualInputDevice)
+            capturedInputVolumeBefore: recordingStartCapturedInputVolume(matching: currentCapturedInputDevice),
+            capturedInputVolumeDuring: AudioRouteVolumeSnapshot.inputVolumeString(for: currentCapturedInputDevice)
         )
     }
 

@@ -40,6 +40,7 @@ extension Audio {
                 throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine input node unavailable"])
             }
             applyPreferredMeetingInputDevice(to: activeInputNode, operation: "start_recording")
+            recordRecordingStartCapturedInput(deviceID: activeInputNode.auAudioUnit.deviceID)
             armVoiceProcessing(on: activeInputNode)
 
             // When VPIO is off (the default — see `enableVoiceProcessing`), run

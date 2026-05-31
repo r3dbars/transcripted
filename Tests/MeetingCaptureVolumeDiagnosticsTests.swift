@@ -154,6 +154,66 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["attenuation_kind"], "scalar_drop", "quiet mic with a dropped input scalar is the WebRTC scalar-drop case")
     }
 
+    runSuite("MeetingCaptureVolumeDiagnostics uses captured input scalar for overridden meeting input") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "default_input_volume_during": "0.800",
+                "captured_input_volume_before": "0.700",
+                "captured_input_volume_during": "0.200",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.30000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.800",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_dropped"], "false", "the default input can stay flat when capture was redirected")
+        assertEqual(context["captured_input_volume_dropped"], "true", "the selected capture device drop should be visible")
+        assertEqual(context["input_volume_scalar_available"], "true", "captured input scalar should count as readable")
+        assertEqual(context["attenuation_kind"], "scalar_drop", "classification should follow the device Transcripted actually recorded")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics does not let stale default input drops override captured input") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "captured_input_volume_before": "0.700",
+                "captured_input_volume_during": "0.700",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.07000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.200",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_dropped"], "true", "default route diagnostics should still report its own drop")
+        assertEqual(context["captured_input_volume_dropped"], "false", "the selected capture device stayed flat")
+        assertEqual(context["attenuation_kind"], "voice_processed", "captured input facts should own attenuation classification when present")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics does not fall back when captured scalar is unreadable") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.800",
+                "captured_input_volume_before": "unavailable",
+                "captured_input_volume_during": "unavailable",
+                "mic_raw_peak": "0.02000",
+                "mic_processed_peak": "0.07000",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.200",
+            ]
+        )
+
+        assertEqual(context["default_input_volume_dropped"], "true", "default route diagnostics should still report its own drop")
+        assertEqual(context["captured_input_volume_dropped"], "unavailable", "the selected capture device did not expose a scalar")
+        assertEqual(context["input_volume_scalar_available"], "false", "captured input presence should own scalar availability")
+        assertEqual(context["attenuation_kind"], "voice_processed", "unreadable captured input should not inherit default route drops")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics classifies voice-processing attenuation when the scalar held (issue 500 Bug B)") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [
