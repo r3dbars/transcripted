@@ -259,7 +259,13 @@ func testRecentCaptureScanners() async {
         do {
             try fm.createDirectory(at: meetingDir, withIntermediateDirectories: true)
             try fm.createDirectory(at: dictationDir, withIntermediateDirectories: true)
-            try writeRecentCapturePerformanceMeetings(count: 500, directory: meetingDir, fileManager: fm, today: today)
+            try writeRecentCapturePerformanceMeetings(
+                count: 500,
+                namedSpeakersPerMeeting: 64,
+                directory: meetingDir,
+                fileManager: fm,
+                today: today
+            )
             try writeRecentCapturePerformanceDictations(
                 dayCount: 120,
                 entriesPerDay: 3,
@@ -289,6 +295,10 @@ func testRecentCaptureScanners() async {
         assertEqual(snapshot.dictationCounts.today, 3, "Home stats should count today's dictations")
         assertEqual(snapshot.dictationCounts.totalWords, 2_160, "Home stats should sum dictated words")
         assertTrue(
+            snapshot.meetings.allSatisfy { $0.speakerStatus == .ready },
+            "Home should not treat large sets of real named speakers as review work"
+        )
+        assertTrue(
             elapsed < m1FriendlyBudgetSeconds,
             String(format: "Home recent-capture load took %.3fs, expected under %.1fs on an M1-friendly fixture", elapsed, m1FriendlyBudgetSeconds)
         )
@@ -304,6 +314,7 @@ private func temporaryRecentCapturePerformanceRoot(fileManager: FileManager) -> 
 
 private func writeRecentCapturePerformanceMeetings(
     count: Int,
+    namedSpeakersPerMeeting: Int,
     directory: URL,
     fileManager: FileManager,
     today: Date
@@ -311,6 +322,16 @@ private func writeRecentCapturePerformanceMeetings(
     for index in 0..<count {
         let recordedAt = today.addingTimeInterval(TimeInterval(-index * 60))
         let title = String(format: "Performance Meeting %03d", index)
+        let transcriptLines = (0..<namedSpeakersPerMeeting)
+            .map { speakerIndex in
+                let timestamp = String(format: "00:%02d", speakerIndex % 60)
+                let channel = speakerIndex.isMultiple(of: 2) ? "System" : "Mic"
+                return """
+                **\(timestamp)**  [\(channel)/Person \(index)-\(speakerIndex)]
+                Checking Home performance with a real named speaker.
+                """
+            }
+            .joined(separator: "\n\n")
         let transcript = """
         ---
         capture_type: meeting
@@ -319,17 +340,13 @@ private func writeRecentCapturePerformanceMeetings(
         time: 10:00:00
         duration: "12:30"
         mic_utterances: 1
-        system_utterances: 1
-        total_word_count: 18
+        system_utterances: \(namedSpeakersPerMeeting)
+        total_word_count: \(namedSpeakersPerMeeting * 8)
         ---
 
         ## Transcript
 
-        **00:01**  [Mic/Justin]
-        Checking the home screen load.
-
-        **00:04**  [System/Maya]
-        The settings panel should stay responsive.
+        \(transcriptLines)
         """
         let url = directory.appendingPathComponent(String(format: "Meeting_%03d.md", index))
         try transcript.write(to: url, atomically: true, encoding: .utf8)

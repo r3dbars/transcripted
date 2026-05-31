@@ -19,6 +19,59 @@ func testSettingsRecentCaptureRefreshPolicy() {
         }
     }
 
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — clicking Home starts only Home work") {
+        let now = Date(timeIntervalSinceReferenceDate: 20)
+
+        assertTrue(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: false,
+                isInFlight: false,
+                lastStartedAt: nil,
+                now: now
+            ),
+            "clicking Home should start the dashboard refresh path"
+        )
+
+        assertFalse(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .people,
+                force: false,
+                isInFlight: false,
+                lastStartedAt: nil,
+                now: now
+            ),
+            "clicking Speakers should not run the Home recent-capture scan"
+        )
+    }
+
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — repeated Home clicks do not stack work") {
+        let lastStartedAt = Date(timeIntervalSinceReferenceDate: 20)
+
+        assertFalse(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: false,
+                isInFlight: true,
+                lastStartedAt: lastStartedAt,
+                now: Date(timeIntervalSinceReferenceDate: 20.4)
+            ),
+            "clicking Home again while a dashboard refresh is running should not start another one"
+        )
+
+        assertFalse(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: false,
+                isInFlight: false,
+                lastStartedAt: lastStartedAt,
+                now: Date(timeIntervalSinceReferenceDate: 20.8),
+                minimumInterval: 1.5
+            ),
+            "clicking Home repeatedly inside the debounce window should stay cheap"
+        )
+    }
+
     runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
         assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")

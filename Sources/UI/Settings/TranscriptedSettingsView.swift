@@ -2969,7 +2969,8 @@ struct TranscriptedSettingsView: View {
 
     private func refreshHomeDashboard(force: Bool) {
         let now = Date()
-        guard SettingsDashboardRefreshPolicy.shouldStartRefresh(
+        guard SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+            for: navigation.selectedPage,
             force: force,
             isInFlight: homeDashboardRefreshInFlight,
             lastStartedAt: lastHomeDashboardRefreshStartedAt,
