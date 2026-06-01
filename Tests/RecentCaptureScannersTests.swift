@@ -391,6 +391,74 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentCaptureLoader handles zero meeting limits without dropping dictations") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Synthetic Capture Row",
+                date: recentLoaderDate("2026-05-20T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "visible dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-20T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 0,
+                includeDictationCounts: false
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "zero meeting limit should not return meeting rows")
+            assertEqual(snapshot.dictations.map(\.text), ["visible dictation row"], "dictation rows should still load when meeting rows are disabled")
+            assertEqual(snapshot.dictationCounts.total, 0, "disabled counts should stay empty for split zero-limit loads")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader supports requested count-only loads") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Synthetic Count Row",
+                date: recentLoaderDate("2026-05-21T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "first count row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-20T13:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "second count row",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-05-21T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 0,
+                meetingLimit: 0,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "count-only loads should not return meeting rows")
+            assertEqual(snapshot.dictations.count, 0, "count-only loads should not return dictation rows")
+            assertEqual(snapshot.dictationCounts.total, 2, "requested count-only loads should still compute total dictations")
+            assertEqual(snapshot.dictationCounts.totalWords, 6, "requested count-only loads should still compute word totals")
+        }
+    }
+
     await runSuite("RecentMeetingsScanner ignores agent docs hidden files and markdown directories") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -421,6 +489,51 @@ func testRecentCaptureLoader() async {
             let meetings = RecentMeetingsScanner.loadRecent(limit: 5)
 
             assertEqual(meetings.map(\.title), ["Included Meeting"], "scanner should only surface real meeting markdown")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner preserves retained audio and speaker review metadata") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("audio-review.md", isDirectory: false)
+
+            try? writeRecentLoaderMeeting(
+                title: "Synthetic Audio Row",
+                date: recentLoaderDate("2026-05-23T14:00:00Z"),
+                to: transcriptURL,
+                micLabel: "Speaker 1"
+            )
+            let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL)
+            try? FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+            FileManager.default.createFile(
+                atPath: audioDirectory.appendingPathComponent("microphone.wav").path,
+                contents: Data("mic".utf8)
+            )
+            FileManager.default.createFile(
+                atPath: audioDirectory.appendingPathComponent("system_audio.wav").path,
+                contents: Data("system".utf8)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 1)
+
+            assertEqual(meetings.map(\.title), ["Synthetic Audio Row"], "scanner should keep the valid meeting row")
+            assertEqual(meetings.first?.audio?.urls.map(\.lastPathComponent), ["system_audio.wav", "microphone.wav"], "scanner should attach retained meeting audio")
+            assertEqual(meetings.first?.speakerStatus, .needsReview(1), "scanner should keep speaker review metadata from the transcript")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner returns empty for non-positive limits") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Synthetic Limited Row",
+                date: recentLoaderDate("2026-05-23T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("limited.md", isDirectory: false)
+            )
+
+            assertEqual(RecentMeetingsScanner.loadRecent(limit: 0).count, 0, "zero meeting limit should not load rows")
+            assertEqual(RecentMeetingsScanner.loadRecent(limit: -1).count, 0, "negative meeting limit should not load rows")
         }
     }
 
@@ -480,7 +593,13 @@ private func withTemporaryRecentCaptureLibrary(
     try? fm.removeItem(at: root)
 }
 
-private func writeRecentLoaderMeeting(title: String, date: Date, to url: URL) throws {
+private func writeRecentLoaderMeeting(
+    title: String,
+    date: Date,
+    to url: URL,
+    micLabel: String = "You",
+    systemLabel: String = "Remote Participant"
+) throws {
     let markdown = """
     ---
     title: "\(title)"
@@ -497,10 +616,10 @@ private func writeRecentLoaderMeeting(title: String, date: Date, to url: URL) th
 
     ## Transcript
 
-    **00:01** [Mic/You]
+    **00:01** [Mic/\(micLabel)]
     Synthetic test meeting.
 
-    **00:04** [System/Remote Participant]
+    **00:04** [System/\(systemLabel)]
     Synthetic response.
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
