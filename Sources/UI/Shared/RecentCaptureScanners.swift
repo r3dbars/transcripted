@@ -177,7 +177,10 @@ enum RecentCaptureLoader {
     static func load(
         dictationLimit: Int,
         meetingLimit: Int,
-        includeDictationCounts: Bool = false
+        includeDictationCounts: Bool = false,
+        meetingDirectory: URL? = nil,
+        dictationDirectory: URL? = nil,
+        today: Date = Date()
     ) async -> RecentCaptureSnapshot {
         let taskBox = LoadTaskBox()
 
@@ -187,10 +190,16 @@ enum RecentCaptureLoader {
                     return emptySnapshot()
                 }
 
-                async let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit)
-                async let dictations = DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
+                async let meetings = RecentMeetingsScanner.loadRecent(
+                    limit: meetingLimit,
+                    directory: meetingDirectory
+                )
+                async let dictations = DictationTranscriptStore.recentSavedDictations(
+                    limit: dictationLimit,
+                    directory: dictationDirectory
+                )
                 async let dictationCounts = includeDictationCounts
-                    ? DictationTranscriptStore.savedDictationCounts()
+                    ? DictationTranscriptStore.savedDictationCounts(directory: dictationDirectory, today: today)
                     : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
 
                 let snapshot = await RecentCaptureSnapshot(
@@ -251,10 +260,10 @@ private final class LoadTaskBox: @unchecked Sendable {
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
 
-    static func loadRecent(limit: Int = 3) -> [RecentMeetingItem] {
+    static func loadRecent(limit: Int = 3, directory: URL? = nil) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }
 
-        let dir = MeetingStoragePaths.transcriptsFolder
+        let dir = directory ?? MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
 

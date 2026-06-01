@@ -39,6 +39,38 @@ func testSpeakerPeopleReviewPolicy() {
 
         assertEqual(sorted.first?.id, unnamed.id, "deferred unnamed speakers should appear first")
     }
+
+    runSuite("SpeakerPeopleReviewPolicy sorts a large named-speaker list inside an M1-friendly budget") {
+        let namedProfiles = (0..<2_000).map { index in
+            makePeopleReviewProfile(
+                name: "Person \(index)",
+                calls: 1 + (index % 20)
+            )
+        }
+        let unnamedProfiles = (0..<50).map { index in
+            makePeopleReviewProfile(name: nil, calls: 1 + (index % 5))
+        }
+        let profiles = namedProfiles + unnamedProfiles
+        let duplicateIds = Set(unnamedProfiles.prefix(10).map(\.id))
+
+        let startedAt = Date()
+        let sorted = SpeakerPeopleReviewPolicy.sortedForPeopleSettings(
+            profiles,
+            duplicateIds: duplicateIds
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+        let m1FriendlyBudgetSeconds = 1.5
+
+        assertEqual(sorted.count, profiles.count, "speaker list sorting should keep every profile")
+        assertTrue(
+            sorted.prefix(50).allSatisfy { SpeakerPeopleReviewPolicy.needsReview(profile: $0, duplicateIds: duplicateIds) },
+            "speaker list sorting should keep review work ahead of clean named speakers"
+        )
+        assertTrue(
+            elapsed < m1FriendlyBudgetSeconds,
+            String(format: "large named-speaker sort took %.3fs, expected under %.1fs", elapsed, m1FriendlyBudgetSeconds)
+        )
+    }
 }
 
 private func makePeopleReviewProfile(
