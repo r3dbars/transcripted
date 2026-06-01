@@ -24,6 +24,7 @@ models/
 
 # Test scratch files
 test-model.swift
+.autoeval/
 
 # Debug logs
 debug.log

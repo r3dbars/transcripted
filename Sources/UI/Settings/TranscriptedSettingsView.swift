@@ -2134,7 +2134,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var connectAgentPage: some View {
-        AgentConnectionSettingsPage()
+        AgentConnectionSettingsPage(meetingSession: meetingSession)
     }
 
     private var privacyPage: some View {

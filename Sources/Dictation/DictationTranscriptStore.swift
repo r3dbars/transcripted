@@ -93,6 +93,7 @@ enum DictationTranscriptStore {
         var totalWords = 0
 
         for file in files where isDictationDayFile(file) {
+            if Task.isCancelled { break }
             let stats = fileStats(in: file)
             total += stats.entries
             totalWords += stats.words
@@ -125,6 +126,7 @@ enum DictationTranscriptStore {
 
         var collectedEntries: [SavedDictationEntry] = []
         for file in dayFiles {
+            if Task.isCancelled { break }
             let remaining = limit - collectedEntries.count
             collectedEntries.append(contentsOf: entries(in: file, limit: remaining))
             if collectedEntries.count >= limit {
@@ -146,40 +148,42 @@ enum DictationTranscriptStore {
     /// Removes a single dictation entry by matching on its stable saved entry ID.
     /// If the day file has no remaining entries, the file is deleted.
     static func deleteEntry(_ entry: SavedDictationEntry) throws {
-        let url = entry.url
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-            throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
-        }
-
-        let sections = splitSections(in: content)
-        var removedCount = 0
-        let kept: [String] = sections.filter { section in
-            guard let parsed = parseEntry(from: section, in: url) else { return true }
-            if isSameEntry(parsed, as: entry) {
-                removedCount += 1
-                return false
+        try DictationTranscriptMutationLock.withLock {
+            let url = entry.url
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+                throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
             }
-            return true
+
+            let sections = splitSections(in: content)
+            var removedCount = 0
+            let kept: [String] = sections.filter { section in
+                guard let parsed = parseEntry(from: section, in: url) else { return true }
+                if isSameEntry(parsed, as: entry) {
+                    removedCount += 1
+                    return false
+                }
+                return true
+            }
+
+            guard removedCount > 0 else {
+                throw NSError(
+                    domain: "DictationTranscriptStore",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
+                )
+            }
+
+            if kept.isEmpty {
+                try FileManager.default.removeItem(at: url)
+            } else {
+                let header = headerPreface(in: content)
+                let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                try rebuilt.write(to: url, atomically: true, encoding: .utf8)
+                FileManager.default.restrictFileToOwnerOnly(at: url)
+            }
         }
 
-        guard removedCount > 0 else {
-            throw NSError(
-                domain: "DictationTranscriptStore",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
-            )
-        }
-
-        if kept.isEmpty {
-            try FileManager.default.removeItem(at: url)
-        } else {
-            let header = headerPreface(in: content)
-            let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-            try rebuilt.write(to: url, atomically: true, encoding: .utf8)
-            FileManager.default.restrictFileToOwnerOnly(at: url)
-        }
-
-        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: url)
+        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: entry.url)
     }
 
     private static func isSameEntry(_ lhs: SavedDictationEntry, as rhs: SavedDictationEntry) -> Bool {
@@ -232,6 +236,7 @@ enum DictationTranscriptStore {
         var sawMetadataLine = false
 
         for line in content.components(separatedBy: "\n") {
+            if Task.isCancelled { break }
             if isEntryHeading(line) {
                 entries += 1
                 scanningMetadata = true

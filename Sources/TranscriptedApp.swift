@@ -92,6 +92,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var activationPolicySubscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if DictationStopBenchmarkRunner.runFromEnvironmentIfRequested() {
+            return
+        }
+
         guard acquireSingleInstanceLock() else { return }
 
         // Crash reporting

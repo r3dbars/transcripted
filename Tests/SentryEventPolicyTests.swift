@@ -22,7 +22,7 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "audio_engine_start_failed"
         )
-        let audioFormatReadTimeout = SentryEventPolicy.policy(
+        let recoverableAudioFormatReadTimeout = SentryEventPolicy.policy(
             forEngine: "parakeet",
             event: "audio_format_read_timeout"
         )
@@ -96,7 +96,7 @@ func testSentryEventPolicy() {
         assertEqual(sessionStall?.summary, "Transcripted detected a stalled runtime session.", "session stalls should be visible in Sentry")
         assertEqual(hotkeyFailure?.summary, "Transcripted could not register a keyboard shortcut.", "capture failure should stay allowlisted")
         assertEqual(audioStartFailure?.summary, "Speech audio engine failed to start.", "audio-start failures should stay allowlisted with a privacy-safe summary")
-        assertEqual(audioFormatReadTimeout?.summary, "Speech audio format readiness timed out.", "audio-format readiness timeouts should be visible in Sentry")
+        assertNil(recoverableAudioFormatReadTimeout, "recoverable format-read timeouts should stay local; final microphone timeouts carry richer Sentry context")
         assertEqual(audioEngineStartTimeout?.summary, "Speech audio engine start timed out.", "audio start timeouts should be visible in Sentry")
         assertEqual(zombieEngineRecoveryFailed?.summary, "Speech engine zombie-state recovery failed.", "zombie recovery failures should be visible in Sentry")
         assertEqual(microphoneStartTimeout?.summary, "Dictation microphone start timed out.", "microphone start timeouts should be visible in Sentry without raw device names")

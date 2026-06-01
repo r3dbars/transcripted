@@ -110,6 +110,89 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {
+        let started = AnalyticsEventPolicy.policy(forEvent: "update_download_started")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "update_download_finished")
+
+        assertEqual(started?.allowedProperties.contains("automatic_downloads_enabled"), true, "download starts should preserve automatic-download state")
+        assertEqual(started?.allowedProperties.contains("state"), true, "download starts should preserve update state")
+        assertEqual(started?.allowedProperties.contains("version"), true, "download starts should preserve the public app version")
+        assertEqual(finished?.allowedProperties.contains("failure_kind"), true, "download finishes should preserve normalized failure kind")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "state": "downloading",
+                "version": "1.2.3",
+            ],
+            allowedKeys: started?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic-download state should survive sanitization")
+        assertEqual(sanitized["state"], "downloading", "download state should survive sanitization")
+        assertEqual(sanitized["version"], "1.2.3", "public update version should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves failed update download classification") {
+        let finished = AnalyticsEventPolicy.policy(forEvent: "update_download_finished")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "false",
+                "failure_kind": "download_failed",
+                "state": "available",
+                "version": "1.2.3",
+            ],
+            allowedKeys: finished?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["automatic_downloads_enabled"], "false", "manual downloads should remain distinguishable from automatic downloads")
+        assertEqual(sanitized["failure_kind"], "download_failed", "normalized download failure kind should survive")
+        assertEqual(sanitized["state"], "available", "failed downloads should keep their post-failure state")
+        assertEqual(sanitized["version"], "1.2.3", "failed downloads should keep the public app version")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves ready-to-install update state") {
+        let ready = AnalyticsEventPolicy.policy(forEvent: "update_ready_to_install")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: ready?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["automatic_downloads_enabled"], "true", "ready-to-install telemetry should preserve automatic-download state")
+        assertEqual(sanitized["state"], "ready_to_install", "ready-to-install state should survive sanitization")
+        assertEqual(sanitized["version"], "1.2.3", "ready-to-install telemetry should preserve the public app version")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps relaunch update telemetry narrow") {
+        let relaunching = AnalyticsEventPolicy.policy(forEvent: "update_relaunching")
+
+        assertEqual(relaunching?.allowedProperties.contains("version"), true, "relaunch telemetry should preserve the public app version")
+        assertEqual(relaunching?.allowedProperties.contains("state"), false, "relaunch telemetry should not add redundant update state")
+        assertEqual(relaunching?.allowedProperties.contains("automatic_downloads_enabled"), false, "relaunch telemetry should not add settings state")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "automatic_downloads_enabled": "true",
+                "download_url": "redacted",
+                "error_message": "redacted",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: relaunching?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["version"], "1.2.3", "relaunch telemetry should keep the public app version")
+        assertNil(sanitized["automatic_downloads_enabled"], "relaunch telemetry should stay narrow")
+        assertNil(sanitized["download_url"], "raw download locations should stay out of analytics")
+        assertNil(sanitized["error_message"], "raw update errors should stay out of analytics")
+        assertNil(sanitized["state"], "relaunch telemetry should not duplicate lifecycle state")
+    }
+
     runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
         let unclean = AnalyticsEventPolicy.policy(forEvent: "app_unclean_shutdown_detected")
         let stall = AnalyticsEventPolicy.policy(forEvent: "app_session_stall_detected")
@@ -189,6 +272,72 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["start_attempt_bucket"], "10_plus", "retry count bucket should survive sanitization")
         assertNil(sanitized["start_attempts"], "raw retry count should stay out of analytics")
         assertEqual(sanitized["trigger"], "hotkey", "dictation start trigger should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy preserves zero-attempt start failure buckets") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "microphone_permission_denied",
+                "start_attempt_bucket": "0",
+                "trigger": "menu",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["failure_kind"], "microphone_permission_denied", "permission failures should keep their normalized failure kind")
+        assertEqual(sanitized["start_attempt_bucket"], "0", "immediate failures should preserve the zero-attempt bucket")
+        assertEqual(sanitized["trigger"], "menu", "non-hotkey triggers should remain attributable")
+    }
+
+    runSuite("AnalyticsEventPolicy drops raw dictation timeout counters") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "failure_kind": "microphone_start_timeout",
+                "forced_readiness_recoveries": "2",
+                "readiness_refreshes": "4",
+                "recovery_start_attempts": "3",
+                "start_attempt_bucket": "4_9",
+                "start_attempts": "7",
+                "trigger": "hotkey",
+                "wait_ms": "12000",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["start_attempt_bucket"], "4_9", "only the coarse retry bucket should survive")
+        assertNil(sanitized["forced_readiness_recoveries"], "raw recovery counts should stay out of analytics")
+        assertNil(sanitized["readiness_refreshes"], "raw readiness refresh counts should stay out of analytics")
+        assertNil(sanitized["recovery_start_attempts"], "raw recovery start counts should stay out of analytics")
+        assertNil(sanitized["start_attempts"], "raw retry counts should stay out of analytics")
+        assertNil(sanitized["wait_ms"], "raw wait durations should stay out of analytics")
+    }
+
+    runSuite("AnalyticsEventPolicy drops raw dictation device labels") {
+        let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "audio_device": "Desk microphone",
+                "default_input_name": "Desk microphone",
+                "failure_kind": "microphone_start_timeout",
+                "input_device_class": "built_in",
+                "output_device_name": "Desk speakers",
+                "route_shape": "built_in_input_to_built_in_output",
+                "start_attempt_bucket": "2_3",
+                "trigger": "hotkey",
+            ],
+            allowedKeys: dictationStartFailed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["input_device_class"], "built_in", "coarse input class should survive")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_built_in_output", "coarse route shape should survive")
+        assertNil(sanitized["audio_device"], "raw audio device names should stay out of analytics")
+        assertNil(sanitized["default_input_name"], "raw input names should stay out of analytics")
+        assertNil(sanitized["output_device_name"], "raw output names should stay out of analytics")
     }
 
     runSuite("AnalyticsEventPolicy allows dictation audio route lifecycle events") {

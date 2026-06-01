@@ -95,4 +95,213 @@ func testAnalyticsReporter() {
         assertEqual(properties["distinct_id"], "anonymous-device", "default distinct id should remain")
         assertEqual(properties["session_id"], "session-1", "default session id should remain")
     }
+
+    runSuite("AnalyticsReporter default properties fall back when build metadata is unavailable") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "session-1",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["app_version"], "unknown", "missing app version should not remove default metadata")
+        assertEqual(properties["build_version"], "unknown", "missing build version should not remove default metadata")
+        assertEqual(properties["os_major"], "15", "OS major version should still be present")
+    }
+
+    runSuite("AnalyticsReporter default properties trim session identifiers") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "  session-1  ",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertEqual(properties["session_id"], "session-1", "session identifiers should be trimmed before analytics capture")
+    }
+
+    runSuite("AnalyticsReporter default properties omit blank session identifiers") {
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: "   ",
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        assertNil(properties["session_id"], "blank session identifiers should not be sent as analytics metadata")
+    }
+
+    runSuite("AnalyticsReporter default properties cap long session identifiers") {
+        let longSessionID = String(repeating: "session-fragment-", count: 8)
+        let properties = AnalyticsReporter.defaultProperties(
+            distinctID: "anonymous-device",
+            sessionID: longSessionID,
+            infoDictionary: [:],
+            operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
+        )
+
+        let sessionID = properties["session_id"] ?? ""
+        assertTrue(sessionID.count <= 83, "session identifiers should honor the analytics value cap")
+        assertTrue(sessionID.hasSuffix("..."), "capped session identifiers should keep the truncation marker")
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket keeps tiny captures coarse") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(5),
+            "lt_10",
+            "tiny dictations and meetings should stay in the smallest coarse bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket switches buckets at exact boundaries") {
+        assertEqual(AnalyticsReporter.wordCountBucket(10), "10_49", "ten words should enter the next bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(50), "50_149", "fifty words should enter the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(150), "150_299", "one hundred fifty words should enter the long-capture bucket")
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket keeps upper edges in their current bucket") {
+        assertEqual(AnalyticsReporter.wordCountBucket(49), "10_49", "forty-nine words should stay below the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(149), "50_149", "one hundred forty-nine words should stay in the midrange bucket")
+        assertEqual(AnalyticsReporter.wordCountBucket(299), "150_299", "two hundred ninety-nine words should stay below the capped bucket")
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket caps long transcripts") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(300),
+            "300_plus",
+            "three hundred or more words should be bucketed instead of exposing raw length"
+        )
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(5_000),
+            "300_plus",
+            "large transcripts should stay in the same coarse analytics bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter wordCountBucket treats invalid negative counts as tiny") {
+        assertEqual(
+            AnalyticsReporter.wordCountBucket(-4),
+            "lt_10",
+            "invalid negative word counts should fail closed to the smallest bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter countBucket keeps zero start attempts explicit") {
+        assertEqual(
+            AnalyticsReporter.countBucket(0),
+            "0",
+            "start-failure telemetry should preserve that no recording attempt ran"
+        )
+    }
+
+    runSuite("AnalyticsReporter countBucket preserves a single start attempt") {
+        assertEqual(
+            AnalyticsReporter.countBucket(1),
+            "1",
+            "one failed recording attempt should stay distinguishable from retry loops"
+        )
+    }
+
+    runSuite("AnalyticsReporter countBucket groups midrange retry attempts") {
+        assertEqual(AnalyticsReporter.countBucket(2), "2_3", "two attempts should enter the first retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(3), "2_3", "three attempts should stay in the first retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(4), "4_9", "four attempts should enter the repeated retry bucket")
+        assertEqual(AnalyticsReporter.countBucket(9), "4_9", "nine attempts should remain below the high retry bucket")
+    }
+
+    runSuite("AnalyticsReporter countBucket caps unexpected retry spikes") {
+        assertEqual(
+            AnalyticsReporter.countBucket(10),
+            "10_plus",
+            "ten or more failed starts should be bucketed instead of exposing raw counts"
+        )
+        assertEqual(
+            AnalyticsReporter.countBucket(37),
+            "10_plus",
+            "large retry spikes should stay privacy-safe and dashboard-stable"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket keeps empty meeting queues explicit") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(0),
+            "0",
+            "empty meeting queues should stay distinguishable from queued work"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket preserves a single queued job") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(1),
+            "1",
+            "one queued meeting job should stay visible as a single-job backlog"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket groups small meeting backlogs") {
+        assertEqual(AnalyticsReporter.queueDepthBucket(2), "2_3", "two queued meeting jobs should enter the small backlog bucket")
+        assertEqual(AnalyticsReporter.queueDepthBucket(3), "2_3", "three queued meeting jobs should stay in the small backlog bucket")
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket caps larger meeting backlogs") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(4),
+            "4_plus",
+            "four or more queued meeting jobs should be bucketed instead of exposing raw depth"
+        )
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(21),
+            "4_plus",
+            "large queued meeting backlogs should stay coarse for analytics"
+        )
+    }
+
+    runSuite("AnalyticsReporter queueDepthBucket treats invalid negative depths as empty") {
+        assertEqual(
+            AnalyticsReporter.queueDepthBucket(-3),
+            "0",
+            "invalid negative depths should fail closed to the empty queue bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter durationBucket keeps short captures coarse") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 5),
+            "lt_10s",
+            "short dictation and meeting durations should stay in the shortest coarse bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter durationBucket switches buckets at second boundaries") {
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 10), "10_29s", "ten seconds should enter the next bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 30), "30_119s", "thirty seconds should enter the next bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 120), "2_9m", "two minutes should enter the minutes bucket")
+    }
+
+    runSuite("AnalyticsReporter durationBucket keeps upper edges in their current bucket") {
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 29.9), "10_29s", "values below thirty seconds should stay in the second bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 119.9), "30_119s", "values below two minutes should stay in the midrange bucket")
+        assertEqual(AnalyticsReporter.durationBucket(seconds: 599.9), "2_9m", "values below ten minutes should stay in the short meeting bucket")
+    }
+
+    runSuite("AnalyticsReporter durationBucket caps long sessions") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 1800),
+            "30m_plus",
+            "thirty minutes or more should stay bucketed instead of exposing raw duration"
+        )
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: 7200),
+            "30m_plus",
+            "multi-hour sessions should stay in the same coarse analytics bucket"
+        )
+    }
+
+    runSuite("AnalyticsReporter durationBucket treats invalid negative durations as short") {
+        assertEqual(
+            AnalyticsReporter.durationBucket(seconds: -1),
+            "lt_10s",
+            "invalid negative durations should fail closed to the shortest duration bucket"
+        )
+    }
 }

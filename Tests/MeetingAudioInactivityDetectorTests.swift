@@ -96,4 +96,96 @@ func testMeetingAudioInactivityDetector() {
         assertNil(detector.warning)
         assertEqual(detector.tick(at: 100), .none)
     }
+
+    runSuite("MeetingAudioInactivityRecoveryPolicy disables auto-stop for degraded long Bluetooth capture") {
+        let baseWarning = MeetingAudioInactivityWarning(
+            inactiveDuration: 300,
+            countdownSeconds: 30
+        )
+        let diagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.667",
+                "default_input_volume_during": "0.000",
+                "input_device_class": "aggregate",
+                "mic_processed_peak": "0.14816",
+                "mic_raw_peak": "0.02030",
+                "output_device_class": "bluetooth",
+                "route_change_count": "158",
+                "system_output_device_class": "bluetooth",
+                "system_status": "silent",
+            ],
+            afterStopContext: [:]
+        )
+
+        let warning = MeetingAudioInactivityRecoveryPolicy.warning(
+            from: baseWarning,
+            durationSeconds: 17 * 60,
+            diagnostics: diagnostics
+        )
+
+        assertEqual(warning.kind, .degradedRoute, "long route-churned Bluetooth silence should get the recovery prompt")
+        assertEqual(warning.automaticStopAllowed, false, "degraded capture should not auto-end the recording")
+    }
+
+    runSuite("MeetingAudioInactivityRecoveryPolicy honors captured input volume drops") {
+        let baseWarning = MeetingAudioInactivityWarning(
+            inactiveDuration: 300,
+            countdownSeconds: 30
+        )
+        let diagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "captured_input_volume_before": "0.650",
+                "captured_input_volume_during": "0.000",
+                "default_input_volume_before": "0.500",
+                "default_input_volume_during": "0.500",
+                "input_device_class": "built_in",
+                "mic_processed_peak": "0.14816",
+                "mic_raw_peak": "0.02030",
+                "output_device_class": "built_in",
+                "route_change_count": "0",
+                "system_output_device_class": "built_in",
+                "system_status": "active",
+            ],
+            afterStopContext: [:]
+        )
+
+        let warning = MeetingAudioInactivityRecoveryPolicy.warning(
+            from: baseWarning,
+            durationSeconds: 17 * 60,
+            diagnostics: diagnostics
+        )
+
+        assertEqual(warning.kind, .degradedRoute, "selected mic scalar drops should get the recovery prompt")
+        assertEqual(warning.automaticStopAllowed, false, "selected mic scalar drops should not auto-end the recording")
+    }
+
+    runSuite("MeetingAudioInactivityRecoveryPolicy keeps normal silence auto-stop") {
+        let baseWarning = MeetingAudioInactivityWarning(
+            inactiveDuration: 300,
+            countdownSeconds: 30
+        )
+        let diagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "default_input_volume_before": "0.500",
+                "default_input_volume_during": "0.500",
+                "input_device_class": "built_in",
+                "mic_processed_peak": "0.00000",
+                "mic_raw_peak": "0.00000",
+                "output_device_class": "built_in",
+                "route_change_count": "0",
+                "system_output_device_class": "built_in",
+                "system_status": "silent",
+            ],
+            afterStopContext: [:]
+        )
+
+        let warning = MeetingAudioInactivityRecoveryPolicy.warning(
+            from: baseWarning,
+            durationSeconds: 17 * 60,
+            diagnostics: diagnostics
+        )
+
+        assertEqual(warning.kind, .noAudio, "plain long silence should keep the original prompt")
+        assertEqual(warning.automaticStopAllowed, true, "plain silence should still auto-end after the countdown")
+    }
 }
