@@ -19,8 +19,8 @@ The benchmark uses synthetic local audio fixtures and injects samples into the a
 - Stop path read: `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Speech/STTRouter.swift`, `Sources/Speech/ParakeetEngine.swift`, `Sources/Dictation/`
 - Existing timing read: `transcription_complete`, `dictation_export_saved`, `dictation_delivery_completed`, `dictation_no_speech`, `scripts/ops/performance-budget.rb`
 - Build: `bash build-deps.sh --force`, `bash build.sh --no-open --full`
-- Baseline: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native --iterations 3 --skip-build`
-- Save-before knob: `bash scripts/ops/dictation-stop-autoeval.sh --label save-before-auto-enter --variant native --iterations 3 --skip-build`
+- Baseline: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native --iterations 3 --skip-build --finalization-order saveAfterAutoEnter`
+- Save-before knob: `bash scripts/ops/dictation-stop-autoeval.sh --label save-before-auto-enter --variant native --iterations 3 --skip-build --finalization-order saveBeforeAutoEnter`
 - Pre-resample knob: `bash scripts/ops/dictation-stop-autoeval.sh --label pre-resampled --variant pre_resampled --iterations 3 --skip-build`
 - Chunking knob: `bash scripts/ops/dictation-stop-autoeval.sh --label chunked-30s --variant chunked --iterations 3 --skip-build --chunk-seconds 30`
 - No-speech guardrail: `bash scripts/ops/dictation-stop-autoeval.sh --label no-speech-guardrail --variant native --iterations 1 --skip-build --include-silence`

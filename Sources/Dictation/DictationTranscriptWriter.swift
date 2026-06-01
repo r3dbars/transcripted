@@ -24,6 +24,8 @@ enum DictationDelivery: String, Sendable {
 }
 
 enum DictationTranscriptWriter {
+    private static let writeLock = NSLock()
+
     private static let dayFilenameFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -74,6 +76,28 @@ enum DictationTranscriptWriter {
         createdAt: Date = Date(),
         directory: URL? = nil
     ) throws -> SavedDictationTranscript {
+        try save(
+            text: text,
+            sourceAppName: sourceApp?.localizedName ?? "Unknown",
+            sourceBundleID: sourceApp?.bundleIdentifier,
+            delivery: delivery,
+            createdAt: createdAt,
+            directory: directory
+        )
+    }
+
+    @discardableResult
+    static func save(
+        text: String,
+        sourceAppName: String,
+        sourceBundleID: String?,
+        delivery: DictationDelivery,
+        createdAt: Date = Date(),
+        directory: URL? = nil
+    ) throws -> SavedDictationTranscript {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = buildTitle(from: normalizedText, createdAt: createdAt)
         let folder = directory ?? DictationStoragePaths.transcriptsFolder
@@ -82,8 +106,7 @@ enum DictationTranscriptWriter {
         }
         let url = dailyFileURL(for: createdAt, in: folder)
 
-        let sourceAppName = sourceApp?.localizedName ?? "Unknown"
-        let sourceBundleID = sourceApp?.bundleIdentifier ?? ""
+        let sourceBundleID = sourceBundleID ?? ""
         let wordCount = normalizedText.split(whereSeparator: \.isWhitespace).count
         let characterCount = normalizedText.count
         let entryID = "dictation-\(entryIdFormatter.string(from: createdAt))-\(UUID().uuidString.lowercased())"

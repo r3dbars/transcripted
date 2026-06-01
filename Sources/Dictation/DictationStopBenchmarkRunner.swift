@@ -53,7 +53,7 @@ enum DictationStopBenchmarkRunner {
                 "iterations": config.iterations,
                 "case_count": cases.count,
                 "model_init_s": rounded(modelInitSeconds),
-                "finalization_order": DictationStopFinalizationPolicy.order.rawValue,
+                "finalization_order": config.finalizationOrder.rawValue,
                 "simulate_auto_enter": config.simulateAutoEnter,
                 "auto_enter_delay_s": rounded(Double(TranscriptedConstants.dictationAutoEnterDelay) / 1_000_000_000.0),
                 "chunk_seconds": rounded(config.chunkSeconds)
@@ -172,7 +172,7 @@ enum DictationStopBenchmarkRunner {
 
         let pastedAt = CFAbsoluteTimeGetCurrent()
         let savedAt: CFAbsoluteTime
-        switch DictationStopFinalizationPolicy.order {
+        switch config.finalizationOrder {
         case .saveAfterAutoEnter:
             if config.simulateAutoEnter {
                 try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
@@ -271,7 +271,7 @@ enum DictationStopBenchmarkRunner {
             "case_id": benchmarkCase.id,
             "iteration": iteration,
             "variant": config.variant.rawValue,
-            "finalization_order": DictationStopFinalizationPolicy.order.rawValue,
+            "finalization_order": config.finalizationOrder.rawValue,
             "simulate_auto_enter": config.simulateAutoEnter,
             "audio_duration_s": rounded(audioDuration),
             "input_sample_rate_hz": rounded(loaded.sampleRate),
@@ -339,6 +339,7 @@ enum DictationStopBenchmarkRunner {
         let saveDirectory: URL
         let iterations: Int
         let variant: Variant
+        let finalizationOrder: DictationStopFinalizationOrder
         let simulateAutoEnter: Bool
         let chunkSeconds: Double
 
@@ -356,12 +357,18 @@ enum DictationStopBenchmarkRunner {
             guard let variant = Variant(rawValue: variantValue) else {
                 throw BenchmarkError("Unknown benchmark variant: \(variantValue)")
             }
+            let finalizationOrderValue = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER"]
+                ?? DictationStopFinalizationPolicy.order.rawValue
+            guard let finalizationOrder = DictationStopFinalizationOrder.parse(finalizationOrderValue) else {
+                throw BenchmarkError("Unknown finalization order: \(finalizationOrderValue)")
+            }
 
             audioDirectory = URL(fileURLWithPath: audioDir).standardizedFileURL
             outputURL = URL(fileURLWithPath: output).standardizedFileURL
             saveDirectory = URL(fileURLWithPath: saveDir).standardizedFileURL
             iterations = max(1, iterationValue)
             self.variant = variant
+            self.finalizationOrder = finalizationOrder
             simulateAutoEnter = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_AUTO_ENTER"] != "0"
             chunkSeconds = environment["TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS"].flatMap(Double.init) ?? 30
         }

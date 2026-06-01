@@ -12,6 +12,7 @@ BUILD_APP=1
 INCLUDE_SILENCE=0
 AUTO_ENTER=1
 CHUNK_SECONDS="30"
+FINALIZATION_ORDER="saveBeforeAutoEnter"
 WORK_DIR="${TRANSCRIPTED_DICTATION_STOP_BENCH_WORK_DIR:-$REPO_ROOT/.autoeval/dictation-stop}"
 FIXTURE_DIR="$WORK_DIR/fixtures"
 RESULT_DIR="$WORK_DIR/results"
@@ -28,6 +29,7 @@ Options:
   --include-silence     Include the no-speech guardrail fixture
   --no-auto-enter       Do not simulate the Auto Enter delay
   --chunk-seconds N     Chunk size for --variant chunked (default: 30)
+  --finalization-order  saveBeforeAutoEnter or saveAfterAutoEnter (default: saveBeforeAutoEnter)
 USAGE
 }
 
@@ -61,6 +63,10 @@ while [ "$#" -gt 0 ]; do
             CHUNK_SECONDS="$2"
             shift 2
             ;;
+        --finalization-order)
+            FINALIZATION_ORDER="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -76,6 +82,14 @@ case "$VARIANT" in
     native|pre_resampled|chunked) ;;
     *)
         echo "Unknown variant: $VARIANT" >&2
+        exit 1
+        ;;
+esac
+
+case "$FINALIZATION_ORDER" in
+    saveBeforeAutoEnter|saveAfterAutoEnter|save_before_auto_enter|save_after_auto_enter) ;;
+    *)
+        echo "Unknown finalization order: $FINALIZATION_ORDER" >&2
         exit 1
         ;;
 esac
@@ -196,6 +210,7 @@ TRANSCRIPTED_DICTATION_STOP_BENCH_OUTPUT="$RESULT_JSONL" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_SAVE_DIR="$SAVE_DIR" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_ITERATIONS="$ITERATIONS" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_VARIANT="$VARIANT" \
+TRANSCRIPTED_DICTATION_STOP_BENCH_FINALIZATION_ORDER="$FINALIZATION_ORDER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_AUTO_ENTER="$AUTO_ENTER" \
 TRANSCRIPTED_DICTATION_STOP_BENCH_CHUNK_SECONDS="$CHUNK_SECONDS" \
 "$APP_BINARY"
