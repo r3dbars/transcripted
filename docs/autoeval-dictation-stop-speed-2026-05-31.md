@@ -15,7 +15,7 @@ The benchmark uses synthetic local audio fixtures and injects samples into the a
 
 ## Commands and sources
 
-- Repo/path: `/Users/redbars/.codex/worktrees/dictation-stop-full-autoeval`
+- Repo: Transcripted checkout on the `codex/dictation-stop-full-autoeval` branch
 - Stop path read: `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Speech/STTRouter.swift`, `Sources/Speech/ParakeetEngine.swift`, `Sources/Dictation/`
 - Existing timing read: `transcription_complete`, `dictation_export_saved`, `dictation_delivery_completed`, `dictation_no_speech`, `scripts/ops/performance-budget.rb`
 - Build: `bash build-deps.sh --force`, `bash build.sh --no-open --full`
