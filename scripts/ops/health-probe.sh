@@ -107,9 +107,8 @@ probe_sentry() {
   echo "Sentry unresolved issues: $count"
 
   if [[ "$count" -gt 0 ]]; then
-    local top_issue
-    top_issue=$(echo "$response" | jq -r '.[0] | "[\(.id)] \(.title)"')
-    echo "Top issue: $top_issue"
+    echo "Sentry unresolved issue rollup (top 5):"
+    echo "$response" | jq -r '.[0:5][] | " - [\(.shortId // .id)] count=\(.count // 0) users=\(.userCount // 0) lastSeen=\(.lastSeen // "unknown") \(.title)"'
   fi
 }
 
