@@ -1485,6 +1485,25 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let cancelBlock = sourceSlice(
+            controllerContents,
+            from: "func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {",
+            to: "func prepareForTermination() async {"
+        )
+
+        assertTrue(
+            cancelBlock.contains("if liveCodexSessionAwaitingFinalTranscript")
+                && cancelBlock.contains("finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)"),
+            "cancelling the owning transcription should fail the pending live sidecar handoff instead of leaving agents waiting forever"
+        )
+        assertTrue(
+            cancelBlock.contains("activeQueuedTranscriptionJobID = nil"),
+            "transcription cancellation should clear the queued job owner used for live sidecar final attachment"
+        )
+    }
+
     runSuite("Repo command contract - live sidecar attaches only its queued meeting") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
