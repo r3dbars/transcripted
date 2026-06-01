@@ -523,6 +523,117 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentCaptureLoader ignores unrelated capture root siblings") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? "not a capture artifact".write(
+                to: captureRoot.appendingPathComponent("README.md", isDirectory: false),
+                atomically: true,
+                encoding: .utf8
+            )
+            try? FileManager.default.createDirectory(
+                at: captureRoot.appendingPathComponent("scratch", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Visible Meeting",
+                date: recentLoaderDate("2026-05-25T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "visible dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-25T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 1,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.map(\.title), ["Visible Meeting"], "capture-root clutter should not hide valid meeting rows")
+            assertEqual(snapshot.dictations.map(\.text), ["visible dictation row"], "capture-root clutter should not hide valid dictations")
+            assertEqual(snapshot.dictationCounts.total, 1, "capture-root clutter should not affect dictation counts")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader loads dictations when the meetings path is a file") {
+        await withTemporaryRecentCaptureLibrary(createMeetingsDirectory: false) { captureRoot in
+            let meetingsPath = captureRoot.appendingPathComponent("meetings", isDirectory: false)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            FileManager.default.createFile(atPath: meetingsPath.path, contents: Data("not a directory".utf8))
+            _ = try? DictationTranscriptStore.save(
+                text: "resilient dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-26T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 1,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "file-shaped meeting storage should fail closed")
+            assertEqual(snapshot.dictations.map(\.text), ["resilient dictation row"], "dictations should still load when meeting storage is damaged")
+            assertEqual(snapshot.dictationCounts.total, 1, "dictation counts should still load when meeting storage is damaged")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader loads meetings when the dictations path is a file") {
+        await withTemporaryRecentCaptureLibrary(createDictationsDirectory: false) { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsPath = captureRoot.appendingPathComponent("dictations", isDirectory: false)
+            FileManager.default.createFile(atPath: dictationsPath.path, contents: Data("not a directory".utf8))
+            try? writeRecentLoaderMeeting(
+                title: "Resilient Meeting Row",
+                date: recentLoaderDate("2026-05-26T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 1,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.map(\.title), ["Resilient Meeting Row"], "meetings should still load when dictation storage is damaged")
+            assertEqual(snapshot.dictations.count, 0, "file-shaped dictation storage should fail closed for rows")
+            assertEqual(snapshot.dictationCounts.total, 0, "file-shaped dictation storage should fail closed for counts")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader count-only loads fail closed when the dictations path is a file") {
+        await withTemporaryRecentCaptureLibrary(createDictationsDirectory: false) { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsPath = captureRoot.appendingPathComponent("dictations", isDirectory: false)
+            FileManager.default.createFile(atPath: dictationsPath.path, contents: Data("not a directory".utf8))
+            try? writeRecentLoaderMeeting(
+                title: "Hidden By Count Only",
+                date: recentLoaderDate("2026-05-27T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 0,
+                meetingLimit: 0,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "count-only loads should not return meeting rows")
+            assertEqual(snapshot.dictations.count, 0, "count-only loads should not return dictation rows")
+            assertEqual(snapshot.dictationCounts.total, 0, "file-shaped dictation storage should report zero total entries")
+            assertEqual(snapshot.dictationCounts.totalWords, 0, "file-shaped dictation storage should report zero dictated words")
+        }
+    }
+
     await runSuite("RecentMeetingsScanner returns empty when the meetings path is not a directory") {
         await withTemporaryRecentCaptureLibrary(createMeetingsDirectory: false) { captureRoot in
             let meetingsPath = captureRoot.appendingPathComponent("meetings", isDirectory: false)
