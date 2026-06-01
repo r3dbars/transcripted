@@ -195,8 +195,8 @@ func testAgentConnectionGuide() {
             "Claude Desktop setup should start inside the app"
         )
         assertTrue(
-            setupText.contains("Click Install for Claude Desktop."),
-            "Claude Desktop setup should use the in-app installer"
+            setupText.contains("Click Install in Claude."),
+            "Claude Desktop setup should use the exact in-app installer label"
         )
         assertTrue(
             setupText.contains(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path),

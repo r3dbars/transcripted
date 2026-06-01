@@ -165,7 +165,7 @@ struct AgentConnectionWindowView: View {
             title: "Claude Desktop",
             subtitle: "Best path: install Transcripted direct tools, then restart Claude Desktop."
         ) {
-            AgentConnectionBodyText("Use Transcripted Settings > Agent > Install for Claude Desktop. The app writes the Claude config and checks your local library.")
+            AgentConnectionBodyText("Use Transcripted Settings > Agent > Install in Claude. The app writes the Claude config and checks your local library.")
 
             HStack(spacing: 10) {
                 Button(viewModel.copyLabel(for: .mcp, default: "Copy Steps")) {
