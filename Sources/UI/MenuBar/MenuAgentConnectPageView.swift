@@ -31,7 +31,7 @@ final class MenuAgentConnectPageView: NSView {
     private let manualSetupLabel = NSTextField(labelWithString: "Fallback only")
     private let mcpRow = AgentConnectInfoRowView(
         symbolName: "globe",
-        title: "Web or Cowork",
+        title: "Web chat",
         body: "Not recommended for full library access. Grant folders or paste one meeting."
     )
     private let folderRow = AgentConnectInfoRowView(
