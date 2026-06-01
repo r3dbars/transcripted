@@ -578,6 +578,160 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentCaptureLoader returns newest same-day dictations when meetings are disabled") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            _ = try? DictationTranscriptStore.save(
+                text: "same day older row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-06-01T13:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "same day newer row",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-06-01T14:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 2,
+                meetingLimit: 0,
+                includeDictationCounts: false
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "disabled meeting rows should stay empty")
+            assertEqual(snapshot.dictations.map(\.text), ["same day newer row", "same day older row"], "same-day dictations should stay newest-first")
+            assertEqual(snapshot.dictationCounts.total, 0, "disabled counts should stay empty")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader fills dictation limit after skipping non-dictation markdown") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let unrelatedMarkdown = dictationsRoot.appendingPathComponent("notes.md", isDirectory: false)
+
+            try? """
+            # Not a dictation day
+
+            ## 9:00 AM - Looks similar
+
+            Words: 100
+
+            This is not a saved dictation artifact.
+            """.write(to: unrelatedMarkdown, atomically: true, encoding: .utf8)
+            _ = try? DictationTranscriptStore.save(
+                text: "newer valid dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-31T14:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "older valid dictation row",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-05-30T14:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 2,
+                meetingLimit: 0,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.dictations.map(\.text), ["newer valid dictation row", "older valid dictation row"], "non-dictation markdown should not consume dictation slots")
+            assertEqual(snapshot.dictationCounts.total, 2, "non-dictation markdown should not inflate dictation counts")
+            assertEqual(snapshot.dictationCounts.totalWords, 8, "counts should only include real dictation rows")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader fills dictation limit after an empty newer day file") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let emptyDayFile = dictationsRoot.appendingPathComponent("Dictations_2026-06-02.md", isDirectory: false)
+
+            try? """
+            ---
+            title: "Dictations for June 2, 2026"
+            date: 2026-06-02
+            capture_type: dictation_day
+            ---
+
+            # Dictations for June 2, 2026
+            """.write(to: emptyDayFile, atomically: true, encoding: .utf8)
+            _ = try? DictationTranscriptStore.save(
+                text: "filled newer dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-06-01T14:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "filled older dictation row",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-05-31T14:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 2,
+                meetingLimit: 0,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.dictations.map(\.text), ["filled newer dictation row", "filled older dictation row"], "empty newer day files should not starve older valid dictations")
+            assertEqual(snapshot.dictationCounts.total, 2, "empty dictation day files should count as zero entries")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader fills dictation limit after skipping unreadable newer day files") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let unreadableDayFile = dictationsRoot.appendingPathComponent("Dictations_2026-06-03.md", isDirectory: false)
+
+            try? """
+            # Dictations for June 3, 2026
+
+            ## 9:00 AM - Unreadable synthetic row
+
+            Words: 4
+
+            hidden unreadable synthetic row
+            """.write(to: unreadableDayFile, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableDayFile.path)
+            _ = try? DictationTranscriptStore.save(
+                text: "readable newer dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-06-02T14:00:00Z"),
+                directory: dictationsRoot
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "readable older dictation row",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: recentLoaderDate("2026-06-01T14:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 2,
+                meetingLimit: 0,
+                includeDictationCounts: true
+            )
+
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadableDayFile.path)
+            assertEqual(snapshot.dictations.map(\.text), ["readable newer dictation row", "readable older dictation row"], "unreadable newer day files should fail closed without starving older valid dictations")
+            assertEqual(snapshot.dictationCounts.total, 2, "unreadable dictation day files should not inflate counts")
+        }
+    }
+
     await runSuite("RecentCaptureLoader loads dictations when the meetings folder is missing") {
         await withTemporaryRecentCaptureLibrary(createMeetingsDirectory: false) { captureRoot in
             let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
