@@ -194,10 +194,10 @@ struct AgentConnectionWindowView: View {
 
     private var webFallbackSection: some View {
         AgentConnectionSectionCard(
-            title: "Fallback Only: Web Chat Or Cowork",
+            title: "Fallback Only: Web Chat",
             subtitle: "Not recommended for full Transcripted memory."
         ) {
-            AgentConnectionBodyText("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use this only for granted folders or pasted meetings.")
+            AgentConnectionBodyText("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Use this only for granted folders or pasted meetings. For live meetings in Cowork, use the sidecar setup in Settings.")
 
             VStack(alignment: .leading, spacing: 10) {
                 AgentConnectionFileRow(

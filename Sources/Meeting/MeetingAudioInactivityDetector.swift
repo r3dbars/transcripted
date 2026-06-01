@@ -1,8 +1,27 @@
 import Foundation
 
 struct MeetingAudioInactivityWarning: Equatable {
+    enum Kind: String, Equatable {
+        case noAudio = "no_audio"
+        case degradedRoute = "degraded_route"
+    }
+
     let inactiveDuration: TimeInterval
     let countdownSeconds: Int
+    let kind: Kind
+    let automaticStopAllowed: Bool
+
+    init(
+        inactiveDuration: TimeInterval,
+        countdownSeconds: Int,
+        kind: Kind = .noAudio,
+        automaticStopAllowed: Bool = true
+    ) {
+        self.inactiveDuration = inactiveDuration
+        self.countdownSeconds = countdownSeconds
+        self.kind = kind
+        self.automaticStopAllowed = automaticStopAllowed
+    }
 }
 
 struct MeetingAudioInactivityDetector {

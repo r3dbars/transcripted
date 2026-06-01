@@ -901,15 +901,37 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
-            stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
-            let autoSendOutcome = await self.performAutoEnterIfNeeded(
-                text: text,
-                delivery: pasteOutcome.delivery
-            )
-            stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
-            stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
-            let saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
-            stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
+            let autoSendOutcome: DictationAutoSendOutcome
+            let saveFailureMessage: String?
+            switch DictationStopFinalizationPolicy.order {
+            case .saveAfterAutoEnter:
+                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
+                autoSendOutcome = await self.performAutoEnterIfNeeded(
+                    text: text,
+                    delivery: pasteOutcome.delivery
+                )
+                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
+                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
+                saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
+            case .saveBeforeAutoEnter:
+                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
+                let saveTask = self.startPersistingDictationTranscript(
+                    text: text,
+                    delivery: pasteOutcome.delivery
+                )
+                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
+                autoSendOutcome = await self.performAutoEnterIfNeeded(
+                    text: text,
+                    delivery: pasteOutcome.delivery
+                )
+                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
+                saveFailureMessage = await self.finishPersistingDictationTranscript(
+                    saveTask,
+                    delivery: pasteOutcome.delivery
+                )
+                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
+            }
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
@@ -1406,31 +1428,75 @@ class DictationSessionController: ObservableObject {
                 sourceApp: sessionSourceApp,
                 delivery: delivery
             )
-            appState?.logger.log("DICTATION | saved markdown export at \(saved.url.lastPathComponent)")
-            DiagnosticsTrail.record(
-                logger: appState?.logger,
-                engine: "dictation",
-                event: "dictation_export_saved",
-                message: "Saved dictation markdown export",
-                context: dictationContext(
-                    extra: [
-                        "delivery": delivery.rawValue
-                    ]
-                )
-            )
+            recordDictationTranscriptSaved(saved, delivery: delivery)
             return nil
         } catch {
-            appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
-            DiagnosticsTrail.record(
-                logger: appState?.logger,
-                level: .warning,
-                engine: "dictation",
-                event: "dictation_export_failed",
-                message: "Failed to save dictation markdown export",
-                context: dictationContext(extra: ["error": error.localizedDescription])
-            )
-            return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
+            return recordDictationTranscriptSaveFailed(error)
         }
+    }
+
+    private func startPersistingDictationTranscript(
+        text: String,
+        delivery: DictationDelivery
+    ) -> Task<Result<SavedDictationTranscript, Error>, Never> {
+        let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
+        let sourceBundleID = sessionSourceApp?.bundleIdentifier
+
+        return Task.detached(priority: .utility) {
+            Result {
+                try DictationTranscriptWriter.save(
+                    text: text,
+                    sourceAppName: sourceAppName,
+                    sourceBundleID: sourceBundleID,
+                    delivery: delivery
+                )
+            }
+        }
+    }
+
+    private func finishPersistingDictationTranscript(
+        _ task: Task<Result<SavedDictationTranscript, Error>, Never>,
+        delivery: DictationDelivery
+    ) async -> String? {
+        switch await task.value {
+        case .success(let saved):
+            NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
+            recordDictationTranscriptSaved(saved, delivery: delivery)
+            return nil
+        case .failure(let error):
+            return recordDictationTranscriptSaveFailed(error)
+        }
+    }
+
+    private func recordDictationTranscriptSaved(
+        _ saved: SavedDictationTranscript,
+        delivery: DictationDelivery
+    ) {
+        appState?.logger.log("DICTATION | saved markdown export at \(saved.url.lastPathComponent)")
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            engine: "dictation",
+            event: "dictation_export_saved",
+            message: "Saved dictation markdown export",
+            context: dictationContext(
+                extra: [
+                    "delivery": delivery.rawValue
+                ]
+            )
+        )
+    }
+
+    private func recordDictationTranscriptSaveFailed(_ error: Error) -> String {
+        appState?.logger.log("DICTATION | failed to save markdown export: \(error.localizedDescription)")
+        DiagnosticsTrail.record(
+            logger: appState?.logger,
+            level: .warning,
+            engine: "dictation",
+            event: "dictation_export_failed",
+            message: "Failed to save dictation markdown export",
+            context: dictationContext(extra: ["error": error.localizedDescription])
+        )
+        return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
     }
 
     private func recordDictationStopLatency(

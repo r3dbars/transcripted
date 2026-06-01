@@ -14,12 +14,15 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var backgroundTaskCount: Int = 0
     @Published public var speakerNamingRequest: SpeakerNamingRequest? = nil
     @Published public var lastSavedTranscriptURL: URL? = nil
+    @Published public private(set) var lastSavedTranscriptTaskId: UUID? = nil
     @Published public var lastSavedTitle: String? = nil
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
     @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
 
     var lastSavedTranscriptId: UUID?
+    private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
+    private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?)] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
@@ -76,6 +79,7 @@ public class TranscriptionTaskManager: ObservableObject {
     /// so multiple in-room speakers can be named individually (GitHub #312). Default false
     /// preserves the single-"You" behavior.
     public func startTranscription(
+        taskId: UUID = UUID(),
         micURL: URL,
         systemURL: URL?,
         outputFolder: URL,
@@ -164,6 +168,7 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let task = TranscriptionTask(
+            id: taskId,
             micURL: micURL,
             systemURL: systemURL,
             outputFolder: outputFolder,
@@ -201,7 +206,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: task.id) else { return }
-                    self.publishTranscriptSaved(from: transcriptURL)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: task.id)
                     self.handleTaskCompletion(taskId: task.id)
                 }
 
@@ -293,7 +298,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
-                    self.publishTranscriptSaved(from: transcriptURL)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId)
                     self.handleTaskCompletion(taskId: taskId)
                 }
             } catch {
@@ -394,7 +399,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
                 await MainActor.run {
                     guard !self.finishCancelledTaskIfNeeded(taskId: taskId) else { return }
-                    self.publishTranscriptSaved(from: transcriptURL)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId)
                     self.handleTaskCompletion(taskId: taskId)
                 }
             } catch {
@@ -626,8 +631,8 @@ public class TranscriptionTaskManager: ObservableObject {
         displayStatus = status
     }
 
-    func publishTranscriptSaved(from transcriptURL: URL) {
-        populateSavedMetadata(from: transcriptURL)
+    func publishTranscriptSaved(from transcriptURL: URL, taskId: UUID? = nil) {
+        populateSavedMetadata(from: transcriptURL, taskId: taskId)
         publishNonFailureStatus(.transcriptSaved)
         scheduleStatusReset(delay: 4)
     }
@@ -854,7 +859,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 self.activeTasks.removeValue(forKey: failedId)
                 self.activeCount = max(0, self.activeCount - 1)
                 self.backgroundTaskCount = max(0, self.backgroundTaskCount - 1)
-                self.publishTranscriptSaved(from: transcriptURL)
+                self.publishTranscriptSaved(from: transcriptURL, taskId: failedId)
                 return true
             }
 
@@ -1011,22 +1016,59 @@ public class TranscriptionTaskManager: ObservableObject {
     /// Populate saved transcript metadata from the file's YAML frontmatter.
     /// Reads the YAML frontmatter in bounded chunks so larger metadata blocks
     /// (many speakers, gap events, etc.) still parse without reading the whole file.
-    func populateSavedMetadata(from url: URL) {
+    func populateSavedMetadata(from url: URL, taskId: UUID? = nil) {
+        let previousTaskId = lastSavedTranscriptTaskId
+        let previousURL = lastSavedTranscriptURL
+        let previousTranscriptId = lastSavedTranscriptId
+        let canonicalURL = Self.canonicalSavedTranscriptURL(url)
+
+        lastSavedTranscriptTaskId = taskId
+            ?? savedTranscriptTaskIdsByURL[canonicalURL]
+            ?? (previousURL.map(Self.canonicalSavedTranscriptURL) == canonicalURL ? previousTaskId : nil)
         lastSavedTranscriptURL = url
         lastSavedTranscriptId = nil
         let name = url.deletingPathExtension().lastPathComponent
         lastSavedTitle = name.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
-        guard let values = try? TranscriptFrontmatter.readValues(from: url) else { return }
+        guard let values = try? TranscriptFrontmatter.readValues(from: url) else {
+            rememberSavedTranscriptOwner(taskId: lastSavedTranscriptTaskId, url: canonicalURL, transcriptId: nil)
+            return
+        }
 
         if let transcriptId = values["transcript_id"] {
-            lastSavedTranscriptId = UUID(uuidString: transcriptId)
+            let parsedTranscriptId = UUID(uuidString: transcriptId)
+            lastSavedTranscriptId = parsedTranscriptId
+            if taskId == nil, let parsedTranscriptId {
+                if let knownTaskId = savedTranscriptTaskIdsByTranscriptId[parsedTranscriptId] {
+                    lastSavedTranscriptTaskId = knownTaskId
+                } else if lastSavedTranscriptTaskId == nil,
+                          previousTranscriptId == parsedTranscriptId {
+                    lastSavedTranscriptTaskId = previousTaskId
+                }
+            }
         }
+        rememberSavedTranscriptOwner(
+            taskId: lastSavedTranscriptTaskId,
+            url: canonicalURL,
+            transcriptId: lastSavedTranscriptId
+        )
         if let title = values["title"] {
             lastSavedTitle = title
         }
         lastSavedDuration = values["duration"]
         lastSavedSpeakerCount = (Int(values["mic_speakers"] ?? "") ?? 0)
             + (Int(values["system_speakers"] ?? "") ?? 0)
+    }
+
+    private static func canonicalSavedTranscriptURL(_ url: URL) -> URL {
+        url.standardizedFileURL
+    }
+
+    private func rememberSavedTranscriptOwner(taskId: UUID?, url: URL, transcriptId: UUID?) {
+        guard let taskId else { return }
+        savedTranscriptTaskIdsByURL[url] = taskId
+        if let transcriptId {
+            savedTranscriptTaskIdsByTranscriptId[transcriptId] = taskId
+        }
     }
 
     func scheduleStatusReset(delay: TimeInterval = 3) {
