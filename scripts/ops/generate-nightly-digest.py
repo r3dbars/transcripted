@@ -564,6 +564,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             status = "needs_review"
             signal = "Support found user-facing pain that needs a reply or investigation."
             action = "Review support draft"
+        elif contains_any(lower, ("no new external", "no new user", "no new public")) and contains_any(
+            lower,
+            ("no new pr recommended", "no new pr from", "no new pr was opened"),
+        ):
+            status = "watch"
+            signal = "Support found no new external support thread; existing audio and web-route risks stay on watch."
+            action = "Review support watch list"
         elif "support inbox: watch" in lower or "issue #500" in lower:
             status = "watch"
             signal = "Support watch is centered on issue #500 and meeting-audio confidence."
@@ -618,7 +625,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            if "issue #500" in lower or "#500" in lower:
+            if contains_any(lower, ("live sidecar preview", "live preview", "live sidecar files")) and contains_any(
+                lower,
+                ("no token", "access-control-allow-origin: *", "tokenized preview", "fixed `http://127.0.0.1:47834`"),
+            ):
+                signal = "Reviewer found a live sidecar preview privacy/docs blocker."
+                action = "Hold PR #924 until preview privacy and docs match"
+            elif "issue #500" in lower or "#500" in lower:
                 signal = "Reviewer kept issue #500 as the real user-trust blocker."
                 action = "Run the issue #500 audio matrix"
             else:
@@ -838,6 +851,8 @@ def human_next_steps(
         lane = blocked_lanes[0]
         if lane.human_action == "Run the issue #500 audio matrix":
             steps.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        elif lane.human_action.startswith("Hold PR #"):
+            steps.append(f"{lane.human_action}.")
         else:
             steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
 
@@ -1273,6 +1288,8 @@ def build_recommendations(
         lane = blocked_lanes[0]
         if lane.human_action == "Run the issue #500 audio matrix":
             recommendations.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        elif lane.human_action.startswith("Hold PR #"):
+            recommendations.append(f"{lane.human_action}.")
         else:
             recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
     if open_prs:
