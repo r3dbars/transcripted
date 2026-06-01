@@ -23,6 +23,7 @@ struct HomeRecentCaptureBenchmark {
             } else {
                 UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
             }
+            _ = fileManager.transcriptedCaptureLibraryDir
             try? fileManager.removeItem(at: runRoot)
         }
 

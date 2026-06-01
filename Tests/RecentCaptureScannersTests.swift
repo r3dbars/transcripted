@@ -359,6 +359,7 @@ private func withTemporaryRecentCaptureLibrary(
     } else {
         UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
     }
+    _ = fm.transcriptedCaptureLibraryDir
     try? fm.removeItem(at: root)
 }
 
