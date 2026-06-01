@@ -331,6 +331,120 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentCaptureLoader active tasks still publish rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Active Task Row",
+                date: recentLoaderDate("2026-06-04T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("active.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "active task dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-06-04T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let task = Task {
+                await RecentCaptureLoader.load(
+                    dictationLimit: 1,
+                    meetingLimit: 1,
+                    includeDictationCounts: true
+                )
+            }
+            let snapshot = await task.value
+
+            assertEqual(snapshot.meetings.map(\.title), ["Active Task Row"], "active task loads should still publish meeting rows")
+            assertEqual(snapshot.dictations.map(\.text), ["active task dictation row"], "active task loads should still publish dictation rows")
+            assertEqual(snapshot.dictationCounts.total, 1, "active task loads should still publish requested counts")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner cancellation returns no rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Canceled Scanner Row A",
+                date: recentLoaderDate("2026-06-05T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("canceled-a.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Canceled Scanner Row B",
+                date: recentLoaderDate("2026-06-04T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("canceled-b.md", isDirectory: false)
+            )
+
+            let task = Task { () -> [RecentMeetingItem] in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                return RecentMeetingsScanner.loadRecent(limit: 2)
+            }
+            task.cancel()
+            let meetings = await task.value
+
+            assertEqual(meetings.count, 0, "canceled scanner tasks should fail closed before publishing meeting rows")
+        }
+    }
+
+    await runSuite("DictationTranscriptStore cancellation skips recent dictation rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            _ = try? DictationTranscriptStore.save(
+                text: "canceled recent dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-06-05T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let task = Task { () -> [SavedDictationEntry] in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                return DictationTranscriptStore.recentSavedDictations(limit: 1, directory: dictationsRoot)
+            }
+            task.cancel()
+            let dictations = await task.value
+
+            assertEqual(dictations.count, 0, "canceled dictation row scans should fail closed before publishing entries")
+        }
+    }
+
+    await runSuite("DictationTranscriptStore cancellation skips dictation counts") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+            let today = recentLoaderDate("2026-06-05T13:00:00Z")
+
+            _ = try? DictationTranscriptStore.save(
+                text: "canceled count dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: today,
+                directory: dictationsRoot
+            )
+
+            let task = Task { () -> DictationTranscriptCounts in
+                while !Task.isCancelled {
+                    await Task.yield()
+                }
+                return DictationTranscriptStore.savedDictationCounts(directory: dictationsRoot, today: today)
+            }
+            task.cancel()
+            let counts = await task.value
+
+            assertEqual(counts.total, 0, "canceled count scans should not publish total entries")
+            assertEqual(counts.today, 0, "canceled count scans should not publish today's entries")
+            assertEqual(counts.totalWords, 0, "canceled count scans should not publish word totals")
+        }
+    }
+
     await runSuite("RecentCaptureLoader.load(limit:) limits both surfaces and skips counts by default") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
