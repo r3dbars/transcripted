@@ -187,35 +187,28 @@ enum RecentCaptureLoader {
                     return emptySnapshot()
                 }
 
-                let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit)
-                guard !Task.isCancelled else {
-                    return emptySnapshot()
-                }
-
-                let dictations = DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
-                guard !Task.isCancelled else {
-                    return emptySnapshot()
-                }
-
-                let dictationCounts = includeDictationCounts
+                async let meetings = RecentMeetingsScanner.loadRecent(limit: meetingLimit)
+                async let dictations = DictationTranscriptStore.recentSavedDictations(limit: dictationLimit)
+                async let dictationCounts = includeDictationCounts
                     ? DictationTranscriptStore.savedDictationCounts()
                     : DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
 
-                guard !Task.isCancelled else {
-                    return emptySnapshot()
-                }
-
-                return RecentCaptureSnapshot(
+                let snapshot = await RecentCaptureSnapshot(
                     meetings: meetings,
                     dictations: dictations,
                     dictationCounts: dictationCounts
                 )
+                guard !Task.isCancelled else {
+                    return emptySnapshot()
+                }
+
+                return snapshot
             }
 
             taskBox.task = task
             return await task.value
         } onCancel: {
-            taskBox.task?.cancel()
+            taskBox.cancel()
         }
     }
 
@@ -231,13 +224,26 @@ enum RecentCaptureLoader {
 private final class LoadTaskBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storedTask: Task<RecentCaptureSnapshot, Never>?
+    private var isCancelled = false
 
     var task: Task<RecentCaptureSnapshot, Never>? {
         get {
             lock.withLock { storedTask }
         }
         set {
-            lock.withLock { storedTask = newValue }
+            lock.withLock {
+                storedTask = newValue
+                if isCancelled {
+                    newValue?.cancel()
+                }
+            }
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            isCancelled = true
+            storedTask?.cancel()
         }
     }
 }
@@ -253,21 +259,28 @@ enum RecentMeetingsScanner {
         guard fm.fileExists(atPath: dir.path) else { return [] }
 
         let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey, .isRegularFileKey]
+        let requestedKeys = Set(keys)
         guard let urls = try? fm.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        let candidates: [(url: URL, date: Date)] = urls.compactMap { url in
-            guard isMarkdownCandidate(url, fileManager: fm) else { return nil }
-            let values = try? url.resourceValues(forKeys: Set(keys))
+        var candidates: [(url: URL, date: Date)] = []
+        for url in urls {
+            if Task.isCancelled { return [] }
+            guard isMarkdownCandidate(url) else { continue }
+            let values = try? url.resourceValues(forKeys: requestedKeys)
+            if values?.isRegularFile == false {
+                continue
+            }
             let date = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
-            return (url, date)
+            candidates.append((url, date))
         }
 
         var recentItems: [RecentMeetingItem] = []
         for entry in candidates.sorted(by: { $0.date > $1.date }) {
+            if Task.isCancelled { return [] }
             guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
                 continue
             }
@@ -289,16 +302,7 @@ enum RecentMeetingsScanner {
         return recentItems
     }
 
-    private static func isMarkdownCandidate(_ url: URL, fileManager: FileManager) -> Bool {
-        guard url.pathExtension == "md", !excludedMarkdownFilenames.contains(url.lastPathComponent) else {
-            return false
-        }
-
-        if let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
-           values.isRegularFile == false {
-            return false
-        }
-
-        return true
+    private static func isMarkdownCandidate(_ url: URL) -> Bool {
+        url.pathExtension == "md" && !excludedMarkdownFilenames.contains(url.lastPathComponent)
     }
 }
