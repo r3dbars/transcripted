@@ -1,0 +1,10 @@
+sample=2 start
+sample=2 stop_to_paste_ms=109 stop_to_done_ms=110 decode_ms=98 paste_ms=1 save_ms=2 model_wait_ms=0 words=10
+sample=3 start
+sample=3 stop_to_paste_ms=99 stop_to_done_ms=101 decode_ms=80 paste_ms=1 save_ms=2 model_wait_ms=0 words=10
+sample=4 start
+sample=4 stop_to_paste_ms=104 stop_to_done_ms=106 decode_ms=87 paste_ms=1 save_ms=2 model_wait_ms=0 words=10
+sample=5 start
+sample=5 stop_to_paste_ms=99 stop_to_done_ms=101 decode_ms=82 paste_ms=1 save_ms=2 model_wait_ms=0 words=10
+sample=6 start
+sample=6 stop_to_paste_ms=100 stop_to_done_ms=102 decode_ms=87 paste_ms=1 save_ms=2 model_wait_ms=0 words=10

@@ -830,6 +830,14 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0"),
+            "performance budget should cap stop-to-paste latency when samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0"),
+            "performance budget should cap the full stop pipeline when samples are required"
+        )
+        assertTrue(
             contents.contains("MAX_MEETING_P95_RTF = 0.05"),
             "performance budget should cap meeting processing real-time factor when stats are provided"
         )
@@ -840,6 +848,37 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
+        )
+        assertTrue(
+            contents.contains("--require-dictation-stop-latency-samples"),
+            "performance budget should support strict fresh dictation stop proof"
+        )
+        assertTrue(
+            contents.contains("--events-since ISO8601")
+                && contents.contains("event[\"_time\"] >= options[:events_since]"),
+            "performance budget should support fresh-window runtime event scoring"
+        )
+        assertTrue(
+            contents.contains("--stats-since ISO8601")
+                && contents.contains("created_at >= '#{since_time.utc.iso8601}'"),
+            "performance budget should support fresh-window meeting throughput scoring"
+        )
+        assertTrue(
+            contents.contains("--min-transcription-samples")
+                && contents.contains("--min-meeting-samples"),
+            "performance budget should let focused experiments set explicit sample requirements"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "performance budget should parse measured dictation stop latency samples"
+        )
+        assertTrue(
+            contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop slowest stage:"),
+            "performance budget should report per-stage stop latency and identify the slowest stop segment"
         )
         assertTrue(
             contents.contains("--stats PATH"),
@@ -958,6 +997,30 @@ func testRepoCommandContract() {
         assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
             "fast dictation start fallback should emit a local proof event"
+        )
+    }
+
+    runSuite("Repo command contract - dictation stop path emits paste latency proof") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
+                && contents.contains("stopTiming.micStoppedAt")
+                && contents.contains("stopTiming.transcriptionStartedAt")
+                && contents.contains("stopTiming.pastedAt")
+                && contents.contains("stopTiming.savedAt"),
+            "dictation stop path should mark the critical stages from stop through paste and save"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "dictation stop path should emit local raw stop latency measurements"
+        )
+        assertTrue(
+            contents.contains("AnalyticsReporter.latencyBucket(milliseconds:")
+                && contents.contains("\"stop_to_paste_bucket\"")
+                && contents.contains("\"stop_to_done_bucket\""),
+            "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
         )
     }
 

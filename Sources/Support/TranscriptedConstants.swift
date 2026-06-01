@@ -167,7 +167,7 @@ enum TranscriptedConstants {
     // MARK: - Dictation Auto Enter
 
     /// Small pause after paste-back before optionally pressing Enter.
-    static let dictationAutoEnterDelay: UInt64 = 200_000_000  // 200ms
+    static let dictationAutoEnterDelay: UInt64 = 150_000_000  // 150ms
 
     /// Ignore extremely short sessions so quick accidental taps do not submit.
     static let dictationAutoEnterMinimumDuration: TimeInterval = 0.3

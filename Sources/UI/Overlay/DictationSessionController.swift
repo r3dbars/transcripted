@@ -695,6 +695,7 @@ class DictationSessionController: ObservableObject {
     /// Stop dictation and paste — selected local STT batch transcription
     func stopDictationAndPaste(trigger: DictationTrigger = .unknown) {
         guard let (appState, overlayController) = readyState() else { return }
+        let stopRequestedAt = CFAbsoluteTimeGetCurrent()
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -702,6 +703,7 @@ class DictationSessionController: ObservableObject {
             message: "Dictation stop requested",
             context: dictationContext(
                 extra: [
+                    "dictation_session_id": currentDictationSessionID.uuidString,
                     "trigger": trigger.rawValue,
                     "overlay_state": overlayStateName(overlayController.state),
                     "stt_recording": "\(appState.sttRouter.isRecording)"
@@ -802,8 +804,10 @@ class DictationSessionController: ObservableObject {
         streamingTask?.cancel()
         let taskSessionID = currentDictationSessionID
         streamingTask = Task {
+            var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             await appState.sttRouter.stopRecording()
+            stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
@@ -811,6 +815,7 @@ class DictationSessionController: ObservableObject {
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
             if !appState.sttRouter.isModelLoaded {
+                stopTiming.modelWaitStartedAt = CFAbsoluteTimeGetCurrent()
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
                 self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
                 for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
@@ -830,22 +835,30 @@ class DictationSessionController: ObservableObject {
                     appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return
                 }
+                stopTiming.modelReadyAt = CFAbsoluteTimeGetCurrent()
+            } else {
+                stopTiming.modelWaitStartedAt = stopTiming.micStoppedAt
+                stopTiming.modelReadyAt = stopTiming.micStoppedAt
             }
             overlayController.state = .drafting
             overlayController.resizePanelToCompact()
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
+            stopTiming.transcriptionStartedAt = CFAbsoluteTimeGetCurrent()
             let voiceText = await appState.sttRouter.transcribe()
+            stopTiming.transcribedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
 
+            let cleanupEnabled = DictationCleanupPreferences.isEnabled()
             let cleanupResult = voiceText.map { rawText in
-                if DictationCleanupPreferences.isEnabled() {
+                if cleanupEnabled {
                     return DictationFillerCleanupPolicy.clean(rawText)
                 }
                 let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
                 return DictationFillerCleanupResult(text: trimmedText, removedCount: 0, changed: trimmedText != rawText)
             }
+            stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
                 appState.logger.log("DICTATION | no transcription, cancelling")
                 EventReporter.shared.capture(
@@ -885,31 +898,42 @@ class DictationSessionController: ObservableObject {
             }
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
+            stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
+            stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
             let autoSendOutcome: DictationAutoSendOutcome
             let saveFailureMessage: String?
             switch DictationStopFinalizationPolicy.order {
             case .saveAfterAutoEnter:
+                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
                 autoSendOutcome = await self.performAutoEnterIfNeeded(
                     text: text,
                     delivery: pasteOutcome.delivery
                 )
+                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
+                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
                 saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
             case .saveBeforeAutoEnter:
+                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
                 let saveTask = self.startPersistingDictationTranscript(
                     text: text,
                     delivery: pasteOutcome.delivery
                 )
+                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
                 autoSendOutcome = await self.performAutoEnterIfNeeded(
                     text: text,
                     delivery: pasteOutcome.delivery
                 )
+                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
                 saveFailureMessage = await self.finishPersistingDictationTranscript(
                     saveTask,
                     delivery: pasteOutcome.delivery
                 )
+                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
             }
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
+            stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
                 logger: appState.logger,
@@ -919,6 +943,7 @@ class DictationSessionController: ObservableObject {
                 message: pasteOutcome.diagnosticMessage,
                 context: self.dictationContext(
                     extra: [
+                        "dictation_session_id": taskSessionID.uuidString,
                         "trigger": self.currentDictationTrigger.rawValue,
                         "delivery": pasteOutcome.diagnosticName,
                         "auto_send": autoSendOutcome.diagnosticName,
@@ -927,6 +952,20 @@ class DictationSessionController: ObservableObject {
                         "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))"
                     ]
                 )
+            )
+            self.recordDictationStopLatency(
+                appState: appState,
+                timing: stopTiming,
+                sessionID: taskSessionID,
+                stopTrigger: trigger,
+                startTrigger: self.currentDictationTrigger,
+                pasteOutcome: pasteOutcome,
+                autoSendOutcome: autoSendOutcome,
+                wordCount: wordCount,
+                charCount: text.count,
+                cleanupEnabled: cleanupEnabled,
+                cleanupChanged: cleanupResult?.changed ?? false,
+                saveSucceeded: saveFailureMessage == nil
             )
             switch pasteOutcome {
             case .pasted:
@@ -1460,6 +1499,97 @@ class DictationSessionController: ObservableObject {
         return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
     }
 
+    private func recordDictationStopLatency(
+        appState: TranscriptedAppState,
+        timing: DictationStopTiming,
+        sessionID: UUID,
+        stopTrigger: DictationTrigger,
+        startTrigger: DictationTrigger,
+        pasteOutcome: DictationPasteOutcome,
+        autoSendOutcome: DictationAutoSendOutcome,
+        wordCount: Int,
+        charCount: Int,
+        cleanupEnabled: Bool,
+        cleanupChanged: Bool,
+        saveSucceeded: Bool
+    ) {
+        let measurements = timing.measurements()
+        let saveOutcome = saveSucceeded ? "saved" : "failed"
+        let outcome: String
+        if !saveSucceeded {
+            outcome = "save_failed"
+        } else if pasteOutcome.delivery == .failed {
+            outcome = "delivery_failed"
+        } else {
+            outcome = "completed"
+        }
+
+        var localContext: [String: String] = [
+            "dictation_session_id": sessionID.uuidString,
+            "start_trigger": startTrigger.rawValue,
+            "stop_trigger": stopTrigger.rawValue,
+            "delivery": pasteOutcome.diagnosticName,
+            "auto_send": autoSendOutcome.diagnosticName,
+            "save_outcome": saveOutcome,
+            "outcome": outcome,
+            "cleanup_enabled": "\(cleanupEnabled)",
+            "cleanup_changed": "\(cleanupChanged)",
+            "chars": "\(charCount)",
+            "words": "\(wordCount)",
+        ]
+        if let copyReason = pasteOutcome.copyReason?.diagnosticName {
+            localContext["copy_reason"] = copyReason
+        }
+        for (key, value) in measurements {
+            localContext[key] = "\(value)"
+        }
+
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: pasteOutcome.delivery == .pasted && saveSucceeded ? .info : .warning,
+            engine: "dictation",
+            event: "dictation_stop_latency_measured",
+            message: "Measured dictation stop latency",
+            context: dictationContext(extra: localContext)
+        )
+
+        var analyticsProperties = dictationAnalyticsProperties(
+            extra: [
+                "trigger": stopTrigger.rawValue,
+                "delivery": pasteOutcome.delivery.rawValue,
+                "auto_send": autoSendOutcome.diagnosticName,
+                "save_outcome": saveOutcome,
+                "outcome": outcome,
+                "cleanup_enabled": "\(cleanupEnabled)",
+                "cleanup_changed": "\(cleanupChanged)",
+                "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+            ]
+        )
+        if let copyReason = pasteOutcome.copyReason?.diagnosticName {
+            analyticsProperties["copy_reason"] = copyReason
+        }
+        let timingBuckets: [(metric: String, bucket: String)] = [
+            ("stop_to_mic_stop_ms", "mic_stop_bucket"),
+            ("model_wait_ms", "model_wait_bucket"),
+            ("decode_ms", "decode_bucket"),
+            ("cleanup_ms", "cleanup_bucket"),
+            ("paste_ms", "paste_bucket"),
+            ("auto_enter_ms", "auto_enter_bucket"),
+            ("save_ms", "save_bucket"),
+            ("stop_to_paste_ms", "stop_to_paste_bucket"),
+            ("stop_to_done_ms", "stop_to_done_bucket"),
+        ]
+        for timingBucket in timingBuckets {
+            guard let milliseconds = measurements[timingBucket.metric] else { continue }
+            analyticsProperties[timingBucket.bucket] = AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
+        }
+
+        AnalyticsReporter.track(
+            "dictation_stop_latency_measured",
+            properties: analyticsProperties
+        )
+    }
+
     private func dictationContext(extra: [String: String] = [:]) -> [String: String] {
         var context: [String: String] = [
             "audio_device": appState?.sttRouter.inputDeviceName ?? ""
@@ -1557,6 +1687,44 @@ private struct DictationReadinessRefreshTimeout {
     let elapsed: TimeInterval
 }
 
+private struct DictationStopTiming {
+    let requestedAt: CFAbsoluteTime
+    var micStoppedAt: CFAbsoluteTime?
+    var modelWaitStartedAt: CFAbsoluteTime?
+    var modelReadyAt: CFAbsoluteTime?
+    var transcriptionStartedAt: CFAbsoluteTime?
+    var transcribedAt: CFAbsoluteTime?
+    var cleanedAt: CFAbsoluteTime?
+    var pasteStartedAt: CFAbsoluteTime?
+    var pastedAt: CFAbsoluteTime?
+    var autoEnterStartedAt: CFAbsoluteTime?
+    var autoEnterFinishedAt: CFAbsoluteTime?
+    var saveStartedAt: CFAbsoluteTime?
+    var savedAt: CFAbsoluteTime?
+    var completedAt: CFAbsoluteTime?
+
+    func measurements() -> [String: Int] {
+        var values: [String: Int] = [:]
+        values["stop_to_mic_stop_ms"] = milliseconds(from: requestedAt, to: micStoppedAt)
+        values["mic_stop_to_decode_start_ms"] = milliseconds(from: micStoppedAt, to: transcriptionStartedAt)
+        values["model_wait_ms"] = milliseconds(from: modelWaitStartedAt, to: modelReadyAt)
+        values["decode_ms"] = milliseconds(from: transcriptionStartedAt, to: transcribedAt)
+        values["cleanup_ms"] = milliseconds(from: transcribedAt, to: cleanedAt)
+        values["paste_ms"] = milliseconds(from: pasteStartedAt, to: pastedAt)
+        values["auto_enter_ms"] = milliseconds(from: autoEnterStartedAt, to: autoEnterFinishedAt)
+        values["save_ms"] = milliseconds(from: saveStartedAt, to: savedAt)
+        values["stop_to_paste_ms"] = milliseconds(from: requestedAt, to: pastedAt)
+        values["stop_to_save_ms"] = milliseconds(from: requestedAt, to: savedAt)
+        values["stop_to_done_ms"] = milliseconds(from: requestedAt, to: completedAt)
+        return values
+    }
+
+    private func milliseconds(from start: CFAbsoluteTime?, to end: CFAbsoluteTime?) -> Int? {
+        guard let start, let end else { return nil }
+        return max(0, Int(((end - start) * 1_000).rounded()))
+    }
+}
+
 private typealias DictationPasteOutcome = TextPasteOutcome
 
 private extension TextPasteOutcome {
@@ -1568,6 +1736,19 @@ private extension TextPasteOutcome {
             return .copied
         case .failed:
             return .failed
+        }
+    }
+}
+
+private extension TextPasteCopyReason {
+    var diagnosticName: String {
+        switch self {
+        case .accessibilityMissing:
+            return "accessibility_missing"
+        case .pasteEventCreationFailed:
+            return "paste_event_creation_failed"
+        case .focusChanged:
+            return "focus_changed"
         }
     }
 }
