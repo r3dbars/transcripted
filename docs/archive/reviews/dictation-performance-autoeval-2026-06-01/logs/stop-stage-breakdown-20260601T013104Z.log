@@ -1,0 +1,27 @@
+Performance budget OK
+Expanded app: 107.0 MiB
+Resources: 1.9 MiB
+Parakeet model: not bundled (runtime download)
+Resource icons: Transcripted.icns
+Runtime events since: 2026-06-01T01:13:00Z
+Dictation transcription samples: 9
+Dictation transcription p95: 0.154s
+Dictation transcription p95 RTF: 0.013
+Launch model-ready samples: 5
+Launch to model-ready p90: 12.751s
+Dictation fast-start samples: 9
+Dictation fast-start p95: 150.0ms
+Dictation fast-start fallback/retry events: 0
+Dictation stop latency samples: 9
+Dictation stop-to-paste p95: 175.0ms
+Dictation stop pipeline p95: 177.0ms
+Dictation stop stage p95s:
+  stop_to_mic_stop_ms: p95=15.0ms max=15.0ms n=9
+  mic_stop_to_decode_start_ms: p95=4.0ms max=4.0ms n=9
+  model_wait_ms: p95=0.0ms max=0.0ms n=9
+  decode_ms: p95=156.0ms max=156.0ms n=9
+  cleanup_ms: p95=0.0ms max=0.0ms n=9
+  paste_ms: p95=3.0ms max=3.0ms n=9
+  auto_enter_ms: p95=0.0ms max=0.0ms n=9
+  save_ms: p95=2.0ms max=2.0ms n=9
+Dictation stop slowest stage: decode_ms p95=156.0ms

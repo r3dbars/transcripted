@@ -2,7 +2,7 @@
 
 ## Verdict
 
-First pass kept one product change: measure the whole stop pipeline precisely.
+First pass kept two product changes: measure the whole stop pipeline precisely, and make the scorer name the slowest stop stage.
 
 The app already starts dictation quickly in the normal warm path. The weak spot is that stop used to feel like one black box. Now each stop can say where the time went: mic stop, model wait, decode, cleanup, paste, auto-enter, save, and done.
 
@@ -18,10 +18,10 @@ Historical local logs, before this patch:
 
 Fresh samples from this branch:
 
-- Dictation stop-to-paste: n=8, p95=175ms
-- Dictation stop pipeline: n=8, p95=177ms
-- Dictation fast start: n=7, p95=142ms
-- Dictation RTF: n=8, p95=0.013
+- Dictation stop-to-paste: n=9, p95=175ms
+- Dictation stop pipeline: n=9, p95=177ms
+- Dictation fast start: n=9, p95=150ms
+- Dictation RTF: n=9, p95=0.013
 - Meeting RTF: n=1, 0.012 for a 56s recording
 - Stop bottleneck: decode, p95=156ms
 - Paste: p95=3ms
@@ -56,6 +56,11 @@ Added fresh-window scoring to `scripts/ops/performance-budget.rb`:
 
 The default full-history scorer is still strict. The new options let experiments score only the fresh samples they produced.
 
+Added stop-stage scoring to `scripts/ops/performance-budget.rb`:
+
+- Prints p95, max, and count for each stop segment.
+- Prints the slowest stop segment directly.
+
 ## Tested Knobs
 
 Model eager warmup:
@@ -72,20 +77,29 @@ Paste/save ordering:
 - Save p95 was 2ms.
 - Decision: rule out as a first tuning knob. It is not the slow edge.
 
+Model load poll interval:
+
+- Current 200ms poll: model-ready-to-recording was 154ms; fast-start was 150ms.
+- Temporary 100ms poll: model-ready-to-recording was 148ms; fast-start was 145ms.
+- Decision: reject and revert. The 5-6ms change is below the 10% meaningful-win bar.
+
 ## Verification
 
 - `bash build.sh --no-open` passed.
-- `bash run-tests.sh` passed 3158 tests.
+- `bash run-tests.sh` passed 3162 tests.
 - `ruby -c scripts/ops/performance-budget.rb` passed.
+- `scripts/dev/agent-preflight.sh` passed.
+- `python3 -m py_compile scripts/ops/generate-nightly-digest.py && python3 scripts/ops/generate-nightly-digest.py --self-test` passed.
 - Fresh-window dictation budget passed with `--events-since 2026-06-01T01:13:00Z`.
+- Stop-stage scorer reported `decode_ms` as the slowest stage, p95 156ms.
 
 ## Test Knobs
 
 Run these one at a time after fresh samples exist:
 
 1. Model warm state: lazy default vs `TRANSCRIPTED_EAGER_MODEL_WARMUP=1`. Tested; rejected as default-on for cached model path.
-2. Existing-install model prefetch delay: 0s, 5s, 12s, 30s.
-3. Model poll interval: 100ms, 200ms, 500ms.
+2. Existing-install model prefetch delay: ruled out for this cached-model speed pass. That path caches files after launch; it does not load the model into memory.
+3. Model poll interval: tested 100ms vs 200ms; rejected.
 4. Paste and save ordering: ruled out as first knob; measured cost is tiny.
 5. Auto-enter delay: current 200ms vs shorter values for allowed apps.
 6. Dictation decode throughput: fresh p95 RTF is 0.013, but full-history p95 is still 0.056.

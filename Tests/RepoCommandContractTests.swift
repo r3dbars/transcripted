@@ -858,6 +858,12 @@ func testRepoCommandContract() {
             "performance budget should parse measured dictation stop latency samples"
         )
         assertTrue(
+            contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop slowest stage:"),
+            "performance budget should report per-stage stop latency and identify the slowest stop segment"
+        )
+        assertTrue(
             contents.contains("--stats PATH"),
             "performance budget should support optional meeting throughput stats"
         )
