@@ -47,6 +47,23 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - Sentry health probe prints aggregate issue rollup") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("Sentry unresolved issue rollup (top 5):")
+                && contents.contains(".shortId")
+                && contents.contains("count=\\(.count")
+                && contents.contains("users=\\(.userCount")
+                && contents.contains("lastSeen=\\(.lastSeen"),
+            "Sentry probe should show aggregate issue counts and freshness for operator triage"
+        )
+        assertFalse(
+            contents.contains("/events/"),
+            "Sentry health probe should not fetch raw event payloads for the nightly rollup"
+        )
+    }
+
     runSuite("Repo command contract - PostHog health probe uses the query API") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
 
