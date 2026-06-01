@@ -13,6 +13,10 @@ func testTranscriptedConstants() async {
             TranscriptedConstants.clipboardRestoreDelay < TranscriptedConstants.dictationAutoEnterDelay,
             "clipboard restore should happen before follow-up keypresses and before users can easily paste stale dictation text"
         )
+        assertTrue(
+            TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,
+            "auto-enter should stay tuned for a fast opt-in stop path"
+        )
     }
 
     runSuite("TranscriptedConstants gives meeting quit preservation enough time") {
