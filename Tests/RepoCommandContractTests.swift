@@ -944,6 +944,24 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - forced dictation recovery preempts refresh churn") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let forcedRecoveryBlock = sourceSlice(
+            contents,
+            from: "func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool",
+            to: "func cancelIfTimedOut(now: TimeInterval) -> DictationReadinessRefreshTimeout?"
+        )
+
+        assertTrue(
+            forcedRecoveryBlock.contains("operation != \"force_input_recovery\""),
+            "hard dictation input recovery should leave an existing hard recovery alone"
+        )
+        assertTrue(
+            forcedRecoveryBlock.contains("cancel()"),
+            "hard dictation input recovery should preempt lower-priority readiness refresh churn"
+        )
+    }
+
     runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let sizeBlock = sourceSlice(
