@@ -330,6 +330,123 @@ func testRecentCaptureLoader() async {
             assertEqual(snapshot.dictationCounts.total, 0, "canceled loads should not publish stale counts")
         }
     }
+
+    await runSuite("RecentCaptureLoader.load(limit:) limits both surfaces and skips counts by default") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            for index in 0..<3 {
+                let date = Date(timeIntervalSince1970: 1_779_470_400 + Double(index * 60))
+                try? writeRecentLoaderMeeting(
+                    title: "Synthetic Capture \(index)",
+                    date: date,
+                    to: meetingsRoot.appendingPathComponent("capture-\(index).md", isDirectory: false)
+                )
+                _ = try? DictationTranscriptStore.save(
+                    text: "synthetic dictation \(index)",
+                    sourceApp: nil,
+                    delivery: .copied,
+                    createdAt: date,
+                    directory: dictationsRoot
+                )
+            }
+
+            let snapshot = await RecentCaptureLoader.load(limit: 1)
+
+            assertEqual(snapshot.meetings.map(\.title), ["Synthetic Capture 2"], "default loading should cap meeting rows")
+            assertEqual(snapshot.dictations.map(\.text), ["synthetic dictation 2"], "default loading should cap dictation rows")
+            assertEqual(snapshot.dictationCounts.total, 0, "default loading should avoid the slower count scan")
+            assertEqual(snapshot.dictationCounts.totalWords, 0, "default loading should not compute word totals")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader handles split zero limits without counts") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Only Meeting Row",
+                date: recentLoaderDate("2026-05-19T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+            _ = try? DictationTranscriptStore.save(
+                text: "hidden dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-19T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 0,
+                meetingLimit: 1,
+                includeDictationCounts: false
+            )
+
+            assertEqual(snapshot.meetings.map(\.title), ["Only Meeting Row"], "meeting rows should still load when dictation rows are disabled")
+            assertEqual(snapshot.dictations.count, 0, "zero dictation limit should not return saved dictations")
+            assertEqual(snapshot.dictationCounts.total, 0, "disabled counts should stay empty even when dictations exist")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner ignores agent docs hidden files and markdown directories") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let directoryShapedMarkdown = meetingsRoot.appendingPathComponent("folder.md", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Included Meeting",
+                date: recentLoaderDate("2026-05-19T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("included.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Agent Doc",
+                date: recentLoaderDate("2026-05-20T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("AGENT.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Claude Doc",
+                date: recentLoaderDate("2026-05-21T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("CLAUDE.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Hidden Meeting",
+                date: recentLoaderDate("2026-05-22T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent(".hidden.md", isDirectory: false)
+            )
+            try? FileManager.default.createDirectory(at: directoryShapedMarkdown, withIntermediateDirectories: false)
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 5)
+
+            assertEqual(meetings.map(\.title), ["Included Meeting"], "scanner should only surface real meeting markdown")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner fills the limit after skipping malformed newer candidates") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let plainMarkdown = meetingsRoot.appendingPathComponent("newer-note.md", isDirectory: false)
+
+            try? "# Synthetic note\n\nNot a meeting transcript.\n".write(to: plainMarkdown, atomically: true, encoding: .utf8)
+            setRecentLoaderFileDate(recentLoaderDate("2026-05-22T14:00:00Z"), at: plainMarkdown)
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting A",
+                date: recentLoaderDate("2026-05-21T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-a.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting B",
+                date: recentLoaderDate("2026-05-20T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-b.md", isDirectory: false)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
+
+            assertEqual(meetings.map(\.title), ["Valid Meeting A", "Valid Meeting B"], "bad newer markdown should not starve older valid meeting rows")
+        }
+    }
 }
 
 private func withTemporaryRecentCaptureLibrary(
@@ -383,11 +500,15 @@ private func writeRecentLoaderMeeting(title: String, date: Date, to url: URL) th
     **00:01** [Mic/You]
     Synthetic test meeting.
 
-    **00:04** [System/Alex]
+    **00:04** [System/Remote Participant]
     Synthetic response.
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
-    try FileManager.default.setAttributes(
+    setRecentLoaderFileDate(date, at: url)
+}
+
+private func setRecentLoaderFileDate(_ date: Date, at url: URL) {
+    try? FileManager.default.setAttributes(
         [.creationDate: date, .modificationDate: date],
         ofItemAtPath: url.path
     )
