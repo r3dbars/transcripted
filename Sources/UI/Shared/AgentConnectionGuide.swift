@@ -469,7 +469,7 @@ enum AgentConnectionGuide {
             "Transcripted direct tools setup:",
             "- Server name: transcripted",
             "- Transport: local stdio",
-            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install for Claude Desktop, then restart Claude Desktop.",
+            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install in Claude, then restart Claude Desktop.",
             "- Installed command path after setup: \(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)",
             "- Claude Desktop config path: \(ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)",
         ]
@@ -515,7 +515,7 @@ enum AgentConnectionGuide {
             "Claude Desktop setup:",
             "1. Open Transcripted Settings.",
             "2. Go to Agent.",
-            "3. Click Install for Claude Desktop.",
+            "3. Click Install in Claude.",
             "4. Restart Claude Desktop.",
             "",
             "Installed command path after setup:",

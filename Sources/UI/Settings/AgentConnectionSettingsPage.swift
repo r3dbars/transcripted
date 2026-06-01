@@ -750,7 +750,7 @@ private struct ClaudeDesktopStatusRow: View {
             return "Claude Desktop is configured. Restart Claude Desktop if you just installed it."
         case .notInstalled:
             return status.claudeDesktopLikelyInstalled
-                ? "Click Install for Claude Desktop, then restart Claude Desktop."
+                ? "Click Install in Claude, then restart Claude Desktop."
                 : "Claude Desktop was not found. You can still install now, then install Claude Desktop."
         case .needsRepair:
             return "Claude Desktop points at another Transcripted server. Install will update it."
