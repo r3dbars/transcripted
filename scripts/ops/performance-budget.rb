@@ -39,9 +39,13 @@ options = {
   max_dictation_stop_to_done_p95_ms: MAX_DICTATION_STOP_TO_DONE_P95_MS,
   max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
   min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
+  min_transcription_samples: MIN_TRANSCRIPTION_SAMPLES,
+  min_meeting_samples: MIN_MEETING_SAMPLES,
   require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
   require_dictation_stop_latency_samples: 0,
+  events_since: nil,
+  stats_since: nil,
   allow_missing_parakeet_model: false
 }
 
@@ -60,9 +64,13 @@ OptionParser.new do |parser|
   parser.on("--max-dictation-stop-to-done-p95-ms MS", Float, "Dictation stop pipeline p95 budget") { |ms| options[:max_dictation_stop_to_done_p95_ms] = ms }
   parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
   parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
+  parser.on("--min-transcription-samples N", Integer, "Minimum dictation transcription samples to require when --events is provided") { |count| options[:min_transcription_samples] = count }
+  parser.on("--min-meeting-samples N", Integer, "Minimum meeting throughput samples to require when --stats is provided") { |count| options[:min_meeting_samples] = count }
   parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
+  parser.on("--events-since ISO8601", "Only score runtime events at or after this timestamp") { |value| options[:events_since] = Time.parse(value) }
+  parser.on("--stats-since ISO8601", "Only score meeting stats at or after this timestamp") { |value| options[:stats_since] = Time.parse(value) }
   parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
 end.parse!
 
@@ -131,11 +139,19 @@ def startup_model_ready_durations(events)
   durations
 end
 
-def meeting_rtf_samples(stats_path, minimum_duration_seconds:)
+def meeting_rtf_samples(stats_path, minimum_duration_seconds:, since_time: nil)
+  predicates = [
+    "duration_seconds >= #{minimum_duration_seconds.to_f}",
+    "processing_time_ms > 0"
+  ]
+  if since_time
+    predicates << "created_at >= '#{since_time.utc.iso8601}'"
+  end
+
   sql = <<~SQL
     SELECT duration_seconds, processing_time_ms
     FROM recordings
-    WHERE duration_seconds >= #{minimum_duration_seconds.to_f} AND processing_time_ms > 0;
+    WHERE #{predicates.join(" AND ")};
   SQL
 
   stdout, stderr, status = Open3.capture3("sqlite3", "-separator", "\t", stats_path.to_s, sql)
@@ -214,6 +230,9 @@ if options[:events_path]
     errors << "Missing events file: #{events_path}"
   else
     events = parse_events(events_path.to_s)
+    if options[:events_since]
+      events = events.select { |event| event["_time"] && event["_time"] >= options[:events_since] }
+    end
     transcription_events = events.select { |event| event["event"] == "transcription_complete" }
     transcription_elapsed = transcription_events
       .map { |event| float_or_nil(event.fetch("context", {})["elapsed_s"]) }
@@ -247,15 +266,15 @@ if options[:events_path]
       .map { |event| float_or_nil(event.fetch("context", {})["stop_to_done_ms"]) }
       .compact
 
-    if transcription_elapsed.length < MIN_TRANSCRIPTION_SAMPLES
-      errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
-    elsif percentile(transcription_elapsed, 0.95) > options[:max_transcription_p95_seconds]
+    if transcription_elapsed.length < options[:min_transcription_samples]
+      errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{options[:min_transcription_samples]}"
+    elsif !transcription_elapsed.empty? && percentile(transcription_elapsed, 0.95) > options[:max_transcription_p95_seconds]
       errors << "Dictation transcription p95 is #{format("%.3fs", percentile(transcription_elapsed, 0.95))}, above #{format("%.3fs", options[:max_transcription_p95_seconds])}"
     end
 
-    if transcription_rtf.length < MIN_TRANSCRIPTION_SAMPLES
-      errors << "Only #{transcription_rtf.length} transcription RTF samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
-    elsif percentile(transcription_rtf, 0.95) > options[:max_transcription_p95_rtf]
+    if transcription_rtf.length < options[:min_transcription_samples]
+      errors << "Only #{transcription_rtf.length} transcription RTF samples, need at least #{options[:min_transcription_samples]}"
+    elsif !transcription_rtf.empty? && percentile(transcription_rtf, 0.95) > options[:max_transcription_p95_rtf]
       errors << "Dictation transcription p95 RTF is #{format("%.3f", percentile(transcription_rtf, 0.95))}, above #{format("%.3f", options[:max_transcription_p95_rtf])}"
     end
 
@@ -304,7 +323,8 @@ if options[:events_path]
       dictation_fast_start_fallback_events: fast_start_fallback_events.length,
       dictation_stop_latency_samples: dictation_stop_latency_events.length,
       dictation_stop_to_paste_p95: percentile(dictation_stop_to_paste_ms, 0.95),
-      dictation_stop_to_done_p95: percentile(dictation_stop_to_done_ms, 0.95)
+      dictation_stop_to_done_p95: percentile(dictation_stop_to_done_ms, 0.95),
+      events_since: options[:events_since]
     }
   end
 end
@@ -318,20 +338,22 @@ if options[:stats_path]
     begin
       meeting_rtfs = meeting_rtf_samples(
         stats_path,
-        minimum_duration_seconds: options[:min_meeting_duration_seconds]
+        minimum_duration_seconds: options[:min_meeting_duration_seconds],
+        since_time: options[:stats_since]
       )
       meeting_p95 = percentile(meeting_rtfs, 0.95)
 
-      if meeting_rtfs.length < MIN_MEETING_SAMPLES
-        errors << "Only #{meeting_rtfs.length} meeting throughput samples, need at least #{MIN_MEETING_SAMPLES}"
-      elsif meeting_p95 > options[:max_meeting_p95_rtf]
+      if meeting_rtfs.length < options[:min_meeting_samples]
+        errors << "Only #{meeting_rtfs.length} meeting throughput samples, need at least #{options[:min_meeting_samples]}"
+      elsif !meeting_rtfs.empty? && meeting_p95 > options[:max_meeting_p95_rtf]
         errors << "Meeting processing p95 RTF is #{format("%.3f", meeting_p95)}, above #{format("%.3f", options[:max_meeting_p95_rtf])}"
       end
 
       stats_summary = {
         meeting_samples: meeting_rtfs.length,
         meeting_p95_rtf: meeting_p95,
-        minimum_duration_seconds: options[:min_meeting_duration_seconds]
+        minimum_duration_seconds: options[:min_meeting_duration_seconds],
+        stats_since: options[:stats_since]
       }
     rescue RuntimeError => error
       errors << error.message
@@ -347,9 +369,20 @@ puts "Resources: #{mib(resources_size)}"
 puts "Parakeet model: #{model_dirs.first || "not bundled (runtime download)"}"
 puts "Resource icons: #{resource_icons.join(", ")}"
 if runtime_summary
+  if runtime_summary[:events_since]
+    puts "Runtime events since: #{runtime_summary[:events_since].utc.iso8601}"
+  end
   puts "Dictation transcription samples: #{runtime_summary[:transcription_samples]}"
-  puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])}"
-  puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
+  if runtime_summary[:transcription_p95]
+    puts "Dictation transcription p95: #{format("%.3fs", runtime_summary[:transcription_p95])}"
+  else
+    puts "Dictation transcription p95: n/a"
+  end
+  if runtime_summary[:transcription_rtf_p95]
+    puts "Dictation transcription p95 RTF: #{format("%.3f", runtime_summary[:transcription_rtf_p95])}"
+  else
+    puts "Dictation transcription p95 RTF: n/a"
+  end
   puts "Launch model-ready samples: #{runtime_summary[:startup_samples]}"
   if runtime_summary[:startup_p90]
     puts "Launch to model-ready p90: #{format("%.3fs", runtime_summary[:startup_p90])}"
@@ -370,7 +403,14 @@ if runtime_summary
   end
 end
 if stats_summary
+  if stats_summary[:stats_since]
+    puts "Meeting stats since: #{stats_summary[:stats_since].utc.iso8601}"
+  end
   puts "Meeting throughput samples: #{stats_summary[:meeting_samples]}"
   puts "Meeting minimum duration: #{format("%.1fs", stats_summary[:minimum_duration_seconds])}"
-  puts "Meeting processing p95 RTF: #{format("%.3f", stats_summary[:meeting_p95_rtf])}"
+  if stats_summary[:meeting_p95_rtf]
+    puts "Meeting processing p95 RTF: #{format("%.3f", stats_summary[:meeting_p95_rtf])}"
+  else
+    puts "Meeting processing p95 RTF: n/a"
+  end
 end

@@ -837,6 +837,21 @@ func testRepoCommandContract() {
             "performance budget should support strict fresh dictation stop proof"
         )
         assertTrue(
+            contents.contains("--events-since ISO8601")
+                && contents.contains("event[\"_time\"] >= options[:events_since]"),
+            "performance budget should support fresh-window runtime event scoring"
+        )
+        assertTrue(
+            contents.contains("--stats-since ISO8601")
+                && contents.contains("created_at >= '#{since_time.utc.iso8601}'"),
+            "performance budget should support fresh-window meeting throughput scoring"
+        )
+        assertTrue(
+            contents.contains("--min-transcription-samples")
+                && contents.contains("--min-meeting-samples"),
+            "performance budget should let focused experiments set explicit sample requirements"
+        )
+        assertTrue(
             contents.contains("dictation_stop_latency_measured")
                 && contents.contains("stop_to_paste_ms")
                 && contents.contains("stop_to_done_ms"),

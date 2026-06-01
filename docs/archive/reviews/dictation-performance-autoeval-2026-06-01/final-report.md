@@ -16,6 +16,17 @@ Historical local logs, before this patch:
 - Dictation RTF: p95=0.056, above the current 0.050 budget
 - Meeting RTF: p95=0.065, above the current 0.050 budget
 
+Fresh samples from this branch:
+
+- Dictation stop-to-paste: n=8, p95=175ms
+- Dictation stop pipeline: n=8, p95=177ms
+- Dictation fast start: n=7, p95=142ms
+- Dictation RTF: n=8, p95=0.013
+- Meeting RTF: n=1, 0.012 for a 56s recording
+- Stop bottleneck: decode, p95=156ms
+- Paste: p95=3ms
+- Save: p95=2ms
+
 ## Kept Change
 
 Added `dictation_stop_latency_measured`.
@@ -36,24 +47,57 @@ Local-only event fields include exact milliseconds:
 
 PostHog only gets coarse buckets, like `250_499ms` or `1_2s`. It does not get raw milliseconds.
 
+Added fresh-window scoring to `scripts/ops/performance-budget.rb`:
+
+- `--events-since`
+- `--stats-since`
+- `--min-transcription-samples`
+- `--min-meeting-samples`
+
+The default full-history scorer is still strict. The new options let experiments score only the fresh samples they produced.
+
+## Tested Knobs
+
+Model eager warmup:
+
+- Lazy launch did not load the model after 4 seconds.
+- Lazy first dictation fast-start was 142ms.
+- `TRANSCRIPTED_EAGER_MODEL_WARMUP=1` loaded the cached model 133ms after launch.
+- Eager first dictation fast-start was 134ms.
+- Decision: do not make eager warmup default from this evidence. The 8ms win is below the 10% meaningful-win bar, and it moves model work into launch.
+
+Paste/save ordering:
+
+- Paste p95 was 3ms.
+- Save p95 was 2ms.
+- Decision: rule out as a first tuning knob. It is not the slow edge.
+
 ## Verification
 
 - `bash build.sh --no-open` passed.
 - `bash run-tests.sh` passed 3158 tests.
 - `ruby -c scripts/ops/performance-budget.rb` passed.
+- Fresh-window dictation budget passed with `--events-since 2026-06-01T01:13:00Z`.
 
 ## Test Knobs
 
 Run these one at a time after fresh samples exist:
 
-1. Model warm state: lazy default vs `TRANSCRIPTED_EAGER_MODEL_WARMUP=1`.
+1. Model warm state: lazy default vs `TRANSCRIPTED_EAGER_MODEL_WARMUP=1`. Tested; rejected as default-on for cached model path.
 2. Existing-install model prefetch delay: 0s, 5s, 12s, 30s.
 3. Model poll interval: 100ms, 200ms, 500ms.
-4. Paste and save ordering: measure whether saving Markdown should stay after paste or move farther off the visible path.
+4. Paste and save ordering: ruled out as first knob; measured cost is tiny.
 5. Auto-enter delay: current 200ms vs shorter values for allowed apps.
-6. Dictation decode throughput: reduce p95 RTF from 0.056 toward 0.050 or lower.
-7. Meeting processing throughput: reduce p95 RTF from 0.065 toward 0.050 or lower.
+6. Dictation decode throughput: fresh p95 RTF is 0.013, but full-history p95 is still 0.056.
+7. Meeting processing throughput: full-history p95 is 0.065; first fresh sample is 0.012, more samples needed before code tuning.
 8. Start tail latency: investigate the rare >1s starts while keeping p95 under 250ms.
+
+Update after fresh meeting sample:
+
+- A 56s meeting processed in 692ms.
+- Fresh meeting RTF was 0.012.
+- This does not reproduce the old full-history 0.065 p95 failure.
+- Next meeting step should be more samples or a repeatable fixture, not a blind code change.
 
 ## Score Command
 
@@ -64,8 +108,9 @@ ruby scripts/ops/performance-budget.rb \
   --app build/Transcripted.app \
   --allow-missing-parakeet-model \
   --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" \
-  --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite" \
-  --require-dictation-stop-latency-samples 3
+  --events-since 2026-06-01T01:13:00Z \
+  --require-dictation-stop-latency-samples 3 \
+  --min-transcription-samples 3
 ```
 
 ## Simple Explanation
