@@ -17,6 +17,8 @@ MAX_TRANSCRIPTION_P95_SECONDS = 0.5
 MAX_TRANSCRIPTION_P95_RTF = 0.05
 MAX_MODEL_READY_P90_SECONDS = 30.0
 MAX_DICTATION_FAST_START_P95_MS = 250.0
+MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0
+MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0
 MAX_MEETING_P95_RTF = 0.05
 MIN_MEETING_DURATION_SECONDS = 30.0
 MIN_TRANSCRIPTION_SAMPLES = 10
@@ -33,10 +35,13 @@ options = {
   max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
   max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS,
   max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
+  max_dictation_stop_to_paste_p95_ms: MAX_DICTATION_STOP_TO_PASTE_P95_MS,
+  max_dictation_stop_to_done_p95_ms: MAX_DICTATION_STOP_TO_DONE_P95_MS,
   max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
   min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
   require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
+  require_dictation_stop_latency_samples: 0,
   allow_missing_parakeet_model: false
 }
 
@@ -51,10 +56,13 @@ OptionParser.new do |parser|
   parser.on("--max-transcription-p95-rtf VALUE", Float, "Dictation transcription p95 RTF budget") { |rtf| options[:max_transcription_p95_rtf] = rtf }
   parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
   parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
+  parser.on("--max-dictation-stop-to-paste-p95-ms MS", Float, "Dictation stop-to-paste p95 budget") { |ms| options[:max_dictation_stop_to_paste_p95_ms] = ms }
+  parser.on("--max-dictation-stop-to-done-p95-ms MS", Float, "Dictation stop pipeline p95 budget") { |ms| options[:max_dictation_stop_to_done_p95_ms] = ms }
   parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
   parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
   parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
+  parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
   parser.on("--allow-missing-parakeet-model", "Allow thin builds that download the Parakeet model on first use") { options[:allow_missing_parakeet_model] = true }
 end.parse!
 
@@ -231,6 +239,13 @@ if options[:events_path]
     else
       []
     end
+    dictation_stop_latency_events = events.select { |event| event["event"] == "dictation_stop_latency_measured" }
+    dictation_stop_to_paste_ms = dictation_stop_latency_events
+      .map { |event| float_or_nil(event.fetch("context", {})["stop_to_paste_ms"]) }
+      .compact
+    dictation_stop_to_done_ms = dictation_stop_latency_events
+      .map { |event| float_or_nil(event.fetch("context", {})["stop_to_done_ms"]) }
+      .compact
 
     if transcription_elapsed.length < MIN_TRANSCRIPTION_SAMPLES
       errors << "Only #{transcription_elapsed.length} transcription samples, need at least #{MIN_TRANSCRIPTION_SAMPLES}"
@@ -264,6 +279,20 @@ if options[:events_path]
       end
     end
 
+    if options[:require_dictation_stop_latency_samples].positive?
+      if dictation_stop_to_paste_ms.length < options[:require_dictation_stop_latency_samples]
+        errors << "Only #{dictation_stop_to_paste_ms.length} dictation stop-to-paste samples, need at least #{options[:require_dictation_stop_latency_samples]}"
+      elsif percentile(dictation_stop_to_paste_ms, 0.95) > options[:max_dictation_stop_to_paste_p95_ms]
+        errors << "Dictation stop-to-paste p95 is #{format("%.1fms", percentile(dictation_stop_to_paste_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_paste_p95_ms])}"
+      end
+
+      if dictation_stop_to_done_ms.length < options[:require_dictation_stop_latency_samples]
+        errors << "Only #{dictation_stop_to_done_ms.length} dictation stop pipeline samples, need at least #{options[:require_dictation_stop_latency_samples]}"
+      elsif percentile(dictation_stop_to_done_ms, 0.95) > options[:max_dictation_stop_to_done_p95_ms]
+        errors << "Dictation stop pipeline p95 is #{format("%.1fms", percentile(dictation_stop_to_done_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_stop_to_done_p95_ms])}"
+      end
+    end
+
     runtime_summary = {
       transcription_samples: transcription_elapsed.length,
       transcription_p95: percentile(transcription_elapsed, 0.95),
@@ -272,7 +301,10 @@ if options[:events_path]
       startup_p90: percentile(startup_durations, 0.90),
       dictation_fast_start_samples: dictation_fast_start_ms.length,
       dictation_fast_start_p95: percentile(dictation_fast_start_ms, 0.95),
-      dictation_fast_start_fallback_events: fast_start_fallback_events.length
+      dictation_fast_start_fallback_events: fast_start_fallback_events.length,
+      dictation_stop_latency_samples: dictation_stop_latency_events.length,
+      dictation_stop_to_paste_p95: percentile(dictation_stop_to_paste_ms, 0.95),
+      dictation_stop_to_done_p95: percentile(dictation_stop_to_done_ms, 0.95)
     }
   end
 end
@@ -329,6 +361,13 @@ if runtime_summary
     puts "Dictation fast-start p95: #{format("%.1fms", runtime_summary[:dictation_fast_start_p95])}"
   end
   puts "Dictation fast-start fallback/retry events: #{runtime_summary[:dictation_fast_start_fallback_events]}"
+  puts "Dictation stop latency samples: #{runtime_summary[:dictation_stop_latency_samples]}"
+  if runtime_summary[:dictation_stop_to_paste_p95]
+    puts "Dictation stop-to-paste p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_paste_p95])}"
+  end
+  if runtime_summary[:dictation_stop_to_done_p95]
+    puts "Dictation stop pipeline p95: #{format("%.1fms", runtime_summary[:dictation_stop_to_done_p95])}"
+  end
 end
 if stats_summary
   puts "Meeting throughput samples: #{stats_summary[:meeting_samples]}"

@@ -291,6 +291,57 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "menu", "non-hotkey triggers should remain attributable")
     }
 
+    runSuite("AnalyticsEventPolicy allows dictation stop latency only as coarse buckets") {
+        let stopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
+
+        assertEqual(stopLatency?.allowedProperties.contains("trigger"), true, "dictation stop latency should preserve stop trigger attribution")
+        assertEqual(stopLatency?.allowedProperties.contains("delivery"), true, "dictation stop latency should preserve delivery outcome")
+        assertEqual(stopLatency?.allowedProperties.contains("word_count_bucket"), true, "dictation stop latency should preserve coarse text size")
+        assertEqual(stopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should bucket stop-to-paste time")
+        assertEqual(stopLatency?.allowedProperties.contains("stop_to_done_bucket"), true, "dictation stop latency should bucket total stop pipeline time")
+        assertEqual(stopLatency?.allowedProperties.contains("decode_bucket"), true, "dictation stop latency should bucket local model work without raw timings")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "auto_enter_bucket": "lt_100ms",
+                "auto_send": "disabled",
+                "chars": "512",
+                "cleanup_bucket": "lt_100ms",
+                "cleanup_changed": "true",
+                "cleanup_enabled": "true",
+                "copy_reason": "focus_changed",
+                "decode_bucket": "250_499ms",
+                "delivery": "pasted",
+                "mic_stop_bucket": "lt_100ms",
+                "model_wait_bucket": "lt_100ms",
+                "outcome": "completed",
+                "paste_bucket": "100_249ms",
+                "raw_text": "hello private words",
+                "save_bucket": "lt_100ms",
+                "save_outcome": "saved",
+                "source_app_bundle": "com.example.PrivateApp",
+                "stop_to_done_bucket": "500_999ms",
+                "stop_to_done_ms": "742",
+                "stop_to_paste_bucket": "500_999ms",
+                "stop_to_paste_ms": "621",
+                "trigger": "physical_key",
+                "word_count_bucket": "10_49",
+            ],
+            allowedKeys: stopLatency?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["stop_to_paste_bucket"], "500_999ms", "bucketed stop-to-paste timing should survive")
+        assertEqual(sanitized["stop_to_done_bucket"], "500_999ms", "bucketed total stop timing should survive")
+        assertEqual(sanitized["decode_bucket"], "250_499ms", "bucketed model work should survive")
+        assertEqual(sanitized["copy_reason"], "focus_changed", "normalized copy reason should survive")
+        assertEqual(sanitized["word_count_bucket"], "10_49", "coarse word count should survive")
+        assertNil(sanitized["stop_to_paste_ms"], "raw stop-to-paste milliseconds should stay local")
+        assertNil(sanitized["stop_to_done_ms"], "raw stop pipeline milliseconds should stay local")
+        assertNil(sanitized["chars"], "raw character counts should stay local")
+        assertNil(sanitized["raw_text"], "transcript text should stay out of analytics")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of analytics")
+    }
+
     runSuite("AnalyticsEventPolicy drops raw dictation timeout counters") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
 
@@ -369,6 +420,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
@@ -377,6 +429,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
