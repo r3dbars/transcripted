@@ -25,7 +25,10 @@ struct SentryEventPolicy: Equatable {
     }
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
+        "attenuation_kind",
         "capture_quality",
+        "captured_input_volume_changed",
+        "captured_input_volume_dropped",
         "default_input_class",
         "default_input_volume_changed",
         "default_input_volume_dropped",
@@ -43,6 +46,7 @@ struct SentryEventPolicy: Equatable {
         "input_channels",
         "input_device_class",
         "input_rate_hz",
+        "input_volume_scalar_available",
         "output_ducking_detected",
         "output_channels",
         "output_device_class",
@@ -119,11 +123,6 @@ struct SentryEventPolicy: Equatable {
             engine: "parakeet",
             event: "audio_format_failed",
             summary: "Transcripted could not create the expected audio format."
-        ),
-        "parakeet.audio_format_read_timeout": .init(
-            engine: "parakeet",
-            event: "audio_format_read_timeout",
-            summary: "Speech audio format readiness timed out."
         ),
         "parakeet.audio_engine_start_failed": .init(
             engine: "parakeet",

@@ -25,7 +25,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Overlay/FloatingOverlayController.swift` — owns the dictation overlay panel lifecycle and Combine subscriptions
 - `Overlay/FloatingOverlayPanel.swift` — non-activating NSPanel for the dictation overlay
-- `Overlay/OverlayDraftingView.swift` — drafting/processing state view
+- `Overlay/OverlayDraftingView.swift` — legacy-named dictation processing and error state view
 - `Overlay/OverlayHeaderView.swift` — overlay title bar with centered listening layout, live waveform host, and inline stop control for active dictation
 - `Overlay/OverlayRootView.swift` — top-level AppKit view that keeps dictation compact in normal listening mode and only expands for loading or error/recovery content
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views

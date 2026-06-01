@@ -97,44 +97,72 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .startRecording, "ready input should start recording")
     }
 
-    runSuite("DictationReadinessWaitPolicy — caps repeated ready-input start attempts") {
+    runSuite("DictationReadinessWaitPolicy — ready input retries before hard recovery threshold") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            recordingStartAttempts: 3,
-            readinessRefreshes: 10
+            readyStartFailures: 2,
+            forcedRecoveryAttempts: 0
         )
 
-        assertEqual(action, .forceInputRecovery, "repeated failed starts should force a hard idle graph recovery instead of refreshing the same stuck route")
-        assertTrue(
-            DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
-                inputFormatReady: true,
-                recordingStartAttempts: 3
-            ),
-            "the retry limiter should be visible to diagnostics code"
-        )
+        assertEqual(action, .startRecording, "a couple of failed starts should still use the normal start path")
     }
 
-    runSuite("DictationReadinessWaitPolicy — exhausted start attempts fall back to refresh after forced recovery budget") {
+    runSuite("DictationReadinessWaitPolicy — repeated ready start failures force recovery") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
             inputFormatReady: true,
-            recordingStartAttempts: 3,
+            readyStartFailures: 3,
+            forcedRecoveryAttempts: 0
+        )
+
+        assertEqual(action, .forceInputRecovery, "repeated ready-state start failures should stop looping normal starts")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — first hard recovery unlocks another normal start") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 3,
+            forcedRecoveryAttempts: 1
+        )
+
+        assertEqual(action, .startRecording, "after one hard recovery the loop should try recording again before forcing another rebuild")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — second ready failure threshold can force another recovery") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 6,
+            forcedRecoveryAttempts: 1
+        )
+
+        assertEqual(action, .forceInputRecovery, "continued ready-state failures can spend the second hard recovery budget")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — ready failure hard recovery stays bounded") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 6,
             forcedRecoveryAttempts: 2,
             maxForcedRecoveryAttempts: 2
         )
 
-        assertEqual(action, .refreshInputReadiness, "the hard recovery path should stay bounded inside one dictation start")
+        assertEqual(action, .startRecording, "after the hard recovery budget is spent the policy should stay bounded")
     }
 
-    runSuite("DictationReadinessWaitPolicy — unready input is not treated as start-budget exhausted") {
-        assertFalse(
-            DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
-                inputFormatReady: false,
-                recordingStartAttempts: 3
-            ),
-            "the start-attempt limiter only applies after the route says it is ready"
+    runSuite("DictationReadinessWaitPolicy — recovery starts do not count as ready failures") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: true,
+            readyStartFailures: 1,
+            forcedRecoveryAttempts: 0,
+            recoveryStartAttempts: 2
         )
+
+        assertEqual(action, .startRecording, "recovery-start attempts should not spend the ready-failure hard recovery threshold")
     }
 
     runSuite("DictationReadinessWaitPolicy — stuck recovery timeout becomes refreshable") {
@@ -189,6 +217,19 @@ func testDictationReadinessWaitPolicy() {
         )
 
         assertEqual(action, .startRecoveryRecording, "after a hard input recovery, one more guarded recovery start should be allowed")
+    }
+
+    runSuite("DictationReadinessWaitPolicy — stale timeout does not rush post-recovery start") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 0,
+            forcedRecoveryAttempts: 1,
+            recoveryStartAttempts: 1,
+            readinessRefreshTimedOut: true
+        )
+
+        assertEqual(action, .refreshInputReadiness, "after hard recovery, a stale timeout flag should wait for fresh readiness refreshes before another recovery start")
     }
 
     runSuite("DictationReadinessWaitPolicy — recovery start is bounded before forced recovery") {

@@ -15,7 +15,7 @@ Claude Desktop is the best full-library experience.
 1. Open Transcripted.
 2. Open Settings.
 3. Go to `Agent`.
-4. Click `Install for Claude Desktop`.
+4. Click `Install in Claude`.
 5. Restart Claude Desktop.
 
 Transcripted copies the bundled `transcripted-mcp` helper into:
@@ -35,15 +35,15 @@ Transcripted backs it up before writing a clean config.
 
 If the installed helper's `--self-test` prints many `[transcripted-mcp] Indexed`
 lines before the JSON payload, the helper copied into Application Support is
-stale. Click `Install for Claude Desktop` again from Transcripted Settings to
-replace it with the current bundled helper. The current helper should print only
-the JSON self-test payload.
+stale. Click `Update Claude Helper` from Transcripted Settings to replace it
+with the current bundled helper. The current helper should print only the JSON
+self-test payload.
 
 A stale helper can also pass `--self-test` but still behave like an older build,
 for example if `transcripted-mcp --help` starts the MCP server instead of
 printing usage. If Transcripted Settings says the direct tools need repair, or
-the installed helper differs from the app-bundled helper, click `Install for
-Claude Desktop` again.
+the installed helper differs from the app-bundled helper, click the repair or
+update button shown in Settings.
 
 Current `transcripted-mcp` capabilities:
 
@@ -99,7 +99,7 @@ The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 2. Go to `Agent`.
 3. Turn on `Live meeting sidecar`.
 4. Click `Open in Codex`, or click `Copy for Cowork` and paste that setup prompt into Claude Cowork.
-5. Click `Open Preview` if you want a live transcript page, or open `http://127.0.0.1:47834/live-preview` in Codex's in-app browser.
+5. Click `Open Preview` if you want a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
 
 Transcripted creates:
 
@@ -109,9 +109,8 @@ Transcripted creates:
 
 The folder contains `state.json`, `live_transcript.md`, `agent-handoff.md`,
 `agent-watcher-state.json`, `agent-live-meeting.md`, and `preview.html`.
-While Transcripted is running, the
-same preview updates in place at
-`http://127.0.0.1:47834/live-preview`.
+While Transcripted is running, the same preview updates in place at the
+tokenized browser preview URL written into `agent-live-meeting.md`.
 
 Rules:
 

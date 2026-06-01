@@ -1,6 +1,6 @@
 import Foundation
 
-#if TRANSCRIPTEDCLI_WITH_DIARIZATION
+#if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
 
 /// JSON-decodable config for the supported OfflineDiarizerConfig parameters.

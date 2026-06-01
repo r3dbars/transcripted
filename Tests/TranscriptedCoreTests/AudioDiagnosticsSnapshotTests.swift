@@ -1,5 +1,6 @@
 import XCTest
 @preconcurrency import AVFoundation
+import CoreAudio
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -35,6 +36,12 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.privacySafeContext["mic_raw_peak"], "0.03000")
         XCTAssertEqual(snapshot.privacySafeContext["mic_processed_peak"], "0.36000")
         XCTAssertEqual(snapshot.privacySafeContext["system_peak"], "0.25000")
+        // Issue #500: the captured-device input scalar is always reported (even
+        // as "unavailable" when the device exposes no readable scalar) so the
+        // scalar-drop sub-mechanism stays detectable on the device we actually
+        // record from, not just the system default input.
+        XCTAssertNotNil(snapshot.privacySafeContext["captured_input_volume_before"])
+        XCTAssertNotNil(snapshot.privacySafeContext["captured_input_volume_during"])
     }
 
     func testSnapshotResetsSignalDiagnosticsForNewRecording() {
@@ -49,6 +56,22 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.micRawPeak, "0.00000")
         XCTAssertEqual(snapshot.micProcessedPeak, "0.00000")
         XCTAssertEqual(snapshot.systemAudioPeak, "0.00000")
+    }
+
+    func testCapturedInputBaselineRequiresSameDevice() {
+        let audio = makeAudio()
+        let originalInput = AudioDeviceID(42)
+        let replacementInput = AudioDeviceID(43)
+
+        audio.recordRecordingStartCapturedInput(deviceID: originalInput)
+
+        XCTAssertEqual(audio.recordingStartCapturedInputDeviceID, originalInput)
+        XCTAssertEqual(audio.recordingStartCapturedInputVolume(matching: replacementInput), "unavailable")
+
+        audio.resetRecordingStartCapturedInput()
+
+        XCTAssertNil(audio.recordingStartCapturedInputDeviceID)
+        XCTAssertEqual(audio.recordingStartCapturedInputVolume(matching: originalInput), "unavailable")
     }
 
     func testRouteVolumeDiagnosticsExposeBeforeAndAfterKeys() {

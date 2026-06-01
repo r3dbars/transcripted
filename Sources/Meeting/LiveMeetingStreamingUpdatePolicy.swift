@@ -3,6 +3,7 @@ import Foundation
 struct LiveMeetingStreamingUpdateState: Equatable {
     var lastText: String = ""
     var lastAppendedAt: Date?
+    var lastAppendedWasFinal = false
 }
 
 enum LiveMeetingStreamingUpdatePolicy {
@@ -26,7 +27,9 @@ enum LiveMeetingStreamingUpdatePolicy {
     ) -> Bool {
         let normalized = normalizedText(text)
         guard !normalized.isEmpty else { return false }
-        guard normalized != state.lastText else { return false }
+        if normalized == state.lastText {
+            return isFinal && !state.lastAppendedWasFinal
+        }
 
         if isFinal {
             return true

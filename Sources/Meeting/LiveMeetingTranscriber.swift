@@ -53,9 +53,10 @@ final class LiveMeetingTranscriber {
         systemChannel.start()
     }
 
-    func stop(capture: MeetingCaptureBridge) {
-        capture.setMicLivePreviewHandler(nil)
-        capture.setSystemLivePreviewHandler(nil)
+    func stop(capture: MeetingCaptureBridge, clearPreviewHandlers: Bool = true) {
+        if clearPreviewHandlers {
+            clearCapturePreviewHandlers(capture: capture)
+        }
 
         channels.values.forEach { $0.cancel() }
         channels.removeAll()
@@ -66,6 +67,11 @@ final class LiveMeetingTranscriber {
             }
         }
         streamingSession = nil
+    }
+
+    func clearCapturePreviewHandlers(capture: MeetingCaptureBridge) {
+        capture.setMicLivePreviewHandler(nil)
+        capture.setSystemLivePreviewHandler(nil)
     }
 }
 
@@ -190,6 +196,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         lock.withLock {
             updateState.lastText = normalized
             updateState.lastAppendedAt = now
+            updateState.lastAppendedWasFinal = update.isConfirmed
         }
 
         let elapsed = now.timeIntervalSince(startedAt)

@@ -44,7 +44,8 @@ to copy prompts, reload pages, or explain where the transcript lives.
 - Live data stays local.
 - The live sidecar reads app-owned files under
   `~/Library/Application Support/Transcripted/AgentLiveMeeting/`.
-- The browser preview is served from `http://127.0.0.1:47834/live-preview`.
+- The browser preview is served from a tokenized localhost URL written into
+  `agent-live-meeting.md`.
 - The live transcript is provisional.
 - The final Transcripted Markdown is canonical.
 - The sidecar must not mutate or replace normal meeting output.

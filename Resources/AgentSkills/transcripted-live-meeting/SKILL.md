@@ -69,11 +69,11 @@ Only include sections that help.
 
 ## Preview
 
-If the user asks for a live transcript window inside Codex, open
-`http://127.0.0.1:47834/live-preview` while Transcripted is running. In Cowork,
-use the granted workspace folder or `preview.html` if local folder access is
-available. If Transcripted is closed, open `preview.html` from the workspace
-instead.
+If the user asks for a live transcript window inside Codex, open the tokenized
+browser preview URL from `agent-live-meeting.md` while Transcripted is running.
+In Cowork, use the granted workspace folder or `preview.html` if local folder
+access is available. If Transcripted is closed, open `preview.html` from the
+workspace instead.
 
 ## Product Intent
 

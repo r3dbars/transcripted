@@ -7,7 +7,7 @@ For Claude Desktop users, the best setup is inside the app:
 1. Open Transcripted.
 2. Open Settings.
 3. Go to `Agent`.
-4. Click `Install for Claude Desktop`.
+4. Click `Install in Claude`.
 5. Restart Claude Desktop.
 
 That path installs the bundled helper, updates Claude Desktop's config, and

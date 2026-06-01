@@ -93,6 +93,7 @@ enum DictationTranscriptStore {
         var totalWords = 0
 
         for file in files where isDictationDayFile(file) {
+            if Task.isCancelled { break }
             let stats = fileStats(in: file)
             total += stats.entries
             totalWords += stats.words
@@ -125,6 +126,7 @@ enum DictationTranscriptStore {
 
         var collectedEntries: [SavedDictationEntry] = []
         for file in dayFiles {
+            if Task.isCancelled { break }
             let remaining = limit - collectedEntries.count
             collectedEntries.append(contentsOf: entries(in: file, limit: remaining))
             if collectedEntries.count >= limit {
@@ -232,6 +234,7 @@ enum DictationTranscriptStore {
         var sawMetadataLine = false
 
         for line in content.components(separatedBy: "\n") {
+            if Task.isCancelled { break }
             if isEntryHeading(line) {
                 entries += 1
                 scanningMetadata = true

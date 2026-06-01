@@ -4,12 +4,18 @@ import Network
 @available(macOS 14.0, *)
 enum LiveMeetingPreviewServerError: LocalizedError {
     case invalidLoopbackAddress
+    case listenerFailed(String)
+    case listenerStartupTimedOut
     case invalidPort
 
     var errorDescription: String? {
         switch self {
         case .invalidLoopbackAddress:
             return "Could not bind the live preview server to 127.0.0.1."
+        case .listenerFailed(let detail):
+            return "Could not start the live preview server: \(detail)"
+        case .listenerStartupTimedOut:
+            return "The live preview server did not become ready in time."
         case .invalidPort:
             return "Could not use the live preview port."
         }
@@ -35,37 +41,90 @@ final class LiveMeetingPreviewServer {
     }
 
     func start(workspaceURL: URL = LiveMeetingCodexSession.defaultWorkspaceRoot) throws -> URL {
-        lock.lock()
-        defer { lock.unlock() }
+        let standardizedWorkspaceURL = workspaceURL.standardizedFileURL
+        let session = LiveMeetingCodexSession(workspaceRoot: standardizedWorkspaceURL, fileManager: fileManager)
+        let authToken = try session.ensurePreviewAuthToken()
 
-        self.workspaceURL = workspaceURL.standardizedFileURL
+        lock.lock()
+
+        self.workspaceURL = standardizedWorkspaceURL
         if listener != nil {
-            return LiveMeetingCodexSession.previewServerURL
+            lock.unlock()
+            return LiveMeetingCodexSession.authenticatedPreviewServerURL(token: authToken)
         }
 
         guard let port = NWEndpoint.Port(rawValue: LiveMeetingCodexSession.previewServerPort) else {
+            lock.unlock()
             throw LiveMeetingPreviewServerError.invalidPort
         }
         guard let loopback = IPv4Address("127.0.0.1") else {
+            lock.unlock()
             throw LiveMeetingPreviewServerError.invalidLoopbackAddress
+        }
+
+        let startupSemaphore = DispatchSemaphore(value: 0)
+        let startupLock = NSLock()
+        var startupResult: Result<Void, Error>?
+        let completeStartup: (Result<Void, Error>) -> Void = { result in
+            startupLock.lock()
+            defer { startupLock.unlock() }
+            guard startupResult == nil else { return }
+            startupResult = result
+            startupSemaphore.signal()
         }
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: port)
 
-        let newListener = try NWListener(using: parameters)
+        let newListener: NWListener
+        do {
+            newListener = try NWListener(using: parameters)
+        } catch {
+            lock.unlock()
+            throw error
+        }
         newListener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection)
         }
-        newListener.stateUpdateHandler = { [weak self] state in
-            guard case .failed = state else { return }
-            self?.clearListener()
+        newListener.stateUpdateHandler = { [weak self, weak newListener] state in
+            switch state {
+            case .ready:
+                completeStartup(.success(()))
+            case .failed(let error):
+                completeStartup(.failure(LiveMeetingPreviewServerError.listenerFailed(error.localizedDescription)))
+                self?.clearListener(newListener)
+            case .cancelled:
+                self?.clearListener(newListener)
+            default:
+                break
+            }
         }
         listener = newListener
+        lock.unlock()
+
         newListener.start(queue: queue)
 
-        return LiveMeetingCodexSession.previewServerURL
+        guard startupSemaphore.wait(timeout: .now() + 1.0) == .success else {
+            clearListener(newListener)
+            newListener.cancel()
+            throw LiveMeetingPreviewServerError.listenerStartupTimedOut
+        }
+
+        switch startupResult {
+        case .success:
+            break
+        case .failure(let error):
+            clearListener(newListener)
+            newListener.cancel()
+            throw error
+        case .none:
+            clearListener(newListener)
+            newListener.cancel()
+            throw LiveMeetingPreviewServerError.listenerStartupTimedOut
+        }
+
+        return LiveMeetingCodexSession.authenticatedPreviewServerURL(token: authToken)
     }
 
     func stop() {
@@ -77,9 +136,15 @@ final class LiveMeetingPreviewServer {
         existingListener?.cancel()
     }
 
-    private func clearListener() {
+    private func clearListener(_ listenerToClear: NWListener? = nil) {
         lock.lock()
-        listener = nil
+        if let listenerToClear {
+            if listener === listenerToClear {
+                listener = nil
+            }
+        } else {
+            listener = nil
+        }
         lock.unlock()
     }
 
@@ -102,6 +167,14 @@ final class LiveMeetingPreviewServer {
         let requestText = String(decoding: requestData, as: UTF8.self)
         let request = parseRequest(requestText)
 
+        guard isAllowedHost(request.headers["host"]) else {
+            return httpResponse(
+                status: "403 Forbidden",
+                contentType: "text/plain; charset=utf-8",
+                body: Data("Forbidden".utf8)
+            )
+        }
+
         if request.method == "OPTIONS" {
             return httpResponse(status: "204 No Content", contentType: "text/plain; charset=utf-8", body: Data())
         }
@@ -115,6 +188,14 @@ final class LiveMeetingPreviewServer {
         }
 
         let route = request.path
+        guard route == "/favicon.ico" || isAuthorizedPreviewRequest(token: request.queryItems["token"]) else {
+            return httpResponse(
+                status: "401 Unauthorized",
+                contentType: "text/plain; charset=utf-8",
+                body: Data("Unauthorized".utf8)
+            )
+        }
+
         switch route {
         case "/", LiveMeetingCodexSession.previewServerPath:
             return fileResponse(filename: LiveMeetingCodexSession.previewFilename, contentType: "text/html; charset=utf-8")
@@ -139,9 +220,6 @@ final class LiveMeetingPreviewServer {
 
     private func fileResponse(filename: String, contentType: String) -> Data {
         let workspaceURL = currentWorkspaceURL()
-        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL, fileManager: fileManager)
-        try? session.ensureWorkspaceFiles()
-
         let fileURL = workspaceURL.appendingPathComponent(filename, isDirectory: false)
         guard let data = try? Data(contentsOf: fileURL) else {
             return httpResponse(
@@ -161,26 +239,97 @@ final class LiveMeetingPreviewServer {
         return url
     }
 
-    private func parseRequest(_ requestText: String) -> (method: String, path: String) {
-        let firstLine = requestText
-            .split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false)
-            .first
-            .map(String.init) ?? ""
+    private func parseRequest(_ requestText: String) -> (method: String, path: String, queryItems: [String: String], headers: [String: String]) {
+        let lines = requestText
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        let firstLine = lines.first ?? ""
         let parts = firstLine.split(separator: " ")
         let method = parts.first.map(String.init) ?? "GET"
         let rawTarget = parts.dropFirst().first.map(String.init) ?? "/"
 
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            if line.isEmpty { break }
+            guard let separator = line.firstIndex(of: ":") else { continue }
+            let name = line[..<separator]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let value = line[line.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                headers[name] = value
+            }
+        }
+
+        let components = URLComponents(string: rawTarget)
         let targetPath: String
-        if let components = URLComponents(string: rawTarget), components.scheme != nil {
+        if let components, components.scheme != nil {
             targetPath = components.path.isEmpty ? "/" : components.path
         } else {
-            targetPath = rawTarget.split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
+            targetPath = components?.path.isEmpty == false
+                ? components?.path ?? "/"
+                : rawTarget.split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
+        }
+        let queryItems = (components?.queryItems ?? []).reduce(into: [String: String]()) { result, item in
+            result[item.name] = item.value ?? ""
         }
 
         return (
             method: method.uppercased(),
-            path: targetPath.removingPercentEncoding ?? targetPath
+            path: targetPath.removingPercentEncoding ?? targetPath,
+            queryItems: queryItems,
+            headers: headers
         )
+    }
+
+    private func isAuthorizedPreviewRequest(token: String?) -> Bool {
+        guard let expected = expectedPreviewAuthToken(),
+              !expected.isEmpty,
+              let token,
+              !token.isEmpty else {
+            return false
+        }
+        return constantTimeEqual(token, expected)
+    }
+
+    private func expectedPreviewAuthToken() -> String? {
+        let tokenURL = currentWorkspaceURL()
+            .appendingPathComponent(LiveMeetingCodexSession.previewAuthTokenFilename, isDirectory: false)
+        return ((try? String(contentsOf: tokenURL, encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsBytes = Array(lhs.utf8)
+        let rhsBytes = Array(rhs.utf8)
+        var difference = lhsBytes.count ^ rhsBytes.count
+        for index in 0..<max(lhsBytes.count, rhsBytes.count) {
+            let left = index < lhsBytes.count ? lhsBytes[index] : 0
+            let right = index < rhsBytes.count ? rhsBytes[index] : 0
+            difference |= Int(left ^ right)
+        }
+        return difference == 0
+    }
+
+    private func isAllowedHost(_ rawHost: String?) -> Bool {
+        guard let host = rawHost?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+            !host.isEmpty else {
+            return false
+        }
+
+        let allowedHosts = [
+            "127.0.0.1",
+            "localhost",
+            "[::1]",
+        ]
+        let portSuffix = ":\(LiveMeetingCodexSession.previewServerPort)"
+
+        return allowedHosts.contains(host)
+            || allowedHosts.contains { host == "\($0)\(portSuffix)" }
     }
 
     private func httpResponse(status: String, contentType: String, body: Data) -> Data {
@@ -188,8 +337,6 @@ final class LiveMeetingPreviewServer {
         header += "Content-Type: \(contentType)\r\n"
         header += "Content-Length: \(body.count)\r\n"
         header += "Cache-Control: no-store, no-cache, must-revalidate\r\n"
-        header += "Access-Control-Allow-Origin: *\r\n"
-        header += "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
         header += "Connection: close\r\n"
         header += "\r\n"
 
