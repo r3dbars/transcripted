@@ -459,6 +459,81 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentCaptureLoader loads dictations when the meetings folder is missing") {
+        await withTemporaryRecentCaptureLibrary(createMeetingsDirectory: false) { captureRoot in
+            let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+
+            _ = try? DictationTranscriptStore.save(
+                text: "fresh dictation row",
+                sourceApp: nil,
+                delivery: .copied,
+                createdAt: recentLoaderDate("2026-05-24T13:00:00Z"),
+                directory: dictationsRoot
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 1,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "missing meetings folder should fail closed")
+            assertEqual(snapshot.dictations.map(\.text), ["fresh dictation row"], "dictation rows should still load without meeting artifacts")
+            assertEqual(snapshot.dictationCounts.total, 1, "dictation counts should still use the existing dictation folder")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader loads meetings when the dictations folder is missing") {
+        await withTemporaryRecentCaptureLibrary(createDictationsDirectory: false) { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Fresh Meeting Row",
+                date: recentLoaderDate("2026-05-24T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("meeting.md", isDirectory: false)
+            )
+
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 1,
+                meetingLimit: 1,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.map(\.title), ["Fresh Meeting Row"], "meeting rows should still load without dictation artifacts")
+            assertEqual(snapshot.dictations.count, 0, "missing dictations folder should fail closed")
+            assertEqual(snapshot.dictationCounts.total, 0, "counts should stay zero when the dictation folder is absent")
+        }
+    }
+
+    await runSuite("RecentCaptureLoader returns an empty snapshot when capture folders are absent") {
+        await withTemporaryRecentCaptureLibrary(
+            createMeetingsDirectory: false,
+            createDictationsDirectory: false
+        ) { _ in
+            let snapshot = await RecentCaptureLoader.load(
+                dictationLimit: 3,
+                meetingLimit: 3,
+                includeDictationCounts: true
+            )
+
+            assertEqual(snapshot.meetings.count, 0, "missing meeting storage should not surface stale rows")
+            assertEqual(snapshot.dictations.count, 0, "missing dictation storage should not surface stale rows")
+            assertEqual(snapshot.dictationCounts.total, 0, "missing dictation storage should report zero total entries")
+            assertEqual(snapshot.dictationCounts.totalWords, 0, "missing dictation storage should report zero dictated words")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner returns empty when the meetings path is not a directory") {
+        await withTemporaryRecentCaptureLibrary(createMeetingsDirectory: false) { captureRoot in
+            let meetingsPath = captureRoot.appendingPathComponent("meetings", isDirectory: false)
+            FileManager.default.createFile(atPath: meetingsPath.path, contents: Data("not a directory".utf8))
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+
+            assertEqual(meetings.count, 0, "a file at the meetings path should fail closed instead of scanning siblings")
+        }
+    }
+
     await runSuite("RecentMeetingsScanner ignores agent docs hidden files and markdown directories") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -563,6 +638,8 @@ func testRecentCaptureLoader() async {
 }
 
 private func withTemporaryRecentCaptureLibrary(
+    createMeetingsDirectory: Bool = true,
+    createDictationsDirectory: Bool = true,
     _ body: (URL) async -> Void
 ) async {
     let fm = FileManager.default
@@ -572,14 +649,19 @@ private func withTemporaryRecentCaptureLibrary(
     let captureRoot = root.appendingPathComponent("captures", isDirectory: true)
     let previous = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
-    try? fm.createDirectory(
-        at: captureRoot.appendingPathComponent("meetings", isDirectory: true),
-        withIntermediateDirectories: true
-    )
-    try? fm.createDirectory(
-        at: captureRoot.appendingPathComponent("dictations", isDirectory: true),
-        withIntermediateDirectories: true
-    )
+    try? fm.createDirectory(at: captureRoot, withIntermediateDirectories: true)
+    if createMeetingsDirectory {
+        try? fm.createDirectory(
+            at: captureRoot.appendingPathComponent("meetings", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
+    if createDictationsDirectory {
+        try? fm.createDirectory(
+            at: captureRoot.appendingPathComponent("dictations", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
     UserDefaults.standard.set(captureRoot.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
     await body(captureRoot)
