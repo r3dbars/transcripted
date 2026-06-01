@@ -865,6 +865,93 @@ func testRecentCaptureLoader() async {
             assertEqual(meetings.map(\.title), ["Valid Meeting A", "Valid Meeting B"], "bad newer markdown should not starve older valid meeting rows")
         }
     }
+
+    await runSuite("RecentMeetingsScanner orders rows by filesystem recency") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let freshFileDate = recentLoaderDate("2026-05-29T14:00:00Z")
+            let olderFileDate = recentLoaderDate("2026-05-28T14:00:00Z")
+
+            try? writeRecentLoaderMeeting(
+                title: "Fresh Copied Meeting",
+                date: recentLoaderDate("2026-05-01T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("fresh-copy.md", isDirectory: false),
+                fileDate: freshFileDate
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Older Newer-Frontmatter Meeting",
+                date: recentLoaderDate("2026-05-30T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("older-frontmatter.md", isDirectory: false),
+                fileDate: olderFileDate
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
+
+            assertEqual(meetings.map(\.title), ["Fresh Copied Meeting", "Older Newer-Frontmatter Meeting"], "Home recency should follow filesystem dates, not stale or future transcript metadata")
+            assertEqual(meetings.first?.date, freshFileDate, "meeting row dates should use the scanner date that controls ordering")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner fills the limit after skipping dictation markdown in meetings storage") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let dictationMarkdown = meetingsRoot.appendingPathComponent("Dictations_2026-05-31.md", isDirectory: false)
+
+            try? """
+            ---
+            title: "Dictations for May 31, 2026"
+            date: 2026-05-31
+            capture_type: dictation_day
+            ---
+
+            # Dictations for May 31, 2026
+            """.write(to: dictationMarkdown, atomically: true, encoding: .utf8)
+            setRecentLoaderFileDate(recentLoaderDate("2026-05-31T14:00:00Z"), at: dictationMarkdown)
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting C",
+                date: recentLoaderDate("2026-05-30T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-c.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting D",
+                date: recentLoaderDate("2026-05-29T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-d.md", isDirectory: false)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
+
+            assertEqual(meetings.map(\.title), ["Valid Meeting C", "Valid Meeting D"], "non-meeting markdown in the meetings folder should not consume Home meeting slots")
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner fills the limit after skipping unreadable newer candidates") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let unreadableMeeting = meetingsRoot.appendingPathComponent("unreadable.md", isDirectory: false)
+
+            try? writeRecentLoaderMeeting(
+                title: "Unreadable Meeting",
+                date: recentLoaderDate("2026-05-31T14:00:00Z"),
+                to: unreadableMeeting
+            )
+            try? FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableMeeting.path)
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting E",
+                date: recentLoaderDate("2026-05-30T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-e.md", isDirectory: false)
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Valid Meeting F",
+                date: recentLoaderDate("2026-05-29T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("valid-f.md", isDirectory: false)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
+
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadableMeeting.path)
+            assertEqual(meetings.map(\.title), ["Valid Meeting E", "Valid Meeting F"], "unreadable newer markdown should fail closed without starving valid meeting rows")
+        }
+    }
 }
 
 private func withTemporaryRecentCaptureLibrary(
@@ -909,6 +996,7 @@ private func writeRecentLoaderMeeting(
     title: String,
     date: Date,
     to url: URL,
+    fileDate: Date? = nil,
     micLabel: String = "You",
     systemLabel: String = "Remote Participant"
 ) throws {
@@ -935,7 +1023,7 @@ private func writeRecentLoaderMeeting(
     Synthetic response.
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
-    setRecentLoaderFileDate(date, at: url)
+    setRecentLoaderFileDate(fileDate ?? date, at: url)
 }
 
 private func setRecentLoaderFileDate(_ date: Date, at url: URL) {
