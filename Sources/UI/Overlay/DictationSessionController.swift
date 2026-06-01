@@ -1630,7 +1630,10 @@ private final class DictationReadinessRefreshRunner {
     }
 
     func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool {
-        start(operation: "force_input_recovery") {
+        if task != nil, operation != "force_input_recovery" {
+            cancel()
+        }
+        return start(operation: "force_input_recovery") {
             await appState.sttRouter.forceInputReadinessRecovery(reason: reason)
         }
     }
