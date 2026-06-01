@@ -188,8 +188,6 @@ final class LiveMeetingPreviewServer {
         header += "Content-Type: \(contentType)\r\n"
         header += "Content-Length: \(body.count)\r\n"
         header += "Cache-Control: no-store, no-cache, must-revalidate\r\n"
-        header += "Access-Control-Allow-Origin: *\r\n"
-        header += "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
         header += "Connection: close\r\n"
         header += "\r\n"
 

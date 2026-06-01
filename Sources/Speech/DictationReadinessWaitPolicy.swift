@@ -14,22 +14,13 @@ enum DictationReadinessWaitAction: Equatable {
 
 struct DictationReadinessWaitPolicy {
     private static let refreshesBeforeRecoveryStart = 4
+    private static let startFailuresBeforeForcedRecovery = 3
     private static let maxRecoveryStartAttempts = 2
-    private static let maxRecordingStartAttempts = 3
-
-    static func recordingStartAttemptsExhausted(
-        inputFormatReady: Bool,
-        recordingStartAttempts: Int,
-        maxAttempts: Int = maxRecordingStartAttempts
-    ) -> Bool {
-        guard inputFormatReady, maxAttempts > 0 else { return false }
-        return recordingStartAttempts >= maxAttempts
-    }
 
     static func action(
         isRecovering: Bool,
         inputFormatReady: Bool,
-        recordingStartAttempts: Int = 0,
+        readyStartFailures: Int = 0,
         readinessRefreshes: Int = 0,
         forcedRecoveryAttempts: Int = 0,
         forcedRecoveryRefreshThreshold: Int = TranscriptedConstants.dictationReadinessForcedRecoveryRefreshes,
@@ -41,38 +32,33 @@ struct DictationReadinessWaitPolicy {
             return .waitForRecovery
         }
 
-        let shouldForceInputRecovery = readinessRefreshes >= forcedRecoveryRefreshThreshold
-            || recordingStartAttemptsExhausted(
-                inputFormatReady: inputFormatReady,
-                recordingStartAttempts: recordingStartAttempts
-            )
-        if shouldForceInputRecovery,
-           forcedRecoveryAttempts < maxForcedRecoveryAttempts {
-            return .forceInputRecovery
-        }
-
         if inputFormatReady {
-            if recordingStartAttemptsExhausted(
-                inputFormatReady: inputFormatReady,
-                recordingStartAttempts: recordingStartAttempts
-            ) {
-                return .refreshInputReadiness
+            let nextForcedRecoveryThreshold = startFailuresBeforeForcedRecovery * (forcedRecoveryAttempts + 1)
+            if readyStartFailures >= nextForcedRecoveryThreshold,
+               forcedRecoveryAttempts < maxForcedRecoveryAttempts {
+                return .forceInputRecovery
             }
             return .startRecording
         }
 
+        let refreshedEnoughForRecoveryStart = readinessRefreshes >= refreshesBeforeRecoveryStart
         let shouldTryRecoveryStart = readinessRefreshTimedOut
-            || readinessRefreshes >= refreshesBeforeRecoveryStart
+            || refreshedEnoughForRecoveryStart
         if shouldTryRecoveryStart,
            recoveryStartAttempts == 0 {
             return .startRecoveryRecording
         }
 
-        if shouldTryRecoveryStart,
+        if refreshedEnoughForRecoveryStart,
            forcedRecoveryAttempts > 0,
            forcedRecoveryAttempts < maxForcedRecoveryAttempts,
            recoveryStartAttempts < maxRecoveryStartAttempts {
             return .startRecoveryRecording
+        }
+
+        if readinessRefreshes >= forcedRecoveryRefreshThreshold,
+           forcedRecoveryAttempts < maxForcedRecoveryAttempts {
+            return .forceInputRecovery
         }
 
         return .refreshInputReadiness

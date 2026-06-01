@@ -488,7 +488,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
-        guard !UpdateFailureKind.isNoUpdateFound(error) else {
+        if UpdateFailureKind.isNoUpdate(error) {
             markNoUpdateAvailable(from: updater)
             return
         }
@@ -550,6 +550,15 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         cancelObservedUpdateCheckTimeout()
         if let error {
+            if UpdateFailureKind.isNoUpdate(error) {
+                guard !didTrackCurrentUpdateCycleFailure else { return }
+                if case .noUpdateAvailable = updateStatus.state {
+                    return
+                }
+                markNoUpdateAvailable(from: updater)
+                return
+            }
+
             guard !didTrackCurrentUpdateCycleFailure else { return }
             markUpdateCheckFailed(from: updater, error: error)
             return

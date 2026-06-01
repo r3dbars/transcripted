@@ -181,14 +181,18 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    private func trackDictationStartFailed(_ failureKind: String) {
+    private func trackDictationStartFailed(
+        _ failureKind: String,
+        extra: [String: String] = [:]
+    ) {
+        var properties = extra
+        properties["failure_kind"] = failureKind
+        properties["trigger"] = currentDictationTrigger.rawValue
+
         AnalyticsReporter.track(
             "dictation_start_failed",
             properties: dictationAnalyticsProperties(
-                extra: [
-                    "failure_kind": failureKind,
-                    "trigger": currentDictationTrigger.rawValue,
-                ]
+                extra: properties
             )
         )
     }
@@ -334,12 +338,11 @@ class DictationSessionController: ObservableObject {
         let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
         var startAttempts = 0
+        var readyStartFailures = 0
         var recoveryStartAttempts = 0
         var readinessRefreshes = 0
         var forcedReadinessRecoveries = 0
         var readinessRefreshTimedOut = false
-        var recordingStartAttemptsSinceRecovery = 0
-        var startAttemptLimitReported = false
         var nextReadinessRefreshAt = startedAt
         let readinessRefresher = DictationReadinessRefreshRunner()
         defer {
@@ -395,7 +398,7 @@ class DictationSessionController: ObservableObject {
             switch DictationReadinessWaitPolicy.action(
                 isRecovering: isRecovering,
                 inputFormatReady: inputFormatReady,
-                recordingStartAttempts: recordingStartAttemptsSinceRecovery,
+                readyStartFailures: readyStartFailures,
                 readinessRefreshes: readinessRefreshes,
                 forcedRecoveryAttempts: forcedReadinessRecoveries,
                 recoveryStartAttempts: recoveryStartAttempts,
@@ -405,27 +408,6 @@ class DictationSessionController: ObservableObject {
                 break
 
             case .refreshInputReadiness:
-                if DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
-                    inputFormatReady: inputFormatReady,
-                    recordingStartAttempts: recordingStartAttemptsSinceRecovery
-                ), !startAttemptLimitReported {
-                    startAttemptLimitReported = true
-                    DiagnosticsTrail.record(
-                        logger: appState.logger,
-                        level: .warning,
-                        engine: "dictation",
-                        event: "dictation_recording_start_attempts_limited",
-                        message: "Dictation held further microphone starts after repeated failures",
-                        context: dictationContext(
-                            extra: [
-                                "start_attempts": "\(startAttempts)",
-                                "readiness_refreshes": "\(readinessRefreshes)",
-                                "is_recovering": "\(isRecovering)",
-                                "format_ready": "\(inputFormatReady)"
-                            ]
-                        )
-                    )
-                }
                 if now >= nextReadinessRefreshAt {
                     if readinessRefresher.start(appState: appState) {
                         readinessRefreshes += 1
@@ -434,20 +416,12 @@ class DictationSessionController: ObservableObject {
                 }
 
             case .forceInputRecovery:
-                let forceReason = DictationReadinessWaitPolicy.recordingStartAttemptsExhausted(
-                    inputFormatReady: inputFormatReady,
-                    recordingStartAttempts: recordingStartAttemptsSinceRecovery
-                )
-                    ? "dictation_recording_start_attempts_exhausted"
-                    : "dictation_readiness_wait_stalled"
                 if readinessRefresher.startForcedRecovery(
                     appState: appState,
-                    reason: forceReason
+                    reason: "dictation_readiness_wait_stalled"
                 ) {
                     forcedReadinessRecoveries += 1
                     readinessRefreshes = 0
-                    recordingStartAttemptsSinceRecovery = 0
-                    startAttemptLimitReported = false
                     nextReadinessRefreshAt = ProcessInfo.processInfo.systemUptime + TranscriptedConstants.dictationReadinessRefreshInterval
                 }
 
@@ -508,7 +482,6 @@ class DictationSessionController: ObservableObject {
 
             case .startRecording:
                 startAttempts += 1
-                recordingStartAttemptsSinceRecovery += 1
                 let started = await appState.sttRouter.startRecording()
                 guard !Task.isCancelled, isDictating else {
                     if started {
@@ -541,6 +514,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
 
+                readyStartFailures += 1
                 DiagnosticsTrail.record(
                     logger: appState.logger,
                     level: .warning,
@@ -595,7 +569,12 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
-        trackDictationStartFailed(cleanupPlan.outcome)
+        trackDictationStartFailed(
+            cleanupPlan.outcome,
+            extra: [
+                "start_attempt_bucket": AnalyticsReporter.countBucket(startAttempts)
+            ]
+        )
         if cleanupPlan.reportRuntimeStall {
             appState.runtimeDiagnostics.recordStall(
                 kind: "dictation",

@@ -99,6 +99,32 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
+        let probe = readRepoTextFile("scripts/ops/health-probe.sh")
+        let docs = readRepoTextFile("docs/ops-credentials.md")
+        let firstValueEvents = sourceSlice(
+            probe,
+            from: "first_value_events=",
+            to: "  query="
+        )
+
+        for event in [
+            "dictation_completed",
+            "onboarding_first_dictation_saved",
+            "meeting_transcript_saved",
+            "onboarding_agent_cta_clicked"
+        ] {
+            assertTrue(
+                firstValueEvents.contains(event) && docs.contains(event),
+                "PostHog first-value probe and docs should include \(event)"
+            )
+        }
+        assertTrue(
+            probe.contains("first_value_events=") && probe.contains("first_value_events_7d"),
+            "PostHog probe should keep the aggregate first-value event count"
+        )
+    }
+
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
@@ -500,18 +526,44 @@ func testRepoCommandContract() {
         assertFalse(existingSessionBlock.contains("beginObservedUpdateCheck()"), "existing Sparkle sessions should not start a new timeout timer")
     }
 
-    runSuite("Repo command contract - Sparkle no-update results are successful checks") {
+    runSuite("Repo command contract - Sparkle no-update finish cycles stay successful") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
-        let failureKind = readRepoTextFile("Sources/Observability/UpdateFailureKind.swift")
-        let noUpdateBlock = sourceSlice(
+        let didNotFindBlock = sourceSlice(
             controller,
             from: "func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error)",
             to: "func updaterDidNotFindUpdate(_ updater: SPUUpdater)"
         )
+        let finishCycleBlock = sourceSlice(
+            controller,
+            from: "func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?)",
+            to: "func updaterWillRelaunchApplication"
+        )
 
-        assertTrue(noUpdateBlock.contains("UpdateFailureKind.isNoUpdateFound(error)"), "Sparkle no-update errors should be detected before failure telemetry")
-        assertTrue(noUpdateBlock.contains("markNoUpdateAvailable(from: updater)"), "Sparkle no-update errors should track up_to_date/no_change, not error")
-        assertTrue(failureKind.contains("sparkleNoUpdateErrorCode = 1001"), "SUNoUpdateError should stay mapped to Sparkle's public no-update code")
+        let didNotFindNoUpdateCheck = didNotFindBlock.range(of: "UpdateFailureKind.isNoUpdate(error)")
+        let didNotFindNoUpdateHandler = didNotFindBlock.range(of: "markNoUpdateAvailable(from: updater)")
+        let didNotFindFailureHandler = didNotFindBlock.range(of: "markUpdateCheckFailed(from: updater, error: error)")
+        let noUpdateCheck = finishCycleBlock.range(of: "UpdateFailureKind.isNoUpdate(error)")
+        let noUpdateHandler = finishCycleBlock.range(of: "markNoUpdateAvailable(from: updater)")
+        let failureHandler = finishCycleBlock.range(of: "markUpdateCheckFailed(from: updater, error: error)")
+
+        assertNotNil(didNotFindNoUpdateCheck, "Sparkle 1001 did-not-find callbacks should be detected as no-update outcomes")
+        assertNotNil(didNotFindNoUpdateHandler, "Sparkle no-update did-not-find callbacks should use the success path")
+        assertNotNil(didNotFindFailureHandler, "real did-not-find errors should still use the failure path")
+        if let didNotFindNoUpdateCheck, let didNotFindFailureHandler {
+            assertTrue(
+                didNotFindNoUpdateCheck.lowerBound < didNotFindFailureHandler.lowerBound,
+                "no-update did-not-find callbacks should be handled before the generic failure path"
+            )
+        }
+        assertNotNil(noUpdateCheck, "Sparkle 1001 finish-cycle errors should be detected as no-update outcomes")
+        assertNotNil(noUpdateHandler, "Sparkle no-update finish cycles should use the success path")
+        assertNotNil(failureHandler, "real finish-cycle errors should still use the failure path")
+        if let noUpdateCheck, let failureHandler {
+            assertTrue(
+                noUpdateCheck.lowerBound < failureHandler.lowerBound,
+                "no-update finish cycles should be handled before the generic failure path"
+            )
+        }
     }
 
     runSuite("Repo command contract - Sparkle download failures include diagnostic codes") {
@@ -1381,6 +1433,36 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed meeting transcripts clear live sidecar final waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "case .gettingReady:"
+        )
+
+        assertTrue(
+            failureBlock.contains("finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)"),
+            "failed or skipped meeting transcription outcomes should stop waiting for a later unrelated final transcript"
+        )
+        assertTrue(
+            countOccurrences(
+                of: "finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)",
+                in: failureBlock
+            ) >= 3,
+            "skipped, speaker-finalization, and generic failed transcript paths should each clear the live sidecar final wait"
+        )
+    }
+
+    runSuite("Repo command contract - live meeting preview stays same-origin only") {
+        let serverContents = readRepoTextFile("Sources/Meeting/LiveMeetingPreviewServer.swift")
+
+        assertFalse(
+            serverContents.contains("Access-Control-Allow-Origin"),
+            "loopback live transcript preview should not allow arbitrary browser origins to read meeting state"
+        )
+    }
+
     runSuite("Repo command contract - Home attention summary includes failed meetings") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let needsAttentionBlock = sourceSlice(
@@ -1747,6 +1829,54 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("DisclosureGroup(\"Show setup details\", isExpanded: $showAdvancedAgentSetup)"),
             "Agent setup details should not rely on the macOS DisclosureGroup click path"
+        )
+    }
+
+    runSuite("Repo command contract - live sidecar toggle owns preview server lifecycle") {
+        let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
+        let toggleBlock = sourceSlice(
+            contents,
+            from: ".onChange(of: liveMeetingCodexEnabled)",
+            to: "HStack(spacing: 10)"
+        )
+        let setupBlock = sourceSlice(
+            contents,
+            from: "private func setupLiveMeetingCodex()",
+            to: "private func prepareLiveMeetingSidecarWorkspace()"
+        )
+        let copyBlock = sourceSlice(
+            contents,
+            from: "private func copyLiveMeetingCoworkSetup()",
+            to: "private func openLiveMeetingPreview()"
+        )
+        let helperBlock = sourceSlice(
+            contents,
+            from: "private func prepareLiveMeetingSidecarWorkspaceForUse() throws -> URL",
+            to: "private func stopLiveMeetingSidecarPreview()"
+        )
+        let stopBlock = sourceSlice(
+            contents,
+            from: "private func stopLiveMeetingSidecarPreview()",
+            to: "private func copyText("
+        )
+
+        assertTrue(
+            toggleBlock.contains("prepareLiveMeetingSidecarWorkspace()")
+                && toggleBlock.contains("stopLiveMeetingSidecarPreview()"),
+            "the live sidecar toggle should start the preview server on enable and stop it on disable"
+        )
+        assertTrue(
+            setupBlock.contains("prepareLiveMeetingSidecarWorkspaceForUse()")
+                && copyBlock.contains("prepareLiveMeetingSidecarWorkspaceForUse()"),
+            "Codex and Cowork setup actions should prepare the workspace and server before handing prompts to agents"
+        )
+        assertTrue(
+            helperBlock.contains("LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)"),
+            "the shared setup helper should start the loopback preview server when supported"
+        )
+        assertTrue(
+            stopBlock.contains("LiveMeetingPreviewServer.shared.stop()"),
+            "disabling the sidecar should stop the loopback preview server"
         )
     }
 

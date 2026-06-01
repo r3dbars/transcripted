@@ -22,6 +22,30 @@ struct ClaudeDesktopIntegrationStatus: Equatable {
     var isInstalled: Bool {
         state == .installed
     }
+
+    var attentionMessage: String? {
+        if !bundledBinaryExists {
+            return "This app build does not include Transcripted direct tools yet."
+        }
+
+        if !configIsReadable {
+            return "Claude Desktop config is not readable JSON. Install will back it up and write a clean config."
+        }
+
+        guard state == .needsRepair else {
+            return nil
+        }
+
+        if !installedBinaryExists {
+            return "Claude Desktop direct tools are missing. Install will copy a fresh helper."
+        }
+
+        if !installedBinaryMatchesBundled {
+            return "Claude Desktop is using an older Transcripted helper. Update now to replace it."
+        }
+
+        return "Claude Desktop points at another Transcripted helper. Repair will update the config."
+    }
 }
 
 struct ClaudeDesktopIntegrationInstallResult: Equatable {
@@ -53,6 +77,7 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
     case bundledBinaryMissing(URL?)
     case installedBinaryNotExecutable(URL)
     case selfTestFailed(status: Int32, output: String)
+    case selfTestReportedUnhealthy(output: String)
     case selfTestOutputUnreadable(String)
 
     var errorDescription: String? {
@@ -69,6 +94,8 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
             return trimmed.isEmpty
                 ? "Transcripted direct tools did not pass the local check."
                 : trimmed
+        case .selfTestReportedUnhealthy:
+            return "Transcripted direct tools did not pass the local check."
         case .selfTestOutputUnreadable:
             return "Transcripted direct tools ran, but the health check output could not be read."
         }
@@ -187,15 +214,23 @@ enum ClaudeDesktopIntegrationInstaller {
     }
 
     static func configSnippet(commandPath: String = installedMCPBinaryURL.path) -> String {
-        """
-        {
-          "mcpServers": {
-            "\(serverName)": {
-              "command": "\(commandPath)"
-            }
-          }
+        let root: [String: Any] = [
+            "mcpServers": [
+                serverName: [
+                    "command": commandPath
+                ]
+            ]
+        ]
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ),
+              let snippet = String(data: data, encoding: .utf8) else {
+            return #"{"mcpServers":{"\#(serverName)":{"command":""}}}"#
         }
-        """
+
+        return snippet
     }
 
     static func installBundledBinary(
@@ -279,7 +314,13 @@ enum ClaudeDesktopIntegrationInstaller {
         }
 
         do {
-            return try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: stdoutData)
+            let selfTest = try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: stdoutData)
+            guard selfTest.ok else {
+                throw ClaudeDesktopIntegrationError.selfTestReportedUnhealthy(output: output)
+            }
+            return selfTest
+        } catch let error as ClaudeDesktopIntegrationError {
+            throw error
         } catch {
             throw ClaudeDesktopIntegrationError.selfTestOutputUnreadable(output)
         }

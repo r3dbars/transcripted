@@ -502,16 +502,11 @@ enum AgentConnectionGuide {
     }
 
     static var mcpConfigExample: String {
-        let command = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
-        return """
-        {
-          "mcpServers": {
-            "transcripted": {
-              "command": "\(command)"
-            }
-          }
-        }
-        """
+        mcpConfigExampleText(commandPath: ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)
+    }
+
+    static func mcpConfigExampleText(commandPath: String) -> String {
+        ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
     }
 
     static var mcpSetupText: String {

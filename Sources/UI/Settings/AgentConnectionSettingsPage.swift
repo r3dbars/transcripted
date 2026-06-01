@@ -156,6 +156,14 @@ struct AgentConnectionSettingsPage: View {
                 }
             }
 
+            if let attentionMessage = claudeDesktopStatus.attentionMessage {
+                Label(attentionMessage, systemImage: claudeDesktopStatusSymbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(claudeDesktopStatusTint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 2)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 SettingsInlineActionButton(
                     title: openedCodexInboxSetup ? "Opened Codex Setup" : "Set up Codex Inbox",
@@ -187,6 +195,8 @@ struct AgentConnectionSettingsPage: View {
                 .onChange(of: liveMeetingCodexEnabled) { _, enabled in
                     if enabled {
                         prepareLiveMeetingSidecarWorkspace()
+                    } else {
+                        stopLiveMeetingSidecarPreview()
                     }
                 }
 
@@ -248,6 +258,10 @@ struct AgentConnectionSettingsPage: View {
         case .notInstalled:
             return "Install in Claude"
         case .needsRepair:
+            if claudeDesktopStatus.installedBinaryExists,
+               !claudeDesktopStatus.installedBinaryMatchesBundled {
+                return "Update Claude Helper"
+            }
             return "Repair Claude Setup"
         }
     }
@@ -283,6 +297,10 @@ struct AgentConnectionSettingsPage: View {
         case .notInstalled:
             return "Not installed"
         case .needsRepair:
+            if claudeDesktopStatus.installedBinaryExists,
+               !claudeDesktopStatus.installedBinaryMatchesBundled {
+                return "Helper stale"
+            }
             return "Repair"
         }
     }
@@ -370,7 +388,7 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
 
             guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
@@ -390,6 +408,9 @@ struct AgentConnectionSettingsPage: View {
                 liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
             }
         } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
         }
     }
@@ -398,10 +419,11 @@ struct AgentConnectionSettingsPage: View {
         liveMeetingCodexSetupError = nil
 
         do {
-            _ = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            _ = try prepareLiveMeetingSidecarWorkspaceForUse()
         } catch {
             liveMeetingCodexEnabled = false
             LiveMeetingCodexPreferences.setEnabled(false)
+            stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
         }
     }
@@ -412,7 +434,7 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
             copiedLiveMeetingCoworkSetup = true
             NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
@@ -421,6 +443,9 @@ struct AgentConnectionSettingsPage: View {
                 copiedLiveMeetingCoworkSetup = false
             }
         } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
         }
     }
@@ -431,10 +456,10 @@ struct AgentConnectionSettingsPage: View {
         do {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
-            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             let previewURL: URL
             if #available(macOS 14.0, *) {
-                previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+                previewURL = LiveMeetingCodexSession.previewServerURL
             } else {
                 previewURL = workspaceURL.appendingPathComponent(
                     LiveMeetingCodexSession.previewFilename,
@@ -453,7 +478,24 @@ struct AgentConnectionSettingsPage: View {
                 liveMeetingCodexSetupError = "The live preview is ready at \(previewURL.absoluteString)."
             }
         } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
+        }
+    }
+
+    private func prepareLiveMeetingSidecarWorkspaceForUse() throws -> URL {
+        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+        if #available(macOS 14.0, *) {
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+        }
+        return workspaceURL
+    }
+
+    private func stopLiveMeetingSidecarPreview() {
+        if #available(macOS 14.0, *) {
+            LiveMeetingPreviewServer.shared.stop()
         }
     }
 
@@ -689,6 +731,10 @@ private struct ClaudeDesktopStatusRow: View {
             return "Claude Desktop config is not readable JSON. Install will back it up and write a clean config."
         }
 
+        if let attentionMessage = status.attentionMessage {
+            return attentionMessage
+        }
+
         switch status.state {
         case .installed:
             return "Claude Desktop is configured. Restart Claude Desktop if you just installed it."
@@ -697,12 +743,6 @@ private struct ClaudeDesktopStatusRow: View {
                 ? "Click Install for Claude Desktop, then restart Claude Desktop."
                 : "Claude Desktop was not found. You can still install now, then install Claude Desktop."
         case .needsRepair:
-            if !status.installedBinaryExists {
-                return "The server file is missing. Install will copy a fresh one and update Claude Desktop."
-            }
-            if !status.installedBinaryMatchesBundled {
-                return "The installed server is from an older app build. Install will copy the current one."
-            }
             return "Claude Desktop points at another Transcripted server. Install will update it."
         }
     }

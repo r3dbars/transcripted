@@ -238,10 +238,15 @@ enum ReliabilityPacketRecorder {
         ]
 
         let allowedKeys: Set<String> = [
+            "attenuation_kind",
             "auto_send",
             "build_version",
             "calendar_granted",
             "capture_quality",
+            "captured_input_volume_before",
+            "captured_input_volume_changed",
+            "captured_input_volume_dropped",
+            "captured_input_volume_during",
             "crash_reporting_enabled",
             "default_input_volume_after",
             "default_input_volume_before",
@@ -268,6 +273,7 @@ enum ReliabilityPacketRecorder {
             "input_channels",
             "input_device_class",
             "input_rate_hz",
+            "input_volume_scalar_available",
             "meeting_state",
             "mic_file_present",
             "mic_processing",

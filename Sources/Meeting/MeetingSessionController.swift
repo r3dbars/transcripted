@@ -2036,6 +2036,7 @@ final class MeetingSessionController: ObservableObject {
             let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
             let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
             if failureKind.shouldReportAsSkippedTranscript {
+                finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
                 DiagnosticsTrail.record(
                     engine: "meeting",
                     event: "meeting_transcript_skipped",
@@ -2065,6 +2066,7 @@ final class MeetingSessionController: ObservableObject {
             }
 
             if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
+                finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
                 let queueDepthBucket = AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)
                 DiagnosticsTrail.record(
                     level: .error,
@@ -2095,6 +2097,7 @@ final class MeetingSessionController: ObservableObject {
                 return
             }
 
+            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
