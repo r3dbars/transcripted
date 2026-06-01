@@ -265,6 +265,29 @@ extension TranscriptionTaskManager {
         return true
     }
 
+    public func hasPendingSpeakerNamingReviewForLastSavedTranscript() -> Bool {
+        if let transcriptId = lastSavedTranscriptId,
+           hasPendingSpeakerNamingReview(transcriptId: transcriptId) {
+            return true
+        }
+
+        guard let transcriptURL = lastSavedTranscriptURL else { return false }
+        return hasPendingSpeakerNamingReview(transcriptURL: transcriptURL)
+    }
+
+    public func hasPendingSpeakerNamingReview(transcriptId: UUID) -> Bool {
+        speakerNamingRequest?.transcriptId == transcriptId
+            || pendingSpeakerNamingRequests.contains { $0.transcriptId == transcriptId }
+    }
+
+    public func hasPendingSpeakerNamingReview(transcriptURL: URL) -> Bool {
+        let standardizedURL = transcriptURL.standardizedFileURL
+        return speakerNamingRequest?.transcriptURL.standardizedFileURL == standardizedURL
+            || pendingSpeakerNamingRequests.contains { request in
+                request.transcriptURL.standardizedFileURL == standardizedURL
+            }
+    }
+
     private func cleanupSpeakerNamingRequest(_ request: SpeakerNamingRequest) {
         if request.shouldRemoveTemporaryAudioOnCleanup {
             removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")

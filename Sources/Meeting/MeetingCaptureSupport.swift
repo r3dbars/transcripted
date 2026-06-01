@@ -259,7 +259,7 @@ enum MeetingAudioInactivityRecoveryPolicy {
             return .noAudio
         }
 
-        let defaultInputDropped = diagnostics["default_input_volume_dropped"] == "true"
+        let inputVolumeDropped = selectedInputVolumeDropped(diagnostics)
         let quietMicRecovered = diagnostics["quiet_mic_recovered"] == "true"
         let systemSilent = diagnostics["system_status"] == "silent"
         let routeChurned = intValue(diagnostics["route_change_count"]) >= routeChurnThreshold
@@ -267,11 +267,21 @@ enum MeetingAudioInactivityRecoveryPolicy {
             || diagnostics["output_device_class"] == "bluetooth"
             || diagnostics["system_output_device_class"] == "bluetooth"
 
-        if defaultInputDropped || (systemSilent && (routeChurned || bluetoothRoute || quietMicRecovered)) {
+        if inputVolumeDropped || (systemSilent && (routeChurned || bluetoothRoute || quietMicRecovered)) {
             return .degradedRoute
         }
 
         return .noAudio
+    }
+
+    private static func selectedInputVolumeDropped(_ diagnostics: [String: String]) -> Bool {
+        let capturedInputContextPresent = diagnostics["captured_input_volume_before"] != nil
+            || diagnostics["captured_input_volume_after"] != nil
+            || diagnostics["captured_input_volume_during"] != nil
+        let selectedDropState = capturedInputContextPresent
+            ? diagnostics["captured_input_volume_dropped"]
+            : diagnostics["default_input_volume_dropped"]
+        return selectedDropState == "true"
     }
 
     private static func intValue(_ rawValue: String?) -> Int {

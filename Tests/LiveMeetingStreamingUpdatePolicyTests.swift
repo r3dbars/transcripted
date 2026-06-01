@@ -5,7 +5,8 @@ func testLiveMeetingStreamingUpdatePolicy() {
         let now = Date(timeIntervalSince1970: 1_765_994_400)
         let state = LiveMeetingStreamingUpdateState(
             lastText: "hello world",
-            lastAppendedAt: now.addingTimeInterval(-5)
+            lastAppendedAt: now.addingTimeInterval(-5),
+            lastAppendedWasFinal: true
         )
 
         assertEqual(
@@ -30,6 +31,34 @@ func testLiveMeetingStreamingUpdatePolicy() {
                 state: state
             ),
             "duplicate updates should be ignored"
+        )
+    }
+
+    runSuite("LiveMeetingStreamingUpdatePolicy - final confirmation can follow a matching partial") {
+        let now = Date(timeIntervalSince1970: 1_765_994_400)
+        let partialState = LiveMeetingStreamingUpdateState(
+            lastText: "we should ship",
+            lastAppendedAt: now.addingTimeInterval(-0.5),
+            lastAppendedWasFinal: false
+        )
+
+        assertFalse(
+            LiveMeetingStreamingUpdatePolicy.shouldAppend(
+                text: "we should ship",
+                isFinal: false,
+                now: now,
+                state: partialState
+            ),
+            "duplicate partial text should stay suppressed"
+        )
+        assertTrue(
+            LiveMeetingStreamingUpdatePolicy.shouldAppend(
+                text: "we should ship",
+                isFinal: true,
+                now: now,
+                state: partialState
+            ),
+            "a final update should append when it confirms the previous partial text"
         )
     }
 

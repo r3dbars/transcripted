@@ -5,6 +5,7 @@ struct AgentConnectionSettingsPage: View {
     @StateObject private var viewModel = AgentConnectionViewModel(
         context: AgentConnectionContext(meetingTitle: nil, meetingDate: nil, transcriptURL: nil)
     )
+    private let meetingSession: MeetingSessionController?
     @State private var claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
     @State private var claudeDesktopInstallResult: ClaudeDesktopIntegrationInstallResult?
     @State private var claudeDesktopInstallError: String?
@@ -21,6 +22,10 @@ struct AgentConnectionSettingsPage: View {
     @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+
+    init(meetingSession: MeetingSessionController? = nil) {
+        self.meetingSession = meetingSession
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -196,6 +201,7 @@ struct AgentConnectionSettingsPage: View {
                     if enabled {
                         prepareLiveMeetingSidecarWorkspace()
                     } else {
+                        meetingSession?.stopLiveCodexSessionFromSettings()
                         stopLiveMeetingSidecarPreview()
                     }
                 }
@@ -410,6 +416,7 @@ struct AgentConnectionSettingsPage: View {
         } catch {
             liveMeetingCodexEnabled = false
             LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
         }
@@ -423,6 +430,7 @@ struct AgentConnectionSettingsPage: View {
         } catch {
             liveMeetingCodexEnabled = false
             LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
         }
@@ -445,6 +453,7 @@ struct AgentConnectionSettingsPage: View {
         } catch {
             liveMeetingCodexEnabled = false
             LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
         }
@@ -459,7 +468,7 @@ struct AgentConnectionSettingsPage: View {
             let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             let previewURL: URL
             if #available(macOS 14.0, *) {
-                previewURL = LiveMeetingCodexSession.previewServerURL
+                previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
             } else {
                 previewURL = workspaceURL.appendingPathComponent(
                     LiveMeetingCodexSession.previewFilename,
@@ -480,6 +489,7 @@ struct AgentConnectionSettingsPage: View {
         } catch {
             liveMeetingCodexEnabled = false
             LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
         }

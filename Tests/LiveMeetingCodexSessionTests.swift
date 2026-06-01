@@ -26,6 +26,10 @@ func testLiveMeetingCodexSession() {
             "workspace should include HTML preview"
         )
         assertTrue(
+            FileManager.default.fileExists(atPath: session.previewAuthTokenURL.path),
+            "workspace should include a private preview auth token"
+        )
+        assertTrue(
             FileManager.default.fileExists(atPath: session.handoffURL.path),
             "workspace should include automatic Codex handoff marker"
         )
@@ -46,6 +50,7 @@ func testLiveMeetingCodexSession() {
         assertFalse(previewText.contains("http-equiv=\"refresh\""), "preview should not full-page refresh")
         assertTrue(previewText.contains("setInterval(refreshPreview, 1000)"), "preview should poll without strobing")
         assertTrue(previewText.contains("/live_transcript.md"), "preview should hot-load the live transcript route")
+        assertTrue(previewText.contains("withPreviewAuthToken(\"/state.json\")"), "preview should token-gate server polling")
         assertTrue(previewText.contains("renderTranscript(lastTranscript)"), "preview should render a formatted transcript stream")
         assertTrue(previewText.contains("Write notes"), "preview should lead with a simple scratchpad")
         assertTrue(previewText.contains(">Transcript</span>"), "preview should keep the raw transcript expandable")
@@ -63,10 +68,12 @@ func testLiveMeetingCodexSession() {
             watcherStateText.contains("\"lastHandledFinalTranscriptPath\": null"),
             "watcher state should start without a handled final transcript"
         )
-        assertEqual(
-            LiveMeetingCodexSession.previewServerURL.absoluteString,
-            "http://127.0.0.1:47834/live-preview",
-            "Codex browser preview should use the stable local URL"
+        let previewToken = ((try? String(contentsOf: session.previewAuthTokenURL, encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        assertTrue(previewToken.count >= 32, "preview auth token should be unguessable enough for localhost routing")
+        assertTrue(
+            session.previewServerBrowserURL().absoluteString.hasPrefix("http://127.0.0.1:47834/live-preview?token="),
+            "Codex browser preview should use the stable local URL with a per-workspace token"
         )
     }
 

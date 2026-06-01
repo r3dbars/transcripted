@@ -66,7 +66,7 @@ The opt-in live-meeting sidecar for Codex or Claude Cowork writes provisional fi
 - automatic agent handoff: `~/Library/Application Support/Transcripted/AgentLiveMeeting/agent-handoff.md`
 - agent watcher state: `~/Library/Application Support/Transcripted/AgentLiveMeeting/agent-watcher-state.json`
 - live preview file: `~/Library/Application Support/Transcripted/AgentLiveMeeting/preview.html`
-- live browser preview while Transcripted is running: `http://127.0.0.1:47834/live-preview`
+- live browser preview while Transcripted is running: tokenized localhost URL in `agent-live-meeting.md`
 
 These files do not replace the normal saved meeting Markdown. Once a meeting is
 saved, `agent-handoff.md` switches to `Status: ready` and `state.json` can

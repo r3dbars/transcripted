@@ -318,6 +318,7 @@ enum AgentConnectionGuide {
 
     static func liveMeetingCodexSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
         let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
+        let browserPreviewURL = session.previewServerBrowserURL().absoluteString
         return """
         # Transcripted Live Meeting Sidecar Setup
 
@@ -331,7 +332,7 @@ enum AgentConnectionGuide {
         - Handoff file: \(session.handoffURL.path)
         - Watcher state: \(session.watcherStateURL.path)
         - Preview: \(session.previewURL.path)
-        - Codex browser preview: \(LiveMeetingCodexSession.previewServerURL.absoluteString)
+        - Codex browser preview: \(browserPreviewURL)
 
         Rules:
         - Read `state.json` and `live_transcript.md` when I ask about the current meeting.
@@ -342,7 +343,7 @@ enum AgentConnectionGuide {
         - After handling a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
         - Do not change Transcripted's normal meeting output.
         - Keep live answers short and say when the stream is too sparse to answer.
-        - For a live transcript panel in Codex, open \(LiveMeetingCodexSession.previewServerURL.absoluteString) while Transcripted is running.
+        - For a live transcript panel in Codex, open \(browserPreviewURL) while Transcripted is running.
 
         Skill:
         - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)

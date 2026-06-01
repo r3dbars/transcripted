@@ -99,7 +99,7 @@ The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 2. Go to `Agent`.
 3. Turn on `Live meeting sidecar`.
 4. Click `Open in Codex`, or click `Copy for Cowork` and paste that setup prompt into Claude Cowork.
-5. Click `Open Preview` if you want a live transcript page, or open `http://127.0.0.1:47834/live-preview` in Codex's in-app browser.
+5. Click `Open Preview` if you want a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
 
 Transcripted creates:
 
@@ -109,9 +109,8 @@ Transcripted creates:
 
 The folder contains `state.json`, `live_transcript.md`, `agent-handoff.md`,
 `agent-watcher-state.json`, `agent-live-meeting.md`, and `preview.html`.
-While Transcripted is running, the
-same preview updates in place at
-`http://127.0.0.1:47834/live-preview`.
+While Transcripted is running, the same preview updates in place at the
+tokenized browser preview URL written into `agent-live-meeting.md`.
 
 Rules:
 

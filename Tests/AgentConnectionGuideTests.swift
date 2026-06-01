@@ -407,8 +407,8 @@ func testAgentConnectionGuide() {
         assertTrue(prompt.contains("agent-watcher-state.json"), "prompt should point agents at watcher state")
         assertTrue(prompt.contains("preview.html"), "prompt should point Codex at the live preview")
         assertTrue(
-            prompt.contains("http://127.0.0.1:47834/live-preview"),
-            "prompt should include the Codex in-app browser preview URL"
+            prompt.contains("http://127.0.0.1:47834/live-preview?token="),
+            "prompt should include the tokenized Codex in-app browser preview URL"
         )
         assertTrue(prompt.contains(AgentConnectionGuide.liveMeetingCodexSkill.id), "prompt should name the live skill")
         assertTrue(prompt.contains("Do not change Transcripted's normal meeting output"), "prompt should preserve normal output")

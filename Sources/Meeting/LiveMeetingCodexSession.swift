@@ -52,6 +52,7 @@ enum LiveMeetingCodexSessionStatus: String, Codable, Equatable {
     case transcriptSaved = "transcript_saved"
     case cancelled
     case failed
+    case disabled
 }
 
 struct LiveMeetingCodexState: Codable, Equatable {
@@ -74,11 +75,18 @@ final class LiveMeetingCodexSession {
     static let handoffFilename = "agent-handoff.md"
     static let watcherStateFilename = "agent-watcher-state.json"
     static let previewFilename = "preview.html"
+    static let previewAuthTokenFilename = ".preview-token"
     static let previewServerPort: UInt16 = 47834
     static let previewServerPath = "/live-preview"
 
     static var previewServerURL: URL {
         URL(string: "http://127.0.0.1:\(previewServerPort)\(previewServerPath)")!
+    }
+
+    static func authenticatedPreviewServerURL(token: String) -> URL {
+        var components = URLComponents(url: previewServerURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "token", value: token)]
+        return components?.url ?? previewServerURL
     }
 
     static var defaultWorkspaceRoot: URL {
@@ -138,14 +146,33 @@ final class LiveMeetingCodexSession {
         workspaceRoot.appendingPathComponent(Self.previewFilename, isDirectory: false)
     }
 
+    var previewAuthTokenURL: URL {
+        workspaceRoot.appendingPathComponent(Self.previewAuthTokenFilename, isDirectory: false)
+    }
+
+    func previewServerBrowserURL() -> URL {
+        guard let token = try? ensurePreviewAuthToken() else {
+            return Self.previewServerURL
+        }
+        return Self.authenticatedPreviewServerURL(token: token)
+    }
+
     func ensureWorkspaceFiles(createdAt: Date = Date()) throws {
         try withSessionLock {
             try ensureWorkspaceFilesLocked(createdAt: createdAt)
         }
     }
 
+    @discardableResult
+    func ensurePreviewAuthToken() throws -> String {
+        try withSessionLock {
+            try ensurePreviewAuthTokenLocked()
+        }
+    }
+
     private func ensureWorkspaceFilesLocked(createdAt: Date = Date()) throws {
         try fileManager.createPrivateDirectory(at: workspaceRoot)
+        _ = try ensurePreviewAuthTokenLocked()
         try writeTextIfChanged(readmeText(), to: workspaceRoot.appendingPathComponent("README.md", isDirectory: false))
         try writeTextIfChanged(agentsText(), to: workspaceRoot.appendingPathComponent("AGENTS.md", isDirectory: false))
         try writeTextIfChanged(setupText(), to: setupURL)
@@ -167,6 +194,20 @@ final class LiveMeetingCodexSession {
 
         try syncHandoffWithState(fallbackDate: createdAt)
         try writePreview()
+    }
+
+    private func ensurePreviewAuthTokenLocked() throws -> String {
+        try fileManager.createPrivateDirectory(at: workspaceRoot)
+        if let existingText = try? String(contentsOf: previewAuthTokenURL, encoding: .utf8) {
+            let existing = existingText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if existing.count >= 32 {
+                return existing
+            }
+        }
+
+        let token = Self.generatePreviewAuthToken()
+        try writeTextIfChanged("\(token)\n", to: previewAuthTokenURL)
+        return token
     }
 
     func start(
@@ -237,6 +278,12 @@ final class LiveMeetingCodexSession {
                 try rewriteLiveTranscriptStatus(status.rawValue)
                 try appendText("\nRecording ended with an error. Check Transcripted for retry details.\n", to: liveTranscriptURL)
                 try writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
+            case .disabled:
+                state.streamingBackendStatus = "disabled"
+                state.note = "Live sidecar was disabled. Transcripted will keep saving the normal final meeting Markdown."
+                try rewriteLiveTranscriptStatus(status.rawValue)
+                try appendText("\nLive sidecar disabled. Transcripted will still save the normal final transcript.\n", to: liveTranscriptURL)
+                try writeTextIfChanged(disabledHandoffText(title: state.title, endedAt: date), to: handoffURL)
             case .idle, .recording, .transcriptSaved:
                 break
             }
@@ -343,6 +390,8 @@ final class LiveMeetingCodexSession {
             try writeTextIfChanged(cancelledHandoffText(title: state.title, endedAt: date), to: handoffURL)
         case .failed:
             try writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
+        case .disabled:
+            try writeTextIfChanged(disabledHandoffText(title: state.title, endedAt: date), to: handoffURL)
         }
     }
 
@@ -506,6 +555,19 @@ final class LiveMeetingCodexSession {
         """
     }
 
+    private func disabledHandoffText(title: String?, endedAt: Date) -> String {
+        let titleLine = handoffTitleLine(title)
+        return """
+        # Transcripted Agent Handoff
+
+        Status: disabled
+        \(titleLine)Ended: \(Self.isoString(endedAt))
+
+        The user turned off the live sidecar. Transcripted will still save the normal final meeting Markdown.
+
+        """
+    }
+
     private func finalHandoffText(url: URL, title: String?, savedAt: Date) -> String {
         let titleLine = handoffTitleLine(title)
         return """
@@ -534,7 +596,8 @@ final class LiveMeetingCodexSession {
     }
 
     private func readmeText() -> String {
-        """
+        let browserPreviewURL = previewServerBrowserURL().absoluteString
+        return """
         # Transcripted Live Meeting Sidecar
 
         This folder is a live sidecar workspace for an active Transcripted meeting.
@@ -546,7 +609,7 @@ final class LiveMeetingCodexSession {
         - `agent-watcher-state.json` is agent-owned memory for the last final transcript already handled.
         - `agent-live-meeting.md` is the setup prompt for Codex or Claude Cowork.
         - `preview.html` is a live transcript preview snapshot. The local browser URL updates without full-page refreshes.
-        - `\(Self.previewServerURL.absoluteString)` is the live browser preview while Transcripted is running.
+        - `\(browserPreviewURL)` is the live browser preview while Transcripted is running.
 
         Important:
         - The live transcript is provisional.
@@ -588,7 +651,8 @@ final class LiveMeetingCodexSession {
     }
 
     private func setupText() -> String {
-        """
+        let browserPreviewURL = previewServerBrowserURL().absoluteString
+        return """
         # Transcripted Live Meeting Agent Setup
 
         Use this agent chat as my live Transcripted meeting room.
@@ -600,7 +664,7 @@ final class LiveMeetingCodexSession {
         - Automatic handoff: \(handoffURL.path)
         - Watcher state: \(watcherStateURL.path)
         - Preview: \(previewURL.path)
-        - Browser preview: \(Self.previewServerURL.absoluteString)
+        - Browser preview: \(browserPreviewURL)
 
         How to work:
         1. Read `state.json`.
@@ -610,7 +674,7 @@ final class LiveMeetingCodexSession {
         5. Once `agent-handoff.md` says `Status: ready` or `finalTranscriptPath` is present, read that final Transcripted Markdown and prefer it for speaker names, diarization, and final notes.
         6. Before posting a post-meeting brief or waking me about the ready transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` already matches the ready final path, stay quiet unless I ask.
         7. After you handle a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
-        8. For Codex, open \(Self.previewServerURL.absoluteString) for the live view while Transcripted is running. For Claude Cowork, use the same workspace files or `preview.html` if folder access is granted.
+        8. For Codex, open \(browserPreviewURL) for the live view while Transcripted is running. For Claude Cowork, use the same workspace files or `preview.html` if folder access is granted.
         9. Keep this local. Do not ask me to copy the transcript into another tool.
 
         Do not alter the normal Transcripted meeting output.
@@ -643,12 +707,16 @@ final class LiveMeetingCodexSession {
             statusLine = "Recording cancelled."
         case .failed:
             statusLine = "Needs attention"
+        case .disabled:
+            statusLine = "Live sidecar disabled"
         case .idle:
             statusLine = "Not recording"
         }
         let escapedDisplayStatus = Self.htmlEscaped(statusLine)
         let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
         let escapedTranscript = Self.htmlEscaped(transcript)
+        let previewAuthToken = (try? ensurePreviewAuthToken()) ?? ""
+        let escapedPreviewAuthToken = Self.javaScriptEscaped(previewAuthToken)
         return """
         <!doctype html>
         <html lang="en">
@@ -978,8 +1046,20 @@ final class LiveMeetingCodexSession {
             </footer>
           </main>
           <script>
-            const stateURL = window.location.protocol === "file:" ? "state.json" : "/state.json";
-            const transcriptURL = window.location.protocol === "file:" ? "live_transcript.md" : "/live_transcript.md";
+            const previewAuthToken = "\(escapedPreviewAuthToken)";
+            function withPreviewAuthToken(url) {
+              if (window.location.protocol === "file:" || !previewAuthToken) {
+                return url;
+              }
+              const separator = url.includes("?") ? "&" : "?";
+              return `${url}${separator}token=${encodeURIComponent(previewAuthToken)}`;
+            }
+            function cacheBusted(url) {
+              const separator = url.includes("?") ? "&" : "?";
+              return `${url}${separator}t=${Date.now()}`;
+            }
+            const stateURL = window.location.protocol === "file:" ? "state.json" : withPreviewAuthToken("/state.json");
+            const transcriptURL = window.location.protocol === "file:" ? "live_transcript.md" : withPreviewAuthToken("/live_transcript.md");
             const statusElement = document.getElementById("status");
             const titleElement = document.getElementById("meeting-title");
             const sourceSummaryElement = document.getElementById("source-summary");
@@ -1135,8 +1215,8 @@ final class LiveMeetingCodexSession {
               const shouldFollow = transcriptOpen && isNearBottom();
               try {
                 const [stateResponse, transcriptResponse] = await Promise.all([
-                  fetch(`${stateURL}?t=${Date.now()}`, { cache: "no-store" }),
-                  fetch(`${transcriptURL}?t=${Date.now()}`, { cache: "no-store" })
+                  fetch(cacheBusted(stateURL), { cache: "no-store" }),
+                  fetch(cacheBusted(transcriptURL), { cache: "no-store" })
                 ]);
 
                 if (stateResponse.ok) {
@@ -1188,6 +1268,20 @@ final class LiveMeetingCodexSession {
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&#39;")
+    }
+
+    private static func javaScriptEscaped(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+    }
+
+    private static func generatePreviewAuthToken() -> String {
+        (0..<3)
+            .map { _ in UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
+            .joined()
     }
 
     private static func isoString(_ date: Date) -> String {
