@@ -147,6 +147,11 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
         fi
 
+        if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "docs/autoeval-dictation-stop-speed-*.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/dictation-stop-autoeval.sh"
+        fi
+
         if matches_any "$path" "scripts/ops/agent-todo-runner.rb" "scripts/ops/agent-todo-launchagent.sh" "scripts/ops/qa-gate-check.sh" "scripts/ops/qa-gate-closeout.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "ruby -c scripts/ops/agent-todo-runner.rb"

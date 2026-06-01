@@ -96,6 +96,13 @@ rules:
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
 
   - paths:
+      - "scripts/ops/dictation-stop-autoeval.sh"
+      - "docs/autoeval-dictation-stop-speed-*.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/dictation-stop-autoeval.sh"
+
+  - paths:
       - "scripts/ops/agent-todo-runner.rb"
       - "scripts/ops/agent-todo-launchagent.sh"
       - "scripts/ops/qa-gate-check.sh"
