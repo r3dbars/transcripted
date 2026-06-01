@@ -5,6 +5,7 @@ struct AgentConnectionSettingsPage: View {
     @StateObject private var viewModel = AgentConnectionViewModel(
         context: AgentConnectionContext(meetingTitle: nil, meetingDate: nil, transcriptURL: nil)
     )
+    private let meetingSession: MeetingSessionController?
     @State private var claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
     @State private var claudeDesktopInstallResult: ClaudeDesktopIntegrationInstallResult?
     @State private var claudeDesktopInstallError: String?
@@ -15,7 +16,16 @@ struct AgentConnectionSettingsPage: View {
     @State private var copiedFolderPaths = false
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
+    @State private var openedLiveMeetingCodexSetup = false
+    @State private var openedLiveMeetingPreview = false
+    @State private var copiedLiveMeetingCoworkSetup = false
+    @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
+    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+
+    init(meetingSession: MeetingSessionController? = nil) {
+        self.meetingSession = meetingSession
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -86,7 +96,7 @@ struct AgentConnectionSettingsPage: View {
                             Label("Web chats are fallback only", systemImage: "globe")
                                 .font(.subheadline.weight(.semibold))
 
-                            Text("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use them for a pasted meeting or granted folders, not full Transcripted memory.")
+                            Text("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Cowork needs the sidecar folder granted for live meetings.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -175,6 +185,60 @@ struct AgentConnectionSettingsPage: View {
 
                 if let codexInboxSetupError {
                     Label(codexInboxSetupError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $liveMeetingCodexEnabled) {
+                    Label("Live meeting sidecar", systemImage: "waveform")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .toggleStyle(.switch)
+                .onChange(of: liveMeetingCodexEnabled) { _, enabled in
+                    if enabled {
+                        prepareLiveMeetingSidecarWorkspace()
+                    } else {
+                        meetingSession?.stopLiveCodexSessionFromSettings()
+                        stopLiveMeetingSidecarPreview()
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    SettingsInlineActionButton(
+                        title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
+                        symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
+                        tone: .accent
+                    ) {
+                        setupLiveMeetingCodex()
+                    }
+
+                    SettingsInlineActionButton(
+                        title: copiedLiveMeetingCoworkSetup ? "Copied Cowork" : "Copy for Cowork",
+                        symbolName: copiedLiveMeetingCoworkSetup ? "checkmark" : "doc.on.doc",
+                        tone: .accent
+                    ) {
+                        copyLiveMeetingCoworkSetup()
+                    }
+
+                    SettingsInlineActionButton(
+                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Preview",
+                        symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
+                        tone: .accent
+                    ) {
+                        openLiveMeetingPreview()
+                    }
+                }
+
+                Text("Use the same local sidecar from Codex or Claude Cowork. Codex can open the workspace directly; Cowork gets a copied setup prompt and folder path.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let liveMeetingCodexSetupError {
+                    Label(liveMeetingCodexSetupError, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -321,6 +385,127 @@ struct AgentConnectionSettingsPage: View {
             }
         } catch {
             codexInboxSetupError = "Could not set up Codex Inbox: \(error.localizedDescription)"
+        }
+    }
+
+    private func setupLiveMeetingCodex() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
+
+            guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
+                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+                liveMeetingCodexSetupError = "The setup prompt was copied. Open Codex and paste it."
+                return
+            }
+
+            if NSWorkspace.shared.open(setupURL) {
+                openedLiveMeetingCodexSetup = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    openedLiveMeetingCodexSetup = false
+                }
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+                liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
+            }
+        } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            stopLiveMeetingSidecarPreview()
+            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+        }
+    }
+
+    private func prepareLiveMeetingSidecarWorkspace() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            _ = try prepareLiveMeetingSidecarWorkspaceForUse()
+        } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            stopLiveMeetingSidecarPreview()
+            liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
+        }
+    }
+
+    private func copyLiveMeetingCoworkSetup() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
+            copiedLiveMeetingCoworkSetup = true
+            NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                copiedLiveMeetingCoworkSetup = false
+            }
+        } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            stopLiveMeetingSidecarPreview()
+            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+        }
+    }
+
+    private func openLiveMeetingPreview() {
+        liveMeetingCodexSetupError = nil
+
+        do {
+            liveMeetingCodexEnabled = true
+            LiveMeetingCodexPreferences.setEnabled(true)
+            let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
+            let previewURL: URL
+            if #available(macOS 14.0, *) {
+                previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            } else {
+                previewURL = workspaceURL.appendingPathComponent(
+                    LiveMeetingCodexSession.previewFilename,
+                    isDirectory: false
+                )
+            }
+
+            if NSWorkspace.shared.open(previewURL) {
+                openedLiveMeetingPreview = true
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    openedLiveMeetingPreview = false
+                }
+            } else {
+                NSWorkspace.shared.activateFileViewerSelecting([previewURL])
+                liveMeetingCodexSetupError = "The live preview is ready at \(previewURL.absoluteString)."
+            }
+        } catch {
+            liveMeetingCodexEnabled = false
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            stopLiveMeetingSidecarPreview()
+            liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
+        }
+    }
+
+    private func prepareLiveMeetingSidecarWorkspaceForUse() throws -> URL {
+        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+        if #available(macOS 14.0, *) {
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+        }
+        return workspaceURL
+    }
+
+    private func stopLiveMeetingSidecarPreview() {
+        if #available(macOS 14.0, *) {
+            LiveMeetingPreviewServer.shared.stop()
         }
     }
 
@@ -565,7 +750,7 @@ private struct ClaudeDesktopStatusRow: View {
             return "Claude Desktop is configured. Restart Claude Desktop if you just installed it."
         case .notInstalled:
             return status.claudeDesktopLikelyInstalled
-                ? "Click Install for Claude Desktop, then restart Claude Desktop."
+                ? "Click Install in Claude, then restart Claude Desktop."
                 : "Claude Desktop was not found. You can still install now, then install Claude Desktop."
         case .needsRepair:
             return "Claude Desktop points at another Transcripted server. Install will update it."

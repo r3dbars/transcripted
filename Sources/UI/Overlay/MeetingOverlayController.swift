@@ -1301,7 +1301,7 @@ final class MeetingOverlayController {
 
         promptCandidate = nil
         promptKind = .audioInactivity
-        promptSecondsRemaining = max(1, warning.countdownSeconds)
+        promptSecondsRemaining = warning.automaticStopAllowed ? max(1, warning.countdownSeconds) : 0
         currentPrompt = audioInactivityPromptDisplay(
             warning: warning,
             countdownSeconds: promptSecondsRemaining
@@ -1310,7 +1310,9 @@ final class MeetingOverlayController {
         state = .prompt
         showPanel()
         pushToView()
-        schedulePromptCountdown()
+        if warning.automaticStopAllowed {
+            schedulePromptCountdown()
+        }
     }
 
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
@@ -1615,6 +1617,9 @@ final class MeetingOverlayController {
     private func handlePromptCountdownExpired() {
         switch promptKind {
         case .audioInactivity:
+            guard meetingSession?.audioInactivityWarning?.automaticStopAllowed != false else {
+                return
+            }
             Task { @MainActor [weak self] in
                 guard let session = self?.meetingSession else { return }
                 await session.endRecordingFromAudioInactivityPrompt(automatic: true)
@@ -1642,11 +1647,25 @@ final class MeetingOverlayController {
         warning: MeetingAudioInactivityWarning,
         countdownSeconds: Int
     ) -> PromptDisplay {
-        PromptDisplay(
+        if warning.kind == .degradedRoute {
+            return PromptDisplay(
+                title: "Audio route changed",
+                detail: "Mic or system audio looks muted. Transcripted is still recording.",
+                countdownText: "",
+                secondaryTitle: "Keep Recording",
+                secondaryAccessibilityLabel: "Keep recording",
+                remindTitle: nil,
+                remindAccessibilityLabel: nil,
+                primaryTitle: "End & Transcribe",
+                primaryAccessibilityLabel: "End and transcribe meeting"
+            )
+        }
+
+        return PromptDisplay(
             title: "No audio detected",
             detail: "No mic or system audio for \(formatInactiveDuration(warning.inactiveDuration)).",
             countdownText: "Ends in \(max(0, countdownSeconds))s",
-            secondaryTitle: "Cancel",
+            secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Keep recording",
             remindTitle: nil,
             remindAccessibilityLabel: nil,

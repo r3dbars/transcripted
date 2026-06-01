@@ -1,0 +1,9 @@
+case=auto_enter_200 since=2026-06-01T01:41:53Z
+auto_send=sent_enter
+auto_enter_ms=212
+stop_to_paste_ms=84
+stop_to_done_ms=300
+paste_ms=3
+save_ms=3
+decode_ms=73
+words=5

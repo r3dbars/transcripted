@@ -115,6 +115,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
+- `dictation_stop_latency_measured`
 - `dictation_cancelled`
 - `dictation_no_speech`
 - `dictation_audio_route_changed`

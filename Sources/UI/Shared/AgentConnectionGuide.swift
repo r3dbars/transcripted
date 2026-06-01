@@ -82,6 +82,10 @@ enum AgentConnectionGuide {
             .standardizedFileURL
     }
 
+    static var liveMeetingCodexFolder: URL {
+        LiveMeetingCodexSession.defaultWorkspaceRoot
+    }
+
     static let starterSkills = [
         AgentConnectionStarterSkill(
             id: "transcripted-summarize",
@@ -98,6 +102,14 @@ enum AgentConnectionGuide {
             detail: "Find what was said, when it happened, and where it came from."
         ),
     ]
+
+    static let liveMeetingCodexSkill = AgentConnectionStarterSkill(
+        id: "transcripted-live-meeting",
+        symbolName: "waveform",
+        title: "Live Meeting",
+        version: "0.2.1",
+        detail: "Answer from a local live meeting sidecar in Codex or Cowork, then hand off to the final saved Markdown."
+    )
 
     static var agentSkillsFolder: URL {
         let fileManager = FileManager.default
@@ -279,11 +291,106 @@ enum AgentConnectionGuide {
         """
     }
 
+    static func ensureLiveMeetingCodexWorkspace(
+        appSupportRoot: URL? = nil,
+        fileManager: FileManager = .default,
+        createdAt: Date = Date()
+    ) throws -> URL {
+        let workspaceURL = (appSupportRoot ?? fileManager.transcriptedAppSupportDir)
+            .appendingPathComponent(LiveMeetingCodexSession.workspaceFolderName, isDirectory: true)
+            .standardizedFileURL
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL, fileManager: fileManager)
+        try session.ensureWorkspaceFiles(createdAt: createdAt)
+        return workspaceURL
+    }
+
+    static func liveMeetingCodexSetupURL(workspaceURL: URL = liveMeetingCodexFolder) -> URL? {
+        var components = URLComponents()
+        components.scheme = "codex"
+        components.host = "threads"
+        components.path = "/new"
+        components.queryItems = [
+            URLQueryItem(name: "path", value: workspaceURL.standardizedFileURL.path),
+            URLQueryItem(name: "prompt", value: liveMeetingCodexOpenPrompt(workspaceURL: workspaceURL)),
+        ]
+        return components.url
+    }
+
+    static func liveMeetingCodexSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
+        let browserPreviewURL = session.previewServerBrowserURL().absoluteString
+        return """
+        # Transcripted Live Meeting Sidecar Setup
+
+        Set this agent chat up as my live Transcripted meeting room.
+
+        Local paths:
+        - Workspace: \(workspaceURL.standardizedFileURL.path)
+        - Setup prompt file: \(session.setupURL.path)
+        - Live transcript: \(session.liveTranscriptURL.path)
+        - State file: \(session.stateURL.path)
+        - Handoff file: \(session.handoffURL.path)
+        - Watcher state: \(session.watcherStateURL.path)
+        - Preview: \(session.previewURL.path)
+        - Codex browser preview: \(browserPreviewURL)
+
+        Rules:
+        - Read `state.json` and `live_transcript.md` when I ask about the current meeting.
+        - Treat live text as provisional and source-labeled.
+        - Treat `[partial]` lines as live ASR hypotheses that may change.
+        - If `finalTranscriptPath` exists in `state.json`, read that final Markdown and prefer it for speaker names, diarization, quotes, decisions, and durable notes.
+        - Before waking me about a ready final transcript, check `agent-watcher-state.json`. Stay quiet if `lastHandledFinalTranscriptPath` already matches.
+        - After handling a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
+        - Do not change Transcripted's normal meeting output.
+        - Keep live answers short and say when the stream is too sparse to answer.
+        - For a live transcript panel in Codex, open \(browserPreviewURL) while Transcripted is running.
+
+        Skill:
+        - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)
+        """
+    }
+
+    static func liveMeetingCoworkSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
+        return """
+        # Transcripted Live Meeting Cowork Setup
+
+        Use Claude Cowork as my live Transcripted meeting room.
+
+        If you can access local folders, use this workspace:
+        \(workspaceURL.standardizedFileURL.path)
+
+        Start with:
+        - \(session.setupURL.path)
+        - \(session.stateURL.path)
+        - \(session.liveTranscriptURL.path)
+        - \(session.handoffURL.path)
+        - \(session.watcherStateURL.path)
+        - \(session.previewURL.path)
+
+        Rules:
+        - While `state.json` says `recording`, answer from `live_transcript.md`.
+        - Treat live text as provisional. `[partial]` lines may change.
+        - Preserve `[Microphone]` and `[System]` source labels when they matter.
+        - If `finalTranscriptPath` exists or `agent-handoff.md` says `Status: ready`, use the final Markdown as the source of truth.
+        - Before posting a post-meeting brief or waking me about the ready transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` already matches, stay quiet unless I ask.
+        - After handling a ready final transcript, update `agent-watcher-state.json` with the final path and current time.
+        - Do not change Transcripted's normal meeting output.
+        - If you cannot access the workspace folder, ask me to grant that folder or paste the current `live_transcript.md`.
+        """
+    }
+
+    static func liveMeetingCodexOpenPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
+        """
+        Use this thread as my Transcripted Live Meeting room. Read \(LiveMeetingCodexSession.setupFilename) in this folder and tell me when you are ready to watch the live transcript.
+        """
+    }
+
     static var folderAccessPrompt: String {
         """
         I use Transcripted on my Mac.
 
-        This is fallback setup for a web chat or Cowork session.
+        This is fallback setup for a web chat or Cowork session that cannot use the live sidecar folder.
 
         I may have granted you access to my Transcripted folders in this chat. Use those granted folders first.
 
@@ -362,7 +469,7 @@ enum AgentConnectionGuide {
             "Transcripted direct tools setup:",
             "- Server name: transcripted",
             "- Transport: local stdio",
-            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install for Claude Desktop, then restart Claude Desktop.",
+            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install in Claude, then restart Claude Desktop.",
             "- Installed command path after setup: \(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)",
             "- Claude Desktop config path: \(ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)",
         ]
@@ -408,7 +515,7 @@ enum AgentConnectionGuide {
             "Claude Desktop setup:",
             "1. Open Transcripted Settings.",
             "2. Go to Agent.",
-            "3. Click Install for Claude Desktop.",
+            "3. Click Install in Claude.",
             "4. Restart Claude Desktop.",
             "",
             "Installed command path after setup:",

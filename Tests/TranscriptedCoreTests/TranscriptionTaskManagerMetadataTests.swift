@@ -106,6 +106,89 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastSavedSpeakerCount, 3)
     }
 
+    func testSavedTranscriptOwnerSurvivesSpeakerReviewRewrite() throws {
+        let manager = makeManager()
+        let taskId = UUID()
+        let transcriptId = UUID()
+        let transcriptURL = tempDirectory.appendingPathComponent("Customer_Call.md")
+        try """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        title: "Customer Call"
+        duration: "10:03"
+        mic_speakers: 1
+        system_speakers: 2
+        ---
+
+        # Meeting Recording
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        manager.publishTranscriptSaved(from: transcriptURL, taskId: taskId)
+        manager.populateSavedMetadata(from: transcriptURL)
+
+        XCTAssertEqual(manager.lastSavedTranscriptTaskId, taskId)
+    }
+
+    func testSavedTranscriptOwnerSurvivesInterleavedSpeakerReviewRewrite() throws {
+        let manager = makeManager()
+        let firstTaskId = UUID()
+        let secondTaskId = UUID()
+        let firstTranscriptId = UUID()
+        let secondTranscriptId = UUID()
+        let firstURL = tempDirectory.appendingPathComponent("First_Call.md")
+        let firstRenamedURL = tempDirectory.appendingPathComponent("First_Call_Named.md")
+        let secondURL = tempDirectory.appendingPathComponent("Second_Call.md")
+
+        try transcriptContent(id: firstTranscriptId, title: "First Call")
+            .write(to: firstURL, atomically: true, encoding: .utf8)
+        try transcriptContent(id: firstTranscriptId, title: "First Call")
+            .write(to: firstRenamedURL, atomically: true, encoding: .utf8)
+        try transcriptContent(id: secondTranscriptId, title: "Second Call")
+            .write(to: secondURL, atomically: true, encoding: .utf8)
+
+        manager.publishTranscriptSaved(from: firstURL, taskId: firstTaskId)
+        manager.publishTranscriptSaved(from: secondURL, taskId: secondTaskId)
+        manager.populateSavedMetadata(from: firstRenamedURL)
+
+        XCTAssertEqual(manager.lastSavedTranscriptId, firstTranscriptId)
+        XCTAssertEqual(manager.lastSavedTranscriptTaskId, firstTaskId)
+    }
+
+    func testPendingSpeakerNamingReviewTracksLastSavedTranscriptAcrossRename() throws {
+        let manager = makeManager()
+        let taskId = UUID()
+        let transcriptId = UUID()
+        let originalURL = tempDirectory.appendingPathComponent("Customer_Call.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Customer_Call_Named.md")
+        let content = """
+        ---
+        transcript_id: "\(transcriptId.uuidString)"
+        title: "Customer Call"
+        duration: "10:03"
+        mic_speakers: 1
+        system_speakers: 2
+        ---
+
+        # Meeting Recording
+        """
+        try content.write(to: originalURL, atomically: true, encoding: .utf8)
+        try content.write(to: renamedURL, atomically: true, encoding: .utf8)
+
+        manager.publishTranscriptSaved(from: originalURL, taskId: taskId)
+        manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: originalURL,
+            transcriptId: transcriptId,
+            systemAudioURL: tempDirectory.appendingPathComponent("system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        )
+        manager.populateSavedMetadata(from: renamedURL)
+
+        XCTAssertTrue(manager.hasPendingSpeakerNamingReviewForLastSavedTranscript())
+        XCTAssertEqual(manager.lastSavedTranscriptTaskId, taskId)
+    }
+
     func testDeferPendingSpeakerNamingReviewCompletesWithReviewLater() {
         let manager = makeManager()
         var completedUpdates: [SpeakerNameUpdate]?
@@ -1442,6 +1525,20 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             retainedAudioDirectoryProvider: retainedAudioDirectoryProvider,
             statsStore: statsStore
         )
+    }
+
+    private func transcriptContent(id: UUID, title: String) -> String {
+        """
+        ---
+        transcript_id: "\(id.uuidString)"
+        title: "\(title)"
+        duration: "10:03"
+        mic_speakers: 1
+        system_speakers: 2
+        ---
+
+        # Meeting Recording
+        """
     }
 
     private func writeMonoWAV(to url: URL, duration: TimeInterval, sampleRate: Double = 16_000) throws {

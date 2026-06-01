@@ -1,0 +1,36 @@
+before_saved=69 before_stopped=34 before_stats=2106
+2026-06-01T01:20:34Z	56	692	0.0124
+2026-06-01T01:09:18Z	4	14	0.0035
+2026-06-01T01:09:18Z	2	15	0.0075
+2026-06-01T01:09:18Z	2	18	0.009
+2026-06-01T01:09:18Z	2	15	0.0075
+["2026-06-01T01:19:36.571Z", "warmup_status_changed", {}]
+["2026-06-01T01:19:36.681Z", "system_audio_status_changed", {"duration_ms"=>"0", "session_state"=>"ready", "display_status"=>"idle"}]
+["2026-06-01T01:19:36.683Z", "system_audio_status_changed", {"duration_ms"=>"0", "session_state"=>"ready", "display_status"=>"idle"}]
+["2026-06-01T01:19:36.797Z", "system_audio_status_changed", {"duration_ms"=>"0", "session_state"=>"ready", "display_status"=>"idle"}]
+["2026-06-01T01:19:36.798Z", "meeting_state_changed", {"session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:19:36.799Z", "meeting_recording_started", {"trigger"=>"hotkey", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:19:46.870Z", "system_audio_status_changed", {"duration_ms"=>"10001", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:19:58.955Z", "system_audio_status_changed", {"duration_ms"=>"22200", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:20:19.510Z", "system_audio_status_changed", {"duration_ms"=>"42600", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:20:33.316Z", "meeting_stop_requested", {"duration_ms"=>"56401", "trigger"=>"hotkey", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:20:33.317Z", "system_audio_status_changed", {"duration_ms"=>"56401", "session_state"=>"recording", "display_status"=>"idle"}]
+["2026-06-01T01:20:33.397Z", "meeting_state_changed", {"session_state"=>"transcribing", "display_status"=>"idle"}]
+["2026-06-01T01:20:33.399Z", "meeting_recording_stopped", {"duration_ms"=>"56401", "trigger"=>"hotkey", "session_state"=>"transcribing", "display_status"=>"idle"}]
+["2026-06-01T01:20:33.408Z", "meeting_transcription_started", {"duration_ms"=>"56401", "trigger"=>"hotkey", "session_state"=>"transcribing", "display_status"=>"getting_ready"}]
+["2026-06-01T01:20:33.549Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:33.894Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:33.991Z", "meeting_segment_transcribed", {"rtf"=>"0.009"}]
+["2026-06-01T01:20:33.991Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:34.078Z", "meeting_segment_transcribed", {"rtf"=>"0.003"}]
+["2026-06-01T01:20:34.119Z", "meeting_segment_transcribed", {"rtf"=>"0.012"}]
+["2026-06-01T01:20:34.119Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:34.162Z", "meeting_segment_transcribed", {"rtf"=>"0.010"}]
+["2026-06-01T01:20:34.162Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:34.242Z", "meeting_segment_transcribed", {"rtf"=>"0.004"}]
+["2026-06-01T01:20:34.243Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:34.243Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"transcribing"}]
+["2026-06-01T01:20:34.246Z", "meeting_pipeline_phase", {"session_state"=>"transcribing", "display_status"=>"finishing"}]
+["2026-06-01T01:20:34.333Z", "meeting_transcript_artifact_ready", {"session_state"=>"transcribing", "display_status"=>"finishing"}]
+["2026-06-01T01:20:34.334Z", "meeting_transcript_saved", {"trigger"=>"hotkey", "session_state"=>"transcribing", "display_status"=>"transcript_saved"}]
+["2026-06-01T01:20:34.335Z", "meeting_state_changed", {"session_state"=>"ready", "display_status"=>"transcript_saved"}]

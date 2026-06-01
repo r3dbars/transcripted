@@ -501,6 +501,7 @@ TMPDIR="$REPO_ROOT/$SWIFTC_TEMP_DIR/" swiftc \
     -framework Vision \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
+    -framework Network \
     -framework Sentry \
     -framework Sparkle \
     -lsqlite3 \

@@ -1,0 +1,20 @@
+batch_since=2026-06-01T01:37:44Z
+before_samples=64
+sample=1 start since=2026-06-01T01:37:44Z
+sample=1 samples_after=65
+sample=1 latest_stats=2026-06-01T01:38:24Z	38	872	0.0229
+sample=1 events_started=1 events_stopped=1 events_saved=1
+sample=2 start since=2026-06-01T01:38:30Z
+sample=2 samples_after=66
+sample=2 latest_stats=2026-06-01T01:39:10Z	38	854	0.0225
+sample=2 events_started=1 events_stopped=1 events_saved=1
+sample=3 start since=2026-06-01T01:39:15Z
+sample=3 samples_after=67
+sample=3 latest_stats=2026-06-01T01:39:56Z	38	870	0.0229
+sample=3 events_started=1 events_stopped=1 events_saved=1
+sample=4 start since=2026-06-01T01:40:01Z
+sample=4 samples_after=68
+sample=4 latest_stats=2026-06-01T01:40:41Z	38	847	0.0223
+sample=4 events_started=1 events_stopped=1 events_saved=1
+after_samples=68
+batch_events_started=4 batch_events_stopped=4 batch_events_saved=4

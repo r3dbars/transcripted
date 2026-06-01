@@ -1,0 +1,6 @@
+case=lazy mode=lazy
+case=lazy models_loaded_after_4s=0
+case=lazy launch_to_model_ms=5258 launch_to_start_ms=5404 fast_start_ms=142 stop_to_paste_ms=92 stop_to_done_ms=94 decode_ms=81 model_wait_ms=0
+case=eager mode=eager
+case=eager models_loaded_after_4s=1
+case=eager launch_to_model_ms=133 launch_to_start_ms=5292 fast_start_ms=134 stop_to_paste_ms=104 stop_to_done_ms=106 decode_ms=89 model_wait_ms=0

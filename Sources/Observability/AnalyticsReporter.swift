@@ -107,6 +107,25 @@ final class AnalyticsReporter {
         }
     }
 
+    static func latencyBucket(milliseconds: Int) -> String {
+        switch milliseconds {
+        case ..<100:
+            return "lt_100ms"
+        case ..<250:
+            return "100_249ms"
+        case ..<500:
+            return "250_499ms"
+        case ..<1_000:
+            return "500_999ms"
+        case ..<2_000:
+            return "1_2s"
+        case ..<5_000:
+            return "2_5s"
+        default:
+            return "5s_plus"
+        }
+    }
+
     static func wordCountBucket(_ count: Int) -> String {
         switch count {
         case ..<10:

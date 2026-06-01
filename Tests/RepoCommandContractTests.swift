@@ -47,6 +47,23 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - Sentry health probe prints aggregate issue rollup") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("Sentry unresolved issue rollup (top 5):")
+                && contents.contains(".shortId")
+                && contents.contains("count=\\(.count")
+                && contents.contains("users=\\(.userCount")
+                && contents.contains("lastSeen=\\(.lastSeen"),
+            "Sentry probe should show aggregate issue counts and freshness for operator triage"
+        )
+        assertFalse(
+            contents.contains("/events/"),
+            "Sentry health probe should not fetch raw event payloads for the nightly rollup"
+        )
+    }
+
     runSuite("Repo command contract - PostHog health probe uses the query API") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
 
@@ -509,6 +526,23 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - existing Sparkle sessions do not start app-owned timeouts") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let checkBlock = sourceSlice(
+            controller,
+            from: "private func beginObservedUpdateCheckIfPossible() -> Bool",
+            to: "private func syncReadiness("
+        )
+        let existingSessionBlock = sourceSlice(
+            checkBlock,
+            from: "if updater.sessionInProgress",
+            to: "guard updater.canCheckForUpdates"
+        )
+
+        assertTrue(existingSessionBlock.contains("syncReadiness(from: updater)"), "existing Sparkle sessions should only sync visible readiness")
+        assertFalse(existingSessionBlock.contains("beginObservedUpdateCheck()"), "existing Sparkle sessions should not start a new timeout timer")
+    }
+
     runSuite("Repo command contract - Sparkle no-update finish cycles stay successful") {
         let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
         let didNotFindBlock = sourceSlice(
@@ -813,6 +847,14 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0"),
+            "performance budget should cap stop-to-paste latency when samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0"),
+            "performance budget should cap the full stop pipeline when samples are required"
+        )
+        assertTrue(
             contents.contains("MAX_MEETING_P95_RTF = 0.05"),
             "performance budget should cap meeting processing real-time factor when stats are provided"
         )
@@ -823,6 +865,37 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
+        )
+        assertTrue(
+            contents.contains("--require-dictation-stop-latency-samples"),
+            "performance budget should support strict fresh dictation stop proof"
+        )
+        assertTrue(
+            contents.contains("--events-since ISO8601")
+                && contents.contains("event[\"_time\"] >= options[:events_since]"),
+            "performance budget should support fresh-window runtime event scoring"
+        )
+        assertTrue(
+            contents.contains("--stats-since ISO8601")
+                && contents.contains("created_at >= '#{since_time.utc.iso8601}'"),
+            "performance budget should support fresh-window meeting throughput scoring"
+        )
+        assertTrue(
+            contents.contains("--min-transcription-samples")
+                && contents.contains("--min-meeting-samples"),
+            "performance budget should let focused experiments set explicit sample requirements"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "performance budget should parse measured dictation stop latency samples"
+        )
+        assertTrue(
+            contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop slowest stage:"),
+            "performance budget should report per-stage stop latency and identify the slowest stop segment"
         )
         assertTrue(
             contents.contains("--stats PATH"),
@@ -959,6 +1032,30 @@ func testRepoCommandContract() {
         assertTrue(
             forcedRecoveryBlock.contains("cancel()"),
             "hard dictation input recovery should preempt lower-priority readiness refresh churn"
+        )
+    }
+
+    runSuite("Repo command contract - dictation stop path emits paste latency proof") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
+                && contents.contains("stopTiming.micStoppedAt")
+                && contents.contains("stopTiming.transcriptionStartedAt")
+                && contents.contains("stopTiming.pastedAt")
+                && contents.contains("stopTiming.savedAt"),
+            "dictation stop path should mark the critical stages from stop through paste and save"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "dictation stop path should emit local raw stop latency measurements"
+        )
+        assertTrue(
+            contents.contains("AnalyticsReporter.latencyBucket(milliseconds:")
+                && contents.contains("\"stop_to_paste_bucket\"")
+                && contents.contains("\"stop_to_done_bucket\""),
+            "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
         )
     }
 
@@ -1434,6 +1531,181 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed meeting transcripts clear live sidecar final waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "case .gettingReady:"
+        )
+        let helperBlock = sourceSlice(
+            controllerContents,
+            from: "private func finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded",
+            to: "private func canStartQueuedTranscriptionImmediately("
+        )
+
+        assertTrue(
+            failureBlock.contains("finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded"),
+            "failed or skipped meeting transcription outcomes should try to stop the owning live sidecar final wait"
+        )
+        assertTrue(
+            countOccurrences(
+                of: "finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded",
+                in: failureBlock
+            ) >= 3,
+            "skipped, speaker-finalization, and generic failed transcript paths should each clear the live sidecar final wait"
+        )
+        assertTrue(
+            helperBlock.contains("failedJobID == awaitedJobID")
+                && helperBlock.contains("allowLastSavedTranscriptOwner && taskManager.lastSavedTranscriptTaskId == awaitedJobID"),
+            "transcription failures should only fail the live sidecar owned by the active job unless a speaker-finalization failure proves the saved transcript owner"
+        )
+    }
+
+    runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let terminationBlock = sourceSlice(
+            controllerContents,
+            from: "func prepareForTermination() async {",
+            to: "private func waitForRecordingFinishBeforeTermination() async {"
+        )
+
+        assertTrue(
+            terminationBlock.contains("let shouldFailPendingLiveHandoff = queuedPreserved > 0")
+                && terminationBlock.contains("|| liveCodexSessionAwaitingFinalTranscript")
+                && terminationBlock.contains("if shouldFailPendingLiveHandoff")
+                && terminationBlock.contains("finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)"),
+            "shutdown should fail any pending live sidecar handoff instead of leaving agents waiting after retry or speaker review state is lost"
+        )
+        assertTrue(
+            terminationBlock.contains("activeQueuedTranscriptionJobID = nil"),
+            "shutdown preservation should clear the active queued job owner used for live sidecar final attachment"
+        )
+    }
+
+    runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let cancelBlock = sourceSlice(
+            controllerContents,
+            from: "func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {",
+            to: "func prepareForTermination() async {"
+        )
+
+        assertTrue(
+            cancelBlock.contains("if liveCodexSessionAwaitingFinalTranscript")
+                && cancelBlock.contains("finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)"),
+            "cancelling the owning transcription should fail the pending live sidecar handoff instead of leaving agents waiting forever"
+        )
+        assertTrue(
+            cancelBlock.contains("activeQueuedTranscriptionJobID = nil"),
+            "transcription cancellation should clear the queued job owner used for live sidecar final attachment"
+        )
+    }
+
+    runSuite("Repo command contract - live sidecar attaches only its queued meeting") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+        let startBlock = sourceSlice(
+            controllerContents,
+            from: "private func startLiveCodexSessionIfNeeded",
+            to: "private func finishLiveCodexSession"
+        )
+        let recordedEnqueueBlock = sourceSlice(
+            controllerContents,
+            from: "private func enqueueTranscriptionJob(",
+            to: "private func enqueueImportedAudioJob("
+        )
+        let attachBlock = sourceSlice(
+            controllerContents,
+            from: "private func attachLiveCodexFinalTranscriptIfReady",
+            to: "private func refreshWarmupStatus"
+        )
+
+        assertTrue(
+            startBlock.contains("liveCodexSessionCanAttachFinalTranscript = true"),
+            "deferred live ASR should still allow the normal final Transcripted Markdown to attach"
+        )
+        assertFalse(
+            startBlock.contains("liveCodexSessionCanAttachFinalTranscript = canStartLiveBackend"),
+            "final transcript handoff should not depend on whether the provisional live ASR backend started"
+        )
+        assertTrue(
+            recordedEnqueueBlock.contains("liveCodexAwaitedTranscriptionJobID = job.id"),
+            "a stopped live sidecar should remember the exact recorded job that owns its final transcript"
+        )
+        assertTrue(
+            startBlock.contains("guard !liveCodexSessionAwaitingFinalTranscript")
+                && startBlock.contains("live_codex_session_deferred_pending_handoff"),
+            "starting another meeting should not overwrite a sidecar that is still waiting for its final transcript handoff"
+        )
+        assertTrue(
+            recordedEnqueueBlock.contains("liveCodexFinalTranscriptNeedsQueuedJobID && liveCodexSessionAwaitingFinalTranscript"),
+            "only the recording that stopped an owned sidecar should assign the next queued transcript job as its final handoff owner"
+        )
+        assertTrue(
+            attachBlock.contains("taskManager.hasPendingSpeakerNamingReviewForLastSavedTranscript()"),
+            "the live sidecar should wait for local speaker review before telling agents the final Markdown is ready"
+        )
+        assertTrue(
+            attachBlock.contains("taskManager.lastSavedTranscriptTaskId == awaitedJobID"),
+            "the live sidecar should attach only a saved URL published by its exact transcription job"
+        )
+        assertTrue(
+            taskManagerContents.contains("@Published public private(set) var lastSavedTranscriptTaskId: UUID? = nil")
+                && taskManagerContents.contains("public func startTranscription(\n        taskId: UUID = UUID(),")
+                && taskManagerContents.contains("populateSavedMetadata(from: transcriptURL, taskId: taskId)"),
+            "TranscriptedCore should publish the owner task for saved-transcript URL handoff"
+        )
+        assertTrue(
+            taskManagerContents.contains("savedTranscriptTaskIdsByTranscriptId")
+                && taskManagerContents.contains("savedTranscriptTaskIdsByURL")
+                && taskManagerContents.contains("rememberSavedTranscriptOwner("),
+            "TranscriptedCore should preserve the saved-transcript owner across speaker-review rewrites, even after another transcript saves"
+        )
+        assertTrue(
+            controllerContents.contains("taskManager.startTranscription(\n                taskId: job.id,"),
+            "the app queue id should be passed into TranscriptedCore so the saved-transcript owner matches the awaited live handoff job"
+        )
+    }
+
+    runSuite("Repo command contract - live meeting preview stays same-origin only") {
+        let serverContents = readRepoTextFile("Sources/Meeting/LiveMeetingPreviewServer.swift")
+        let fileResponseBlock = sourceSlice(
+            serverContents,
+            from: "private func fileResponse(",
+            to: "private func currentWorkspaceURL()"
+        )
+
+        assertFalse(
+            serverContents.contains("Access-Control-Allow-Origin"),
+            "loopback live transcript preview should not allow arbitrary browser origins to read meeting state"
+        )
+        assertFalse(
+            fileResponseBlock.contains("ensureWorkspaceFiles"),
+            "preview polling should read the sidecar files without rewriting live transcript state"
+        )
+        assertTrue(
+            serverContents.contains("startupSemaphore.wait")
+                && serverContents.contains("case .failed(let error):")
+                && serverContents.contains("throw error"),
+            "preview server start should only return the loopback URL after the listener becomes ready or should surface startup failure"
+        )
+        assertTrue(
+            serverContents.contains("isAllowedHost(request.headers[\"host\"])")
+                && serverContents.contains("\"127.0.0.1\"")
+                && serverContents.contains("\"localhost\"")
+                && serverContents.contains("\"[::1]\"")
+                && serverContents.contains("403 Forbidden"),
+            "preview server should reject DNS-rebinding Host headers before serving live meeting files"
+        )
+        assertTrue(
+            serverContents.contains("isAuthorizedPreviewRequest(token: request.queryItems[\"token\"])")
+                && serverContents.contains("previewAuthTokenFilename")
+                && serverContents.contains("401 Unauthorized"),
+            "preview server should require the sidecar auth token before serving private live meeting files"
+        )
+    }
+
     runSuite("Repo command contract - Home attention summary includes failed meetings") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let needsAttentionBlock = sourceSlice(
@@ -1800,6 +2072,77 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("DisclosureGroup(\"Show setup details\", isExpanded: $showAdvancedAgentSetup)"),
             "Agent setup details should not rely on the macOS DisclosureGroup click path"
+        )
+    }
+
+    runSuite("Repo command contract - live sidecar toggle owns preview server lifecycle") {
+        let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
+        let settingsViewContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let sessionContents = readRepoTextFile("Sources/Meeting/LiveMeetingCodexSession.swift")
+        let transcriberContents = readRepoTextFile("Sources/Meeting/LiveMeetingTranscriber.swift")
+        let toggleBlock = sourceSlice(
+            contents,
+            from: ".onChange(of: liveMeetingCodexEnabled)",
+            to: "HStack(spacing: 10)"
+        )
+        let setupBlock = sourceSlice(
+            contents,
+            from: "private func setupLiveMeetingCodex()",
+            to: "private func prepareLiveMeetingSidecarWorkspace()"
+        )
+        let copyBlock = sourceSlice(
+            contents,
+            from: "private func copyLiveMeetingCoworkSetup()",
+            to: "private func openLiveMeetingPreview()"
+        )
+        let helperBlock = sourceSlice(
+            contents,
+            from: "private func prepareLiveMeetingSidecarWorkspaceForUse() throws -> URL",
+            to: "private func stopLiveMeetingSidecarPreview()"
+        )
+        let stopBlock = sourceSlice(
+            contents,
+            from: "private func stopLiveMeetingSidecarPreview()",
+            to: "private func copyText("
+        )
+
+        assertTrue(
+            toggleBlock.contains("prepareLiveMeetingSidecarWorkspace()")
+                && toggleBlock.contains("meetingSession?.stopLiveCodexSessionFromSettings()")
+                && toggleBlock.contains("stopLiveMeetingSidecarPreview()"),
+            "the live sidecar toggle should start the preview server on enable and stop both the active sidecar and preview server on disable"
+        )
+        assertTrue(
+            settingsViewContents.contains("AgentConnectionSettingsPage(meetingSession: meetingSession)"),
+            "Agent settings should receive the meeting session so the opt-out toggle can stop an active live sidecar"
+        )
+        assertTrue(
+            setupBlock.contains("prepareLiveMeetingSidecarWorkspaceForUse()")
+                && copyBlock.contains("prepareLiveMeetingSidecarWorkspaceForUse()"),
+            "Codex and Cowork setup actions should prepare the workspace and server before handing prompts to agents"
+        )
+        assertTrue(
+            helperBlock.contains("LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)"),
+            "the shared setup helper should start the loopback preview server when supported"
+        )
+        assertTrue(
+            stopBlock.contains("LiveMeetingPreviewServer.shared.stop()"),
+            "disabling the sidecar should stop the loopback preview server"
+        )
+        assertTrue(
+            controllerContents.contains("func stopLiveCodexSessionFromSettings()")
+                && controllerContents.contains("clearPreviewHandlers: !shouldDeferPreviewHandlerClear")
+                && controllerContents.contains("liveCodexPreviewHandlersNeedClearingAfterActiveRecording = true")
+                && controllerContents.contains("clearDeferredLiveCodexPreviewHandlersIfNeeded()")
+                && sessionContents.contains("case disabled")
+                && sessionContents.contains("The user turned off the live sidecar"),
+            "disabling the preference should mark an active live sidecar disabled without implying the normal transcript will not save"
+        )
+        assertTrue(
+            transcriberContents.contains("func stop(capture: MeetingCaptureBridge, clearPreviewHandlers: Bool = true)")
+                && transcriberContents.contains("func clearCapturePreviewHandlers(capture: MeetingCaptureBridge)"),
+            "the live sidecar should be able to stop streaming immediately while deferring capture-handler clears until recording stops"
         )
     }
 

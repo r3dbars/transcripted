@@ -1,4 +1,6 @@
 import XCTest
+import Combine
+import FluidAudio
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -68,6 +70,78 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
 
         XCTAssertEqual(merged.count, 2)
+    }
+
+    @MainActor
+    func testMicDiarizationKeepsWeakGhostSpeakerStandalone() async throws {
+        let speakerDB = try temporarySpeakerDatabase()
+        var droppedSegments = 0
+
+        let result = try await Transcription.processMicChannelWithDiarization(
+            samples: alternatingSamples(amplitude: 0.02, count: 47 * 16_000),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(speakerId: 7, start: 0.0, end: 35.0, embedding: [1.0, 0.0], qualityScore: 0.95),
+                speakerSegment(speakerId: 6, start: 35.0, end: 47.0, embedding: unitVector(cosineToXAxis: 0.42), qualityScore: 0.20),
+            ]),
+            parakeet: PipelineStubSpeechToTextEngine(transcript: "spoken words"),
+            speakerDB: speakerDB,
+            existingProfiles: [],
+            droppedSegments: &droppedSegments,
+            onProgress: nil
+        )
+
+        XCTAssertEqual(droppedSegments, 0)
+        XCTAssertEqual(Set(result.utterances.map(\.speakerId)), [6, 7])
+        XCTAssertEqual(result.speakerContexts.count, 2)
+        XCTAssertEqual(speakerDB.allSpeakers().count, 2)
+    }
+
+    @MainActor
+    func testMicDiarizationStillMergesStrongGhostSpeakerMatch() async throws {
+        let speakerDB = try temporarySpeakerDatabase()
+        var droppedSegments = 0
+
+        let result = try await Transcription.processMicChannelWithDiarization(
+            samples: alternatingSamples(amplitude: 0.02, count: 47 * 16_000),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(speakerId: 7, start: 0.0, end: 35.0, embedding: [1.0, 0.0], qualityScore: 0.95),
+                speakerSegment(speakerId: 6, start: 35.0, end: 47.0, embedding: unitVector(cosineToXAxis: 0.78), qualityScore: 0.20),
+            ]),
+            parakeet: PipelineStubSpeechToTextEngine(transcript: "spoken words"),
+            speakerDB: speakerDB,
+            existingProfiles: [],
+            droppedSegments: &droppedSegments,
+            onProgress: nil
+        )
+
+        XCTAssertEqual(droppedSegments, 0)
+        XCTAssertEqual(Set(result.utterances.map(\.speakerId)), [7])
+        XCTAssertEqual(result.speakerContexts.count, 1)
+        XCTAssertEqual(speakerDB.allSpeakers().count, 1)
+    }
+
+    @MainActor
+    func testMicDiarizationKeepsGhostSpeakerStandaloneWhenNoNonGhostTargetExists() async throws {
+        let speakerDB = try temporarySpeakerDatabase()
+        var droppedSegments = 0
+
+        let result = try await Transcription.processMicChannelWithDiarization(
+            samples: alternatingSamples(amplitude: 0.02, count: 24 * 16_000),
+            diarization: PipelineStubDiarizationEngine(segments: [
+                speakerSegment(speakerId: 6, start: 0.0, end: 12.0, embedding: [1.0, 0.0], qualityScore: 0.20),
+                speakerSegment(speakerId: 7, start: 12.0, end: 24.0, embedding: [0.0, 1.0], qualityScore: 0.20),
+            ]),
+            parakeet: PipelineStubSpeechToTextEngine(transcript: "spoken words"),
+            speakerDB: speakerDB,
+            existingProfiles: [],
+            droppedSegments: &droppedSegments,
+            onProgress: nil
+        )
+
+        XCTAssertEqual(droppedSegments, 0)
+        XCTAssertEqual(Set(result.utterances.map(\.speakerId)), [6, 7])
+        XCTAssertEqual(result.speakerContexts.count, 2)
+        XCTAssertEqual(speakerDB.allSpeakers().count, 2)
     }
 
     func testDetectSpeechSegmentsSplitsOnLongSilence() {
@@ -264,6 +338,37 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         (0..<count).map { $0.isMultiple(of: 2) ? amplitude : -amplitude }
     }
 
+    private func unitVector(cosineToXAxis: Float) -> [Float] {
+        let y = sqrt(max(0, 1 - (cosineToXAxis * cosineToXAxis)))
+        return [cosineToXAxis, y]
+    }
+
+    private func speakerSegment(
+        speakerId: Int,
+        start: Double,
+        end: Double,
+        embedding: [Float],
+        qualityScore: Float
+    ) -> SpeakerSegment {
+        SpeakerSegment(
+            speakerId: speakerId,
+            startTime: start,
+            endTime: end,
+            embedding: embedding,
+            qualityScore: qualityScore
+        )
+    }
+
+    private func temporarySpeakerDatabase() throws -> SpeakerDatabase {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineHelpersTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+        return SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
+    }
+
     private func utterance(
         start: Double,
         end: Double,
@@ -282,5 +387,57 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
             matchSimilarity: matchSimilarity,
             transcript: transcript
         )
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class PipelineStubSpeechToTextEngine: SpeechToTextEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    private let transcript: String
+
+    init(transcript: String) {
+        self.transcript = transcript
+    }
+
+    func initialize() async {
+        isReady = true
+    }
+
+    func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
+        transcript
+    }
+
+    func cleanup() {
+        isReady = false
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class PipelineStubDiarizationEngine: DiarizationEngine {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+    var isReady = true
+    private let segments: [SpeakerSegment]
+
+    init(segments: [SpeakerSegment]) {
+        self.segments = segments
+    }
+
+    func initialize() async {
+        isReady = true
+    }
+
+    func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] {
+        segments
+    }
+
+    func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] {
+        segments
+    }
+
+    func cleanup() {
+        isReady = false
     }
 }

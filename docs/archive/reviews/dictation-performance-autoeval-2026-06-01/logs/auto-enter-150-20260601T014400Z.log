@@ -1,0 +1,19 @@
+case=auto_enter_150 since=2026-06-01T01:43:38Z
+auto_send=sent_enter
+auto_enter_ms=155
+stop_to_paste_ms=70
+stop_to_done_ms=228
+paste_ms=3
+save_ms=2
+decode_ms=57
+words=5
+
+case=auto_enter_150_repeat since=2026-06-01T01:44:33Z
+auto_send=sent_enter
+auto_enter_ms=157
+stop_to_paste_ms=74
+stop_to_done_ms=233
+paste_ms=3
+save_ms=2
+decode_ms=59
+words=5

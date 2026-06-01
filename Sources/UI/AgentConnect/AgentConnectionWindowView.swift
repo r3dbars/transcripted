@@ -165,7 +165,7 @@ struct AgentConnectionWindowView: View {
             title: "Claude Desktop",
             subtitle: "Best path: install Transcripted direct tools, then restart Claude Desktop."
         ) {
-            AgentConnectionBodyText("Use Transcripted Settings > Agent > Install for Claude Desktop. The app writes the Claude config and checks your local library.")
+            AgentConnectionBodyText("Use Transcripted Settings > Agent > Install in Claude. The app writes the Claude config and checks your local library.")
 
             HStack(spacing: 10) {
                 Button(viewModel.copyLabel(for: .mcp, default: "Copy Steps")) {
@@ -194,10 +194,10 @@ struct AgentConnectionWindowView: View {
 
     private var webFallbackSection: some View {
         AgentConnectionSectionCard(
-            title: "Fallback Only: Web Chat Or Cowork",
+            title: "Fallback Only: Web Chat",
             subtitle: "Not recommended for full Transcripted memory."
         ) {
-            AgentConnectionBodyText("Claude web, ChatGPT web, Cowork, and mobile chats usually cannot see your Mac. Use this only for granted folders or pasted meetings.")
+            AgentConnectionBodyText("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Use this only for granted folders or pasted meetings. For live meetings in Cowork, use the sidecar setup in Settings.")
 
             VStack(alignment: .leading, spacing: 10) {
                 AgentConnectionFileRow(
