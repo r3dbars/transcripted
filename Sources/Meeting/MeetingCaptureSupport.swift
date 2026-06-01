@@ -229,3 +229,63 @@ enum MeetingCaptureVolumeDiagnostics {
         return "unavailable"
     }
 }
+
+enum MeetingAudioInactivityRecoveryPolicy {
+    private static let longRecordingThreshold: TimeInterval = 10 * 60
+    private static let routeChurnThreshold = 2
+
+    static func warning(
+        from warning: MeetingAudioInactivityWarning,
+        durationSeconds: TimeInterval,
+        diagnostics: [String: String]
+    ) -> MeetingAudioInactivityWarning {
+        let kind = warningKind(
+            durationSeconds: durationSeconds,
+            diagnostics: diagnostics
+        )
+        return MeetingAudioInactivityWarning(
+            inactiveDuration: warning.inactiveDuration,
+            countdownSeconds: warning.countdownSeconds,
+            kind: kind,
+            automaticStopAllowed: kind == .noAudio
+        )
+    }
+
+    static func warningKind(
+        durationSeconds: TimeInterval,
+        diagnostics: [String: String]
+    ) -> MeetingAudioInactivityWarning.Kind {
+        guard durationSeconds >= longRecordingThreshold else {
+            return .noAudio
+        }
+
+        let inputVolumeDropped = selectedInputVolumeDropped(diagnostics)
+        let quietMicRecovered = diagnostics["quiet_mic_recovered"] == "true"
+        let systemSilent = diagnostics["system_status"] == "silent"
+        let routeChurned = intValue(diagnostics["route_change_count"]) >= routeChurnThreshold
+        let bluetoothRoute = diagnostics["input_device_class"] == "bluetooth"
+            || diagnostics["output_device_class"] == "bluetooth"
+            || diagnostics["system_output_device_class"] == "bluetooth"
+
+        if inputVolumeDropped || (systemSilent && (routeChurned || bluetoothRoute || quietMicRecovered)) {
+            return .degradedRoute
+        }
+
+        return .noAudio
+    }
+
+    private static func selectedInputVolumeDropped(_ diagnostics: [String: String]) -> Bool {
+        let capturedInputContextPresent = diagnostics["captured_input_volume_before"] != nil
+            || diagnostics["captured_input_volume_after"] != nil
+            || diagnostics["captured_input_volume_during"] != nil
+        let selectedDropState = capturedInputContextPresent
+            ? diagnostics["captured_input_volume_dropped"]
+            : diagnostics["default_input_volume_dropped"]
+        return selectedDropState == "true"
+    }
+
+    private static func intValue(_ rawValue: String?) -> Int {
+        guard let rawValue else { return 0 }
+        return Int(rawValue) ?? 0
+    }
+}

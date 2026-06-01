@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "bundle_version": "0.1.0",
+  "bundle_version": "0.2.0",
   "skills": [
     {
       "id": "transcripted-summarize",
@@ -17,6 +17,14 @@
       "status": "experimental",
       "path": "transcripted-search-memory/SKILL.md",
       "description": "Find what was said, when it happened, and where it came from."
+    },
+    {
+      "id": "transcripted-live-meeting",
+      "display_name": "Live Meeting",
+      "version": "0.2.1",
+      "status": "experimental",
+      "path": "transcripted-live-meeting/SKILL.md",
+      "description": "Answer from a local live meeting sidecar in Codex or Cowork, then switch to the final saved Markdown."
     }
   ],
   "iteration": {

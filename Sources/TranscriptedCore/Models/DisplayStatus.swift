@@ -90,6 +90,7 @@ public struct TranscriptionTask: Identifiable {
     public let meetingTitle: String?
 
     public init(
+        id: UUID = UUID(),
         micURL: URL,
         systemURL: URL?,
         outputFolder: URL,
@@ -97,7 +98,7 @@ public struct TranscriptionTask: Identifiable {
         splitLocalSpeakers: Bool = false,
         meetingTitle: String? = nil
     ) {
-        self.id = UUID()
+        self.id = id
         self.micURL = micURL
         self.systemURL = systemURL
         self.outputFolder = outputFolder

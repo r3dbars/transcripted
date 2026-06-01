@@ -21,7 +21,7 @@ extension MeetingCaptureBridge {
     //
     // These forward TranscriptedCore's new live-buffer hooks through the
     // bridge so MeetingSessionController can route mic + system buffers to
-    // a pair of StreamingEouAsrManager instances without touching the
+    // the live meeting streaming ASR sidecar without touching the
     // Audio class directly. Fired on the CoreAudio capture thread — the
     // handler MUST be real-time safe (no I/O, no locks held across async,
     // no allocations beyond small copies). See Audio.swift's
