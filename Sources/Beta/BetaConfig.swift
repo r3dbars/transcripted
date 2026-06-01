@@ -3,8 +3,7 @@
 //
 // History: this file used to ship a per-user bearer token baked in at build time
 // via sed/perl substitution in build-beta.sh. That token authenticated the app
-// against the archived proxy worker at draft-proxy.tz427gsydr.workers.dev, which
-// also re-exposed Anthropic's /v1/messages endpoint.
+// against an archived proxy worker that is no longer part of the live product.
 //
 // The proxy client is no longer part of the app target (BetaTelemetry and the
 // /config update-check flow are gone — Sparkle handles updates, Sentry handles
