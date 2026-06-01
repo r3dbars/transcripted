@@ -23,9 +23,17 @@ enum DictationDelivery: String, Sendable {
     }
 }
 
-enum DictationTranscriptWriter {
+enum DictationTranscriptMutationLock {
     private static let writeLock = NSLock()
 
+    static func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        return try operation()
+    }
+}
+
+enum DictationTranscriptWriter {
     private static let dayFilenameFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -95,9 +103,26 @@ enum DictationTranscriptWriter {
         createdAt: Date = Date(),
         directory: URL? = nil
     ) throws -> SavedDictationTranscript {
-        writeLock.lock()
-        defer { writeLock.unlock() }
+        try DictationTranscriptMutationLock.withLock {
+            try saveLocked(
+                text: text,
+                sourceAppName: sourceAppName,
+                sourceBundleID: sourceBundleID,
+                delivery: delivery,
+                createdAt: createdAt,
+                directory: directory
+            )
+        }
+    }
 
+    private static func saveLocked(
+        text: String,
+        sourceAppName: String,
+        sourceBundleID: String?,
+        delivery: DictationDelivery,
+        createdAt: Date,
+        directory: URL?
+    ) throws -> SavedDictationTranscript {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let title = buildTitle(from: normalizedText, createdAt: createdAt)
         let folder = directory ?? DictationStoragePaths.transcriptsFolder
