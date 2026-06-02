@@ -23,6 +23,7 @@ final class HomeViewModel: ObservableObject {
     private var refreshGeneration = 0
     private var dictationLimit = 10
     private var meetingLimit = 10
+    private var didTrackActivationReturnProxy = false
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
@@ -85,6 +86,10 @@ final class HomeViewModel: ObservableObject {
             self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.date)
             self.canLoadMoreDictations = snapshot.dictations.count > requestedDictationLimit
             self.canLoadMoreMeetings = snapshot.meetings.count > requestedMeetingLimit
+            self.trackActivationReturnProxyIfNeeded(
+                dictations: visibleDictations,
+                meetings: visibleMeetings
+            )
             self.isLoading = false
             self.isLoadingMore = false
         }
@@ -129,6 +134,29 @@ final class HomeViewModel: ObservableObject {
         if calendar.isDateInYesterday(day) { return "Yesterday" }
         let formatter = Self.daySectionFormatter
         return formatter.string(from: day)
+    }
+
+    private func trackActivationReturnProxyIfNeeded(
+        dictations: [SavedDictationEntry],
+        meetings: [RecentMeetingItem]
+    ) {
+        guard !didTrackActivationReturnProxy else { return }
+
+        let dictationCandidates = dictations.map { entry in
+            (kind: ActivationTelemetry.ArtifactKind.dictation, date: entry.createdAt)
+        }
+        let meetingCandidates = meetings.map { item in
+            (kind: ActivationTelemetry.ArtifactKind.meeting, date: item.date)
+        }
+        guard let latest = (dictationCandidates + meetingCandidates).max(by: { $0.date < $1.date }) else {
+            return
+        }
+
+        didTrackActivationReturnProxy = ActivationTelemetry.trackReturnProxyIfEligible(
+            priorArtifactKind: latest.kind,
+            priorArtifactDate: latest.date,
+            surface: .home
+        )
     }
 
     private static let daySectionFormatter: DateFormatter = {

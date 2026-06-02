@@ -97,6 +97,10 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
 - `onboarding_dismissed`
+- `activation_artifact_action_clicked`
+- `activation_agent_prompt_action_clicked`
+- `activation_agent_setup_cta_clicked`
+- `activation_return_proxy_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`

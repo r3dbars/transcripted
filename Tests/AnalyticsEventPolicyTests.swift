@@ -57,6 +57,107 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy pins active onboarding activation events") {
+        let expected: [(String, Set<String>)] = [
+            ("onboarding_model_state_changed", ["from_status", "step_id", "to_status"]),
+            ("onboarding_primary_cta_clicked", ["cta", "cta_type", "flow_elapsed_bucket", "model_state", "step_elapsed_bucket", "step_id"]),
+            ("onboarding_first_dictation_started", ["model_state", "step_id"]),
+            ("onboarding_first_dictation_saved", ["delivery", "step_id", "word_count_bucket"]),
+            ("onboarding_first_dictation_stop_clicked", ["step_id"]),
+            ("onboarding_first_dictation_empty", ["step_id"]),
+            ("onboarding_agent_cta_clicked", ["agent_cta", "step_id"]),
+            ("onboarding_reporting_toggle_changed", ["available", "enabled", "reporting_kind", "step_id"]),
+        ]
+
+        for (event, properties) in expected {
+            assertEqual(
+                AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? Set<String>(),
+                properties,
+                "\(event) should keep a narrow activation payload"
+            )
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
+        let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
+        let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
+        let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
+        let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
+
+        assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
+        assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
+        assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
+        assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+
+        let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
+            .union(artifact?.allowedProperties ?? Set<String>())
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action_kind": "open_markdown",
+                "agent_target": "codex",
+                "artifact_age_bucket": "24_48h",
+                "artifact_kind": "meeting",
+                "prompt_kind": "meeting_bundle",
+                "result": "success",
+                "surface": "home_preview",
+                "transcript": "private words",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "audio_path": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "meeting_url": "https://example.com/private",
+                "prompt_text": "Read my transcript",
+                "word_count": "4217",
+            ],
+            allowedKeys: activationAllowedProperties
+        )
+
+        assertEqual(sanitized["action_kind"], "open_markdown", "action kind should survive")
+        assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
+        assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
+        assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
+        assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
+        assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
+    }
+
+    runSuite("ActivationTelemetry buckets artifact age and next-day return proxy") {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+        assertEqual(
+            ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-3 * 3_600), now: now),
+            "lt_12h",
+            "same-session artifacts should stay in the shortest age bucket"
+        )
+        assertEqual(
+            ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-30 * 3_600), now: now),
+            "24_48h",
+            "next-day artifacts should use a stable age bucket"
+        )
+        assertNil(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-2 * 3_600), now: now),
+            "return proxy should not fire for immediate same-session refreshes"
+        )
+        assertEqual(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-24 * 3_600), now: now),
+            "18_36h",
+            "next-day return proxy should capture the 18-36h window"
+        )
+        assertEqual(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-96 * 3_600), now: now),
+            "3_7d",
+            "late return proxy should stay bucketed"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
         let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")

@@ -209,6 +209,7 @@ APP_SOURCES=(
     "Sources/Meeting/LiveMeetingStreamingUpdatePolicy.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/Observability/AnalyticsReporter.swift"
+    "Sources/Observability/ActivationTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"

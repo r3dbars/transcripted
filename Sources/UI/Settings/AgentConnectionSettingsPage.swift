@@ -60,6 +60,12 @@ struct AgentConnectionSettingsPage: View {
                                 title: copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config",
                                 symbolName: "doc.on.doc"
                             ) {
+                                ActivationTelemetry.trackAgentPromptAction(
+                                    promptKind: .claudeDesktopSetup,
+                                    actionKind: .copied,
+                                    agentTarget: .claudeDesktop,
+                                    surface: .agentSettings
+                                )
                                 copyText(
                                     ClaudeDesktopIntegrationInstaller.configSnippet(),
                                     showingCopiedFeedback: $copiedClaudeDesktopConfig
@@ -106,6 +112,12 @@ struct AgentConnectionSettingsPage: View {
                                     title: copiedFolderPrompt ? "Copied" : "Copy Folder Prompt",
                                     symbolName: "doc.on.doc"
                                 ) {
+                                    ActivationTelemetry.trackAgentPromptAction(
+                                        promptKind: .folderAccess,
+                                        actionKind: .copied,
+                                        agentTarget: .fallbackFolder,
+                                        surface: .agentSettings
+                                    )
                                     copyText(
                                         AgentConnectionGuide.folderAccessPrompt,
                                         showingCopiedFeedback: $copiedFolderPrompt
@@ -116,6 +128,12 @@ struct AgentConnectionSettingsPage: View {
                                     title: copiedFolderPaths ? "Copied" : "Copy Paths",
                                     symbolName: "folder"
                                 ) {
+                                    ActivationTelemetry.trackAgentPromptAction(
+                                        promptKind: .folderPaths,
+                                        actionKind: .copied,
+                                        agentTarget: .fallbackFolder,
+                                        surface: .agentSettings
+                                    )
                                     copyText(
                                         AgentConnectionGuide.folderPathsText,
                                         showingCopiedFeedback: $copiedFolderPaths
@@ -154,6 +172,17 @@ struct AgentConnectionSettingsPage: View {
                     tint: Color(nsColor: .systemBlue),
                     isEnabled: true
                 ) {
+                    ActivationTelemetry.trackAgentSetupCTA(
+                        setupKind: .localPrompt,
+                        agentTarget: .localAgent,
+                        surface: .agentSettings
+                    )
+                    ActivationTelemetry.trackAgentPromptAction(
+                        promptKind: .localAgentPrompt,
+                        actionKind: .copied,
+                        agentTarget: .localAgent,
+                        surface: .agentSettings
+                    )
                     copyText(
                         AgentConnectionGuide.starterPrompt(filename: nil),
                         showingCopiedFeedback: $copiedLocalAgentPrompt
@@ -339,6 +368,7 @@ struct AgentConnectionSettingsPage: View {
 
     private func installClaudeDesktop() {
         guard !isInstallingClaudeDesktop else { return }
+        let priorStatus = claudeDesktopActivationPriorStatus
         isInstallingClaudeDesktop = true
         claudeDesktopInstallResult = nil
         claudeDesktopInstallError = nil
@@ -351,9 +381,23 @@ struct AgentConnectionSettingsPage: View {
 
                 claudeDesktopInstallResult = result
                 refreshClaudeDesktopStatus()
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .claudeDesktop,
+                    agentTarget: .claudeDesktop,
+                    surface: .agentSettings,
+                    priorStatus: priorStatus,
+                    result: .success
+                )
             } catch {
                 claudeDesktopInstallError = error.localizedDescription
                 refreshClaudeDesktopStatus()
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .claudeDesktop,
+                    agentTarget: .claudeDesktop,
+                    surface: .agentSettings,
+                    priorStatus: priorStatus,
+                    result: .failed
+                )
             }
 
             isInstallingClaudeDesktop = false
@@ -366,14 +410,37 @@ struct AgentConnectionSettingsPage: View {
         do {
             let inboxURL = try AgentConnectionGuide.ensureCodexInboxFolder()
             copyText(AgentConnectionGuide.codexInboxSetupPrompt(inboxURL: inboxURL))
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .codexInboxSetup,
+                actionKind: .copied,
+                agentTarget: .codex,
+                surface: .agentSettings
+            )
 
             guard let setupURL = AgentConnectionGuide.codexInboxSetupURL(inboxURL: inboxURL) else {
                 NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
                 codexInboxSetupError = "The setup prompt was copied. Open Codex and paste it."
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .codexInbox,
+                    agentTarget: .codex,
+                    surface: .agentSettings,
+                    result: .fallbackCopied
+                )
                 return
             }
 
             if NSWorkspace.shared.open(setupURL) {
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .codexInbox,
+                    agentTarget: .codex,
+                    surface: .agentSettings
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .codexInboxSetup,
+                    actionKind: .opened,
+                    agentTarget: .codex,
+                    surface: .agentSettings
+                )
                 openedCodexInboxSetup = true
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -382,9 +449,21 @@ struct AgentConnectionSettingsPage: View {
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
                 codexInboxSetupError = "Codex was not found. The setup prompt was copied and the inbox folder is open."
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .codexInbox,
+                    agentTarget: .codex,
+                    surface: .agentSettings,
+                    result: .fallbackCopied
+                )
             }
         } catch {
             codexInboxSetupError = "Could not set up Codex Inbox: \(error.localizedDescription)"
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .codexInbox,
+                agentTarget: .codex,
+                surface: .agentSettings,
+                result: .failed
+            )
         }
     }
 
@@ -396,14 +475,37 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(true)
             let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .liveMeetingCodexSetup,
+                actionKind: .copied,
+                agentTarget: .codex,
+                surface: .agentSettings
+            )
 
             guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 liveMeetingCodexSetupError = "The setup prompt was copied. Open Codex and paste it."
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .liveSidecar,
+                    agentTarget: .codex,
+                    surface: .agentSettings,
+                    result: .fallbackCopied
+                )
                 return
             }
 
             if NSWorkspace.shared.open(setupURL) {
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .liveSidecar,
+                    agentTarget: .codex,
+                    surface: .agentSettings
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .liveMeetingCodexSetup,
+                    actionKind: .opened,
+                    agentTarget: .codex,
+                    surface: .agentSettings
+                )
                 openedLiveMeetingCodexSetup = true
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -412,6 +514,12 @@ struct AgentConnectionSettingsPage: View {
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .liveSidecar,
+                    agentTarget: .codex,
+                    surface: .agentSettings,
+                    result: .fallbackCopied
+                )
             }
         } catch {
             liveMeetingCodexEnabled = false
@@ -419,6 +527,12 @@ struct AgentConnectionSettingsPage: View {
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .codex,
+                surface: .agentSettings,
+                result: .failed
+            )
         }
     }
 
@@ -444,6 +558,17 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(true)
             let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
             copyText(AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL))
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .cowork,
+                surface: .agentSettings
+            )
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .liveMeetingCoworkSetup,
+                actionKind: .copied,
+                agentTarget: .cowork,
+                surface: .agentSettings
+            )
             copiedLiveMeetingCoworkSetup = true
             NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
             Task { @MainActor in
@@ -456,6 +581,12 @@ struct AgentConnectionSettingsPage: View {
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .cowork,
+                surface: .agentSettings,
+                result: .failed
+            )
         }
     }
 
@@ -477,6 +608,17 @@ struct AgentConnectionSettingsPage: View {
             }
 
             if NSWorkspace.shared.open(previewURL) {
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .livePreview,
+                    agentTarget: .localAgent,
+                    surface: .agentSettings
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .liveMeetingPreview,
+                    actionKind: .opened,
+                    agentTarget: .localAgent,
+                    surface: .agentSettings
+                )
                 openedLiveMeetingPreview = true
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -485,6 +627,12 @@ struct AgentConnectionSettingsPage: View {
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([previewURL])
                 liveMeetingCodexSetupError = "The live preview is ready at \(previewURL.absoluteString)."
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .livePreview,
+                    agentTarget: .localAgent,
+                    surface: .agentSettings,
+                    result: .fallbackCopied
+                )
             }
         } catch {
             liveMeetingCodexEnabled = false
@@ -492,6 +640,12 @@ struct AgentConnectionSettingsPage: View {
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
             liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .livePreview,
+                agentTarget: .localAgent,
+                surface: .agentSettings,
+                result: .failed
+            )
         }
     }
 
@@ -528,7 +682,24 @@ struct AgentConnectionSettingsPage: View {
 
     private func openClaudeDesktopDownload() {
         guard let url = URL(string: "https://claude.ai/download") else { return }
+        ActivationTelemetry.trackAgentSetupCTA(
+            setupKind: .claudeDesktop,
+            agentTarget: .claudeDesktop,
+            surface: .agentSettings,
+            priorStatus: claudeDesktopActivationPriorStatus
+        )
         NSWorkspace.shared.open(url)
+    }
+
+    private var claudeDesktopActivationPriorStatus: ActivationTelemetry.AgentSetupPriorStatus {
+        switch claudeDesktopStatus.state {
+        case .installed:
+            return .installed
+        case .notInstalled:
+            return .notInstalled
+        case .needsRepair:
+            return .needsRepair
+        }
     }
 }
 

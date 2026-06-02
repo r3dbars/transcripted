@@ -189,6 +189,17 @@ final class MenuAgentConnectPageView: NSView {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(AgentConnectionGuide.starterPrompt(filename: nil), forType: .string)
+        ActivationTelemetry.trackAgentSetupCTA(
+            setupKind: .localPrompt,
+            agentTarget: .localAgent,
+            surface: .menubarAgent
+        )
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .localAgentPrompt,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .menubarAgent
+        )
 
         resetTask?.cancel()
         copyPromptButton.title = "Copied"
@@ -208,6 +219,17 @@ final class MenuAgentConnectPageView: NSView {
             "\(AgentConnectionGuide.mcpSetupText)\n\n\(AgentConnectionGuide.mcpConfigExample)",
             forType: .string
         )
+        ActivationTelemetry.trackAgentSetupCTA(
+            setupKind: .claudeDesktop,
+            agentTarget: .claudeDesktop,
+            surface: .menubarAgent
+        )
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .claudeDesktopSetup,
+            actionKind: .copied,
+            agentTarget: .claudeDesktop,
+            surface: .menubarAgent
+        )
 
         resetTask?.cancel()
         copyMCPButton.title = "Copied"
@@ -224,6 +246,12 @@ final class MenuAgentConnectPageView: NSView {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(AgentConnectionGuide.folderPathsText, forType: .string)
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .folderPaths,
+            actionKind: .copied,
+            agentTarget: .fallbackFolder,
+            surface: .menubarAgent
+        )
 
         resetTask?.cancel()
         copyFoldersButton.title = "Copied"

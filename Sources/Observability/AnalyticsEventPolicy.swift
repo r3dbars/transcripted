@@ -100,6 +100,37 @@ struct AnalyticsEventPolicy: Equatable {
         "trigger",
     ]
 
+    private static let activationArtifactActionProperties: Set<String> = [
+        "action_kind",
+        "artifact_age_bucket",
+        "artifact_kind",
+        "surface",
+    ]
+
+    private static let activationAgentPromptActionProperties: Set<String> = [
+        "action_kind",
+        "agent_target",
+        "artifact_kind",
+        "prompt_kind",
+        "result",
+        "surface",
+    ]
+
+    private static let activationAgentSetupProperties: Set<String> = [
+        "agent_target",
+        "prior_status",
+        "result",
+        "setup_kind",
+        "surface",
+    ]
+
+    private static let activationReturnProxyProperties: Set<String> = [
+        "prior_artifact_kind",
+        "proxy_kind",
+        "return_window_bucket",
+        "surface",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -255,6 +286,22 @@ struct AnalyticsEventPolicy: Equatable {
                 "step_id",
                 "step_index",
             ]
+        ),
+        "activation_artifact_action_clicked": .init(
+            name: "activation_artifact_action_clicked",
+            allowedProperties: activationArtifactActionProperties
+        ),
+        "activation_agent_prompt_action_clicked": .init(
+            name: "activation_agent_prompt_action_clicked",
+            allowedProperties: activationAgentPromptActionProperties
+        ),
+        "activation_agent_setup_cta_clicked": .init(
+            name: "activation_agent_setup_cta_clicked",
+            allowedProperties: activationAgentSetupProperties
+        ),
+        "activation_return_proxy_observed": .init(
+            name: "activation_return_proxy_observed",
+            allowedProperties: activationReturnProxyProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
