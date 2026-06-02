@@ -103,9 +103,13 @@ class ParakeetEngine: ObservableObject {
         DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
     }
 
-    nonisolated private static func loadDictationInputDeviceSelection() -> DictationInputDeviceSelection? {
+    nonisolated private static func loadDictationInputDeviceSelection(
+        allowsBuiltInBluetoothFallback: Bool = true
+    ) -> DictationInputDeviceSelection? {
         do {
-            return try CoreAudioInputDeviceLookup.preferredDictationInputSelection()
+            return try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+            )
         } catch {
             return nil
         }
@@ -1319,9 +1323,12 @@ class ParakeetEngine: ObservableObject {
 
     private func audioInputSnapshot(
         operation: String,
-        recoveryGeneration: UInt64? = nil
+        recoveryGeneration: UInt64? = nil,
+        allowsBuiltInBluetoothFallback: Bool = true
     ) async throws -> ParakeetAudioInputSnapshot {
-        let selection = Self.loadDictationInputDeviceSelection()
+        let selection = Self.loadDictationInputDeviceSelection(
+            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+        )
         if let selection, selection.didOverrideDefault {
             let shouldApplyOverride = try await runTimedAudioEngineWork(operation: "\(operation)_device_check") { engine in
                 engine.inputNode.auAudioUnit.deviceID != selection.selectedInput.id
@@ -1877,7 +1884,10 @@ class ParakeetEngine: ObservableObject {
 
             let snapshot: ParakeetAudioInputSnapshot
             do {
-                snapshot = try await audioInputSnapshot(operation: "start_recording")
+                snapshot = try await audioInputSnapshot(
+                    operation: "start_recording",
+                    allowsBuiltInBluetoothFallback: !isRecoveryAttempt
+                )
             } catch {
                 let operationTimedOut = error is ParakeetAudioEngineWorkError
                 EventReporter.shared.capture(

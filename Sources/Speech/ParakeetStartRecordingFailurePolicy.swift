@@ -154,10 +154,14 @@ enum ParakeetAudioFormatReadinessPolicy {
             return .invalid
         }
 
+        let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
+        let overriddenBluetoothOutputRoute = selectionOverrodeDefault
+            && outputDeviceClass == "bluetooth"
+
         if selectedInputClass != "bluetooth",
-           outputDeviceClass != "bluetooth",
            inputSampleRate >= 44_100,
-           likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
+           lowRateOutputBus,
+           (outputDeviceClass != "bluetooth" || overriddenBluetoothOutputRoute) {
             return .routeNotSettled
         }
 

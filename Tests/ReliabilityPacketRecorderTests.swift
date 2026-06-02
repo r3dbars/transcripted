@@ -73,6 +73,50 @@ func testReliabilityPacketRecorder() {
         assertNil(ReliabilityPacketRecorder.packet(from: event), "boring app launch should not create a packet")
     }
 
+    runSuite("ReliabilityPacketRecorder maps dictation microphone timeout route shape safely") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-06-02T14:18:42.771Z",
+            level: "error",
+            engine: "dictation",
+            event: "microphone_start_timeout",
+            message: "Dictation recording failed to start within recovery budget",
+            context: [
+                "audio_device": "Private AirPods",
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
+                "error": "private raw error",
+                "failure_kind": "microphone_start_timeout",
+                "format_ready": "false",
+                "input_device_class": "built_in",
+                "output_device_class": "bluetooth",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "sample_flow_started": "false",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
+                "source_app_name": "Private App",
+                "stt_model": "parakeet-tdt-v3",
+                "transcript_text": "private words",
+            ],
+            appVersion: "1.1.45",
+            osVersion: "Version 26.5.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertNotNil(packet, "dictation mic start timeout should produce a reliability packet")
+        assertEqual(packet?.feature, "dictation", "packet feature should classify dictation")
+        assertEqual(packet?.stage, "start", "packet stage should classify startup")
+        assertEqual(packet?.outcome, "failed_retryable", "mic start timeout should be retryable")
+        assertEqual(packet?.context["route_shape"], "built_in_input_to_bluetooth_output", "coarse route shape should survive")
+        assertEqual(packet?.context["sample_flow_started"], "false", "sample-flow proof should stay queryable")
+        assertEqual(packet?.context["selection_reason"], "preferredBuiltInForBluetoothHeadset", "selection reason should stay coarse")
+        assertNil(packet?.context["audio_device"], "raw device names should not be copied into reliability packets")
+        assertNil(packet?.context["error"], "raw error text should not be copied into reliability packets")
+        assertNil(packet?.context["source_app_name"], "source app names should not be copied into reliability packets")
+        assertNil(packet?.context["transcript_text"], "transcript text should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder preserves coarse runtime shutdown duration") {
         let event = ObservabilityEvent(
             timestamp: "2026-05-03T01:15:11.605Z",

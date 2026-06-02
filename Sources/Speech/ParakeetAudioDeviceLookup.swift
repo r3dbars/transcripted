@@ -26,7 +26,9 @@ enum ParakeetAudioEngineWorkError: LocalizedError {
 }
 
 enum CoreAudioInputDeviceLookup {
-    static func preferredDictationInputSelection() throws -> DictationInputDeviceSelection {
+    static func preferredDictationInputSelection(
+        allowsBuiltInBluetoothFallback: Bool = true
+    ) throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
         var availableInputs = try allInputDevices()
 
@@ -43,7 +45,8 @@ enum CoreAudioInputDeviceLookup {
         return DictationInputDeviceSelectionPolicy.selection(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
-            availableInputs: availableInputs
+            availableInputs: availableInputs,
+            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
         )
     }
 
