@@ -462,9 +462,15 @@ struct PermissionsOnboardingView: View {
     private func copyAgentItem(_ item: AgentCopyItem) {
         let value: String
         let agentCTA: String
+        let promptKind: ActivationTelemetry.AgentPromptKind
+        let setupKind: ActivationTelemetry.AgentSetupKind
+        let agentTarget: ActivationTelemetry.AgentTarget
         switch item {
         case .claudeDesktopSetup:
             agentCTA = "claude_desktop_setup"
+            promptKind = .claudeDesktopSetup
+            setupKind = .claudeDesktop
+            agentTarget = .claudeDesktop
             value = """
             \(AgentConnectionGuide.mcpSetupText)
 
@@ -472,12 +478,26 @@ struct PermissionsOnboardingView: View {
             """
         case .localAgentPrompt:
             agentCTA = "local_agent_prompt"
+            promptKind = .localAgentPrompt
+            setupKind = .localPrompt
+            agentTarget = .localAgent
             value = AgentConnectionGuide.starterPrompt(filename: nil)
         }
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(value, forType: .string)
+        ActivationTelemetry.trackAgentSetupCTA(
+            setupKind: setupKind,
+            agentTarget: agentTarget,
+            surface: .onboarding
+        )
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: promptKind,
+            actionKind: .copied,
+            agentTarget: agentTarget,
+            surface: .onboarding
+        )
         AnalyticsReporter.track(
             "onboarding_agent_cta_clicked",
             properties: [

@@ -361,6 +361,11 @@ struct TranscriptedSettingsView: View {
                     action: activity.transcriptURL.map { transcriptURL in
                         {
                             trackSettingsAction("open_current_activity", page: .home)
+                            ActivationTelemetry.trackArtifactAction(
+                                artifactKind: .meeting,
+                                actionKind: .openMarkdown,
+                                surface: .homeCurrentActivity
+                            )
                             NSWorkspace.shared.open(transcriptURL)
                         }
                     }
@@ -387,6 +392,12 @@ struct TranscriptedSettingsView: View {
                     savedMeetingRetranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
                     onOpenDictation: { entry in
                         trackSettingsAction("open_recent_dictation", page: .home)
+                        ActivationTelemetry.trackArtifactAction(
+                            artifactKind: .dictation,
+                            actionKind: .openMarkdown,
+                            surface: .homeRow,
+                            artifactDate: entry.createdAt
+                        )
                         NSWorkspace.shared.open(entry.url)
                     },
                     onCopyDictation: { entry in
@@ -458,6 +469,12 @@ struct TranscriptedSettingsView: View {
                 preview: preview,
                 onOpenMarkdown: {
                     trackSettingsAction("open_recent_meeting_markdown", page: .home)
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .meeting,
+                        actionKind: .openMarkdown,
+                        surface: .homePreview,
+                        artifactDate: preview.date
+                    )
                     NSWorkspace.shared.open(preview.transcriptURL)
                 },
                 onCopyForAgent: {
@@ -576,6 +593,13 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .meetingBundle,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .homeRow,
+            artifactKind: .meeting
+        )
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if let bundle = AgentConnectionGuide.portableMeetingBundle(
@@ -595,6 +619,13 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .meetingMarkdown,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .homePreview,
+            artifactKind: .meeting
+        )
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(preview.markdown, forType: .string)
@@ -621,6 +652,12 @@ struct TranscriptedSettingsView: View {
 
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
+        ActivationTelemetry.trackArtifactAction(
+            artifactKind: .meeting,
+            actionKind: .preview,
+            surface: .homeRow,
+            artifactDate: item.date
+        )
         homeMeetingPreviewLoadTask?.cancel()
         homeMeetingPreviewLoadTask = Task { @MainActor in
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
@@ -700,6 +737,12 @@ struct TranscriptedSettingsView: View {
         [
             HomeRowMenuItem(title: "Open saved file", symbolName: "doc.text") {
                 trackSettingsAction("open_recent_dictation_file", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .openMarkdown,
+                    surface: .homeMenu,
+                    artifactDate: entry.createdAt
+                )
                 NSWorkspace.shared.open(entry.url)
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -708,6 +751,12 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .revealFolder,
+                    surface: .homeMenu,
+                    artifactDate: entry.createdAt
+                )
                 NSWorkspace.shared.activateFileViewerSelecting([entry.url])
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -741,6 +790,12 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .revealFolder,
+                    surface: .homeMenu,
+                    artifactDate: item.date
+                )
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
         ])
