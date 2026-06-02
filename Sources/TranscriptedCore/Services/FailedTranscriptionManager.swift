@@ -187,16 +187,24 @@ public class FailedTranscriptionManager: ObservableObject {
         return didPersist
     }
 
-    /// Removes a failed transcription from the queue
-    public func removeFailedTranscription(id: UUID) {
+    /// Removes a failed transcription from the queue.
+    @discardableResult
+    public func removeFailedTranscription(id: UUID) -> Bool {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
-            return
+            return false
         }
 
-        failedTranscriptions.remove(at: index)
-        saveFailedTranscriptions()
+        let removed = failedTranscriptions.remove(at: index)
+        let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions.insert(removed, at: index)
+        }
 
-        AppLogger.pipeline.info("Removed failed transcription", ["id": "\(id)"])
+        AppLogger.pipeline.info("Removed failed transcription", [
+            "id": "\(id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
     }
 
     @discardableResult
@@ -225,10 +233,15 @@ public class FailedTranscriptionManager: ObservableObject {
         return didPersist
     }
 
-    /// Removes a failed transcription and deletes its audio files
-    public func deleteFailedTranscription(id: UUID) {
+    /// Removes a failed transcription and deletes its audio files.
+    @discardableResult
+    public func deleteFailedTranscription(id: UUID) -> Bool {
         guard let failed = failedTranscriptions.first(where: { $0.id == id }) else {
-            return
+            return false
+        }
+
+        guard removeFailedTranscription(id: id) else {
+            return false
         }
 
         // Delete audio files independently so one failure does not hide the other.
@@ -242,8 +255,7 @@ public class FailedTranscriptionManager: ObservableObject {
             removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
         }
 
-        // Remove from queue
-        removeFailedTranscription(id: id)
+        return true
     }
 
     /// Increments retry count for a failed transcription

@@ -717,7 +717,12 @@ public class TranscriptionTaskManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle
         )
-        guard didPersist else { return false }
+        guard didPersist else {
+            if let retainedAudio {
+                removeRetainedFailedAudio(retainedAudio)
+            }
+            return false
+        }
         guard removeOriginalsAfterArchive else { return true }
 
         if retainedAudio?.micURL != nil {
@@ -729,6 +734,21 @@ public class TranscriptionTaskManager: ObservableObject {
             removeManagedCleanupFile(originalSystemURL, label: "archived failed system scratch")
         }
         return true
+    }
+
+    private func removeRetainedFailedAudio(_ retainedAudio: RetainedRecordingAudio) {
+        let fileManager = FileManager.default
+        for url in [retainedAudio.micURL, retainedAudio.systemURL].compactMap({ $0 }) {
+            try? fileManager.removeItem(at: url)
+        }
+
+        let remaining = (try? fileManager.contentsOfDirectory(
+            at: retainedAudio.directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        if remaining.isEmpty {
+            try? fileManager.removeItem(at: retainedAudio.directory)
+        }
     }
 
     private func makeSilentMicPlaceholderIfNeeded(
@@ -809,7 +829,7 @@ public class TranscriptionTaskManager: ObservableObject {
         guard failed.audioFilesExist() else {
             AppLogger.pipeline.error("Audio files no longer exist for failed transcription", ["failedId": "\(failedId)"])
             await MainActor.run {
-                failedTranscriptionManager.removeFailedTranscription(id: failedId)
+                _ = failedTranscriptionManager.removeFailedTranscription(id: failedId)
             }
             return false
         }

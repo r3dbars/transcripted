@@ -306,7 +306,7 @@ struct TranscriptedSettingsView: View {
                     audioAttachment: { failedMeetingAudioAttachment(for: $0) },
                     onRetry: { item in
                         trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
+                        retryFailedMeeting(item)
                     },
                     onRevealAudio: { item in
                         trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
@@ -420,7 +420,7 @@ struct TranscriptedSettingsView: View {
                     },
                     onRetryFailedMeeting: { item in
                         trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
+                        retryFailedMeeting(item)
                     },
                     onRevealFailedMeetingAudio: { item in
                         trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
@@ -841,10 +841,21 @@ struct TranscriptedSettingsView: View {
             MeetingAudioPlayback.shared.stop()
         }
 
+        let didClear: Bool
+        let failureTitle: String
         if !item.audioURLs.isEmpty {
-            meetingSession.deleteFailedMeeting(id: item.id)
+            didClear = meetingSession.deleteFailedMeeting(id: item.id)
+            failureTitle = "Could not delete failed meeting"
         } else {
-            meetingSession.dismissFailedMeeting(id: item.id)
+            didClear = meetingSession.dismissFailedMeeting(id: item.id)
+            failureTitle = "Could not dismiss failed meeting"
+        }
+
+        if !didClear {
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
+            )
         }
     }
 
@@ -854,11 +865,26 @@ struct TranscriptedSettingsView: View {
     }
 
     private func presentHomeDeleteFailure(title: String, error: Error) {
+        presentHomeActionFailure(title: title, message: error.localizedDescription)
+    }
+
+    private func presentHomeActionFailure(title: String, message: String) {
         NSSound.beep()
         homeDeleteFailure = HomeDeleteFailure(
             title: title,
-            message: error.localizedDescription
+            message: message
         )
+    }
+
+    private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
+        let didStart = meetingSession.retryFailedMeeting(id: item.id)
+        if !didStart {
+            presentHomeActionFailure(
+                title: "Could not retry meeting",
+                message: failedMeetingRetryUnavailableReason
+                    ?? "Transcripted could not start that retry. The saved audio may already be cleared."
+            )
+        }
     }
 
     private var homeWelcomeSummary: String {

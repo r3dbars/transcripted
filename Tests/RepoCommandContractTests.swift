@@ -1816,6 +1816,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Home failed meeting actions surface failures") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift")
+
+        assertTrue(
+            controllerContents.contains("func retryFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting retry should report whether the retry started"
+        )
+        assertTrue(
+            controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool")
+                && controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting clear actions should report whether the queue changed"
+        )
+        assertTrue(
+            managerContents.contains("public func removeFailedTranscription(id: UUID) -> Bool")
+                && managerContents.contains("public func deleteFailedTranscription(id: UUID) -> Bool"),
+            "failed-queue manager deletes should return persistence results instead of fire-and-forget"
+        )
+        assertTrue(
+            settingsContents.contains("retryFailedMeeting(item)")
+                && settingsContents.contains("let didStart = meetingSession.retryFailedMeeting(id: item.id)")
+                && settingsContents.contains("title: \"Could not retry meeting\""),
+            "Home retry clicks should surface immediate retry blockers"
+        )
+        assertTrue(
+            settingsContents.contains("let didClear: Bool")
+                && settingsContents.contains("didClear = meetingSession.deleteFailedMeeting(id: item.id)")
+                && settingsContents.contains("didClear = meetingSession.dismissFailedMeeting(id: item.id)")
+                && settingsContents.contains("if !didClear"),
+            "Home delete/dismiss clicks should surface failed queue updates"
+        )
+    }
+
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")

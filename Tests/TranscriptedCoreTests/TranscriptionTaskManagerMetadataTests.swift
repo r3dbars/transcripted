@@ -520,6 +520,39 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
     }
 
+    func testManualFailedQueueRemovesRetainedAudioWhenQueuePersistenceFails() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        try FileManager.default.createDirectory(
+            at: tempDirectory.appendingPathComponent("failed_transcriptions.json"),
+            withIntermediateDirectories: true
+        )
+
+        let didQueue = manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Temporary transcription failure"
+        )
+
+        XCTAssertFalse(didQueue)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should stay when queue persistence fails")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should stay when queue persistence fails")
+        let retainedChildren = (try? FileManager.default.contentsOfDirectory(
+            at: retainedAudioDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        XCTAssertTrue(retainedChildren.isEmpty, "failed queue persistence should not leave orphan retained audio")
+    }
+
     func testSystemOnlyFailedQueueCreatesPlaceholderAndRetainsSystemAudio() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
