@@ -1163,9 +1163,14 @@ final class MeetingSessionController: ObservableObject {
         return preservedCount
     }
 
-    func retryFailedMeeting(id: UUID) {
-        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return }
-        guard !retryingFailedMeetingIDs.contains(id) else { return }
+    @discardableResult
+    func retryFailedMeeting(id: UUID) -> Bool {
+        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return false }
+        guard !retryingFailedMeetingIDs.contains(id) else { return false }
+        guard failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
+            refreshFailedMeetings()
+            return false
+        }
 
         retryingFailedMeetingIDs.insert(id)
         activeTranscriptionTrigger = .unknown
@@ -1194,6 +1199,7 @@ final class MeetingSessionController: ObservableObject {
             self.retryingFailedMeetingIDs.remove(id)
             self.refreshFailedMeetings()
         }
+        return true
     }
 
     @discardableResult
@@ -1266,16 +1272,20 @@ final class MeetingSessionController: ObservableObject {
         return true
     }
 
-    func dismissFailedMeeting(id: UUID) {
+    @discardableResult
+    func dismissFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        failedManager.removeFailedTranscription(id: id)
+        let didDismiss = failedManager.removeFailedTranscription(id: id)
         refreshFailedMeetings()
+        return didDismiss || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
 
-    func deleteFailedMeeting(id: UUID) {
+    @discardableResult
+    func deleteFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        failedManager.deleteFailedTranscription(id: id)
+        let didDelete = failedManager.deleteFailedTranscription(id: id)
         refreshFailedMeetings()
+        return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
 
     // MARK: - Subscriptions
