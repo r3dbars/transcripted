@@ -18,6 +18,22 @@ Claude Desktop is the best full-library experience.
 4. Click `Install in Claude`.
 5. Restart Claude Desktop.
 
+After restart, ask Claude:
+
+```text
+Use Transcripted to summarize my latest meeting. Tell me which Transcripted source you used, including the filename/date, then list decisions and action items.
+```
+
+Tomorrow, ask:
+
+```text
+Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today.
+```
+
+Claude answers from Transcripted's read-only direct tools. If those tools are
+unavailable, use the local-agent prompt below so an agent can fall back to the
+saved Markdown folders.
+
 Transcripted copies the bundled `transcripted-mcp` helper into:
 
 ```text
@@ -56,6 +72,9 @@ Current `transcripted-mcp` capabilities:
 - `search`
 - `who_is`
 - `recap`
+
+These tools are read-only, but they are not redacted. `read_meeting` and
+`read_dictation` can return local transcript text to the agent you connected.
 
 ## Good Path: Local Coding Agents
 
