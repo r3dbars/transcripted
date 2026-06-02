@@ -46,14 +46,22 @@ POSTHOG_ENV_KEYS = (
 )
 POSTHOG_ACTIVE_EVENTS = (
     "app_launched",
+    "app_unclean_shutdown_detected",
+    "app_session_stall_detected",
     "onboarding_completed",
     "dictation_started",
+    "dictation_start_failed",
     "dictation_completed",
     "dictation_cancelled",
+    "dictation_no_speech",
+    "dictation_audio_route_recovery_timeout",
     "meeting_recording_started",
+    "meeting_recording_start_failed",
     "meeting_recording_stopped",
+    "meeting_recording_cancelled",
     "meeting_transcript_saved",
     "meeting_transcript_failed",
+    "meeting_transcript_skipped",
 )
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
@@ -2312,6 +2320,26 @@ def run_self_test() -> None:
         assert normalize_posthog_host("https://us.i.posthog.com") == "https://us.posthog.com"
         assert posthog_host_error("http://posthog.invalid") == "PostHog host must use HTTPS"
         assert posthog_host_error("https://example.invalid") is not None
+        health_probe_workflow_events = {
+            "app_launched",
+            "app_unclean_shutdown_detected",
+            "app_session_stall_detected",
+            "onboarding_completed",
+            "dictation_started",
+            "dictation_start_failed",
+            "dictation_completed",
+            "dictation_cancelled",
+            "dictation_no_speech",
+            "dictation_audio_route_recovery_timeout",
+            "meeting_recording_started",
+            "meeting_recording_start_failed",
+            "meeting_recording_stopped",
+            "meeting_recording_cancelled",
+            "meeting_transcript_saved",
+            "meeting_transcript_failed",
+            "meeting_transcript_skipped",
+        }
+        assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
         assert Path(paths["latest_json"]).exists()
