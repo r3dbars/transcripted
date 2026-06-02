@@ -173,6 +173,10 @@ enum AgentConnectionGuide {
 
         Use these files as the source of truth.
 
+        Good first asks:
+        - Summarize my latest meeting. Tell me which Transcripted source you used, including the filename/date, then list decisions and action items.
+        - Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today.
+
         Rules:
         - Prefer Transcripted direct tools when available; otherwise search meetings and dictations together from files.
         - Cite filenames, dates, speakers, and timestamps when useful.

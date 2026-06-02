@@ -68,6 +68,14 @@ func testAgentConnectionGuide() {
             "prompt should support direct-tool retrieval and folder fallback"
         )
         assertTrue(
+            prompt.contains("Summarize my latest meeting. Tell me which Transcripted source you used, including the filename/date, then list decisions and action items."),
+            "prompt should give agents a concrete first-answer ask"
+        )
+        assertTrue(
+            prompt.contains("Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today."),
+            "prompt should make the next-day return ask obvious"
+        )
+        assertTrue(
             prompt.contains("For relative dates like today or yesterday, state the exact dates searched."),
             "prompt should force exact dates for relative-date work"
         )
