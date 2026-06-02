@@ -127,12 +127,12 @@ func testSentryEventPolicy() {
                 "forced_readiness_recoveries": "2",
                 "format_ready": "false",
                 "hfp_suspected": "false",
-                "input_device_class": "bluetooth",
+                "input_device_class": "built_in",
                 "output_device_class": "bluetooth",
                 "readiness_refreshes": "8",
                 "recovering": "false",
                 "recovery_start_attempts": "2",
-                "route_shape": "bluetooth_input_to_built_in_output",
+                "route_shape": "built_in_input_to_bluetooth_output",
                 "sample_flow_started": "false",
                 "selected_input_class": "built_in",
                 "selection_overrode_default": "true",
@@ -151,9 +151,9 @@ func testSentryEventPolicy() {
         assertEqual(tags["format_ready"], "false", "format readiness should be queryable")
         assertEqual(tags["hfp_suspected"], "false", "HFP suspicion should be queryable")
         assertEqual(tags["recovering"], "false", "recovery state should be queryable")
-        assertEqual(tags["input_device_class"], "bluetooth", "coarse device class should be queryable")
+        assertEqual(tags["input_device_class"], "built_in", "coarse device class should be queryable")
         assertEqual(tags["output_device_class"], "bluetooth", "coarse output class should be queryable")
-        assertEqual(tags["route_shape"], "bluetooth_input_to_built_in_output", "coarse route shape should be queryable")
+        assertEqual(tags["route_shape"], "built_in_input_to_bluetooth_output", "coarse route shape should be queryable")
         assertEqual(tags["sample_flow_started"], "false", "sample-flow state should be queryable")
         assertEqual(tags["selected_input_class"], "built_in", "selected input class should be queryable")
         assertEqual(tags["selection_overrode_default"], "true", "input override state should be queryable")

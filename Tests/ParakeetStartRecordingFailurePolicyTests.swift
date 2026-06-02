@@ -186,7 +186,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "AirPods HFP 24k hardware to 48k output should remain valid")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts built-in override with Bluetooth output speech bus") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers built-in override with Bluetooth output speech bus") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -197,7 +197,8 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionOverrodeDefault: true
         )
 
-        assertEqual(readiness, .ready, "built-in fallback with Bluetooth output can start because the tap uses the delivered buffer format")
+        assertEqual(readiness, .routeNotSettled, "built-in fallback should wait until the Bluetooth output bus leaves speech mode")
+        assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "stale Bluetooth output routes should map to route-not-settled")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy accepts intentional Bluetooth output speech bus") {
@@ -212,6 +213,20 @@ func testParakeetStartRecordingFailurePolicy() {
         )
 
         assertEqual(readiness, .ready, "native built-in capture with Bluetooth output can still use the speech bus when Transcripted did not force an input override")
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts settled built-in override with Bluetooth output") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: true
+        )
+
+        assertEqual(readiness, .ready, "built-in fallback can start once the Bluetooth output bus settles back to a normal capture rate")
     }
 
     runSuite("ParakeetAudioFormatReadinessPolicy defers stale AirPods-to-built-in switch formats") {

@@ -32,6 +32,23 @@ func testDictationInputDeviceSelectionPolicy() {
         assertEqual(selection.selectedInput, macBookMic, "MacBook mic should be the first built-in fallback")
     }
 
+    runSuite("DictationInputDeviceSelectionPolicy can suppress built-in fallback for recovery starts") {
+        let airPodsInput = device(1, "Justin's AirPods Pro", .bluetooth)
+        let airPodsOutput = device(2, "Justin's AirPods Pro", .bluetooth, inputChannels: 0)
+        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: [airPodsInput, macBookMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, airPodsInput, "recovery starts should get one chance to use the matched Bluetooth route")
+        assertFalse(selection.didOverrideDefault, "suppressed fallback should not force the hybrid built-in/Bluetooth route")
+        assertEqual(selection.reason, .builtInFallbackSuppressedForRecoveryAttempt, "selection reason should make the recovery fallback queryable")
+    }
+
     runSuite("DictationInputDeviceSelectionPolicy keeps Bluetooth input when output is not Bluetooth") {
         let airPodsInput = device(1, "Justin's AirPods Pro", .bluetooth)
         let speakers = device(2, "MacBook Pro Speakers", .builtIn, inputChannels: 0)
