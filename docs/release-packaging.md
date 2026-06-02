@@ -128,19 +128,30 @@ Sparkle steps in `docs/sparkle-updates.md`.
 
 After the release is published on GitHub, register the matching Sentry release
 so Sentry sees a real finalized release before production events arrive. This
-also uploads `build/Transcripted.app.dSYM` when it is present:
+also requires and uploads `build/Transcripted.app.dSYM` by default:
 
 ```bash
-bash scripts/release/register-sentry-release.sh <version>
+SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>
 ```
 
 The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
 Sentry project, associates commits when Sentry can resolve the repo, and uploads
-debug symbol files through `sentry-cli debug-files upload --no-sources`. If the
-dSYM was moved, set `SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM`. If
-symbols are intentionally unavailable for a one-off local registration, set
-`SENTRY_UPLOAD_DEBUG_FILES=0`; shipped releases should not skip this because
-crash reports may lose app frames.
+debug symbol files through `sentry-cli debug-files upload --no-sources`. Before
+upload, it verifies the dSYM UUID matches the built app binary at
+`build/Transcripted.app/Contents/MacOS/Transcripted`.
+
+If you are registering a reused artifact, set both paths so they point at the
+matching pair from that exact release build:
+
+```bash
+SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM \
+SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted \
+bash scripts/release/register-sentry-release.sh <version>
+```
+
+If symbols are intentionally unavailable for a one-off local registration, set
+`SENTRY_UPLOAD_DEBUG_FILES=0` and call the release yellow; shipped releases
+should not skip this because crash reports may lose app frames.
 
 If you expect `brew install` or `brew upgrade` to pick up the new version, do
 not stop after the GitHub release is published. You must also refresh and push

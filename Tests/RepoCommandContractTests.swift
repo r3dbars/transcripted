@@ -481,6 +481,47 @@ func testRepoCommandContract() {
         assertTrue(cask.contains("depends_on macos: \">= :tahoe\""), "Homebrew cask should stay aligned with the macOS 26+ release floor")
     }
 
+    runSuite("Repo command contract - Sentry release registration requires matching dSYM") {
+        let buildBeta = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        let registerSentry = readRepoTextFile("scripts/release/register-sentry-release.sh")
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+
+        assertTrue(
+            buildBeta.contains("GENERATE_DSYM=\"${GENERATE_DSYM:-1}\"")
+                && buildBeta.contains("dsymutil \"$APP_BINARY\" -o \"$APP_DSYM\""),
+            "release builds should generate the app dSYM by default"
+        )
+        assertTrue(
+            buildBeta.contains("SENTRY_REQUIRE_DEBUG_FILES=\"${SENTRY_REQUIRE_DEBUG_FILES:-1}\"")
+                && buildBeta.contains("SENTRY_APP_BINARY_PATH=\"${SENTRY_APP_BINARY_PATH:-$APP_BINARY}\"")
+                && buildBeta.contains("SENTRY_DEBUG_FILES_PATH=\"${SENTRY_DEBUG_FILES_PATH:-$APP_DSYM}\""),
+            "build-beta.sh should register Sentry with the exact app/dSYM pair from the release build"
+        )
+        assertTrue(
+            registerSentry.contains("SENTRY_REQUIRE_DEBUG_FILES=\"${SENTRY_REQUIRE_DEBUG_FILES:-1}\"")
+                && registerSentry.contains("SENTRY_DEBUG_FILES_PATH=\"${SENTRY_DEBUG_FILES_PATH:-build/Transcripted.app.dSYM}\"")
+                && registerSentry.contains("SENTRY_APP_BINARY_PATH=\"${SENTRY_APP_BINARY_PATH:-build/Transcripted.app/Contents/MacOS/Transcripted}\""),
+            "standalone Sentry registration should require the release dSYM and know the matching app binary path by default"
+        )
+        assertTrue(
+            registerSentry.contains("dwarfdump --uuid \"$path\"")
+                && registerSentry.contains("verify_debug_file_match \"$SENTRY_APP_BINARY_PATH\" \"$SENTRY_DEBUG_FILES_PATH\"")
+                && registerSentry.contains("Sentry debug files do not match the app binary."),
+            "Sentry registration should fail before upload when the dSYM UUID does not match the app binary"
+        )
+        assertTrue(
+            registerSentry.contains("Release is yellow unless matching dSYM was uploaded separately"),
+            "explicit debug-file skips should call the release yellow"
+        )
+        assertTrue(
+            releaseDocs.contains("verifies the dSYM UUID matches the built app binary")
+                && releaseDocs.contains("SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM")
+                && releaseDocs.contains("SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted")
+                && releaseDocs.contains("call the release yellow"),
+            "release docs should tell future workers how to register a reused artifact without stale symbols"
+        )
+    }
+
     runSuite("Repo command contract - Sparkle app settings point at the committed appcast") {
         let infoPlist = readRepoTextFile("Info.plist")
         let appcast = readRepoTextFile("docs/appcast.xml")
