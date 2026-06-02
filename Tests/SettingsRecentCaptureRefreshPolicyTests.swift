@@ -72,6 +72,64 @@ func testSettingsRecentCaptureRefreshPolicy() {
         )
     }
 
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — forced Home refresh bypasses passive gates") {
+        assertTrue(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: true,
+                isInFlight: true,
+                lastStartedAt: Date(timeIntervalSinceReferenceDate: 20),
+                now: Date(timeIntervalSinceReferenceDate: 20.1)
+            ),
+            "new or deleted captures should refresh Home even when passive work would be coalesced"
+        )
+    }
+
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — force does not bypass page gating") {
+        let now = Date(timeIntervalSinceReferenceDate: 20)
+
+        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about] {
+            assertFalse(
+                SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                    for: page,
+                    force: true,
+                    isInFlight: false,
+                    lastStartedAt: nil,
+                    now: now
+                ),
+                "\(page.rawValue) should not run Home recent-capture work even for forced refresh events"
+            )
+        }
+    }
+
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — passive Home refresh resumes after debounce") {
+        assertTrue(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: false,
+                isInFlight: false,
+                lastStartedAt: Date(timeIntervalSinceReferenceDate: 20),
+                now: Date(timeIntervalSinceReferenceDate: 21.6),
+                minimumInterval: 1.5
+            ),
+            "Home should refresh again once the passive debounce window has elapsed"
+        )
+    }
+
+    runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — debounce boundary is refreshable on Home") {
+        assertTrue(
+            SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+                for: .home,
+                force: false,
+                isInFlight: false,
+                lastStartedAt: Date(timeIntervalSinceReferenceDate: 20),
+                now: Date(timeIntervalSinceReferenceDate: 21.5),
+                minimumInterval: 1.5
+            ),
+            "Home should refresh at the exact passive debounce boundary"
+        )
+    }
+
     runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
         assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
