@@ -641,6 +641,7 @@ fi
 if [ "$REGISTER_SENTRY_RELEASE" = "1" ]; then
     echo "Registering Sentry release..."
     SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-1}" \
+        SENTRY_APP_BINARY_PATH="${SENTRY_APP_BINARY_PATH:-$APP_BINARY}" \
         SENTRY_DEBUG_FILES_PATH="${SENTRY_DEBUG_FILES_PATH:-$APP_DSYM}" \
         bash scripts/release/register-sentry-release.sh "$APP_VERSION"
 fi

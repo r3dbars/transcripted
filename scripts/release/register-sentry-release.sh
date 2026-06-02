@@ -6,6 +6,7 @@ usage() {
     echo "Usage: bash scripts/release/register-sentry-release.sh [version]"
     echo ""
     echo "Creates and finalizes the Sentry release matching Info.plist."
+    echo "Requires and uploads the matching release dSYM by default."
     echo "Defaults: SENTRY_ORG=r3dbars, SENTRY_PROJECT=apple-macos"
 }
 
@@ -25,8 +26,9 @@ SENTRY_PROJECT="${SENTRY_PROJECT:-apple-macos}"
 SENTRY_REPOSITORY="${SENTRY_REPOSITORY:-r3dbars/transcripted}"
 SENTRY_SET_COMMITS="${SENTRY_SET_COMMITS:-1}"
 SENTRY_UPLOAD_DEBUG_FILES="${SENTRY_UPLOAD_DEBUG_FILES:-1}"
-SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-0}"
+SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-1}"
 SENTRY_DEBUG_FILES_PATH="${SENTRY_DEBUG_FILES_PATH:-build/Transcripted.app.dSYM}"
+SENTRY_APP_BINARY_PATH="${SENTRY_APP_BINARY_PATH:-build/Transcripted.app/Contents/MacOS/Transcripted}"
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "Missing sentry-cli."
@@ -82,6 +84,76 @@ sentry_commit_spec() {
     fi
 }
 
+uuid_set_for_path() {
+    local path="$1"
+    dwarfdump --uuid "$path" 2>/dev/null | awk '/^UUID:/ { print $2 }' | sort -u
+}
+
+print_uuid_set() {
+    local value="$1"
+
+    if [ -n "$value" ]; then
+        printf '%s\n' "$value" | sed 's/^/    /' >&2
+    else
+        echo "    [none]" >&2
+    fi
+}
+
+verify_debug_file_match() {
+    local binary_path="$1"
+    local debug_files_path="$2"
+    local binary_uuids
+    local debug_file_uuids
+
+    if ! command -v dwarfdump >/dev/null 2>&1; then
+        echo "Missing dwarfdump; cannot verify that Sentry debug files match the app binary." >&2
+        echo "Install Xcode command line tools before registering a shipped release." >&2
+        return 1
+    fi
+
+    if [ ! -e "$binary_path" ]; then
+        echo "Missing app binary for Sentry debug-file match verification: $binary_path" >&2
+        echo "Keep the release app bundle next to the dSYM, or set SENTRY_APP_BINARY_PATH to the matching app binary." >&2
+        return 1
+    fi
+
+    if ! binary_uuids="$(uuid_set_for_path "$binary_path")"; then
+        echo "Could not read UUIDs from app binary: $binary_path" >&2
+        return 1
+    fi
+
+    if ! debug_file_uuids="$(uuid_set_for_path "$debug_files_path")"; then
+        echo "Could not read UUIDs from Sentry debug files: $debug_files_path" >&2
+        return 1
+    fi
+
+    if [ -z "$binary_uuids" ] || [ -z "$debug_file_uuids" ]; then
+        echo "Sentry debug-file UUID verification failed." >&2
+        echo "  app binary: $binary_path" >&2
+        echo "  app UUID(s):" >&2
+        print_uuid_set "$binary_uuids"
+        echo "  debug files: $debug_files_path" >&2
+        echo "  debug UUID(s):" >&2
+        print_uuid_set "$debug_file_uuids"
+        return 1
+    fi
+
+    if [ "$binary_uuids" != "$debug_file_uuids" ]; then
+        echo "Sentry debug files do not match the app binary." >&2
+        echo "  app binary: $binary_path" >&2
+        echo "  app UUID(s):" >&2
+        print_uuid_set "$binary_uuids"
+        echo "  debug files: $debug_files_path" >&2
+        echo "  debug UUID(s):" >&2
+        print_uuid_set "$debug_file_uuids"
+        echo "Rebuild with build-beta.sh, or point SENTRY_DEBUG_FILES_PATH and SENTRY_APP_BINARY_PATH at the matching artifact pair." >&2
+        return 1
+    fi
+
+    echo "Verified Sentry debug files match the app binary UUID(s):"
+    printf '%s\n' "$binary_uuids" | sed 's/^/  /'
+}
+
 echo "Sentry release: $SENTRY_RELEASE"
 echo "Sentry dist: $SENTRY_DIST"
 echo "Sentry project: $SENTRY_ORG/$SENTRY_PROJECT"
@@ -112,6 +184,7 @@ fi
 
 if [ "$SENTRY_UPLOAD_DEBUG_FILES" = "1" ]; then
     if [ -e "$SENTRY_DEBUG_FILES_PATH" ]; then
+        verify_debug_file_match "$SENTRY_APP_BINARY_PATH" "$SENTRY_DEBUG_FILES_PATH"
         echo "Uploading Sentry debug files: $SENTRY_DEBUG_FILES_PATH"
         sentry-cli debug-files upload \
             --org "$SENTRY_ORG" \
@@ -125,10 +198,11 @@ if [ "$SENTRY_UPLOAD_DEBUG_FILES" = "1" ]; then
         exit 1
     else
         echo "Sentry debug files not found: $SENTRY_DEBUG_FILES_PATH"
-        echo "Skipping debug-file upload. Crash reports may be missing app frames."
+        echo "Skipping debug-file upload. Release is yellow unless matching dSYM was uploaded separately; crash reports may be missing app frames."
     fi
 else
     echo "Skipping Sentry debug-file upload because SENTRY_UPLOAD_DEBUG_FILES=$SENTRY_UPLOAD_DEBUG_FILES."
+    echo "Release is yellow unless matching dSYM was uploaded separately."
 fi
 
 echo "Sentry release registration complete."
