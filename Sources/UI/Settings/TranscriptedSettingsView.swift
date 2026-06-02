@@ -357,7 +357,7 @@ struct TranscriptedSettingsView: View {
                     detail: activity.detail,
                     tone: activity.tone,
                     progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown",
                     action: activity.transcriptURL.map { transcriptURL in
                         {
                             trackSettingsAction("open_current_activity", page: .home)
@@ -698,7 +698,7 @@ struct TranscriptedSettingsView: View {
 
     private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         [
-            HomeRowMenuItem(title: "Open saved file", symbolName: "doc.text") {
+            HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text") {
                 trackSettingsAction("open_recent_dictation_file", page: .home)
                 NSWorkspace.shared.open(entry.url)
             },

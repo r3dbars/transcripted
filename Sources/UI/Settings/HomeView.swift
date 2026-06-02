@@ -988,9 +988,9 @@ struct HomeArtifactStatus: Equatable {
     static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus? {
         switch entry.delivery {
         case .pasted, .copied:
-            return nil
+            return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)
         case .failed:
-            return HomeArtifactStatus(text: "Saved only", tone: .warning)
+            return HomeArtifactStatus(text: "Saved to Markdown only", tone: .warning)
         }
     }
 
@@ -1381,10 +1381,14 @@ struct HomeDictationRow: View {
                     .multilineTextAlignment(.leading)
 
                 if let status {
-                    Text(status.text)
-                        .font(.caption2)
-                        .foregroundStyle(status.foregroundStyle)
-                        .lineLimit(1)
+                    Button(action: onOpen) {
+                        Label(status.text, systemImage: "doc.text")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(status.foregroundStyle)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open Markdown")
                 }
 
                 if canExpand {
