@@ -1077,6 +1077,7 @@ enum MeetingOverlayTokens {
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6
     static let tooltipDelayNanoseconds: UInt64 = 80_000_000
+    static let defaultDetectedMeetingPromptTimeoutSeconds = 30
 }
 
 // MARK: - Controller
@@ -1212,7 +1213,10 @@ final class MeetingOverlayController {
     }
 
     @discardableResult
-    func presentDetectedMeetingPrompt(_ candidate: MeetingPromptDetector.Candidate, timeout seconds: Int = 10) -> Bool {
+    func presentDetectedMeetingPrompt(
+        _ candidate: MeetingPromptDetector.Candidate,
+        timeout seconds: Int = MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds
+    ) -> Bool {
         guard let session = meetingSession else { return false }
 
         switch session.state {
