@@ -202,7 +202,7 @@ if [ -n "$changed_paths" ]; then
             add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/CLAUDE.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"
