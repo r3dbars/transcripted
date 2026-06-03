@@ -1681,8 +1681,19 @@ func testRepoCommandContract() {
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
-                && controllerContents.contains("updateFailedTranscriptionAudio("),
-            "late WAV finalization should refresh the failed queue so retries do not point at deleted mic recovery segments"
+                && controllerContents.contains("promoteFinalizedFailedTranscriptionAudio("),
+            "late WAV finalization should promote finalized failed audio before refreshing the failed queue"
+        )
+        let refreshTimedOutAudioBlock = sourceSlice(
+            controllerContents,
+            from: "private func refreshTimedOutFailedMeetingAudio(",
+            to: "private func refreshFailedMeetings("
+        )
+        assertTrue(
+            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+                && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
+                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
+            "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
@@ -1786,6 +1797,17 @@ func testRepoCommandContract() {
         assertTrue(
             terminationBlock.contains("activeQueuedTranscriptionJobID = nil"),
             "shutdown preservation should clear the active queued job owner used for live sidecar final attachment"
+        )
+        assertTrue(
+            terminationBlock.contains("let shutdownFailedTaskId = UUID()")
+                && terminationBlock.contains("capture.stopAndAwaitFiles {")
+                && terminationBlock.contains("refreshTimedOutFailedMeetingAudio("),
+            "shutdown stop timeouts should keep the same late-finalization repair path as normal meeting stops"
+        )
+        assertTrue(
+            terminationBlock.contains("taskId: shutdownFailedTaskId")
+                && terminationBlock.contains("archiveAudio: !files.didTimeOut"),
+            "shutdown stop timeouts should keep unfinished scratch audio in place until late finalization can promote it"
         )
     }
 

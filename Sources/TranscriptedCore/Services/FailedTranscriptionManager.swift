@@ -180,6 +180,9 @@ public class FailedTranscriptionManager: ObservableObject {
         )
 
         let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions[index] = existing
+        }
         AppLogger.pipeline.info("Updated failed transcription audio", [
             "id": "\(id)",
             "persisted": "\(didPersist)"

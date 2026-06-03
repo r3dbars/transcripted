@@ -317,6 +317,38 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted.first?.systemAudioURL, systemURL)
     }
 
+    func testUpdateFailedTranscriptionAudioRollsBackMemoryWhenPersistenceFails() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let firstMicURL = paths.audioCaptures.appendingPathComponent("timeout-segment.wav")
+        let finalMicURL = paths.audioCaptures.appendingPathComponent("timeout-merged.wav")
+        FileManager.default.createFile(atPath: firstMicURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: finalMicURL.path, contents: Data("merged".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedId = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedId,
+            micAudioURL: firstMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+        try FileManager.default.removeItem(at: paths.failedQueue)
+        try FileManager.default.createDirectory(at: paths.failedQueue, withIntermediateDirectories: true)
+
+        XCTAssertFalse(manager.updateFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: finalMicURL,
+            systemAudioURL: nil
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertEqual(failed.micAudioURL, firstMicURL)
+        XCTAssertNil(failed.systemAudioURL)
+    }
+
     func testAddFailedTranscriptionRollsBackMemoryWhenPersistenceFails() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
