@@ -51,6 +51,11 @@ Default rules:
 - `Package.swift` or public core seam: also `swift test`
 - release/update path: read `docs/release-packaging.md` and `docs/sparkle-updates.md`
 
+## Handoff
+
+For worker-lane closeout, use the `AGENTS.md` coordinator closeout shape:
+`Status`, `Changed`, `Verified`, `Risk`, `Next`.
+
 ## Safety
 
 - Keep Transcripted local-first and privacy-safe.

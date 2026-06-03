@@ -100,7 +100,7 @@ Use these docs for these jobs:
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
-- `docs/qa-parakeet-start-failure-smoke.md` — manual BET-88 validation checklist for Parakeet start-failure recovery
+- `docs/qa-parakeet-start-failure-smoke.md` — historical BET-88 validation checklist for the closed Parakeet start-failure recovery gate
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
 - `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes

@@ -103,7 +103,8 @@ See `docs/storage-paths.md` for the full map.
 
 ## Test and verification
 
-- `bash build.sh`
+- `bash build-deps.sh --force`
+- `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-integration-smoke.sh`
 

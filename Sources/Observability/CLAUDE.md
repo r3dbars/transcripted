@@ -10,6 +10,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `AppLogger.swift` — developer-facing debug log writer
 - `EventReporter.swift` — structured event capture
 - `ObservabilityEvent.swift` — shared structured event payload used by local event logging and derived reliability packets
+- `LocalObservabilityPayloadSanitizer.swift` — redacts local event messages and context before disk writes
 - `ReliabilityPacketRecorder.swift` — writes privacy-safe `reliability.jsonl` packets for important dictation, meeting, and runtime outcomes so support feedback can include failure shape without raw audio or transcript data
 - `JSONLWriter.swift` — shared append-only JSONL writer that reuses file handles and falls back cleanly if log files are rotated or recreated
 - `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records

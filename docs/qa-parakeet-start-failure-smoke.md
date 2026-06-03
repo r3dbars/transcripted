@@ -3,6 +3,10 @@
 This checklist validates the BET-88 fix around `ParakeetEngine.startRecording()`
 failure handling and retry behavior.
 
+This is a historical manual smoke for the closed BET-88 gate issue `#428`, not
+an active queue item. Keep it around only when validating that specific
+start-failure recovery path or the repo-contract workflow fixture.
+
 ## Preconditions
 
 - Build includes BET-88 changes.
@@ -72,7 +76,7 @@ Expected:
 - Dictation can recover and start again after transient device instability.
 - Logged failure events include enough context for debugging (`audio_device`, format details, `is_recovery_attempt`).
 
-## QA Result Comment Format (for `#428`)
+## Historical QA Result Comment Format (for `#428`)
 
 The manual BET-88 gate helper reads the first non-empty line of your top-level
 comment on `#428`. The GitHub auto-close workflow is additionally gated by the
