@@ -14,8 +14,8 @@ class FloatingOverlayController {
         let status: String?
 
         static let initial = LoadingPresentation(
-            title: "Loading dictation",
-            detail: "Transcripted is getting the local voice model ready.",
+            title: "Loading voice model",
+            detail: "Recording starts automatically when it's ready.",
             progress: 0.08,
             status: "Starting up"
         )
