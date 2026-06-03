@@ -58,6 +58,21 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         XCTAssertFalse(selection.didOverrideDefault)
     }
 
+    func testPrefersBuiltInInputWhenBluetoothOutputLookupIsUnavailable() {
+        let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+        let macBookMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+
+        let selection = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: airPods,
+            defaultOutput: nil,
+            availableInputs: [airPods, macBookMic]
+        )
+
+        XCTAssertEqual(selection.selectedInput, macBookMic)
+        XCTAssertEqual(selection.reason, .preferredBuiltInForBluetoothHeadset)
+        XCTAssertTrue(selection.didOverrideDefault)
+    }
+
     func testRanksMacBookMicrophoneAheadOfOtherBuiltInCandidates() {
         let airPods = device(id: 10, name: "AirPods Pro", transport: .bluetooth, channels: 1)
         let studioDisplayMic = device(
