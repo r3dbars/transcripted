@@ -1164,29 +1164,29 @@ class DictationSessionController: ObservableObject {
         switch modelState {
         case .notLoaded:
             return .init(
-                title: "Starting dictation",
-                detail: "Transcripted is waking up the local voice model before it starts listening.",
+                title: "Starting voice model",
+                detail: "Recording starts automatically when it's ready.",
                 progress: 0.08,
                 status: "Preparing local model"
             )
         case .downloading(let progress):
             return .init(
-                title: "Downloading dictation model",
-                detail: "Transcripted is downloading the on-device voice model needed for local dictation.",
+                title: "Downloading voice model",
+                detail: "Keep Transcripted open. Dictation will start when it's ready.",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 status: "\(Int(progress * 100))% complete"
             )
         case .cached:
             return .init(
-                title: "Loading dictation",
-                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                title: "Loading voice model",
+                detail: "Recording starts automatically when it's ready.",
                 progress: 0.88,
                 status: "Loading cached model"
             )
         case .loading:
             return .init(
-                title: "Loading dictation",
-                detail: "Transcripted has the model files and is loading them into memory. Recording starts automatically when it finishes.",
+                title: "Loading voice model",
+                detail: "Recording starts automatically when it's ready.",
                 progress: 0.92,
                 status: "Almost ready"
             )
@@ -1427,6 +1427,10 @@ class DictationSessionController: ObservableObject {
         }
 
         try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
+        guard !Task.isCancelled else { return .disabled }
+        if delivery == .pasted {
+            await textPaster.waitForPendingClipboardRestore()
+        }
         guard !Task.isCancelled else { return .disabled }
         return autoSender.send(DictationAutoSendPreferences.sendKey())
     }

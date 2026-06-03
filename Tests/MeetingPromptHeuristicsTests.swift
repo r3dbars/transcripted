@@ -54,14 +54,18 @@ func testMeetingPromptHeuristics() {
         assertNil(prompt, "clock-skewed future activity should not create a prompt")
     }
 
-    runSuite("MeetingPromptProvider.supportsRuntimeOnlyPrompt — Teams must rely on stronger evidence") {
+    runSuite("MeetingPromptProvider.supportsRuntimeOnlyPrompt — app-open-only prompts require strong evidence") {
         assertFalse(
             MeetingPromptProvider.teams.supportsRuntimeOnlyPrompt,
             "Teams should not prompt just because the app is open"
         )
-        assertTrue(
+        assertFalse(
             MeetingPromptProvider.zoom.supportsRuntimeOnlyPrompt,
-            "Zoom should keep the existing runtime-only prompt path"
+            "Zoom should not prompt just because the app is open or frontmost"
+        )
+        assertTrue(
+            MeetingPromptProvider.webex.supportsRuntimeOnlyPrompt,
+            "Webex should keep the native runtime-only prompt path"
         )
     }
 

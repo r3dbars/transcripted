@@ -62,6 +62,10 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_saved",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "activation_artifact_action_clicked",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "activation_return_proxy_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
@@ -2355,6 +2359,10 @@ def run_self_test() -> None:
             "meeting_transcript_saved",
             "meeting_transcript_failed",
             "meeting_transcript_skipped",
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         paths = write_reports(payload, output_dir)

@@ -8,10 +8,18 @@ func testTranscriptedConstants() async {
         assertTrue(TranscriptedConstants.hasMinimumParakeetAudioSamples(20_000), "longer audio should still be accepted")
     }
 
-    runSuite("TranscriptedConstants restores borrowed clipboard before auto-enter") {
+    runSuite("TranscriptedConstants restores consumed borrowed clipboard before auto-enter") {
         assertTrue(
             TranscriptedConstants.clipboardRestoreDelay < TranscriptedConstants.dictationAutoEnterDelay,
             "clipboard restore should happen before follow-up keypresses and before users can easily paste stale dictation text"
+        )
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreFallbackDelay > TranscriptedConstants.clipboardRestoreDelay,
+            "fallback restore should give slow paste consumers longer to read the borrowed dictation text"
+        )
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreFallbackDelay <= 1_000_000_000,
+            "fallback restore should still return the user's clipboard promptly when no paste consumer reads it"
         )
         assertTrue(
             TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,

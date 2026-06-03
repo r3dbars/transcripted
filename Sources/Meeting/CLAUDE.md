@@ -58,7 +58,7 @@
 - Imported meeting audio should be copied into app-controlled scratch space before transcription so later cleanup and metadata writes stay consistent with live captures.
 - Retained-audio maintenance must only manage Transcripted meeting transcripts and app-owned retained audio filenames. A transcript is only storage-owned when its frontmatter has `capture_type: meeting` and a valid `capture_id` or `transcript_id`. Be very conservative with deletion: Markdown transcripts stay, unrelated files in capture folders stay, symlinked audio folders are ignored, and converted or pre-existing M4A files should be owner-only.
 - Meeting recording cancellation must be explicit, visible, and confirmed because discard deletes the captured audio. Do not wire Escape to meeting cancellation.
-- `MeetingPromptDetector` can prompt from either upcoming calendar events or recently active supported meeting apps (Zoom, Teams, Webex, FaceTime, plus browser-hosted providers like Google Meet).
+- `MeetingPromptDetector` can prompt from upcoming calendar events or from recently active supported runtime apps. Zoom and Teams should rely on stronger calendar evidence because app-open/frontmost state is not enough to prove a call is active.
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
 - Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
@@ -103,7 +103,8 @@ See `docs/storage-paths.md` for the full map.
 
 ## Test and verification
 
-- `bash build.sh`
+- `bash build-deps.sh --force`
+- `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-integration-smoke.sh`
 

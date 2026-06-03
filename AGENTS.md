@@ -56,6 +56,17 @@ Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 Use `.agents/test-matrix.yml` as the quick path-to-verification map, with this
 file taking precedence when there is any conflict.
 
+## Coordinator closeout
+
+When a worker lane reports back to the Transcripted coordinator, use this exact
+shape and keep it short:
+
+- `Status:` ready | blocked | no-change
+- `Changed:` one-line area/files, or `none`
+- `Verified:` commands run, or `not run: <reason>`
+- `Risk:` one real remaining risk, or `none known`
+- `Next:` one recommended coordinator action
+
 ## Build and test
 
 ```bash

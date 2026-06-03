@@ -35,7 +35,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
-- `scripts/dev/benchmark-home-recent-captures.sh` — local benchmark for Settings Home recent-capture loading
+- `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
@@ -66,8 +66,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
-- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy scorer for dictation recovery timing and Bluetooth-settle guardrails
-  - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb`
+- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
+  - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`
@@ -77,12 +77,14 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
-- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
+- `scripts/ops/qa-gate-check.sh` — historical one-shot check for the closed BET-88 QA gate `#428`, using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
   - Usage: `bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]`
   - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
   - Usage: `bash scripts/ops/qa-gate-closeout.sh [repo] [issue_number] [owner_login]`
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
+  - Keep these only while the closed BET-88 workflow remains useful as a repo
+    contract fixture; do not treat them as active queue automation.
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
