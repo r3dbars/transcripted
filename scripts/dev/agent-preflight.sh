@@ -135,7 +135,12 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
         fi
 
-        if matches_any "$path" "scripts/ops/generate-nightly-digest.py" "scripts/README.md"; then
+        if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/generate-nightly-digest.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
@@ -150,6 +155,12 @@ if [ -n "$changed_paths" ]; then
         if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "docs/autoeval-dictation-stop-speed-*.md"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/ops/dictation-stop-autoeval.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-recovery-time-*.md" "docs/autoeval-dictation-start-time-*.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+            add_command "ruby scripts/ops/dictation-recovery-autoeval.rb --details"
         fi
 
         if matches_any "$path" "scripts/ops/agent-todo-runner.rb" "scripts/ops/agent-todo-launchagent.sh" "scripts/ops/qa-gate-check.sh" "scripts/ops/qa-gate-closeout.sh"; then
@@ -190,7 +201,7 @@ if [ -n "$changed_paths" ]; then
             add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"
@@ -215,3 +226,11 @@ echo "- nearest live CLAUDE.md for touched code"
 echo ""
 
 echo "Matrix: .agents/test-matrix.yml"
+echo ""
+
+echo "Coordinator closeout:"
+echo "- Status: ready | blocked | no-change"
+echo "- Changed: <one-line area/files or none>"
+echo "- Verified: <commands run or not run: reason>"
+echo "- Risk: <remaining risk or none known>"
+echo "- Next: <one recommended action>"

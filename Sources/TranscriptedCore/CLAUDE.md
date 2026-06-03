@@ -4,7 +4,7 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (65 Swift files)
+## Subsystems (66 Swift files)
 
 - `Audio/` (18 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (2 files) — shared app logger and JSONL file logger
@@ -14,7 +14,7 @@
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (11 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (5 files) — transcript save, scanner, formatter, shared frontmatter parsing, and retained-recording audio archiving
+- `Storage/` (6 files) — transcript save, scanner, formatter, format options, shared frontmatter parsing, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know
@@ -72,7 +72,8 @@ default path.
 
 Always run:
 
-- `bash build.sh`
+- `bash build-deps.sh --force`
+- `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-integration-smoke.sh`
 

@@ -78,8 +78,14 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/dev/benchmark-home-recent-captures.sh"
+      - "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+
+  - paths:
       - "scripts/ops/generate-nightly-digest.py"
-      - "scripts/README.md"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
@@ -101,6 +107,15 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/ops/dictation-stop-autoeval.sh"
+
+  - paths:
+      - "scripts/ops/dictation-recovery-autoeval.rb"
+      - "docs/autoeval-dictation-recovery-time-*.md"
+      - "docs/autoeval-dictation-start-time-*.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+      - "ruby scripts/ops/dictation-recovery-autoeval.rb --details"
 
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
@@ -177,6 +192,10 @@ rules:
       - "CONTRIBUTING.md"
       - "WORKFLOW.md"
       - "docs/**"
+      - "Tests/README.md"
+      - "scripts/README.md"
+      - "Sources/**/CLAUDE.md"
+      - "Tools/**/CLAUDE.md"
       - ".agents/**"
       - ".github/**"
       - "scripts/dev/agent-preflight.sh"
