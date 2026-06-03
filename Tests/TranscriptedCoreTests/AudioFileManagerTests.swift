@@ -107,12 +107,14 @@ final class AudioFileManagerTests: XCTestCase {
 
     // MARK: - manualDownmix (AudioFileManager.swift:465)
 
-    func testManualDownmixAveragesNonInterleavedStereoChannels() throws {
+    func testManualDownmixUsesDominantNonInterleavedChannelWithoutPhaseCancellation() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let audio = makeAudio(root: root)
 
-        // Left = 1.0, Right = -1.0 -> mono average = 0.0 across every frame.
+        // Left = 1.0, Right = -1.0 used to average to silence. For mic capture,
+        // choose the dominant channel instead so opposite-polarity inputs do not
+        // erase local speech.
         let stereo = try makeNonInterleavedBuffer(
             channels: 2,
             sampleRate: 48_000,
@@ -131,18 +133,18 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertEqual(mono.format.channelCount, 1)
         let monoData = try XCTUnwrap(mono.floatChannelData?[0])
         for frame in 0..<256 {
-            XCTAssertEqual(monoData[frame], 0.0, accuracy: 1e-6)
+            XCTAssertEqual(monoData[frame], 1.0, accuracy: 1e-6)
         }
     }
 
-    func testManualDownmixAveragesInterleavedStereoChannels() throws {
+    func testManualDownmixUsesDominantInterleavedStereoChannel() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let audio = makeAudio(root: root)
 
         // Interleaved branch in manualDownmix (AudioFileManager.swift:479) reads
-        // [L0,R0,L1,R1,...] and must produce the same per-frame average as the
-        // non-interleaved path.
+        // [L0,R0,L1,R1,...] and must preserve the dominant channel just like
+        // the non-interleaved path.
         let stereo = try makeInterleavedBuffer(
             channels: 2,
             sampleRate: 44_100,
@@ -160,7 +162,34 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertEqual(mono.frameLength, 128)
         let monoData = try XCTUnwrap(mono.floatChannelData?[0])
         for frame in 0..<128 {
-            XCTAssertEqual(monoData[frame], 0.6, accuracy: 1e-6)
+            XCTAssertEqual(monoData[frame], 0.8, accuracy: 1e-6)
+        }
+    }
+
+    func testManualDownmixDoesNotHalveSpeechWhenSecondChannelIsSilent() throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+
+        let stereo = try makeNonInterleavedBuffer(
+            channels: 2,
+            sampleRate: 48_000,
+            frameCount: 128
+        ) { ch, frame in
+            ch == 0 ? Float(frame) / 128.0 : 0.0
+        }
+
+        let monoFormat = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+
+        let mono = try XCTUnwrap(audio.manualDownmix(buffer: stereo, to: monoFormat))
+        let monoData = try XCTUnwrap(mono.floatChannelData?[0])
+        for frame in 0..<128 {
+            XCTAssertEqual(monoData[frame], Float(frame) / 128.0, accuracy: 1e-6)
         }
     }
 

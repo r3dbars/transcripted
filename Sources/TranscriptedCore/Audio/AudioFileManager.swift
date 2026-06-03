@@ -462,7 +462,9 @@ extension Audio {
 
     // MARK: - Buffer Utilities
 
-    /// Manually downmix multi-channel audio to mono by averaging all channels
+    /// Manually downmix multi-channel mic audio to mono by taking the dominant
+    /// channel for this buffer. Averaging can halve a real mic when the second
+    /// channel is silent, and opposite-polarity channel pairs can cancel speech.
     func manualDownmix(buffer: AVAudioPCMBuffer, to monoFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
         let frameCount = buffer.frameLength
         let channelCount = Int(buffer.format.channelCount)
@@ -476,32 +478,64 @@ extension Audio {
 
         guard let monoData = monoBuffer.floatChannelData?[0] else { return nil }
 
+        let dominantChannel = dominantChannelIndex(buffer: buffer, frameCount: Int(frameCount))
+
         // Check if buffer is interleaved or non-interleaved
         if buffer.format.isInterleaved {
             // Interleaved: samples are [L0, R0, C0, S0, L1, R1, C1, S1, ...]
             guard let interleavedData = buffer.floatChannelData?[0] else { return nil }
 
             for frame in 0..<Int(frameCount) {
-                var sum: Float = 0
-                for channel in 0..<channelCount {
-                    sum += interleavedData[frame * channelCount + channel]
-                }
-                monoData[frame] = sum / Float(channelCount)
+                monoData[frame] = interleavedData[frame * channelCount + dominantChannel]
             }
         } else {
             // Non-interleaved: each channel is a separate array
             guard let channelData = buffer.floatChannelData else { return nil }
 
             for frame in 0..<Int(frameCount) {
-                var sum: Float = 0
-                for channel in 0..<channelCount {
-                    sum += channelData[channel][frame]
-                }
-                monoData[frame] = sum / Float(channelCount)
+                monoData[frame] = channelData[dominantChannel][frame]
             }
         }
 
         return monoBuffer
+    }
+
+    private func dominantChannelIndex(buffer: AVAudioPCMBuffer, frameCount: Int) -> Int {
+        let channelCount = Int(buffer.format.channelCount)
+        guard channelCount > 1, frameCount > 0 else { return 0 }
+
+        var bestChannel = 0
+        var bestEnergy: Float = -1
+
+        if buffer.format.isInterleaved {
+            guard let interleavedData = buffer.floatChannelData?[0] else { return 0 }
+            for channel in 0..<channelCount {
+                var energy: Float = 0
+                for frame in 0..<frameCount {
+                    let sample = interleavedData[frame * channelCount + channel]
+                    energy += sample * sample
+                }
+                if energy > bestEnergy {
+                    bestEnergy = energy
+                    bestChannel = channel
+                }
+            }
+        } else {
+            guard let channelData = buffer.floatChannelData else { return 0 }
+            for channel in 0..<channelCount {
+                var energy: Float = 0
+                for frame in 0..<frameCount {
+                    let sample = channelData[channel][frame]
+                    energy += sample * sample
+                }
+                if energy > bestEnergy {
+                    bestEnergy = energy
+                    bestChannel = channel
+                }
+            }
+        }
+
+        return bestChannel
     }
 
     /// Deep copy an AVAudioPCMBuffer to ensure data safety across async dispatch
