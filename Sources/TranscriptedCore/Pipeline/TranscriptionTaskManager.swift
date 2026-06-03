@@ -673,6 +673,7 @@ public class TranscriptionTaskManager: ObservableObject {
             systemURL: systemAudioURL,
             taskId: id
         )
+        let retryIsUsingOriginalAudio = activeTasks[id] != nil
         let promotedMicURL = retainedAudio?.micURL ?? micAudioURL
         let promotedSystemURL = retainedAudio?.systemURL ?? systemAudioURL
         let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
@@ -688,10 +689,15 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        if retainedAudio?.micURL != nil {
+        if retryIsUsingOriginalAudio, retainedAudio != nil {
+            AppLogger.pipeline.info("Deferred finalized failed audio scratch cleanup until active retry finishes", [
+                "id": id.uuidString
+            ])
+        }
+        if retainedAudio?.micURL != nil, !retryIsUsingOriginalAudio {
             removeManagedCleanupFile(micAudioURL, label: "finalized failed mic scratch")
         }
-        if retainedAudio?.systemURL != nil {
+        if retainedAudio?.systemURL != nil, !retryIsUsingOriginalAudio {
             removeManagedCleanupFile(systemAudioURL, label: "finalized failed system scratch")
         }
         return true
@@ -911,6 +917,11 @@ public class TranscriptionTaskManager: ObservableObject {
                 guard !self.finishCancelledTaskIfNeeded(taskId: failedId) else { return false }
 
                 let waitingForSpeakerNames = self.hasPendingSpeakerNamingRequest(sourceFailedTranscriptionId: failedId)
+                self.removeSupersededRetrySourceAudioIfNeeded(
+                    failedId: failedId,
+                    micURL: failed.micAudioURL,
+                    systemURL: failed.systemAudioURL
+                )
                 if waitingForSpeakerNames {
                     AppLogger.pipeline.info("Retry transcript saved; keeping failed meeting until speaker names finalize", [
                         "failedId": failedId.uuidString
@@ -940,6 +951,11 @@ public class TranscriptionTaskManager: ObservableObject {
                     id: failedId,
                     errorMessage: diagnosticMessage
                 )
+                self.removeSupersededRetrySourceAudioIfNeeded(
+                    failedId: failedId,
+                    micURL: failed.micAudioURL,
+                    systemURL: failed.systemAudioURL
+                )
                 self.publishFailure(
                     displayMessage: "Retry failed",
                     diagnosticMessage: diagnosticMessage
@@ -955,6 +971,23 @@ public class TranscriptionTaskManager: ObservableObject {
             || pendingSpeakerNamingRequests.contains {
                 $0.sourceFailedTranscriptionId == sourceFailedTranscriptionId
             }
+    }
+
+    private func removeSupersededRetrySourceAudioIfNeeded(
+        failedId: UUID,
+        micURL: URL,
+        systemURL: URL?
+    ) {
+        guard let current = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
+            return
+        }
+
+        if current.micAudioURL != micURL {
+            removeManagedCleanupFile(micURL, label: "superseded retry mic scratch")
+        }
+        if let systemURL, current.systemAudioURL != systemURL {
+            removeManagedCleanupFile(systemURL, label: "superseded retry system scratch")
+        }
     }
 
     // MARK: - Task Completion & Cleanup
