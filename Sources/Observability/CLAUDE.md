@@ -21,6 +21,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — explicit allowlist of PostHog events + properties
+- `ActivationTelemetry.swift` — centralized activation analytics helpers for first-artifact actions, agent prompt/setup CTAs, and return-proxy buckets
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
@@ -43,6 +44,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
 - Shipped builds should report releases as `transcripted@<CFBundleShortVersionString>` and dist as `CFBundleVersion`; release packaging registers that Sentry release explicitly through `scripts/release/register-sentry-release.sh`
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
+- Activation analytics should route through `ActivationTelemetry` so first-artifact, agent prompt/setup, and return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
 - `ReliabilityPacketRecorder` derives packets from already-reviewed observability events. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
