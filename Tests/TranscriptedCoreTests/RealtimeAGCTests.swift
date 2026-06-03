@@ -81,6 +81,25 @@ final class RealtimeAGCTests: XCTestCase {
         XCTAssertLessThanOrEqual(agc.appliedGain, 12.0 + 0.001, "appliedGain should not exceed maxGain")
     }
 
+    func testIssue500VeryQuietMicReachesUsableProcessedPeak() {
+        // Issue #500 voice-processing attenuation can be quieter than the
+        // original scalar-drop case. At the old 12x default cap, a 0.005 peak
+        // stayed below the 0.12 processed-peak diagnostics bar and still looked
+        // unrecovered. The default realtime path should now cross that bar
+        // without opting into Apple VPIO.
+        let agc = RealtimeAGC()
+        var lastPeak: Float = 0
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.005))
+            agc.process(buffer: buffer)
+            lastPeak = peak(of: samples(from: buffer))
+        }
+
+        XCTAssertGreaterThanOrEqual(lastPeak, 0.12, "Severely attenuated issue #500 mic input should become diagnostically usable")
+        XCTAssertLessThanOrEqual(lastPeak, 0.14, "Default cap should avoid a large overshoot for very quiet input")
+        XCTAssertLessThanOrEqual(agc.appliedGain, 25.0 + 0.001, "default appliedGain should respect the raised cap")
+    }
+
     func testNormalLevelInputPassesThrough() {
         // Speech already at the target peak should not be amplified or
         // attenuated meaningfully — gain stays near 1.0.

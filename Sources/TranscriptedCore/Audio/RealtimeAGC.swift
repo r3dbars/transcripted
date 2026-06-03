@@ -18,10 +18,12 @@ import Accelerate
 /// and slow release (raise gain gradually to avoid audible pumping during
 /// quiet stretches).
 ///
-/// The default tuning (`targetPeak = 0.45`, `maxGain = 12.0`,
-/// `minPeak = 0.0008`) mirrors `AudioSignalRecovery.normalizeForSpeech`
-/// so the saved WAV's loudness matches what the post-processing path would
-/// produce, and the in-memory STT copy stays consistent with the file.
+/// The default tuning (`targetPeak = 0.45`, `maxGain = 25.0`,
+/// `minPeak = 0.0008`) gives the live mic copy enough headroom for the
+/// more severe issue #500 voice-processing attenuation case while still
+/// refusing to chase near-silence. The post-processing path can normalize
+/// again before final transcription; this real-time pass protects the saved
+/// WAV, live preview, and diagnostics without touching system audio.
 ///
 /// Real-time safe: `process(buffer:)` performs zero allocations and no
 /// locking. Safe to invoke from an `AVAudioEngine` tap callback.
@@ -61,8 +63,9 @@ public final class RealtimeAGC {
 
     /// - Parameters:
     ///   - targetPeak: Desired peak after gain. 0.45 leaves headroom under 1.0.
-    ///   - maxGain: Upper bound on applied gain. 12.0 matches the
-    ///     post-processing recovery cap.
+    ///   - maxGain: Upper bound on applied gain. 25.0 lets a very quiet
+    ///     but real shared-device mic stream reach the usable diagnostic bar
+    ///     without opting into Apple's system-wide voice-processing ducking.
     ///   - minPeak: Silence threshold for hold behavior. 0.0008 matches
     ///     AudioSignalRecovery's lower bound for WebRTC-attenuated input.
     ///   - windowSize: Buffers of peak history.
@@ -75,7 +78,7 @@ public final class RealtimeAGC {
     ///     coefficients. 4096 frames at 48 kHz ≈ 85ms.
     public init(
         targetPeak: Float = 0.45,
-        maxGain: Float = 12.0,
+        maxGain: Float = 25.0,
         minPeak: Float = 0.0008,
         windowSize: Int = 16,
         attackTimeMs: Float = 20,
@@ -174,7 +177,7 @@ public final class RealtimeAGC {
         }
 
         // 6. Hard-clip to [-1, 1]. With targetPeak = 0.45 and a maxGain of
-        // 12.0 we shouldn't exceed unity often; this is a safety net for
+        // 25.0 we shouldn't exceed unity often; this is a safety net for
         // transients above the windowed peak.
         var lo: Float = -1.0
         var hi: Float = 1.0
