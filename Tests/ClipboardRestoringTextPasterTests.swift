@@ -214,6 +214,150 @@ func testClipboardRestoringTextPaster() async {
             "waiting for pending restore should include the delayed read-triggered restore before auto-enter"
         )
     }
+
+    await runSuite("ClipboardRestoringTextPaster.waitForPendingClipboardRestore — waits for fallback restore") {
+        let existingClipboard = "synthetic existing clipboard"
+        let pasteText = "synthetic paste text"
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: existingClipboard)
+        }
+
+        let outcome = await MainActor.run {
+            paster.paste(
+                pasteText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                fallbackRestoreDelay: 2_000_000
+            )
+        }
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            existingClipboard,
+            "waiting for pending restore should not return until the previous clipboard is restored"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.waitForPendingClipboardRestore — preserves user copies") {
+        let userCopy = "synthetic user clipboard"
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
+        }
+
+        let outcome = await MainActor.run {
+            paster.paste(
+                "synthetic paste text",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                fallbackRestoreDelay: 5_000_000
+            )
+        }
+        await MainActor.run {
+            pasteboard.clearContents()
+            pasteboard.setString(userCopy, forType: .string)
+        }
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        await paster.waitForPendingClipboardRestore()
+        let clipboardAfterRestore = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterRestore,
+            userCopy,
+            "scheduled restore should not overwrite a clipboard change made after pasteback"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — cancels scheduled restore") {
+        let pasteText = "synthetic paste text"
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
+        }
+
+        let outcome = await MainActor.run {
+            paster.paste(
+                pasteText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                fallbackRestoreDelay: 5_000_000
+            )
+        }
+        await MainActor.run {
+            paster.cancelPendingClipboardRestore()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        let clipboardAfterCancel = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterCancel,
+            pasteText,
+            "canceling the pending restore should leave the current clipboard value alone"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — paste dispatcher failure cancels restore") {
+        let pasteText = "synthetic paste fallback"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
+        }
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            paster.paste(
+                pasteText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { false },
+                fallbackRestoreDelay: 5_000_000
+            )
+        }
+        await paster.waitForPendingClipboardRestore()
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Couldn't paste automatically. The text was copied instead.",
+                reason: .pasteEventCreationFailed
+            ),
+            "paste event failures should fall back to a copied result"
+        )
+        let clipboardAfterFailure = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterFailure,
+            pasteText,
+            "failed paste dispatch should not later restore over the copied fallback text"
+        )
+    }
 }
 
 private func readClipboardPasterSource() -> String {
