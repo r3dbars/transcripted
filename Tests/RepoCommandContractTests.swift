@@ -233,8 +233,10 @@ func testRepoCommandContract() {
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
             "bash -n scripts/ops/daily-audio-reliability-check.sh",
+            "bash -n scripts/dev/benchmark-home-recent-captures.sh",
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
-            "python3 scripts/ops/generate-nightly-digest.py --self-test"
+            "python3 scripts/ops/generate-nightly-digest.py --self-test",
+            "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
         ]
 
         for check in expectedChecks {
@@ -708,8 +710,20 @@ func testRepoCommandContract() {
             "release packaging docs should include the Sentry release registration command"
         )
         assertTrue(
+            releaseDocs.contains("Prefer this post-publish registration path")
+                && releaseDocs.contains("REGISTER_SENTRY_RELEASE=1"),
+            "release packaging docs should explain when build-time Sentry registration is safe"
+        )
+        assertTrue(
             releaseDocs.contains("Homebrew users will still") && releaseDocs.contains("install or upgrade to the older version"),
             "release packaging docs should warn when the cask is stale"
+        )
+        assertTrue(
+            releaseDocs.contains("live `/appcast.xml`")
+                && releaseDocs.contains("live `/download`")
+                && releaseDocs.contains("live `/download/latest.dmg`")
+                && releaseDocs.contains("Cloudflare Pages deployment status"),
+            "release packaging docs should keep live web release truth separate from source truth"
         )
         assertTrue(
             releaseDocs.contains("SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"),
@@ -735,8 +749,57 @@ func testRepoCommandContract() {
             scriptsReadme.contains("scripts/release/generate-sparkle-appcast.sh")
                 && scriptsReadme.contains("scripts/release/verify-sparkle-release.sh")
                 && scriptsReadme.contains("scripts/release/update-cask.sh")
-                && scriptsReadme.contains("scripts/release/register-sentry-release.sh"),
-            "scripts README should list the active release helper scripts"
+                && scriptsReadme.contains("scripts/release/register-sentry-release.sh")
+                && scriptsReadme.contains("scripts/dev/benchmark-home-recent-captures.sh")
+                && scriptsReadme.contains("scripts/ops/dictation-recovery-autoeval.rb"),
+            "scripts README should list the active release, benchmark, and autoeval helper scripts"
+        )
+    }
+
+    runSuite("Repo command contract - release path preflight rebuilds deps") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+        let releaseMatrixBlock = sourceSlice(
+            matrix,
+            from: "- \"build-beta.sh\"",
+            to: "- \"Tools/TranscriptedCLI/**\""
+        )
+        let releasePreflightBlock = sourceSlice(
+            preflight,
+            from: "if matches_any \"$path\" \"build-beta.sh\"",
+            to: "if matches_any \"$path\" \"README.md\""
+        )
+
+        assertTrue(
+            releaseMatrixBlock.contains("bash build-deps.sh --force")
+                && releaseMatrixBlock.contains("bash build.sh --no-open")
+                && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"),
+            "release-path matrix checks should rebuild deps before app and packaging smoke"
+        )
+        assertTrue(
+            releasePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
+                && releasePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
+                && releasePreflightBlock.contains("add_command \"SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>\""),
+            "agent preflight should suggest dependency rebuilds for release-path edits"
+        )
+    }
+
+    runSuite("Repo command contract - Cloudflare ops docs split read from deploy") {
+        let docs = readRepoTextFile("docs/ops-credentials.md")
+
+        assertTrue(
+            docs.contains("Cloudflare Pages Read")
+                && docs.contains("Pages project, deployment, zone, and analytics status")
+                && docs.contains("Pages Read")
+                && docs.contains("Zone Read")
+                && docs.contains("Cloudflare Pages Deploy")
+                && docs.contains("Pages Write"),
+            "Cloudflare ops docs should distinguish health-check read scopes from deploy-capable credentials"
+        )
+        assertTrue(
+            docs.contains("health probe reads Pages project/deployment status and zone analytics")
+                && docs.contains("Manual deploys need `Pages Write`"),
+            "Cloudflare docs should warn that health-probe auth is not deploy proof"
         )
     }
 
@@ -2100,6 +2163,12 @@ func testRepoCommandContract() {
             "agent issue template should make the manual queue label explicit"
         )
         assertTrue(
+            agentTemplate.contains("Activation / saved artifacts / agent payoff")
+                && agentTemplate.contains("docs/activation-lane.md")
+                && agentTemplate.contains("COORD_DONE: GREEN/BRIEF/RED"),
+            "agent issue template should make lane selection and coordinator closeout explicit"
+        )
+        assertTrue(
             bugTemplate.contains("Please redact transcripts, audio, meeting titles, speaker names, emails, tokens")
                 && featureTemplate.contains("Please do not include private transcripts, audio, meeting titles, speaker names"),
             "public issue templates should put privacy redaction guidance where users attach diagnostics"
@@ -2107,6 +2176,8 @@ func testRepoCommandContract() {
         assertTrue(
             prTemplate.contains("`scripts/dev/agent-preflight.sh`")
                 && prTemplate.contains("`swift test` if I touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam")
+                && prTemplate.contains("Lane: `activation` / `dictation reliability` / `meeting reliability` / `release ops` / `agent workflow`")
+                && prTemplate.contains("COORD_DONE: GREEN/BRIEF/RED")
                 && prTemplate.contains("Agent PRs link the issue/workpad")
                 && prTemplate.contains("No private transcripts, audio, tokens, personal paths, or customer data"),
             "PR template should point reviewers at preflight, core package checks, agent review evidence, and privacy review"
@@ -2122,6 +2193,52 @@ func testRepoCommandContract() {
             qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")
                 && !qaGateAutoClose.contains("child_issue_number"),
             "old BET-88 auto-close workflow should be label-gated and should not mutate a hard-coded child issue"
+        )
+    }
+
+    runSuite("Repo command contract - activation lane and closeout docs stay linked") {
+        let agentStart = readRepoTextFile("AGENT_START.md")
+        let onboarding = readRepoTextFile("docs/agent-onboarding.md")
+        let repoLayout = readRepoTextFile("docs/repo-layout.md")
+        let activation = readRepoTextFile("docs/activation-lane.md")
+        let closeout = readRepoTextFile("docs/agent-closeout.md")
+        let workflow = readRepoTextFile("WORKFLOW.md")
+        let agents = readRepoTextFile("AGENTS.md")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        assertTrue(
+            agentStart.contains("Activation/artifacts/agent payoff - `docs/activation-lane.md`")
+                && agentStart.contains("Bluetooth/AirPods dictation")
+                && agentStart.contains("Zoom/Meet prompts")
+                && agentStart.contains("Pasteback/clipboard/Auto Enter"),
+            "agent start should route common current product lanes to the right docs"
+        )
+        assertTrue(
+            onboarding.contains("## Choose The Lane")
+                && onboarding.contains("docs/activation-lane.md")
+                && onboarding.contains("docs/agent-closeout.md"),
+            "agent onboarding should tell workers how to classify vague work before editing"
+        )
+        assertTrue(
+            repoLayout.contains("docs/activation-lane.md")
+                && repoLayout.contains("docs/agent-closeout.md")
+                && repoLayout.contains("docs/agent-connect.md")
+                && repoLayout.contains("Casks/"),
+            "repo layout should list activation, handoff, agent-connect, and Homebrew release surfaces"
+        )
+        assertTrue(
+            activation.contains("saved Markdown -> agent use -> return")
+                && activation.contains("Sources/Observability/ActivationTelemetry.swift")
+                && activation.contains("Do not claim activation is fixed from artifact volume alone"),
+            "activation lane doc should keep product payoff and privacy-safe measurement explicit"
+        )
+        assertTrue(
+            closeout.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && agents.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && preflight.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && closeout.contains("delete branches, close issues")
+                && workflow.contains("docs/agent-closeout.md"),
+            "closeout docs and workflow should keep delegated handoff and GitHub mutation boundaries explicit"
         )
     }
 

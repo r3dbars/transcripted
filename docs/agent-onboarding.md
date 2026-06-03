@@ -30,7 +30,9 @@ historical, and which local doc to read before editing a subsystem.
 22. `docs/release-packaging.md` and `docs/sparkle-updates.md` when touching packaging, notarization, releases, or in-app updates
 23. `Tools/*/CLAUDE.md` when touching standalone CLI, MCP, or QA tools
 24. `scripts/README.md` when touching the shell entrypoints or release helpers
-25. source comments
+25. `docs/activation-lane.md` when touching saved artifacts, agent handoff, onboarding, first-value, or return-use work
+26. `docs/agent-closeout.md` when a delegated worker, automation run, or coordinator thread needs a compact handoff
+27. source comments
 
 For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
@@ -60,6 +62,10 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   GitHub issue templates, PR checklist, and workflow automation.
 - `docs/storage-paths.md`
   Canonical app, tool, and fallback storage layout.
+- `docs/activation-lane.md`
+  Current activation routing: saved Markdown, agent payoff, and return-use loop.
+- `docs/agent-closeout.md`
+  Coordinator-ready handoff format, including `COORD_DONE`.
 - `docs/docs.md`
   Documentation tone, drift checks, and follow-up PR rules.
 - `docs/release-packaging.md` + `docs/sparkle-updates.md`
@@ -106,8 +112,29 @@ Rule of thumb:
 - if you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public
   core package seam, also run `swift test`
 
+## Choose The Lane
+
+When the issue is vague, classify it before editing:
+
+- Activation, saved artifacts, agent setup, first prompt, or return-use:
+  `docs/activation-lane.md`, `Sources/UI/CLAUDE.md`, and `docs/agent-connect.md`
+- Dictation start/stop, no-speech, Bluetooth/AirPods, or model readiness:
+  `Sources/Speech/CLAUDE.md`, `Sources/UI/Overlay`, and `docs/audio-reliability-daily-check.md`
+- Pasteback, clipboard restore, Auto Enter, or focused app targeting:
+  `Sources/Support/CLAUDE.md`, `Sources/Accessibility/CLAUDE.md`, and `Sources/Dictation/CLAUDE.md`
+- Meeting capture, retained audio, retry, speaker review, or Zoom/Meet prompts:
+  `Sources/Meeting/CLAUDE.md`, `Sources/TranscriptedCore/CLAUDE.md`, and `docs/qa-issue-500-meeting-audio.md`
+- Release, updates, Homebrew, Sentry release metadata, dSYMs, or public download
+  truth: `docs/release-packaging.md`, `docs/sparkle-updates.md`, and `docs/ops-credentials.md`
+- GitHub automation, issue runner, templates, or review packets:
+  `WORKFLOW.md`, `docs/agent-issue-orchestration.md`, `.github/`, and `docs/agent-closeout.md`
+
 ## Highest-Value Local Docs
 
+- `docs/activation-lane.md`
+  Saved Markdown -> useful agent answer -> return-use routing.
+- `docs/agent-closeout.md`
+  `COORD_DONE` and PR/issue handoff shape.
 - `Sources/CLAUDE.md`
   App boot order and shared state wiring.
 - `Sources/Accessibility/CLAUDE.md`

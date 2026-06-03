@@ -147,15 +147,21 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+        fi
+
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
         fi
 
-        if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "docs/autoeval-dictation-stop-speed-*.md"; then
+        if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-stop-speed-*.md" "docs/autoeval-dictation-recovery-time-*.md"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/ops/dictation-stop-autoeval.sh"
+            add_command "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
         fi
 
         if matches_any "$path" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-recovery-time-*.md" "docs/autoeval-dictation-start-time-*.md"; then
@@ -197,6 +203,7 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "build-beta.sh" "scripts/entrypoints/build-beta.sh" "scripts/release/*" "docs/release-packaging.md" "docs/sparkle-updates.md" "Casks/*" "docs/appcast.xml"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
             add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
@@ -230,8 +237,5 @@ echo "Matrix: .agents/test-matrix.yml"
 echo ""
 
 echo "Coordinator closeout:"
-echo "- Status: ready | blocked | no-change"
-echo "- Changed: <one-line area/files or none>"
-echo "- Verified: <commands run or not run: reason>"
-echo "- Risk: <remaining risk or none known>"
-echo "- Next: <one recommended action>"
+echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action"
+echo "See docs/agent-closeout.md for status meanings and cleanup boundaries."

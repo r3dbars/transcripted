@@ -66,7 +66,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
-- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness and recovery timing
+- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
   - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`

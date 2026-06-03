@@ -59,13 +59,12 @@ file taking precedence when there is any conflict.
 ## Coordinator closeout
 
 When a worker lane reports back to the Transcripted coordinator, use this exact
-shape and keep it short:
+one-line shape and keep it short:
 
-- `Status:` ready | blocked | no-change
-- `Changed:` one-line area/files, or `none`
-- `Verified:` commands run, or `not run: <reason>`
-- `Risk:` one real remaining risk, or `none known`
-- `Next:` one recommended coordinator action
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
+
+Use `docs/agent-closeout.md` for the status meanings and GitHub cleanup
+boundaries.
 
 ## Build and test
 

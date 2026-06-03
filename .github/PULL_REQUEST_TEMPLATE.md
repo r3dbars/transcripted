@@ -5,6 +5,7 @@
 ## Product Impact
 
 - Affects: `dictation` / `meetings` / `agent artifacts` / `docs only`
+- Lane: `activation` / `dictation reliability` / `meeting reliability` / `release ops` / `agent workflow`
 - Why this matters:
 
 ## What changed
@@ -34,3 +35,9 @@
 ## Notes
 
 <!-- Related issues, follow-ups, screenshots, or legacy-branch impact -->
+
+## Agent handoff
+
+<!-- For delegated work, paste the one-line closeout from docs/agent-closeout.md. -->
+
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
