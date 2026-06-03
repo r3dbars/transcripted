@@ -445,51 +445,55 @@ ruby scripts/ops/dictation-recovery-autoeval.rb --details
 
 Result:
 
-The existing `scripts/ops/dictation-recovery-autoeval.rb` scorer had drifted from the live policy constants. This pass updated its baseline to match current code:
+The existing `scripts/ops/dictation-recovery-autoeval.rb` scorer had drifted into a misleading shape where the `baseline` row was also the kept/current policy. This pass now separates the pre-keeper baseline from the kept policy:
 
-- poll interval: `100 ms`
+- baseline poll interval: `150 ms`
 - refresh interval: `300 ms`
 - refresh timeout: `900 ms`
-- forced recovery threshold: `5` refreshes
-- ready-start attempt cap: `2`
+- baseline forced recovery threshold: `6` refreshes
+- baseline ready-start attempt cap: `3`
+- kept current policy: `100 ms` poll, force after `5` refreshes, ready-start cap `2`
 
-Knob summary after fixing the scorer:
+Knob summary after fixing the scorer anchor:
 
 | Knob | p95 ms | p95 delta | Max ms | Max delta | Unexpected failures | Starts | Start delta | Refreshes | Refresh delta | Recovery starts | Forced | Refresh timeouts | Mic timeouts |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| baseline | 1990 | 0 | 1990 | 0 | 0 | 17 | 0 | 21 | 0 | 7 | 5 | 1 | 1 |
-| poll_75ms | 2140 | +150 | 2140 | +150 | 0 | 17 | 0 | 19 | -2 | 7 | 5 | 1 | 1 |
-| poll_50ms | 2040 | +50 | 2040 | +50 | 0 | 17 | 0 | 20 | -1 | 7 | 5 | 1 | 1 |
-| refresh_interval_200ms | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
-| refresh_interval_150ms | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
-| refresh_timeout_600ms | 3800 | +1810 | 3800 | +1810 | 2 | 21 | +4 | 42 | +21 | 10 | 8 | 13 | 3 |
-| recovery_start_after_3_refreshes | 2020 | +30 | 2020 | +30 | 0 | 18 | +1 | 16 | -5 | 7 | 6 | 1 | 1 |
-| recovery_start_after_2_refreshes | 2020 | +30 | 2020 | +30 | 0 | 20 | +3 | 13 | -8 | 8 | 7 | 1 | 1 |
-| max_ready_start_attempts_1 | 1990 | 0 | 1990 | 0 | 0 | 17 | 0 | 20 | -1 | 7 | 7 | 1 | 1 |
-| force_after_4_refreshes | 1800 | -190 | 1800 | -190 | 0 | 14 | -3 | 14 | -7 | 2 | 7 | 1 | 1 |
-| combo_poll100_refresh200_attempts2 | 1720 | -270 | 1720 | -270 | 0 | 18 | +1 | 24 | +3 | 7 | 6 | 1 | 1 |
+| baseline | 2440 | 0 | 2440 | 0 | 0 | 18 | 0 | 18 | 0 | 7 | 5 | 1 | 1 |
+| poll_100ms | 2290 | -150 | 2290 | -150 | 0 | 18 | 0 | 19 | +1 | 7 | 5 | 1 | 1 |
+| poll_75ms | 2440 | 0 | 2440 | 0 | 0 | 18 | 0 | 22 | +4 | 7 | 4 | 1 | 1 |
+| poll_50ms | 2340 | -100 | 2340 | -100 | 0 | 18 | 0 | 23 | +5 | 7 | 4 | 1 | 1 |
+| refresh_interval_200ms | 2440 | 0 | 2440 | 0 | 0 | 18 | 0 | 18 | 0 | 7 | 5 | 1 | 1 |
+| refresh_interval_150ms | 1870 | -570 | 1870 | -570 | 0 | 20 | +2 | 23 | +5 | 7 | 7 | 1 | 1 |
+| refresh_timeout_600ms | 4400 | +1960 | 4400 | +1960 | 2 | 24 | +6 | 33 | +15 | 9 | 8 | 14 | 3 |
+| recovery_start_after_3_refreshes | 2470 | +30 | 2470 | +30 | 0 | 19 | +1 | 13 | -5 | 7 | 6 | 1 | 1 |
+| recovery_start_after_2_refreshes | 2470 | +30 | 2470 | +30 | 0 | 20 | +2 | 9 | -9 | 8 | 7 | 1 | 1 |
+| max_ready_start_attempts_2 | 2440 | 0 | 2440 | 0 | 0 | 17 | -1 | 18 | 0 | 7 | 5 | 1 | 1 |
+| max_ready_start_attempts_1 | 2440 | 0 | 2440 | 0 | 0 | 17 | -1 | 17 | -1 | 7 | 7 | 1 | 1 |
+| force_after_5_refreshes | 2140 | -300 | 2140 | -300 | 0 | 18 | 0 | 20 | +2 | 7 | 5 | 1 | 1 |
+| force_after_4_refreshes | 1900 | -540 | 1900 | -540 | 0 | 15 | -3 | 14 | -4 | 2 | 7 | 1 | 1 |
+| kept_current_policy | 1990 | -450 | 1990 | -450 | 0 | 17 | -1 | 21 | +3 | 7 | 5 | 1 | 1 |
+| combo_poll100_refresh200_attempts2 | 1920 | -520 | 1920 | -520 | 0 | 18 | 0 | 22 | +4 | 7 | 6 | 1 | 1 |
 
 Important per-scenario regressions from `--details`:
 
 | Knob | Regressed scenario | Delta | Why it was rejected |
 | --- | --- | ---: | --- |
-| `refresh_interval_200ms` | `bluetooth_late_ready_stale_flag` | +600 ms | Starts recovery earlier, wastes the guarded attempt, then waits for forced recovery. |
-| `refresh_interval_150ms` | `bluetooth_late_ready_stale_flag` | +600 ms | Same regression as 200 ms with no extra p95 gain. |
+| `refresh_interval_150ms` | `bluetooth_late_ready_stale_flag` | +700 ms | Improves aggregate p95 but starts recovery too early for Bluetooth settle. |
 | `refresh_timeout_600ms` | `selected_input_stale_until_force` | timeout | Adds false stale-refresh failures. |
 | `refresh_timeout_600ms` | `ready_flag_start_keeps_failing` | timeout | Turns an expected success into `microphone_start_timeout`. |
-| `recovery_start_after_3_refreshes` | `bluetooth_late_ready_stale_flag` | +900 ms | Starts too early and loses the useful guarded attempt. |
-| `recovery_start_after_2_refreshes` | `bluetooth_reconnect_stale_flag` | +900 ms | Too aggressive for Bluetooth route settle. |
+| `recovery_start_after_3_refreshes` | aggregate | +30 ms p95 | Starts too early without a reliable p95 win. |
+| `recovery_start_after_2_refreshes` | aggregate | +30 ms p95 | Too aggressive for Bluetooth route settle. |
 | `max_ready_start_attempts_1` | `first_start_fails_retry_succeeds` | +600 ms | Forces hard recovery instead of allowing the cheap retry. |
-| `force_after_4_refreshes` | `bluetooth_reconnect_stale_flag` | +680 ms | Skips the faster guarded recovery start and forces a slower rebuild. |
+| `force_after_4_refreshes` | `bluetooth_reconnect_stale_flag` | +730 ms | Skips the faster guarded recovery start and forces a slower rebuild. |
 
 Decision:
 
-- `dictationReadinessPollInterval`: rejected. 75 ms and 50 ms worsened aggregate p95 in the deterministic suite.
-- `dictationReadinessRefreshInterval`: rejected. 200 ms/150 ms improved aggregate p95 by 270 ms, but increased starts/refreshes/forced recoveries and regressed the late Bluetooth settle scenario by 600 ms.
+- `dictationReadinessPollInterval`: keep 100 ms as part of the current policy. 75 ms and 50 ms added refresh churn without beating the kept combo.
+- `dictationReadinessRefreshInterval`: rejected. 150 ms improved aggregate p95 by 570 ms, but increased starts/refreshes/forced recoveries and regressed Bluetooth settle by 700 ms.
 - `dictationReadinessRefreshTimeout`: rejected. 600 ms created 2 unexpected failures and 3 simulated microphone timeouts.
-- recovery-start threshold: rejected. Starting after 3 or 2 refreshes regressed late Bluetooth scenarios by 900 ms.
-- ready-start attempt cap: rejected. One attempt regressed cheap retry success by 600 ms and repeated ready-start failure recovery by 700 ms.
-- forced recovery threshold: rejected. Forcing after 4 refreshes improved aggregate p95 by 190 ms, but regressed Bluetooth reconnect by 680 ms.
+- recovery-start threshold: rejected. Starting after 3 or 2 refreshes worsened aggregate p95.
+- ready-start attempt cap: keep 2 as part of the current policy. One attempt still regresses cheap retry success.
+- forced recovery threshold: keep 5 as part of the current policy. Forcing after 4 refreshes improved aggregate p95 more, but regressed Bluetooth reconnect by 730 ms.
 - `dictationRecoveryBudget` 6 s: ruled out for latency. Lowering it only fails faster; raising it worsens start latency. Keep the current budget unless the metric changes to recovery success rate.
 - forced recovery attempt budget: ruled out for this latency goal. The scorer already keeps attempts bounded; more attempts would increase worst-case latency and fewer attempts would reduce recovery chance.
 
@@ -505,10 +509,10 @@ Decision:
 | Diagnostics/logging hot path | Ruled out | Stage timing shows post-start diagnostics are not the request-to-recording bottleneck. |
 | Skip explicit `audioEngine.prepare()` | Kept | Built-in p95 request-to-recording improved 106 -> 98 ms with no guardrail events. |
 | Keep engine running between starts | Ruled out | Would keep mic hardware active after stop and weaken privacy/battery expectations. |
-| Recovery poll interval | Rejected | 75 ms and 50 ms worsened deterministic p95. |
-| Recovery refresh interval | Rejected | 200 ms/150 ms improved aggregate p95 but regressed late Bluetooth settle by 600 ms and increased starts/refreshes/forced recoveries. |
+| Recovery poll interval | Partly kept | 100 ms is in the kept current policy; 75 ms and 50 ms added churn without beating the kept combo. |
+| Recovery refresh interval | Rejected | 150 ms improved aggregate p95 but regressed Bluetooth settle by 700 ms and increased starts/refreshes/forced recoveries. |
 | Recovery refresh timeout | Rejected | 600 ms created 2 unexpected failures and 3 simulated microphone timeouts. |
-| Recovery start threshold | Rejected | Earlier recovery starts regressed Bluetooth settle scenarios by 900 ms. |
+| Recovery start threshold | Rejected | Earlier recovery starts worsened aggregate p95 by 30 ms and regressed Bluetooth settle scenarios by 1300 ms. |
 | Recovery budget | Ruled out | Lower budget fails faster rather than starting faster; higher budget worsens latency. |
 
 ## Final Verdict
@@ -517,6 +521,6 @@ Built-in route: no 20-30% win found. The kept measured win is small: p95 request
 
 Bluetooth-output route: blocked by missing hardware in the current environment. The prior safe improvement for ready Bluetooth routes is kept, but deeper route-settle tuning cannot be scored right now.
 
-Slow recovery route: no safe code change kept. After updating the deterministic scorer to current constants, every recovery knob either worsened p95, created failure regressions, or improved aggregate p95 while hurting a Bluetooth-settle scenario enough to reject it.
+Slow recovery route: no further safe code change kept. After fixing the deterministic scorer to compare against the real pre-keeper baseline, the current policy remains the safe kept combo; more aggressive knobs either create failure regressions or improve aggregate p95 while hurting a Bluetooth-settle scenario enough to reject them.
 
 Conclusion: this autoeval found a small built-in-route keeper and then hit a clear no-win/blocker boundary for the remaining knobs.

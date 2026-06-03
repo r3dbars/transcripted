@@ -778,6 +778,14 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_DICTATION_REQUEST_TO_RECORDING_P95_MS = 250.0"),
+            "performance budget should cap request-to-recording latency when strict start samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS = 350.0"),
+            "performance budget should cap start-to-first-sample latency when strict start samples are required"
+        )
+        assertTrue(
             contents.contains("MAX_MEETING_P95_RTF = 0.05"),
             "performance budget should cap meeting processing real-time factor when stats are provided"
         )
@@ -790,12 +798,25 @@ func testRepoCommandContract() {
             "performance budget should support strict fresh dictation start proof"
         )
         assertTrue(
+            contents.contains("--max-dictation-request-to-recording-p95-ms")
+                && contents.contains("--max-dictation-start-to-first-sample-p95-ms"),
+            "strict dictation start proof should expose budgets for the user-visible start and audio-flow metrics"
+        )
+        assertTrue(
             contents.contains("dictation_request_to_recording_ms"),
             "performance budget should surface true request-to-recording timing when logs include it"
         )
         assertTrue(
             contents.contains("start_to_first_sample_ms"),
             "performance budget should surface audio-flow timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("dictation_start_proof_events")
+                && contents.contains("dictation request-to-recording samples")
+                && contents.contains("Dictation request-to-recording p95 is")
+                && contents.contains("dictation start-to-first-sample samples")
+                && contents.contains("Dictation start-to-first-sample p95 is"),
+            "strict dictation start proof should enforce the collected request-to-recording and audio-flow samples"
         )
         assertTrue(
             contents.contains("--stats PATH"),
@@ -886,6 +907,33 @@ func testRepoCommandContract() {
                 && betaBuildScript.contains("-whole-module-optimization")
                 && betaBuildScript.contains("-num-threads \"$SWIFTC_NUM_THREADS\""),
             "beta release build should use threaded whole-module Swift compilation"
+        )
+    }
+
+    runSuite("Repo command contract - dictation recovery autoeval separates baseline from kept policy") {
+        let contents = readRepoTextFile("scripts/ops/dictation-recovery-autoeval.rb")
+        let baselineBlock = sourceSlice(contents, from: "BASELINE = Config.new(", to: ")\n\nKEPT_POLICY = Config.new(")
+        let keptBlock = sourceSlice(contents, from: "KEPT_POLICY = Config.new(", to: ")\n\nSCENARIOS = [")
+
+        assertTrue(
+            baselineBlock.contains("name: \"baseline\"")
+                && baselineBlock.contains("poll_ms: 150")
+                && baselineBlock.contains("forced_recovery_refreshes: 6")
+                && baselineBlock.contains("max_recording_start_attempts: 3"),
+            "recovery autoeval baseline should stay the pre-keeper policy, not the kept winner"
+        )
+        assertTrue(
+            keptBlock.contains("name: \"kept_current_policy\"")
+                && keptBlock.contains("poll_ms: 100")
+                && keptBlock.contains("forced_recovery_refreshes: 5")
+                && keptBlock.contains("max_recording_start_attempts: 2"),
+            "recovery autoeval should name the current kept policy separately from the baseline"
+        )
+        assertTrue(
+            contents.contains("all_results.fetch(BASELINE.name)")
+                && contents.contains("Baseline: pre-keeper policy")
+                && contents.contains("Kept current policy:"),
+            "recovery autoeval deltas and raw rows should be anchored to the real baseline"
         )
     }
 
