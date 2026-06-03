@@ -274,6 +274,27 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertGreaterThan(normalized.samples.map(abs).max() ?? 0, analysis.peak)
     }
 
+    func testQuietWebRTCMicSegmentIsPreparedForTranscription() {
+        var samples = [Float](repeating: 0.0, count: 64_000)
+        let quietSpeech = alternatingSamples(amplitude: 0.006, count: 24_000)
+        samples.replaceSubrange(20_000..<44_000, with: quietSpeech)
+
+        let segments = Transcription.detectSpeechSegments(samples: samples, sampleRate: 16_000)
+        let prepared = Transcription.prepareMicSegmentForTranscription(
+            samples: samples,
+            sampleRate: 16_000
+        )
+
+        XCTAssertFalse(segments.isEmpty, "Quiet issue #500-style mic speech should still be segmented")
+        XCTAssertNotNil(prepared, "Quiet issue #500-style mic speech should still reach Parakeet")
+        XCTAssertGreaterThan(prepared?.gain ?? 1, 1, "Prepared mic speech should be normalized before STT")
+        XCTAssertGreaterThan(
+            prepared?.samples.map(abs).max() ?? 0,
+            samples.map(abs).max() ?? 0,
+            "Prepared mic speech should be louder than the captured quiet segment"
+        )
+    }
+
     func testPrepareMicSegmentPadsShortQuietSpeechForParakeet() {
         let samples = alternatingSamples(amplitude: 0.006, count: 8_000)
 
