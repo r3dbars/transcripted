@@ -17,6 +17,31 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(merged.map(\.speakerId)), [1])
     }
 
+    func testOfflinePostProcessCanSkipPairwiseMergeForMultiSpeakerCalls() {
+        let segments = [
+            segment(speakerId: 1, startTime: 0, endTime: 3, embedding: unitVector(degrees: 0)),
+            segment(speakerId: 2, startTime: 3, endTime: 6, embedding: unitVector(degrees: 30)),
+            segment(speakerId: 3, startTime: 6, endTime: 9, embedding: unitVector(degrees: 60)),
+            segment(speakerId: 4, startTime: 9, endTime: 12, embedding: unitVector(degrees: 90)),
+            segment(speakerId: 5, startTime: 12, endTime: 15, embedding: unitVector(degrees: 120)),
+            segment(speakerId: 6, startTime: 15, endTime: 18, embedding: unitVector(degrees: 150)),
+        ]
+
+        XCTAssertEqual(
+            Set(EmbeddingClusterer.pairwiseMerge(segments: segments, threshold: 0.78).map(\.speakerId)).count,
+            1,
+            "Transitive pairwise merge reproduces the reported multi-speaker collapse risk"
+        )
+
+        let preserved = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: [],
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(Set(preserved.map(\.speakerId)).count, 6)
+    }
+
     func testAbsorbSmallClustersPreservesAtLeastTwoSpeakers() {
         let protected = EmbeddingClusterer.absorbSmallClusters(
             segments: [
@@ -87,5 +112,10 @@ final class EmbeddingClustererTests: XCTestCase {
     private func unitVector(cosineToXAxis: Float) -> [Float] {
         let y = sqrt(max(0, 1 - (cosineToXAxis * cosineToXAxis)))
         return [cosineToXAxis, y]
+    }
+
+    private func unitVector(degrees: Float) -> [Float] {
+        let radians = degrees * .pi / 180
+        return [cos(radians), sin(radians)]
     }
 }
