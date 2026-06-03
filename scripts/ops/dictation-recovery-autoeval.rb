@@ -65,6 +65,19 @@ end
 
 BASELINE = Config.new(
   name: "baseline",
+  poll_ms: 150,
+  refresh_interval_ms: 300,
+  refresh_timeout_ms: 900,
+  budget_ms: 6000,
+  refreshes_before_recovery_start: 4,
+  forced_recovery_refreshes: 6,
+  max_forced_recoveries: 2,
+  max_recovery_start_attempts: 2,
+  max_recording_start_attempts: 3
+)
+
+KEPT_POLICY = Config.new(
+  name: "kept_current_policy",
   poll_ms: 100,
   refresh_interval_ms: 300,
   refresh_timeout_ms: 900,
@@ -291,6 +304,7 @@ SCENARIOS = [
 def config_variants
   [
     BASELINE,
+    BASELINE.dup.tap { |config| config.name = "poll_100ms"; config.poll_ms = 100 },
     BASELINE.dup.tap { |config| config.name = "poll_75ms"; config.poll_ms = 75 },
     BASELINE.dup.tap { |config| config.name = "poll_50ms"; config.poll_ms = 50 },
     BASELINE.dup.tap { |config| config.name = "refresh_interval_200ms"; config.refresh_interval_ms = 200 },
@@ -298,8 +312,11 @@ def config_variants
     BASELINE.dup.tap { |config| config.name = "refresh_timeout_600ms"; config.refresh_timeout_ms = 600 },
     BASELINE.dup.tap { |config| config.name = "recovery_start_after_3_refreshes"; config.refreshes_before_recovery_start = 3 },
     BASELINE.dup.tap { |config| config.name = "recovery_start_after_2_refreshes"; config.refreshes_before_recovery_start = 2 },
+    BASELINE.dup.tap { |config| config.name = "max_ready_start_attempts_2"; config.max_recording_start_attempts = 2 },
     BASELINE.dup.tap { |config| config.name = "max_ready_start_attempts_1"; config.max_recording_start_attempts = 1 },
+    BASELINE.dup.tap { |config| config.name = "force_after_5_refreshes"; config.forced_recovery_refreshes = 5 },
     BASELINE.dup.tap { |config| config.name = "force_after_4_refreshes"; config.forced_recovery_refreshes = 4 },
+    KEPT_POLICY,
     BASELINE.dup.tap do |config|
       config.name = "combo_poll100_refresh200_attempts2"
       config.poll_ms = 100
@@ -604,12 +621,14 @@ variants = config_variants
 all_results = variants.to_h do |config|
   [config.name, SCENARIOS.map { |scenario| simulate(scenario, config) }]
 end
-baseline_summary = summarize(all_results.fetch("baseline"))
+baseline_summary = summarize(all_results.fetch(BASELINE.name))
 
 puts "# Dictation Recovery Autoeval"
 puts
 puts "Primary metric: request-to-listening time for slow dictation recovery scenarios."
 puts "Guardrails: expected success cases must still succeed; unrecoverable route must time out clearly; attempts and hard recoveries stay bounded."
+puts "Baseline: pre-keeper policy, 150ms poll, force after 6 stale refreshes, ready-start cap 3."
+puts "Kept current policy: 100ms poll, force after 5 stale refreshes, ready-start cap 2."
 puts
 
 puts "## Scenarios"
@@ -661,7 +680,7 @@ print_table(
 puts
 
 puts "## Baseline Raw Results"
-baseline_rows = all_results.fetch("baseline").map do |result|
+baseline_rows = all_results.fetch(BASELINE.name).map do |result|
   [
     result.scenario,
     result.success ? "success" : "timeout",
@@ -682,11 +701,11 @@ print_table(
 if options[:details]
   puts
   puts "## Per-Knob Raw Results"
-  variants.reject { |config| config.name == "baseline" }.each do |config|
+  variants.reject { |config| config.name == BASELINE.name }.each do |config|
     puts
     puts "### #{config.name}"
     rows = all_results.fetch(config.name).map do |result|
-      baseline = all_results.fetch("baseline").find { |base| base.scenario == result.scenario }
+      baseline = all_results.fetch(BASELINE.name).find { |base| base.scenario == result.scenario }
       [
         result.scenario,
         result.success ? "success" : "timeout",

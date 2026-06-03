@@ -17,6 +17,8 @@ MAX_TRANSCRIPTION_P95_SECONDS = 0.5
 MAX_TRANSCRIPTION_P95_RTF = 0.05
 MAX_MODEL_READY_P90_SECONDS = 30.0
 MAX_DICTATION_FAST_START_P95_MS = 250.0
+MAX_DICTATION_REQUEST_TO_RECORDING_P95_MS = 250.0
+MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS = 350.0
 MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0
 MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0
 MAX_MEETING_P95_RTF = 0.05
@@ -45,6 +47,8 @@ options = {
   max_transcription_p95_rtf: MAX_TRANSCRIPTION_P95_RTF,
   max_model_ready_p90_seconds: MAX_MODEL_READY_P90_SECONDS,
   max_dictation_fast_start_p95_ms: MAX_DICTATION_FAST_START_P95_MS,
+  max_dictation_request_to_recording_p95_ms: MAX_DICTATION_REQUEST_TO_RECORDING_P95_MS,
+  max_dictation_start_to_first_sample_p95_ms: MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS,
   max_dictation_stop_to_paste_p95_ms: MAX_DICTATION_STOP_TO_PASTE_P95_MS,
   max_dictation_stop_to_done_p95_ms: MAX_DICTATION_STOP_TO_DONE_P95_MS,
   max_meeting_p95_rtf: MAX_MEETING_P95_RTF,
@@ -70,6 +74,8 @@ OptionParser.new do |parser|
   parser.on("--max-transcription-p95-rtf VALUE", Float, "Dictation transcription p95 RTF budget") { |rtf| options[:max_transcription_p95_rtf] = rtf }
   parser.on("--max-model-ready-p90-s SECONDS", Float, "Launch to model-ready p90 budget") { |seconds| options[:max_model_ready_p90_seconds] = seconds }
   parser.on("--max-dictation-fast-start-p95-ms MS", Float, "Ready-engine dictation fast-start p95 budget") { |ms| options[:max_dictation_fast_start_p95_ms] = ms }
+  parser.on("--max-dictation-request-to-recording-p95-ms MS", Float, "Dictation request-to-recording p95 budget for strict fresh start proof") { |ms| options[:max_dictation_request_to_recording_p95_ms] = ms }
+  parser.on("--max-dictation-start-to-first-sample-p95-ms MS", Float, "Dictation start-to-first-audio-sample p95 budget for strict fresh start proof") { |ms| options[:max_dictation_start_to_first_sample_p95_ms] = ms }
   parser.on("--max-dictation-stop-to-paste-p95-ms MS", Float, "Dictation stop-to-paste p95 budget") { |ms| options[:max_dictation_stop_to_paste_p95_ms] = ms }
   parser.on("--max-dictation-stop-to-done-p95-ms MS", Float, "Dictation stop pipeline p95 budget") { |ms| options[:max_dictation_stop_to_done_p95_ms] = ms }
   parser.on("--max-meeting-p95-rtf VALUE", Float, "Meeting processing p95 real-time-factor budget") { |rtf| options[:max_meeting_p95_rtf] = rtf }
@@ -275,15 +281,20 @@ if options[:events_path]
       .map { |event| [event["_time"], float_or_nil(event.fetch("context", {})["start_ms"])] }
       .select { |time, value| time && value }
     dictation_fast_start_ms = dictation_fast_starts.map { |_, value| value }
-    dictation_request_to_recording_ms = events
+    first_fast_start_time = dictation_fast_starts.map(&:first).min
+    dictation_start_proof_events = if first_fast_start_time
+      events.select { |event| event["_time"] && event["_time"] >= first_fast_start_time }
+    else
+      events
+    end
+    dictation_request_to_recording_ms = dictation_start_proof_events
       .select { |event| ["dictation_recording_fast_start", "dictation_started_after_wait"].include?(event["event"]) }
       .map { |event| float_or_nil(event.fetch("context", {})["request_to_recording_ms"]) }
       .compact
-    dictation_start_to_first_sample_ms = events
+    dictation_start_to_first_sample_ms = dictation_start_proof_events
       .select { |event| event["event"] == "audio_samples_detected" }
       .map { |event| float_or_nil(event.fetch("context", {})["start_to_first_sample_ms"]) }
       .compact
-    first_fast_start_time = dictation_fast_starts.map(&:first).min
     fast_start_fallback_events = if first_fast_start_time
       events.select do |event|
         [
@@ -327,11 +338,24 @@ if options[:events_path]
       end
     end
 
-    if options[:require_dictation_fast_start_samples].positive?
-      if dictation_fast_start_ms.length < options[:require_dictation_fast_start_samples]
-        errors << "Only #{dictation_fast_start_ms.length} dictation fast-start samples, need at least #{options[:require_dictation_fast_start_samples]}"
+    required_fast_start_samples = options[:require_dictation_fast_start_samples]
+    if required_fast_start_samples.positive?
+      if dictation_fast_start_ms.length < required_fast_start_samples
+        errors << "Only #{dictation_fast_start_ms.length} dictation fast-start samples, need at least #{required_fast_start_samples}"
       elsif percentile(dictation_fast_start_ms, 0.95) > options[:max_dictation_fast_start_p95_ms]
         errors << "Dictation fast-start p95 is #{format("%.1fms", percentile(dictation_fast_start_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_fast_start_p95_ms])}"
+      end
+
+      if dictation_request_to_recording_ms.length < required_fast_start_samples
+        errors << "Only #{dictation_request_to_recording_ms.length} dictation request-to-recording samples, need at least #{required_fast_start_samples}"
+      elsif percentile(dictation_request_to_recording_ms, 0.95) > options[:max_dictation_request_to_recording_p95_ms]
+        errors << "Dictation request-to-recording p95 is #{format("%.1fms", percentile(dictation_request_to_recording_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_request_to_recording_p95_ms])}"
+      end
+
+      if dictation_start_to_first_sample_ms.length < required_fast_start_samples
+        errors << "Only #{dictation_start_to_first_sample_ms.length} dictation start-to-first-sample samples, need at least #{required_fast_start_samples}"
+      elsif percentile(dictation_start_to_first_sample_ms, 0.95) > options[:max_dictation_start_to_first_sample_p95_ms]
+        errors << "Dictation start-to-first-sample p95 is #{format("%.1fms", percentile(dictation_start_to_first_sample_ms, 0.95))}, above #{format("%.1fms", options[:max_dictation_start_to_first_sample_p95_ms])}"
       end
 
       unless fast_start_fallback_events.empty?
