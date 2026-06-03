@@ -65,6 +65,72 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.paste — dispatches after dictation text is on the pasteboard") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic just-finished dictation"
+            var observedTextAtPost: String?
+            var postCount = 0
+
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    postCount += 1
+                    observedTextAtPost = pasteboard.string(forType: .string)
+                    return true
+                }
+            )
+
+            assertEqual(outcome, .pasted, "valid pasteboard write should allow automatic paste")
+            assertEqual(postCount, 1, "automatic paste should dispatch exactly once")
+            assertEqual(
+                observedTextAtPost,
+                dictationText,
+                "paste shortcut should only fire after the borrowed clipboard contains dictation text"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — blocks Cmd+V when the dictation clipboard write fails") {
+            let existingClipboard = "synthetic existing clipboard"
+            let pasteboard = FakeClipboardPasteboard(
+                initialString: existingClipboard,
+                clearContentsClears: false,
+                setStringSucceeds: false,
+                writePasteboardItemsSucceeds: false
+            )
+            let paster = ClipboardRestoringTextPaster()
+            var observedTextAtPost: String?
+            var postCount = 0
+
+            let outcome = paster.paste(
+                "synthetic just-finished dictation",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    postCount += 1
+                    observedTextAtPost = pasteboard.string(forType: .string)
+                    return true
+                }
+            )
+
+            assertEqual(
+                outcome,
+                .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run."),
+                "failed clipboard writes should be reported as paste-back failures"
+            )
+            assertEqual(postCount, 0, "Cmd+V should not fire when the dictation text is not on the pasteboard")
+            assertNil(observedTextAtPost, "failed pasteboard prep should not reach the paste dispatcher")
+            assertEqual(
+                pasteboard.string(forType: .string),
+                existingClipboard,
+                "failed pasteback should not paste the pre-existing clipboard contents"
+            )
+        }
+
         runSuite("DictationPasteTarget — accepts only the captured foreground app") {
             let target = DictationPasteTarget(
                 processIdentifier: 42,
@@ -99,10 +165,129 @@ func testClipboardRestoringTextPaster() async {
             )
         }
     }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — keeps dictation available for delayed paste consumers") {
+        let existingClipboard = "synthetic existing clipboard"
+        let dictationText = "synthetic delayed dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedDelayedPasteTest-\(UUID().uuidString)")
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 80_000_000
+            )
+        }
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        let delayedRead = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            delayedRead,
+            dictationText,
+            "a target that reads after the eager restore delay should still get the dictation text"
+        )
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let restoredClipboard = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            existingClipboard,
+            "after the target reads the temporary text, the user's original clipboard should be restored"
+        )
+    }
 }
 
 private func readClipboardPasterSource() -> String {
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent("Sources/Support/ClipboardRestoringTextPaster.swift")
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+@MainActor
+private final class FakeClipboardPasteboard: ClipboardPasteboard {
+    var changeCount = 0
+    var clearContentsClears: Bool
+    var setStringSucceeds: Bool
+    var writePasteboardItemsSucceeds: Bool
+    private var storedString: String?
+    private var storedItems: [NSPasteboardItem]?
+
+    init(
+        initialString: String?,
+        clearContentsClears: Bool = true,
+        setStringSucceeds: Bool = true,
+        writePasteboardItemsSucceeds: Bool = true
+    ) {
+        self.storedString = initialString
+        self.clearContentsClears = clearContentsClears
+        self.setStringSucceeds = setStringSucceeds
+        self.writePasteboardItemsSucceeds = writePasteboardItemsSucceeds
+    }
+
+    var pasteboardItems: [NSPasteboardItem]? {
+        if let storedString,
+           let data = storedString.data(using: .utf8) {
+            let item = NSPasteboardItem()
+            item.setData(data, forType: .string)
+            return [item]
+        }
+        return storedItems
+    }
+
+    @discardableResult
+    func clearContents() -> Int {
+        changeCount += 1
+        if clearContentsClears {
+            storedString = nil
+            storedItems = nil
+        }
+        return changeCount
+    }
+
+    @discardableResult
+    func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
+        guard setStringSucceeds, dataType == .string else { return false }
+        storedString = string
+        storedItems = nil
+        changeCount += 1
+        return true
+    }
+
+    func string(forType dataType: NSPasteboard.PasteboardType) -> String? {
+        guard dataType == .string else { return nil }
+        if let storedString {
+            return storedString
+        }
+        return storedItems?.compactMap { item in
+            item.data(forType: .string)
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }.first
+    }
+
+    @discardableResult
+    func writePasteboardItems(_ items: [NSPasteboardItem]) -> Bool {
+        guard writePasteboardItemsSucceeds else { return false }
+        changeCount += 1
+        storedString = nil
+        storedItems = items
+        return true
+    }
 }
