@@ -10,7 +10,7 @@ This document describes the observability lanes used by Transcripted and how to 
 | **Sentry Releases** | Release registration and debug symbols | `SENTRY_AUTH_TOKEN` or configured `sentry-cli` auth | `project:releases`, `project:write`, plus `org:read` for `sentry-cli` release management | Use the same Sentry token surface, with release-management scopes added only on release machines | `bash scripts/release/register-sentry-release.sh <version>` |
 | **PostHog** | Anonymous usage statistics | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` | Personal API key | Create a Personal API Key in PostHog project settings (Settings -> Personal API keys) | `bash scripts/ops/health-probe.sh posthog` |
 | **GitHub** | Release metadata, traffic stats | None (uses `gh auth`) | None (uses authenticated CLI) | Run `gh auth login` in your terminal | `gh api repos/r3dbars/transcripted` |
-| **Cloudflare Pages Read** | Pages project and deployment status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Pages Read` or `Pages Write` | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with Pages read access for the account | See `scripts/ops/health-probe.sh cloudflare` |
+| **Cloudflare Pages Read** | Pages project, deployment, zone, and analytics status | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Pages Read`, plus `Zone Read` and analytics read access for the checked zones | Create an API Token at [Cloudflare Tokens](https://dash.cloudflare.com/profile/api-tokens) with Pages read access for the account and zone analytics read access for `transcripted.app` and `r3d.bar` | See `scripts/ops/health-probe.sh cloudflare` |
 | **Cloudflare Pages Deploy** | Manual Pages deploys for live web surfaces | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Account-level `Pages Write` | Use a deployment-scoped token only on machines allowed to publish Pages artifacts | Deploy from the web repo after source and live-release checks pass |
 
 ## Important Notes
@@ -44,10 +44,11 @@ If `POSTHOG_HOST` points at the app ingest host, such as `https://us.i.posthog.c
 
 ### Cloudflare Read vs Deploy
 
-The health probe only needs to read Pages project and deployment status. A token
-that can run `bash scripts/ops/health-probe.sh cloudflare` is not proof that it
-can publish a Pages deployment. Manual deploys need `Pages Write`; identity or
-read-only project access can still fail at deploy time.
+The health probe reads Pages project/deployment status and zone analytics for
+`transcripted.app` and `r3d.bar`. A token that can run
+`bash scripts/ops/health-probe.sh cloudflare` is not proof that it can publish a
+Pages deployment. Manual deploys need `Pages Write`; identity or read-only
+project access can still fail at deploy time.
 
 ## Quick Start
 

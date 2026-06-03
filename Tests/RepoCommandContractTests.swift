@@ -789,14 +789,15 @@ func testRepoCommandContract() {
 
         assertTrue(
             docs.contains("Cloudflare Pages Read")
-                && docs.contains("Pages project and deployment status")
+                && docs.contains("Pages project, deployment, zone, and analytics status")
                 && docs.contains("Pages Read")
+                && docs.contains("Zone Read")
                 && docs.contains("Cloudflare Pages Deploy")
                 && docs.contains("Pages Write"),
-            "Cloudflare ops docs should distinguish read-only health checks from deploy-capable credentials"
+            "Cloudflare ops docs should distinguish health-check read scopes from deploy-capable credentials"
         )
         assertTrue(
-            docs.contains("health probe only needs to read Pages project and deployment status")
+            docs.contains("health probe reads Pages project/deployment status and zone analytics")
                 && docs.contains("Manual deploys need `Pages Write`"),
             "Cloudflare docs should warn that health-probe auth is not deploy proof"
         )
@@ -2202,6 +2203,8 @@ func testRepoCommandContract() {
         let activation = readRepoTextFile("docs/activation-lane.md")
         let closeout = readRepoTextFile("docs/agent-closeout.md")
         let workflow = readRepoTextFile("WORKFLOW.md")
+        let agents = readRepoTextFile("AGENTS.md")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
 
         assertTrue(
             agentStart.contains("Activation/artifacts/agent payoff - `docs/activation-lane.md`")
@@ -2231,6 +2234,8 @@ func testRepoCommandContract() {
         )
         assertTrue(
             closeout.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && agents.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && preflight.contains("COORD_DONE: GREEN/BRIEF/RED")
                 && closeout.contains("delete branches, close issues")
                 && workflow.contains("docs/agent-closeout.md"),
             "closeout docs and workflow should keep delegated handoff and GitHub mutation boundaries explicit"
