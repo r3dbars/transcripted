@@ -1,6 +1,6 @@
 // ClipboardRestoringTextPaster.swift
 // Pastes text into the current target app by borrowing the clipboard briefly
-// and restoring the prior clipboard contents after Cmd+V completes.
+// and restoring the prior clipboard contents after the target reads the text.
 
 import AppKit
 import ApplicationServices
@@ -47,6 +47,45 @@ enum TextPasteOutcome: Equatable {
     }
 }
 
+@MainActor
+protocol ClipboardPasteboard: AnyObject {
+    var changeCount: Int { get }
+    var pasteboardItems: [NSPasteboardItem]? { get }
+
+    @discardableResult
+    func clearContents() -> Int
+
+    @discardableResult
+    func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool
+
+    func string(forType dataType: NSPasteboard.PasteboardType) -> String?
+
+    @discardableResult
+    func writePasteboardItems(_ items: [NSPasteboardItem]) -> Bool
+}
+
+extension NSPasteboard: ClipboardPasteboard {
+    @discardableResult
+    func writePasteboardItems(_ items: [NSPasteboardItem]) -> Bool {
+        writeObjects(items)
+    }
+}
+
+private func postClipboardPasteShortcut() -> Bool {
+    guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
+          let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+        return false
+    }
+
+    vDown.flags = .maskCommand
+    vDown.post(tap: .cghidEventTap)
+
+    vUp.flags = .maskCommand
+    vUp.post(tap: .cghidEventTap)
+
+    return true
+}
+
 struct DictationPasteTarget: Equatable {
     let processIdentifier: pid_t?
     let bundleIdentifier: String?
@@ -85,20 +124,39 @@ final class ClipboardRestoringTextPaster {
     typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
 
     private var clipboardRestoreTask: Task<Void, Never>?
+    private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
+    private var pasteGeneration = 0
 
     deinit {
         clipboardRestoreTask?.cancel()
     }
 
     func cancelPendingClipboardRestore() {
+        pasteGeneration += 1
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
+        temporaryPasteboardDataProvider = nil
+    }
+
+    func waitForPendingClipboardRestore() async {
+        while let clipboardRestoreTask {
+            await clipboardRestoreTask.value
+        }
     }
 
     func paste(
         _ text: String,
         target: DictationPasteTarget? = nil,
-        activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait
+        activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait,
+        pasteboard: any ClipboardPasteboard = NSPasteboard.general,
+        accessibilityTrusted: () -> Bool = { AXIsProcessTrusted() },
+        requestAccessibilityTrust: () -> Void = {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        },
+        pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
+        restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
+        fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay
     ) -> TextPasteOutcome {
         cancelPendingClipboardRestore()
 
@@ -112,49 +170,93 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
-        guard AXIsProcessTrusted() else {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            copyTextToClipboard(text)
+        guard accessibilityTrusted() else {
+            requestAccessibilityTrust()
+            copyTextToClipboard(text, to: pasteboard)
             return .copied(
                 "Couldn't paste automatically. Accessibility is off, so the text was copied.",
                 reason: .accessibilityMissing
             )
         }
 
-        let pasteboard = NSPasteboard.general
         let savedItems = snapshotPasteboardItems(from: pasteboard)
+        pasteGeneration += 1
+        let generation = pasteGeneration
+        var temporaryChangeCount = 0
 
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let wroteTemporaryString = writeTemporaryString(text, to: pasteboard) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.scheduleClipboardRestore(
+                    savedItems,
+                    temporaryString: text,
+                    temporaryChangeCount: temporaryChangeCount,
+                    to: pasteboard,
+                    generation: generation,
+                    delay: restoreDelay
+                )
+            }
+        }
 
-        guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
-              let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+        if !wroteTemporaryString {
+            pasteboard.clearContents()
+            guard pasteboard.setString(text, forType: .string),
+                  pasteboard.string(forType: .string) == text else {
+                return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
+            }
+        }
+        temporaryChangeCount = pasteboard.changeCount
+
+        scheduleClipboardRestore(
+            savedItems,
+            temporaryString: text,
+            temporaryChangeCount: temporaryChangeCount,
+            to: pasteboard,
+            generation: generation,
+            delay: fallbackRestoreDelay
+        )
+
+        guard pasteDispatcher() else {
+            cancelPendingClipboardRestore()
+            guard copyTextToClipboard(text, to: pasteboard) else {
+                return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
+            }
             return .copied(
                 "Couldn't paste automatically. The text was copied instead.",
                 reason: .pasteEventCreationFailed
             )
         }
 
-        vDown.flags = .maskCommand
-        vDown.post(tap: .cghidEventTap)
+        return .pasted
+    }
 
-        vUp.flags = .maskCommand
-        vUp.post(tap: .cghidEventTap)
-
-        let changeCountAfterSet = pasteboard.changeCount
+    private func scheduleClipboardRestore(
+        _ savedItems: PasteboardSnapshot,
+        temporaryString: String,
+        temporaryChangeCount: Int,
+        to pasteboard: any ClipboardPasteboard,
+        generation: Int,
+        delay: UInt64
+    ) {
+        guard generation == pasteGeneration else { return }
+        clipboardRestoreTask?.cancel()
         clipboardRestoreTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.clipboardRestoreDelay)
-            guard !Task.isCancelled else { return }
-            self?.restorePasteboardItems(
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self,
+                  !Task.isCancelled,
+                  self.pasteGeneration == generation else { return }
+            self.restorePasteboardItems(
                 savedItems,
-                temporaryString: text,
-                temporaryChangeCount: changeCountAfterSet,
+                temporaryString: temporaryString,
+                temporaryChangeCount: temporaryChangeCount,
                 to: pasteboard
             )
+            self.temporaryPasteboardDataProvider = nil
+            self.clipboardRestoreTask = nil
+            if self.pasteGeneration == generation {
+                self.pasteGeneration += 1
+            }
         }
-
-        return .pasted
     }
 
     private func waitForTargetActivation(_ target: DictationPasteTarget, timeout: TimeInterval) -> Bool {
@@ -170,13 +272,40 @@ final class ClipboardRestoringTextPaster {
         return target.matchesCurrentFrontmostApp()
     }
 
-    func copyTextToClipboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
+    @discardableResult
+    func copyTextToClipboard(_ text: String, to pasteboard: any ClipboardPasteboard = NSPasteboard.general) -> Bool {
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        return pasteboard.setString(text, forType: .string)
+            && pasteboard.string(forType: .string) == text
     }
 
-    func snapshotPasteboardItems(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+    @discardableResult
+    func writeTemporaryString(
+        _ text: String,
+        to pasteboard: any ClipboardPasteboard,
+        onTemporaryStringRead: @escaping () -> Void
+    ) -> Bool {
+        guard pasteboard is NSPasteboard else { return false }
+
+        let provider = TemporaryPasteboardStringProvider(
+            text: text,
+            onTemporaryStringRead: onTemporaryStringRead
+        )
+        let item = NSPasteboardItem()
+        guard item.setDataProvider(provider, forTypes: [.string]) else {
+            return false
+        }
+
+        guard pasteboard.writePasteboardItems([item]) else {
+            temporaryPasteboardDataProvider = nil
+            return false
+        }
+
+        temporaryPasteboardDataProvider = provider
+        return true
+    }
+
+    func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
         pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
@@ -192,7 +321,7 @@ final class ClipboardRestoringTextPaster {
         _ savedItems: PasteboardSnapshot,
         temporaryString: String,
         temporaryChangeCount: Int,
-        to pasteboard: NSPasteboard
+        to pasteboard: any ClipboardPasteboard
     ) {
         guard pasteboard.changeCount == temporaryChangeCount,
               pasteboard.string(forType: .string) == temporaryString else {
@@ -208,7 +337,40 @@ final class ClipboardRestoringTextPaster {
             return item
         }
         if !items.isEmpty {
-            pasteboard.writeObjects(items)
+            pasteboard.writePasteboardItems(items)
+        }
+    }
+}
+
+private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardItemDataProvider {
+    private let text: String
+    private let onTemporaryStringRead: () -> Void
+    private let lock = NSLock()
+    private var didNotifyRead = false
+
+    init(text: String, onTemporaryStringRead: @escaping () -> Void) {
+        self.text = text
+        self.onTemporaryStringRead = onTemporaryStringRead
+    }
+
+    func pasteboard(
+        _ pasteboard: NSPasteboard?,
+        item: NSPasteboardItem,
+        provideDataForType type: NSPasteboard.PasteboardType
+    ) {
+        guard type == .string else { return }
+        item.setString(text, forType: .string)
+        notifyReadOnce()
+    }
+
+    private func notifyReadOnce() {
+        lock.lock()
+        let shouldNotify = !didNotifyRead
+        didNotifyRead = true
+        lock.unlock()
+
+        if shouldNotify {
+            onTemporaryStringRead()
         }
     }
 }
