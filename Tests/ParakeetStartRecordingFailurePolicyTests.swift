@@ -201,6 +201,21 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "stale Bluetooth output routes should map to route-not-settled")
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred built-in fallback with Bluetooth output") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 24_000,
+            outputChannelCount: 1,
+            inputSampleRate: 48_000,
+            inputChannelCount: 1,
+            selectedInputClass: "built_in",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: true,
+            selectionReason: .preferredBuiltInForBluetoothHeadset
+        )
+
+        assertEqual(readiness, .ready, "built-in fallback for Bluetooth output should start instead of timing out")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy accepts intentional Bluetooth output speech bus") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,

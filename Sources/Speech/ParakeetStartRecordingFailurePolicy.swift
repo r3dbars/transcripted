@@ -147,7 +147,8 @@ enum ParakeetAudioFormatReadinessPolicy {
         inputChannelCount: UInt32,
         selectedInputClass: String,
         outputDeviceClass: String,
-        selectionOverrodeDefault: Bool
+        selectionOverrodeDefault: Bool,
+        selectionReason: DictationInputDeviceSelectionReason? = nil
     ) -> ParakeetAudioFormatReadiness {
         guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
               isUsableCaptureSampleRate(inputSampleRate), inputChannelCount > 0 else {
@@ -157,6 +158,7 @@ enum ParakeetAudioFormatReadinessPolicy {
         let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
         let overriddenBluetoothOutputRoute = selectionOverrodeDefault
             && outputDeviceClass == "bluetooth"
+            && selectionReason != .preferredBuiltInForBluetoothHeadset
 
         if selectedInputClass != "bluetooth",
            inputSampleRate >= 44_100,

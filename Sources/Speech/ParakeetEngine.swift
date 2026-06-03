@@ -1193,7 +1193,8 @@ class ParakeetEngine: ObservableObject {
             inputChannelCount: hwFormat.channelCount,
             selectedInputClass: selectedInputClass(for: selection),
             outputDeviceClass: defaultOutputClass(for: selection),
-            selectionOverrodeDefault: selection?.didOverrideDefault ?? false
+            selectionOverrodeDefault: selection?.didOverrideDefault ?? false,
+            selectionReason: selection?.reason
         )
     }
 
