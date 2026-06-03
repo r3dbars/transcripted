@@ -36,7 +36,12 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
     }
 
     var supportsRuntimeOnlyPrompt: Bool {
-        supportsNativeRuntimePrompt && self != .teams
+        switch self {
+        case .zoom, .teams, .googleMeet:
+            return false
+        case .webex, .facetime:
+            return supportsNativeRuntimePrompt
+        }
     }
 
     static func provider(forMeetingHost host: String) -> MeetingPromptProvider? {
