@@ -1621,6 +1621,17 @@ func testRepoCommandContract() {
                 && controllerContents.contains("promoteFinalizedFailedTranscriptionAudio("),
             "late WAV finalization should promote finalized failed audio before refreshing the failed queue"
         )
+        let refreshTimedOutAudioBlock = sourceSlice(
+            controllerContents,
+            from: "private func refreshTimedOutFailedMeetingAudio(",
+            to: "private func refreshFailedMeetings("
+        )
+        assertTrue(
+            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+                && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
+                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
+            "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
+        )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
             "stop-timeout diagnostics should state whether the retained audio reached the retry queue"

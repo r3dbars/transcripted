@@ -2538,10 +2538,11 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
-        guard let micURL = result.micURL else { return }
-        let existingSystemURL = failedManager.failedTranscriptions
-            .first(where: { $0.id == id })?
-            .systemAudioURL
+        let existingFailure = failedManager.failedTranscriptions
+            .first(where: { $0.id == id })
+        let existingMicURL = existingFailure?.micAudioURL
+        let existingSystemURL = existingFailure?.systemAudioURL
+        guard let micURL = result.micURL ?? existingMicURL else { return }
         let systemURL = result.systemURL ?? existingSystemURL
 
         let updated = taskManager.promoteFinalizedFailedTranscriptionAudio(
