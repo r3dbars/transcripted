@@ -119,6 +119,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
         let probe = readRepoTextFile("scripts/ops/health-probe.sh")
         let docs = readRepoTextFile("docs/ops-credentials.md")
+        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
         let firstValueEvents = sourceSlice(
             probe,
             from: "first_value_events=",
@@ -129,11 +130,26 @@ func testRepoCommandContract() {
             "dictation_completed",
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
-            "onboarding_agent_cta_clicked"
+            "onboarding_agent_cta_clicked",
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed"
         ] {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
                 "PostHog first-value probe and docs should include \(event)"
+            )
+        }
+        for event in [
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed"
+        ] {
+            assertTrue(
+                digest.contains(event),
+                "nightly digest DAU event set should include \(event)"
             )
         }
         assertTrue(
