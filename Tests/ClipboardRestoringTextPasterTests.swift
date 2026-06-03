@@ -190,6 +190,11 @@ func testClipboardRestoringTextPaster() async {
         }
 
         assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        let waitTask = Task { @MainActor in
+            await paster.waitForPendingClipboardRestore()
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
         try? await Task.sleep(nanoseconds: 30_000_000)
 
         let delayedRead = await MainActor.run {
@@ -202,15 +207,11 @@ func testClipboardRestoringTextPaster() async {
             "a target that reads after the eager restore delay should still get the dictation text"
         )
 
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        let restoredClipboard = await MainActor.run {
-            let pasteboard = NSPasteboard(name: pasteboardName)
-            return pasteboard.string(forType: .string)
-        }
+        let restoredClipboard = await waitTask.value
         assertEqual(
             restoredClipboard,
             existingClipboard,
-            "after the target reads the temporary text, the user's original clipboard should be restored"
+            "waiting for pending restore should include the delayed read-triggered restore before auto-enter"
         )
     }
 }

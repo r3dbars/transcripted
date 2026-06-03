@@ -138,6 +138,12 @@ final class ClipboardRestoringTextPaster {
         temporaryPasteboardDataProvider = nil
     }
 
+    func waitForPendingClipboardRestore() async {
+        while let clipboardRestoreTask {
+            await clipboardRestoreTask.value
+        }
+    }
+
     func paste(
         _ text: String,
         target: DictationPasteTarget? = nil,
