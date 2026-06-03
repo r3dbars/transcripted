@@ -35,6 +35,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/benchmark-home-recent-captures.sh` — local benchmark for Settings Home recent-capture loading
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
@@ -65,6 +66,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
   - Writes ignored scratch output under `.autoeval/dictation-stop/`
+- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy scorer for dictation recovery timing and Bluetooth-settle guardrails
+  - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb`
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`

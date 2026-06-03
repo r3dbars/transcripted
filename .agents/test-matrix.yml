@@ -86,6 +86,12 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/dev/benchmark-home-recent-captures.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+
+  - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
@@ -97,10 +103,13 @@ rules:
 
   - paths:
       - "scripts/ops/dictation-stop-autoeval.sh"
+      - "scripts/ops/dictation-recovery-autoeval.rb"
       - "docs/autoeval-dictation-stop-speed-*.md"
+      - "docs/autoeval-dictation-recovery-time-*.md"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/ops/dictation-stop-autoeval.sh"
+      - "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
 
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
@@ -150,6 +159,7 @@ rules:
       - "Casks/**"
       - "docs/appcast.xml"
     checks:
+      - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"

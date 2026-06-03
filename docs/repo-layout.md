@@ -77,6 +77,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `docs/archive/` — archived planning, reviews, and historical notes
 - `archive/` — historical code and legacy tooling kept out of the live product surface
 - `config/` — app config artifacts including entitlements and nightly security manifests
+- `Casks/` — committed Homebrew cask release surface
 - `Resources/` — bundled app assets
 - `scripts/entrypoints/` — implementations behind the thin root command wrappers
 
@@ -92,8 +93,13 @@ Use these docs for these jobs:
 - `.github/` — GitHub issue templates, PR checklist, and workflow automation
 - `CLAUDE.md` — Claude-specific repo orientation
 - `docs/agent-onboarding.md` — how to interpret the repo’s doc layers
+- `docs/activation-lane.md` — saved Markdown, agent payoff, and return-use routing
+- `docs/agent-closeout.md` — compact coordinator and agent handoff format
+- `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
 - `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
+- `docs/live-meeting-codex-sidecar.md` — opt-in live meeting sidecar and agent workspace notes
+- `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, corpus, corpus-compare, live, artifact, and synthetic audio passes

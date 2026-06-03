@@ -120,6 +120,7 @@ Before you publish a user-facing release note, sanity-check the release state:
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
+- verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
 - if you want a clean starting point, use `docs/release-notes-template.md`
 
 If you expect existing installs of Transcripted to discover the new version
@@ -133,6 +134,11 @@ also requires and uploads `build/Transcripted.app.dSYM` by default:
 ```bash
 SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>
 ```
+
+Prefer this post-publish registration path. `build-beta.sh` also supports
+`REGISTER_SENTRY_RELEASE=1`, but use that only when the tag, app binary, dSYM,
+and release artifact are already final and match the GitHub release you intend
+to ship.
 
 The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
 Sentry project, associates commits when Sentry can resolve the repo, and uploads
