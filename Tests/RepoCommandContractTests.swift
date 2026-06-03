@@ -888,6 +888,14 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_DICTATION_REQUEST_TO_RECORDING_P95_MS = 250.0"),
+            "performance budget should cap request-to-recording latency when strict start samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS = 350.0"),
+            "performance budget should cap start-to-first-sample latency when strict start samples are required"
+        )
+        assertTrue(
             contents.contains("MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0"),
             "performance budget should cap stop-to-paste latency when samples are required"
         )
@@ -906,6 +914,11 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
+        )
+        assertTrue(
+            contents.contains("--max-dictation-request-to-recording-p95-ms")
+                && contents.contains("--max-dictation-start-to-first-sample-p95-ms"),
+            "strict dictation start proof should expose budgets for the user-visible start and audio-flow metrics"
         )
         assertTrue(
             contents.contains("--require-dictation-stop-latency-samples"),
@@ -937,6 +950,22 @@ func testRepoCommandContract() {
                 && contents.contains("Dictation stop stage p95s:")
                 && contents.contains("Dictation stop slowest stage:"),
             "performance budget should report per-stage stop latency and identify the slowest stop segment"
+        )
+        assertTrue(
+            contents.contains("dictation_request_to_recording_ms"),
+            "performance budget should surface true request-to-recording timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "performance budget should surface audio-flow timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("dictation_start_proof_events")
+                && contents.contains("dictation request-to-recording samples")
+                && contents.contains("Dictation request-to-recording p95 is")
+                && contents.contains("dictation start-to-first-sample samples")
+                && contents.contains("Dictation start-to-first-sample p95 is"),
+            "strict dictation start proof should enforce the collected request-to-recording and audio-flow samples"
         )
         assertTrue(
             contents.contains("--stats PATH"),
@@ -1030,6 +1059,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation recovery autoeval separates baseline from kept policy") {
+        let contents = readRepoTextFile("scripts/ops/dictation-recovery-autoeval.rb")
+        let baselineBlock = sourceSlice(contents, from: "BASELINE = Config.new(", to: ")\n\nKEPT_POLICY = Config.new(")
+        let keptBlock = sourceSlice(contents, from: "KEPT_POLICY = Config.new(", to: ")\n\nSCENARIOS = [")
+
+        assertTrue(
+            baselineBlock.contains("name: \"baseline\"")
+                && baselineBlock.contains("poll_ms: 150")
+                && baselineBlock.contains("forced_recovery_refreshes: 6")
+                && baselineBlock.contains("max_recording_start_attempts: 3"),
+            "recovery autoeval baseline should stay the pre-keeper policy, not the kept winner"
+        )
+        assertTrue(
+            keptBlock.contains("name: \"kept_current_policy\"")
+                && keptBlock.contains("poll_ms: 100")
+                && keptBlock.contains("forced_recovery_refreshes: 5")
+                && keptBlock.contains("max_recording_start_attempts: 2"),
+            "recovery autoeval should name the current kept policy separately from the baseline"
+        )
+        assertTrue(
+            contents.contains("all_results.fetch(BASELINE.name)")
+                && contents.contains("Baseline: pre-keeper policy")
+                && contents.contains("Kept current policy:"),
+            "recovery autoeval deltas and raw rows should be anchored to the real baseline"
+        )
+    }
+
     runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         guard
@@ -1051,6 +1107,14 @@ func testRepoCommandContract() {
         assertTrue(
             fastPathBlock.contains("dictation_recording_fast_start"),
             "fast dictation start should emit a measurable local proof event"
+        )
+        assertTrue(
+            fastPathBlock.contains("request_to_recording_ms"),
+            "fast dictation start should measure request-to-recording latency, not only CoreAudio start time"
+        )
+        assertTrue(
+            fastPathBlock.contains("pre_recording_overhead_ms"),
+            "fast dictation start should expose non-CoreAudio overhead for future autoeval runs"
         )
         assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
@@ -1097,6 +1161,28 @@ func testRepoCommandContract() {
                 && contents.contains("\"stop_to_paste_bucket\"")
                 && contents.contains("\"stop_to_done_bucket\""),
             "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
+        )
+    }
+
+    runSuite("Repo command contract - audio sample flow start stays measurable") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "audio_samples_detected should include start-to-first-buffer latency for dictation start autoevals"
+        )
+    }
+
+    runSuite("Repo command contract - dictation audio start exposes stage timings") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("dictation_audio_start_timing"),
+            "dictation start autoevals need a local stage-timing event"
+        )
+        assertTrue(
+            contents.contains("audio_input_snapshot_read_ms")
+                && contents.contains("audio_tap_install_ms")
+                && contents.contains("audio_engine_start_ms"),
+            "stage timing should cover audio snapshot read, tap install, and engine start"
         )
     }
 

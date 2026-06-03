@@ -95,6 +95,7 @@ class DictationSessionController: ObservableObject {
         trigger: DictationTrigger = .unknown,
         anchorRect: NSRect? = nil
     ) {
+        let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
         guard !isDictating else { return }
         guard !appState.sttRouter.isTranscribing else {
@@ -106,7 +107,7 @@ class DictationSessionController: ObservableObject {
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
-        sessionStartTime = CFAbsoluteTimeGetCurrent()
+        sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
@@ -256,6 +257,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
                 if started {
+                    let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000)
                     self.recordingStartRetryTask = nil
                     overlayController.state = .listening
                     if !overlayController.isVisible {
@@ -271,6 +273,8 @@ class DictationSessionController: ObservableObject {
                         message: "Dictation recording started through the ready-engine fast path",
                         context: self.dictationContext(
                             extra: [
+                                "pre_recording_overhead_ms": "\(max(0, requestToRecordingMs - startMs))",
+                                "request_to_recording_ms": "\(requestToRecordingMs)",
                                 "start_ms": "\(startMs)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "trigger": self.currentDictationTrigger.rawValue
@@ -280,6 +284,7 @@ class DictationSessionController: ObservableObject {
                     AppSoundPlayer.shared.play(.dictationStart)
                     self.installSessionTimeout()
                 } else {
+                    let requestToFallbackMs = Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000)
                     DiagnosticsTrail.record(
                         logger: appState.logger,
                         level: .warning,
@@ -288,6 +293,8 @@ class DictationSessionController: ObservableObject {
                         message: "Ready-engine dictation fast start failed and fell back to recovery wait",
                         context: self.dictationContext(
                             extra: [
+                                "pre_recording_overhead_ms": "\(max(0, requestToFallbackMs - startMs))",
+                                "request_to_fallback_ms": "\(requestToFallbackMs)",
                                 "start_ms": "\(startMs)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "trigger": self.currentDictationTrigger.rawValue,
@@ -456,6 +463,7 @@ class DictationSessionController: ObservableObject {
                     resizePanelToCompact()
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
                     let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                    let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
                     appState.logger.log("DICTATION | started after forced recovery start and \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
                         logger: appState.logger,
@@ -464,6 +472,7 @@ class DictationSessionController: ObservableObject {
                         message: "Dictation started after forcing a recovery recording start",
                         context: dictationContext(
                             extra: [
+                                "request_to_recording_ms": "\(requestToRecordingMs)",
                                 "wait_ms": "\(waited)",
                                 "start_attempts": "\(startAttempts)",
                                 "readiness_refreshes": "\(readinessRefreshes)"
@@ -494,6 +503,7 @@ class DictationSessionController: ObservableObject {
                     resizePanelToCompact()
                     appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording_after_wait")
                     let waited = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                    let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000)
                     appState.logger.log("DICTATION | started after \(waited)ms wait (parakeet, \(appState.sttRouter.inputDeviceName))")
                     DiagnosticsTrail.record(
                         logger: appState.logger,
@@ -502,6 +512,7 @@ class DictationSessionController: ObservableObject {
                         message: "Dictation started after waiting for engine readiness",
                         context: dictationContext(
                             extra: [
+                                "request_to_recording_ms": "\(requestToRecordingMs)",
                                 "wait_ms": "\(waited)",
                                 "audio_device": appState.sttRouter.inputDeviceName,
                                 "start_attempts": "\(startAttempts)",

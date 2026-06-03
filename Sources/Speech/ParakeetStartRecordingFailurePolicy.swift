@@ -197,6 +197,12 @@ enum ParakeetAudioFormatReadinessPolicy {
     }
 }
 
+enum ParakeetInputOverrideSettlePolicy {
+    static func delayNanoseconds(afterImmediateReadiness readiness: ParakeetAudioFormatReadiness) -> UInt64 {
+        readiness == .ready ? 0 : TranscriptedConstants.audioRecoveryDelay
+    }
+}
+
 struct ParakeetAudioFormatSummary: Equatable {
     let sampleRate: Double
     let channelCount: UInt32

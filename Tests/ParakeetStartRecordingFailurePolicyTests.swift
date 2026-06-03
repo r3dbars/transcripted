@@ -301,6 +301,27 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "native 24k external capture should stay usable when input and output agree")
     }
 
+    runSuite("ParakeetInputOverrideSettlePolicy skips delay when immediate format is ready") {
+        assertEqual(
+            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .ready),
+            0,
+            "ready formats after an input override should not pay a fixed settle delay"
+        )
+    }
+
+    runSuite("ParakeetInputOverrideSettlePolicy keeps delay while route is settling") {
+        assertEqual(
+            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .routeNotSettled),
+            TranscriptedConstants.audioRecoveryDelay,
+            "stale route formats should still get the full CoreAudio settle delay"
+        )
+        assertEqual(
+            ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .invalid),
+            TranscriptedConstants.audioRecoveryDelay,
+            "invalid formats should still get the full CoreAudio settle delay"
+        )
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy rejects zero formats") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 0,
