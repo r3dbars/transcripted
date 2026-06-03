@@ -23,9 +23,10 @@ public enum EmbeddingClusterer {
     /// multiple known DB voices.
     ///
     /// - Parameter pairwiseMergeThreshold: Cosine similarity threshold for merging
-    ///   fragmented speaker clusters. Pass `nil` to skip pairwise merge entirely.
-    ///   Sortformer default: 0.85 (conservative). PyAnnote: 0.78 (VBx already does
-    ///   initial clustering, but fragments dominant speakers on codec-compressed audio).
+    ///   fragmented speaker clusters. Pass `nil` to skip only the pairwise merge
+    ///   phase; small-cluster absorption and DB-informed split still run.
+    ///   Sortformer default: 0.85 (conservative). Offline PyAnnote callers pass
+    ///   `nil` because VBx already handles the base merge/fragmentation case.
     public static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],

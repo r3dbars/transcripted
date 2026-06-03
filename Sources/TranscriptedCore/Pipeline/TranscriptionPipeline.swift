@@ -143,9 +143,9 @@ extension Transcription {
             AppLogger.transcription.info("Running offline diarization on system audio")
             let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
-            // Post-process diarization segments. Keep PyAnnote/VBx speaker IDs intact
-            // before review: over-segmentation is fixable by merging/name review, but
-            // pre-review pairwise merges can irreversibly collapse real participants.
+            // Post-process diarization segments, but skip the broad pairwise merge
+            // phase for PyAnnote/VBx output. Small-cluster absorption and DB-informed
+            // split still run for noise cleanup and known-speaker corrections.
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
