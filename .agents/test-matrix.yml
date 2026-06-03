@@ -83,6 +83,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+      - "scripts/dev/benchmark-home-recent-captures.sh"
 
   - paths:
       - "scripts/ops/generate-nightly-digest.py"
