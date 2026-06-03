@@ -765,6 +765,57 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedAudioDirectory.path), "stop-timeout preservation should not copy possibly unfinished WAVs into the retained archive")
     }
 
+    func testLateStopTimeoutFinalizationPromotesFailedQueueAudioToRetainedArchive() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("timeout-final-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("timeout-final-system.wav")
+        let failedId = UUID()
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedId,
+            meetingTitle: "Long Customer Call",
+            archiveAudio: false
+        ))
+        manager.failedTranscriptionManager.incrementRetryCount(id: failedId)
+
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: micURL,
+            systemAudioURL: systemURL
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertEqual(failed.meetingTitle, "Long Customer Call")
+        XCTAssertEqual(failed.retryCount, 1)
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(retainedSystemURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retainedSystemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "finalized timeout mic scratch should be removed after archive")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finalized timeout system scratch should be removed after archive")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persisted = try decoder.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: tempDirectory.appendingPathComponent("failed_transcriptions.json"))
+        )
+        XCTAssertEqual(persisted.first?.micAudioURL, failed.micAudioURL)
+        XCTAssertEqual(persisted.first?.systemAudioURL, failed.systemAudioURL)
+        XCTAssertEqual(persisted.first?.retryCount, 1)
+    }
+
     func testRetryFailedTranscriptionSuccessCreatesMarkdownAndClearsFailedQueue() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact.")

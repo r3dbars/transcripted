@@ -656,6 +656,48 @@ public class TranscriptionTaskManager: ObservableObject {
     }
 
     @discardableResult
+    public func promoteFinalizedFailedTranscriptionAudio(
+        id: UUID,
+        micAudioURL: URL,
+        systemAudioURL: URL?
+    ) -> Bool {
+        guard failedTranscriptionManager.failedTranscriptions.contains(where: { $0.id == id }) else {
+            AppLogger.pipeline.warning("Failed transcription audio promotion skipped because entry was missing", [
+                "id": id.uuidString
+            ])
+            return false
+        }
+
+        let retainedAudio = archiveFailedRecordingAudioIfConfigured(
+            micURL: micAudioURL,
+            systemURL: systemAudioURL,
+            taskId: id
+        )
+        let promotedMicURL = retainedAudio?.micURL ?? micAudioURL
+        let promotedSystemURL = retainedAudio?.systemURL ?? systemAudioURL
+        let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
+            id: id,
+            micAudioURL: promotedMicURL,
+            systemAudioURL: promotedSystemURL
+        )
+
+        guard didPersist else {
+            if let retainedAudio {
+                removeRetainedFailedAudio(retainedAudio)
+            }
+            return false
+        }
+
+        if retainedAudio?.micURL != nil {
+            removeManagedCleanupFile(micAudioURL, label: "finalized failed mic scratch")
+        }
+        if retainedAudio?.systemURL != nil {
+            removeManagedCleanupFile(systemAudioURL, label: "finalized failed system scratch")
+        }
+        return true
+    }
+
+    @discardableResult
     public func addFailedTranscriptionRetainingAvailableAudio(
         micAudioURL: URL?,
         systemAudioURL: URL?,

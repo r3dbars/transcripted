@@ -1061,6 +1061,7 @@ final class MeetingSessionController: ObservableObject {
         var didPreserveRecording = false
         var recordingTrigger = activeRecordingTrigger
         var stoppedFiles: (micURL: URL?, systemURL: URL?) = (nil, nil)
+        var stopTimedOut = false
 
         if isFinishingRecording {
             await waitForRecordingFinishBeforeTermination()
@@ -1073,8 +1074,15 @@ final class MeetingSessionController: ObservableObject {
             _ = audioInactivityDetector.stopRecording()
             audioInactivityWarning = nil
 
-            let files = await capture.stopAndAwaitFiles()
+            let shutdownFailedTaskId = UUID()
+            let files = await capture.stopAndAwaitFiles { [weak self] lateResult in
+                self?.refreshTimedOutFailedMeetingAudio(
+                    id: shutdownFailedTaskId,
+                    result: lateResult
+                )
+            }
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
+            stopTimedOut = files.didTimeOut
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             let meetingTitle = activeRecordingSuggestedTitle
             activeRecordingTrigger = .unknown
@@ -1082,10 +1090,12 @@ final class MeetingSessionController: ObservableObject {
 
             if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = preserveFailedMeetingForRetry(
+                    taskId: shutdownFailedTaskId,
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    archiveAudio: !files.didTimeOut
                 )
             }
         } else {
@@ -1120,6 +1130,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": recordingTrigger.rawValue,
                     "mic_file_present": boolString(stoppedFiles.micURL != nil),
                     "system_file_present": boolString(stoppedFiles.systemURL != nil),
+                    "stop_timed_out": boolString(stopTimedOut),
                     "active_preserved": "\(activePreserved)",
                     "queued_preserved": "\(queuedPreserved)"
                 ]
@@ -2533,7 +2544,7 @@ final class MeetingSessionController: ObservableObject {
             .systemAudioURL
         let systemURL = result.systemURL ?? existingSystemURL
 
-        let updated = failedManager.updateFailedTranscriptionAudio(
+        let updated = taskManager.promoteFinalizedFailedTranscriptionAudio(
             id: id,
             micAudioURL: micURL,
             systemAudioURL: systemURL
