@@ -143,17 +143,14 @@ extension Transcription {
             AppLogger.transcription.info("Running offline diarization on system audio")
             let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
-            // Post-process diarization segments:
-            // PyAnnote's VBx does initial clustering but fragments dominant speakers
-            // on codec-compressed audio (e.g., one person split into 3 IDs during a
-            // long monologue). Pairwise merge at 0.78 catches same-person fragments
-            // (typically 0.75-0.85 similarity) without merging different speakers
-            // (typically 0.50-0.65 on Zoom audio).
+            // Post-process diarization segments. Keep PyAnnote/VBx speaker IDs intact
+            // before review: over-segmentation is fixable by merging/name review, but
+            // pre-review pairwise merges can irreversibly collapse real participants.
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
                 existingProfiles: existingProfiles,
-                pairwiseMergeThreshold: 0.78
+                pairwiseMergeThreshold: nil
             )
 
             let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -644,7 +641,7 @@ extension Transcription {
         let speakerSegments = EmbeddingClusterer.postProcess(
             segments: rawSegments,
             existingProfiles: existingProfiles,
-            pairwiseMergeThreshold: 0.78
+            pairwiseMergeThreshold: nil
         )
 
         let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
