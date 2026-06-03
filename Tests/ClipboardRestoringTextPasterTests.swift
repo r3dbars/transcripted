@@ -294,7 +294,7 @@ func testClipboardRestoringTextPaster() async {
         }
 
         let outcome = await MainActor.run {
-            paster.paste(
+            let outcome = paster.paste(
                 pasteText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
@@ -302,9 +302,8 @@ func testClipboardRestoringTextPaster() async {
                 pasteDispatcher: { true },
                 fallbackRestoreDelay: 5_000_000
             )
-        }
-        await MainActor.run {
             paster.cancelPendingClipboardRestore()
+            return outcome
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
 
