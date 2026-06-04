@@ -7,6 +7,12 @@ Current shipped version remains `1.1.46`. `Info.plist`, `docs/appcast.xml`,
 until a real `1.1.47` release artifact is approved, built, published, and
 verified.
 
+Freshness note from the June 4, 2026 review: this branch was cut before the
+latest `main` merge wave. Keep merged follow-up work in the final release read
+after the branch is refreshed, including failed-audio promotion tests,
+paste-back fallback timing, live sidecar preview smoke coverage, no-speech copy
+timing, and CEO brief first-value reporting.
+
 ## Candidate Summary
 
 This candidate would focus on meeting-audio reliability, recovery, and speaker
@@ -47,13 +53,15 @@ long-meeting retry visibility, and the Grigory-style speaker-collapse fix.
   it shipped until a signed `1.1.47` artifact has passed release validation and
   is actually available to install.
 - Open issues #500 and #825 remain open until the fixes are validated in use.
+- Open PRs #967, #968, #969, #970, #971, #972, #973, #974, and #975 are not part
+  of this candidate unless they merge before the release artifact is built.
 - This file does not update Sparkle or Homebrew. Existing installs will not see a
   `1.1.47` update until a real release artifact exists and the appcast is updated.
 
 ## Suggested Verification Before Publish
 
 - `bash build-deps.sh --force`
-- `bash build.sh`
+- `bash build.sh --no-open`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-tests.sh`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-integration-smoke.sh`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test`
