@@ -9,9 +9,9 @@ verified.
 
 ## Candidate Summary
 
-This candidate would focus on meeting-audio reliability and recovery after
-`1.1.46`, especially quiet-mic/attenuation handling and long-meeting retry
-visibility.
+This candidate would focus on meeting-audio reliability, recovery, and speaker
+identity trust after `1.1.46`, especially quiet-mic/attenuation handling,
+long-meeting retry visibility, and the Grigory-style speaker-collapse fix.
 
 ## User-Visible Changes
 
@@ -21,13 +21,18 @@ visibility.
 - Give meeting prompts a longer window before timing out.
 - Clarify the dictation model-loading overlay while local speech models prepare.
 - Improve delayed dictation paste-back when the target app is slow to accept text.
+- Keep weak ghost-speaker matches as separate reviewable speakers instead of
+  collapsing them into the nearest existing voice.
 
 ## Reliability And Ops Changes
 
 - Fix a meeting mic downmix path that could make one-sided or uneven channel
   input too quiet.
 - Improve realtime mic gain recovery for quiet meeting input.
+- Add a minimum similarity floor for ghost-speaker auto-merge so low-confidence
+  diarization fragments do not collapse distinct speakers.
 - Add issue 500 guardrail tests around downmix and meeting mic recovery.
+- Add regression coverage for the ghost-speaker merge floor.
 - Add clipboard restore wait guardrails.
 - Count activation events in health probes so the release read can see first-value
   progress more clearly.
@@ -38,6 +43,9 @@ visibility.
 - `1.1.46` is still a recent release, published on June 3, 2026.
 - The issue 500 fixes need real route coverage after shipping, especially USB
   and Bluetooth output routes.
+- The speaker-collapse fix is in this candidate, but Grigory should not be told
+  it shipped until a signed `1.1.47` artifact has passed release validation and
+  is actually available to install.
 - Open issues #500 and #825 remain open until the fixes are validated in use.
 - This file does not update Sparkle or Homebrew. Existing installs will not see a
   `1.1.47` update until a real release artifact exists and the appcast is updated.
