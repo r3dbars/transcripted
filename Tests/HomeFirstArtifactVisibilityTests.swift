@@ -10,6 +10,10 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
             encoding: .utf8
         )) ?? ""
+        let meetingOverlaySource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayController.swift"),
+            encoding: .utf8
+        )) ?? ""
 
         assertTrue(
             homeSource.contains(#"return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)"#),
@@ -32,10 +36,21 @@ func testHomeFirstArtifactVisibility() {
             settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown""#),
             "the just-saved meeting activity card should name the Markdown artifact"
         )
+        assertTrue(
+            meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved to Markdown""#),
+            "the meeting saved overlay should name the Markdown artifact at the moment of first value"
+        )
+        assertTrue(
+            settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")
+                && settingsSource.contains(#"promptKind: .meetingBundle"#)
+                && settingsSource.contains(#"result: bundle == nil ? .fallbackCopied : .success"#),
+            "meeting preview Copy for agent should prefer the portable meeting bundle over raw Markdown"
+        )
         assertFalse(
             homeSource.contains(#"HomeArtifactStatus(text: "Saved only""#)
                 || settingsSource.contains(#"HomeRowMenuItem(title: "Open saved file""#)
-                || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#),
+                || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#)
+                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#),
             "old vague saved-file copy should not return"
         )
     }
