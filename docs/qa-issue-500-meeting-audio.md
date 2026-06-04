@@ -27,7 +27,7 @@ For end-call prompt and degraded-route diagnostics, include the inactivity
 warning events too:
 
 ```bash
-tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl | rg --line-buffered "meeting_recording_started|meeting_recording_stopped|meeting_recording_cancelled|meeting_audio_inactivity_warning_started|meeting_audio_inactivity_timeout_deferred|meeting_audio_inactivity_end_requested|meeting_audio_inactivity_warning_dismissed"
+tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl | rg --line-buffered "meeting_recording_started|meeting_recording_stopped|meeting_recording_cancelled|meeting_audio_inactivity_warning_started|meeting_audio_inactivity_timeout_deferred|meeting_audio_inactivity_timeout|meeting_audio_inactivity_end_requested|meeting_audio_inactivity_warning_dismissed|meeting_audio_inactivity_warning_cleared"
 ```
 
 Use a simple spoken phrase so no private content lands in logs or transcripts:
