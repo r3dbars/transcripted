@@ -206,6 +206,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/LiveMeetingCodexSession.swift"
+    "Sources/Meeting/LiveMeetingPreviewServer.swift"
     "Sources/Meeting/LiveMeetingStreamingUpdatePolicy.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/Observability/AnalyticsReporter.swift"
@@ -288,6 +289,7 @@ SWIFTC_ARGS+=(
     -framework Carbon
     -framework CoreMedia
     -framework EventKit
+    -framework Network
     -framework ScreenCaptureKit
     -parse-as-library
     -o "$TEST_BINARY"
