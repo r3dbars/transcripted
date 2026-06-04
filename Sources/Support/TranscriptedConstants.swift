@@ -164,7 +164,7 @@ enum TranscriptedConstants {
     /// Maximum time to keep borrowed dictation text available if the target app
     /// has not requested it yet. This protects slower paste consumers without
     /// leaving the user's clipboard borrowed indefinitely.
-    static let clipboardRestoreFallbackDelay: UInt64 = 900_000_000  // 900ms
+    static let clipboardRestoreFallbackDelay: UInt64 = 2_500_000_000  // 2.5s
 
     /// Max time to wait for a just-activated target app before paste-back falls
     /// back to copying. This covers menu/settings flows where activation is async.
