@@ -29,15 +29,18 @@ final class LiveMeetingPreviewServer {
     private let queue = DispatchQueue(label: "com.transcripted.live-meeting-preview-server")
     private let lock = NSLock()
     private let fileManager: FileManager
+    private let port: UInt16
     private var listener: NWListener?
     private var workspaceURL: URL
 
     init(
         workspaceURL: URL = LiveMeetingCodexSession.defaultWorkspaceRoot,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        port: UInt16 = LiveMeetingCodexSession.previewServerPort
     ) {
         self.workspaceURL = workspaceURL.standardizedFileURL
         self.fileManager = fileManager
+        self.port = port
     }
 
     func start(workspaceURL: URL = LiveMeetingCodexSession.defaultWorkspaceRoot) throws -> URL {
@@ -50,10 +53,10 @@ final class LiveMeetingPreviewServer {
         self.workspaceURL = standardizedWorkspaceURL
         if listener != nil {
             lock.unlock()
-            return LiveMeetingCodexSession.authenticatedPreviewServerURL(token: authToken)
+            return authenticatedPreviewServerURL(token: authToken)
         }
 
-        guard let port = NWEndpoint.Port(rawValue: LiveMeetingCodexSession.previewServerPort) else {
+        guard let listenerPort = NWEndpoint.Port(rawValue: port) else {
             lock.unlock()
             throw LiveMeetingPreviewServerError.invalidPort
         }
@@ -75,7 +78,7 @@ final class LiveMeetingPreviewServer {
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: port)
+        parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: listenerPort)
 
         let newListener: NWListener
         do {
@@ -124,7 +127,7 @@ final class LiveMeetingPreviewServer {
             throw LiveMeetingPreviewServerError.listenerStartupTimedOut
         }
 
-        return LiveMeetingCodexSession.authenticatedPreviewServerURL(token: authToken)
+        return authenticatedPreviewServerURL(token: authToken)
     }
 
     func stop() {
@@ -326,10 +329,20 @@ final class LiveMeetingPreviewServer {
             "localhost",
             "[::1]",
         ]
-        let portSuffix = ":\(LiveMeetingCodexSession.previewServerPort)"
+        let portSuffix = ":\(port)"
 
         return allowedHosts.contains(host)
             || allowedHosts.contains { host == "\($0)\(portSuffix)" }
+    }
+
+    private func authenticatedPreviewServerURL(token: String) -> URL {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = "127.0.0.1"
+        components.port = Int(port)
+        components.path = LiveMeetingCodexSession.previewServerPath
+        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        return components.url ?? LiveMeetingCodexSession.authenticatedPreviewServerURL(token: token)
     }
 
     private func httpResponse(status: String, contentType: String, body: Data) -> Data {
