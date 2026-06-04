@@ -23,6 +23,13 @@ Watch the local event log:
 tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl | rg --line-buffered "meeting_recording_started|meeting_recording_stopped|meeting_recording_cancelled"
 ```
 
+For end-call prompt and degraded-route diagnostics, include the inactivity
+warning events too:
+
+```bash
+tail -f ~/Library/Application\ Support/Transcripted/logs/events.jsonl | rg --line-buffered "meeting_recording_started|meeting_recording_stopped|meeting_recording_cancelled|meeting_audio_inactivity_warning_started|meeting_audio_inactivity_timeout_deferred|meeting_audio_inactivity_end_requested|meeting_audio_inactivity_warning_dismissed"
+```
+
 Use a simple spoken phrase so no private content lands in logs or transcripts:
 
 ```text
@@ -72,12 +79,19 @@ For each run, capture:
 - `default_system_output_volume_after`
 - `default_output_volume_dropped`
 - `default_system_output_volume_dropped`
+- `attenuation_kind`
+- `output_ducking_detected`
+- `warning_kind`
+- `automatic_stop_allowed`
 - pass or fail
 - notes
 
 The volume `before` and `during` values come from `meeting_recording_started` or `meeting_recording_stopped`. The `after` values and peak values come from `meeting_recording_stopped` or `meeting_recording_cancelled`.
 `system_peak` is the system-audio peak.
 The dropped flags are generated from the same scalar fields and are also attached to degraded-capture diagnostics.
+The warning fields come from `meeting_audio_inactivity_*` events and help
+separate quiet-audio capture from the prompt that asks whether the meeting
+should end.
 
 ## Results Sheet
 
@@ -86,7 +100,7 @@ values in `event values` so the pass/fail call can be checked later.
 
 | App | Route | Voice processing | Meeting volume | Mic usable | System audio present | Output dropped | Result | Event values | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Chrome Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail | `mic_raw_peak=`, `mic_processed_peak=`, `system_peak=`, `default_output_volume_before=`, `default_output_volume_during=`, `default_output_volume_after=` |  |
+| Chrome Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail | `mic_raw_peak=`, `mic_processed_peak=`, `system_peak=`, `default_output_volume_before=`, `default_output_volume_during=`, `default_output_volume_after=`, `attenuation_kind=`, `output_ducking_detected=`, `warning_kind=`, `automatic_stop_allowed=` |  |
 | Safari Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
 | Safari Meet | built-in mic/speakers | on | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
 | Firefox Meet | built-in mic/speakers | off | same / quieter / louder / unusable | yes / no | yes / no / n/a | yes / no | pass / fail |  |  |
