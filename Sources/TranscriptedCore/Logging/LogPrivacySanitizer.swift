@@ -65,9 +65,33 @@ enum LogPrivacySanitizer {
     private static let emailRegex = makeRegex(#"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
     private static let apiKeyRegex = makeRegex(#"sk-[A-Za-z0-9_-]+"#)
     private static let authSchemeRegex = makeRegex(#"(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]+"#, options: [.caseInsensitive])
+    private static let authorizationAssignmentRegex = makeRegex(
+        #"(?i)\b((?:proxy-)?authorization)\s*[:=]\s*(?:basic|bearer)\s+[^\s,;]+"#
+    )
+    private static let privateKeyBlockRegex = makeRegex(
+        #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
+    )
+    private static let privateKeyMarkerRegex = makeRegex(
+        #"-----((?:BEGIN|END)) [A-Z0-9 ]*PRIVATE KEY-----"#,
+        options: [.caseInsensitive]
+    )
+    private static let jsonSensitiveAssignmentRegex = makeRegex(
+        #""(audio_device|audio_path|bundle_id|default_input_name|default_output_name|device_name|download_url|file_path|input_device_name|input_name|meeting_name|meeting_title|meeting_url|microphone_name|output_device_name|output_name|prompt_text|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|title|transcript|transcript_path|transcript_text|transcript_title|url)"\s*:\s*"(?:\\.|[^"\\])*""#,
+        options: [.caseInsensitive]
+    )
+    private static let inlineSensitiveAssignmentRegex = makeRegex(
+        #"\b(audio_device|audio_path|bundle_id|default_input_name|default_output_name|device_name|download_url|file_path|input_device_name|input_name|meeting_name|meeting_title|meeting_url|microphone_name|output_device_name|output_name|prompt_text|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|title|transcript|transcript_path|transcript_text|transcript_title|url)\s*=\s*.*?(?=\s+[A-Za-z0-9_.$-]+=|$)"#,
+        options: [.caseInsensitive]
+    )
+    private static let engineDeviceLogRegex = makeRegex(
+        #"\((parakeet|whisper),\s*[^)]*\)"#,
+        options: [.caseInsensitive]
+    )
     private static let secretAssignmentRegex = makeRegex(
         #"(?i)\b((?:access_)?token|refresh_token|api[_-]?key|x-api-key|signature|x-amz-signature|password|passphrase|secret|client[_-]?secret|credential|dsn)\s*[:=]\s*([^\s,;]+)"#
     )
+    private static let localHostnameRegex = makeRegex(#"\b[a-zA-Z0-9._-]+\.local\b"#)
     private static let commonSecretRegex = makeRegex(
         #"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|phc_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|xox[baprs]-[A-Za-z0-9-]{10,}|xoxx-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b"#
     )
@@ -83,9 +107,16 @@ enum LogPrivacySanitizer {
         result = replace(rawURLRegex, in: result, with: redactedURL)
         result = replace(apiKeyRegex, in: result, with: "sk-****")
         result = replace(commonSecretRegex, in: result, with: redactedSecret)
+        result = replace(authorizationAssignmentRegex, in: result, with: "$1=\(redactedSecret)")
         result = replace(authSchemeRegex, in: result, with: "$1 ****")
+        result = replace(privateKeyBlockRegex, in: result, with: redactedSecret)
+        result = replace(privateKeyMarkerRegex, in: result, with: redactedSecret)
+        result = replace(jsonSensitiveAssignmentRegex, in: result, with: "\"$1\":\"\(redactedSensitiveValue)\"")
+        result = replace(inlineSensitiveAssignmentRegex, in: result, with: "$1=\(redactedSensitiveValue)")
+        result = replace(engineDeviceLogRegex, in: result, with: "($1, \(redactedSensitiveValue))")
         result = replace(secretAssignmentRegex, in: result, with: "$1=\(redactedSecret)")
         result = replace(emailRegex, in: result, with: redactedEmail)
+        result = replace(localHostnameRegex, in: result, with: "[redacted-host]")
         return result
     }
 

@@ -141,6 +141,20 @@
       ]
     },
     {
+      "id": "generic-title-url-and-device-name-assignments",
+      "input": "DIAG title=Customer Roadmap url=https://meet.example.com/private-room default_input_name=Jane's AirPods Pro",
+      "must_not_contain": [
+        "Customer Roadmap",
+        "https://meet.example.com/private-room",
+        "Jane's AirPods Pro"
+      ],
+      "must_contain": [
+        "title=[redacted-sensitive-value]",
+        "url=[redacted-sensitive-value]",
+        "default_input_name=[redacted-sensitive-value]"
+      ]
+    },
+    {
       "id": "plain-engine-device-log",
       "input": "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
       "must_not_contain": [

@@ -114,6 +114,56 @@ final class FileLoggerTests: XCTestCase {
         XCTAssertFalse(metadata["error"]?.contains("Bearer abc123") == true, "metadata values should redact auth headers")
     }
 
+    func testFileLoggerRedactsInlineSensitiveAssignmentsInMessages() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FileLoggerInlinePrivacyTests-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: logs
+        )
+
+        let logger = FileLogger(paths: paths, isDisabledOverride: false)
+        logger.write(
+            level: "warning",
+            subsystem: "pipeline",
+            message: "DICTATION | started (parakeet, Jane's AirPods Pro) from Janes-MacBook-Pro.local transcript_text=private roadmap words speaker_name=Alice Customer audio_path=/Users/jane/Private/customer.wav title=Customer Roadmap",
+            metadata: nil
+        )
+        logger.flush()
+
+        let logURL = logs.appendingPathComponent("app.jsonl")
+        let line = try XCTUnwrap(
+            try String(contentsOf: logURL, encoding: .utf8)
+                .split(separator: "\n")
+                .map(String.init)
+                .first
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let message = try XCTUnwrap(object["m"] as? String)
+
+        XCTAssertFalse(message.contains("Jane's AirPods Pro"), "raw device names should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("Janes-MacBook-Pro.local"), "local hostnames should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("private roadmap words"), "transcript text should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("Alice Customer"), "speaker names should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("/Users/jane/Private/customer.wav"), "audio paths should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("Customer Roadmap"), "titles should not enter app.jsonl messages")
+        XCTAssertTrue(message.contains("(parakeet, [redacted-sensitive-value])"))
+        XCTAssertTrue(message.contains("[redacted-host]"))
+        XCTAssertTrue(message.contains("transcript_text=[redacted-sensitive-value]"))
+        XCTAssertTrue(message.contains("speaker_name=[redacted-sensitive-value]"))
+        XCTAssertTrue(message.contains("audio_path=[redacted-sensitive-value]"))
+        XCTAssertTrue(message.contains("title=[redacted-sensitive-value]"))
+    }
+
     func testDisableFlagSkipsFileLogging() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileLoggerDisableTests-\(UUID().uuidString)", isDirectory: true)
