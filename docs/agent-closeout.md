@@ -18,7 +18,7 @@ Status meanings:
   clear next move
 - `RED` - blocked, unsafe, failing verification, or needs a human decision
 
-## Before Closeout
+## Before Patch Closeout
 
 - Run `git status --short` and make sure only your task files are changed.
 - Run `bash scripts/dev/agent-preflight.sh`.
@@ -28,7 +28,12 @@ Status meanings:
   release metadata, dSYM upload, and public download surfaces were updated.
 - If you touched observability, say which sanitizer/policy tests or privacy
   checks covered the payload shape.
-- If you did not make a patch, say why.
+
+## Before Read-Only Closeout
+
+- Run `git status --short`.
+- Say why no patch was needed.
+- List any follow-up checks you skipped because there were no edits.
 
 ## GitHub Cleanup Boundaries
 

@@ -214,6 +214,8 @@ Current high-ingestion files to treat carefully, ranked by agent pain:
 8. `Sources/UI/Overlay/MeetingOverlayController.swift` - meeting prompt/recording panel, views, and tokens
 9. `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` - people settings view model and row composition
 10. `Sources/Meeting/LiveMeetingCodexSession.swift` - live sidecar state, file writes, handoff text, and preview HTML
+11. `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` - Core queueing, retries, task lifecycle, and metadata handoff
+12. `Sources/TranscriptedCore/Audio/Audio.swift` - Core mic/system-audio start-stop state, recovery, and capture lifecycle
 
 Safe decomposition usually looks like extracting a pure presentation policy,
 formatter, or row helper with focused tests. Risky decomposition looks like

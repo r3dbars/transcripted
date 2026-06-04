@@ -67,14 +67,14 @@ checks for the files changed.
 Default rules:
 
 - Swift app change: `bash build.sh --no-open` and `bash run-tests.sh`
-- `Sources/Meeting/` or `Sources/TranscriptedCore/`: also `bash run-integration-smoke.sh`
-- `Package.swift` or public core seam: also `swift test`
+- `Sources/Meeting/` or `Sources/TranscriptedCore/`: also `bash build-deps.sh --force` and `bash run-integration-smoke.sh`
+- `Package.swift` or public core seam: also `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`
 - release/update path: read `docs/release-packaging.md` and `docs/sparkle-updates.md`
 
 ## Handoff
 
-For worker-lane closeout, use the `AGENTS.md` coordinator closeout shape:
-`Status`, `Changed`, `Verified`, `Risk`, `Next`.
+For worker-lane closeout, use the exact `AGENTS.md` coordinator closeout line:
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`.
 
 ## Safety
 

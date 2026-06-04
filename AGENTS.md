@@ -76,11 +76,12 @@ bash run-integration-smoke.sh
 swift test
 ```
 
-Rules:
+Rules. Use `.agents/test-matrix.yml` for the full path-to-verification map;
+these are the common minimums:
 
 1. After changing Swift source, run `bash build.sh --no-open` and `bash run-tests.sh`.
-2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
+2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash build-deps.sh --force` and `bash run-integration-smoke.sh`.
+3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
 
 ## Releases, Sparkle, and Homebrew
@@ -112,7 +113,7 @@ Rules:
    - `bash build-deps.sh --force` when dependency tooling changes
    - `bash build.sh --no-open`
    - `bash run-tests.sh`
-   - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
+   - `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
 ## Observability, Sentry, and Analytics
 

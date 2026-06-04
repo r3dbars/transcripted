@@ -1,4 +1,5 @@
 name: BET-88 QA Gate Status
+# Historical BET-88/#428 fixture. Use workflow_dispatch only unless this closed QA gate is retired.
 
 on:
   workflow_dispatch:
