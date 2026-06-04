@@ -39,11 +39,11 @@ enum ObservabilityTextRedactor {
         options: [.caseInsensitive]
     )
     private static let jsonSensitiveAssignmentRegex = makeRegex(
-        #""(audio_device|bundle_id|device_name|file_path|input_device_name|meeting_name|meeting_title|microphone_name|output_device_name|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|transcript_text|transcript_title)"\s*:\s*"(?:\\.|[^"\\])*""#,
+        #""(audio_device|audio_path|bundle_id|device_name|file_path|input_device_name|meeting_name|meeting_title|meeting_url|microphone_name|output_device_name|prompt_text|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|transcript_path|transcript_text|transcript_title)"\s*:\s*"(?:\\.|[^"\\])*""#,
         options: [.caseInsensitive]
     )
     private static let inlineSensitiveAssignmentRegex = makeRegex(
-        #"\b(audio_device|bundle_id|device_name|file_path|input_device_name|meeting_name|meeting_title|microphone_name|output_device_name|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|transcript_text|transcript_title)\s*=\s*.*?(?=\s+[A-Za-z0-9_.$-]+=|$)"#,
+        #"\b(audio_device|audio_path|bundle_id|device_name|file_path|input_device_name|meeting_name|meeting_title|meeting_url|microphone_name|output_device_name|prompt_text|raw_url|source_app|source_app_bundle_id|source_app_name|speaker_name|transcript_path|transcript_text|transcript_title)\s*=\s*.*?(?=\s+[A-Za-z0-9_.$-]+=|$)"#,
         options: [.caseInsensitive]
     )
     private static let engineDeviceLogRegex = makeRegex(

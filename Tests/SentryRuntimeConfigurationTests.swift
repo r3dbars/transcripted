@@ -111,6 +111,60 @@ func testSentryRuntimeConfiguration() {
         )
     }
 
+    runSuite("SentryRuntimeConfiguration rejects sensitive metadata overrides") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.environmentInfoKey: "production",
+            SentryRuntimeConfiguration.releasePrefixInfoKey: "transcripted",
+            "CFBundleShortVersionString": "1.2.3",
+            "CFBundleVersion": "456",
+        ]
+        let environment = [
+            SentryRuntimeConfiguration.environmentEnvironmentKey: "/Users/jane/private",
+            SentryRuntimeConfiguration.releaseEnvironmentKey: "transcripted@person@example.com",
+            SentryRuntimeConfiguration.distEnvironmentKey: "sk-private",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.environment(environment: environment, infoDictionary: info),
+            "production",
+            "unsafe SENTRY_ENVIRONMENT values should not become Sentry metadata"
+        )
+        assertEqual(
+            SentryRuntimeConfiguration.releaseName(environment: environment, infoDictionary: info),
+            "transcripted@1.2.3",
+            "unsafe SENTRY_RELEASE overrides should fall back to bundle metadata"
+        )
+        assertEqual(
+            SentryRuntimeConfiguration.dist(environment: environment, infoDictionary: info),
+            "456",
+            "unsafe SENTRY_DIST values should fall back to the bundle build"
+        )
+    }
+
+    runSuite("SentryRuntimeConfiguration drops unsafe bundle metadata when no safe fallback exists") {
+        let info: [String: Any] = [
+            SentryRuntimeConfiguration.environmentInfoKey: "person@example.com",
+            SentryRuntimeConfiguration.releasePrefixInfoKey: "/Users/jane/private",
+            "CFBundleShortVersionString": "sk-private",
+            "CFBundleVersion": "https://example.com/build",
+        ]
+
+        assertEqual(
+            SentryRuntimeConfiguration.environment(environment: [:], infoDictionary: info),
+            "production",
+            "unsafe plist environments should fall back to production"
+        )
+        assertEqual(
+            SentryRuntimeConfiguration.releaseName(environment: [:], infoDictionary: info),
+            "transcripted@unknown",
+            "unsafe plist release pieces should not become a Sentry release"
+        )
+        assertNil(
+            SentryRuntimeConfiguration.dist(environment: [:], infoDictionary: info),
+            "unsafe plist dist values should be omitted"
+        )
+    }
+
     runSuite("SentryRuntimeConfiguration defaults to the Transcripted release prefix") {
         let info: [String: Any] = [
             "CFBundleShortVersionString": "1.2.3",

@@ -111,6 +111,36 @@
       ]
     },
     {
+      "id": "transcript-speaker-and-audio-references",
+      "input": "DIAG transcript_text=private roadmap words speaker_name=Alice audio_path=/Users/redbars/Private/customer.wav transcript_path=/Users/redbars/Private/customer.md",
+      "must_not_contain": [
+        "private roadmap words",
+        "Alice",
+        "/Users/redbars/Private/customer.wav",
+        "/Users/redbars/Private/customer.md"
+      ],
+      "must_contain": [
+        "transcript_text=[redacted-sensitive-value]",
+        "speaker_name=[redacted-sensitive-value]",
+        "audio_path=[redacted-sensitive-value]",
+        "transcript_path=[redacted-sensitive-value]"
+      ]
+    },
+    {
+      "id": "json-transcript-speaker-and-url",
+      "input": "{\"transcript_text\":\"private words\",\"speaker_name\":\"Alice\",\"raw_url\":\"https://meet.example.com/private-room\"}",
+      "must_not_contain": [
+        "private words",
+        "Alice",
+        "https://meet.example.com/private-room"
+      ],
+      "must_contain": [
+        "\"transcript_text\":\"[redacted-sensitive-value]\"",
+        "\"speaker_name\":\"[redacted-sensitive-value]\"",
+        "\"raw_url\":\"[redacted-sensitive-value]\""
+      ]
+    },
+    {
       "id": "plain-engine-device-log",
       "input": "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
       "must_not_contain": [

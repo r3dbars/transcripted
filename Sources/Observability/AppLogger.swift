@@ -90,7 +90,14 @@ class AppLogger: ObservableObject {
         }
     }
 
+    nonisolated static func sanitizedLogMessage(_ message: String) -> String {
+        ObservabilityTextRedactor.redact(message)
+    }
+
     func log(_ message: String) {
+        let message = Self.sanitizedLogMessage(message)
+        guard !message.isEmpty else { return }
+
         let timestamp = dateFormatter.string(from: Date())
         let entry = "[\(timestamp)] \(message)"
         entries.append(entry)

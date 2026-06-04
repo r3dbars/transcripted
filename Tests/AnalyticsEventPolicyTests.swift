@@ -689,6 +689,84 @@ func testAnalyticsEventPolicy() {
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy meeting outcomes drop adversarial private fields") {
+        let privateFields = [
+            "audio_device": "Jane's AirPods Pro",
+            "audio_path": "/Users/jane/Private/customer.wav",
+            "email": "person@example.com",
+            "file_path": "/Users/jane/Private/customer.md",
+            "meeting_title": "Customer Roadmap",
+            "raw_url": "https://meet.example.com/private-room",
+            "speaker_name": "Alice Customer",
+            "token": "sk-private",
+            "transcript_text": "private transcript words",
+        ]
+
+        let saved = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "duration_bucket": "10_29m",
+                    "participant_count_bucket": "2_3",
+                    "queue_depth_bucket": "1",
+                    "trigger": "hotkey",
+                    "word_count_bucket": "300_plus",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")?.allowedProperties ?? []
+        )
+        assertEqual(saved["duration_bucket"], "10_29m", "saved meetings should keep duration bucket")
+        assertEqual(saved["participant_count_bucket"], "2_3", "saved meetings should keep participant bucket")
+        assertEqual(saved["trigger"], "hotkey", "saved meetings should keep trigger")
+        assertEqual(saved["word_count_bucket"], "300_plus", "saved meetings should keep word bucket")
+
+        let failed = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "transcription_inference_failed",
+                    "queue_depth_bucket": "1",
+                    "trigger": "hotkey",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")?.allowedProperties ?? []
+        )
+        assertEqual(failed["failure_kind"], "transcription_inference_failed", "meeting failures should keep normalized failure kind")
+        assertEqual(failed["queue_depth_bucket"], "1", "meeting failures should keep queue bucket")
+
+        let skipped = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "no_speech_detected",
+                    "queue_depth_bucket": "0",
+                    "trigger": "hotkey",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")?.allowedProperties ?? []
+        )
+        assertEqual(skipped["failure_kind"], "no_speech_detected", "skipped meetings should keep normalized reason")
+
+        let importFailed = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "unsupported_format",
+                    "import_stage": "preparation",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_file_import_failed")?.allowedProperties ?? []
+        )
+        assertEqual(importFailed["failure_kind"], "unsupported_format", "import failures should keep normalized kind")
+        assertEqual(importFailed["import_stage"], "preparation", "import failures should keep coarse stage")
+
+        for sanitized in [saved, failed, skipped, importFailed] {
+            for key in privateFields.keys {
+                assertNil(sanitized[key], "\(key) should not be emitted for meeting outcome analytics")
+            }
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows saved-audio retranscription request attribution") {
         let requested = AnalyticsEventPolicy.policy(forEvent: "meeting_saved_audio_retranscription_requested")
 
