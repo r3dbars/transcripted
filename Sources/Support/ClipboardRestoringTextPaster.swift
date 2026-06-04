@@ -187,7 +187,7 @@ final class ClipboardRestoringTextPaster {
         pasteboard.clearContents()
         let wroteTemporaryString = writeTemporaryString(text, to: pasteboard) { [weak self] in
             Task { @MainActor [weak self] in
-                self?.scheduleClipboardRestore(
+                self?.scheduleClipboardRestoreAfterTemporaryRead(
                     savedItems,
                     temporaryString: text,
                     temporaryChangeCount: temporaryChangeCount,
@@ -228,6 +228,27 @@ final class ClipboardRestoringTextPaster {
         }
 
         return .pasted
+    }
+
+    private func scheduleClipboardRestoreAfterTemporaryRead(
+        _ savedItems: PasteboardSnapshot,
+        temporaryString: String,
+        temporaryChangeCount: Int,
+        to pasteboard: any ClipboardPasteboard,
+        generation: Int,
+        delay: UInt64
+    ) {
+        // Pasteboard observers can read the provider before the target app consumes Cmd+V.
+        // Keep the longer fallback active unless no restore has been scheduled yet.
+        guard clipboardRestoreTask == nil else { return }
+        scheduleClipboardRestore(
+            savedItems,
+            temporaryString: temporaryString,
+            temporaryChangeCount: temporaryChangeCount,
+            to: pasteboard,
+            generation: generation,
+            delay: delay
+        )
     }
 
     private func scheduleClipboardRestore(

@@ -211,7 +211,7 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             restoredClipboard,
             existingClipboard,
-            "waiting for pending restore should include the delayed read-triggered restore before auto-enter"
+            "waiting for pending restore should include the fallback restore before auto-enter"
         )
     }
 
@@ -261,6 +261,62 @@ func testClipboardRestoringTextPaster() async {
             restoredClipboard,
             existingClipboard,
             "slow-consumer pasteback should still restore the previous clipboard afterward"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — early observer reads do not race slow consumers") {
+        let existingClipboard = "synthetic existing clipboard"
+        let dictationText = "synthetic observer-safe dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedObserverPasteConsumerTest-\(UUID().uuidString)")
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 140_000_000
+            )
+        }
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        let waitTask = Task { @MainActor in
+            await paster.waitForPendingClipboardRestore()
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let observerRead = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(observerRead, dictationText, "a clipboard observer should see the borrowed dictation text")
+
+        try? await Task.sleep(nanoseconds: 70_000_000)
+        let slowConsumerRead = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            slowConsumerRead,
+            dictationText,
+            "an early clipboard observer read should not restore stale clipboard before a slower target reads Cmd+V"
+        )
+
+        let restoredClipboard = await waitTask.value
+        assertEqual(
+            restoredClipboard,
+            existingClipboard,
+            "observer-safe pasteback should still restore the previous clipboard afterward"
         )
     }
 
