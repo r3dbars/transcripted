@@ -27,6 +27,17 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants keeps no-speech recovery copy readable") {
+        assertTrue(
+            TranscriptedConstants.noSpeechDismissDelay >= 2_000_000_000,
+            "no-speech overlay should stay visible long enough to read the physical-key recovery hint"
+        )
+        assertTrue(
+            TranscriptedConstants.noSpeechDismissDelay < TranscriptedConstants.errorDismissDelay,
+            "no-speech recovery should still dismiss faster than regular error states"
+        )
+    }
+
     runSuite("TranscriptedConstants gives meeting quit preservation enough time") {
         let meetingStopTimeoutSeconds = TimeInterval(TranscriptedConstants.meetingStopTimeout) / 1_000_000_000
         assertTrue(
