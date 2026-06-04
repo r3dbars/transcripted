@@ -164,6 +164,49 @@ final class FileLoggerTests: XCTestCase {
         XCTAssertTrue(message.contains("title=[redacted-sensitive-value]"))
     }
 
+    func testFileLoggerRedactsPunctuationInsideAbsolutePathMessages() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FileLoggerPathPunctuationPrivacyTests-\(UUID().uuidString)", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: logs
+        )
+
+        let logger = FileLogger(paths: paths, isDisabledOverride: false)
+        logger.write(
+            level: "error",
+            subsystem: "pipeline",
+            message: "Failed /Users/jane/Client, Secret/meeting.md; archived /Users/jane/Decks/Customer) Roadmap/final.md status=failed",
+            metadata: nil
+        )
+        logger.flush()
+
+        let logURL = logs.appendingPathComponent("app.jsonl")
+        let line = try XCTUnwrap(
+            try String(contentsOf: logURL, encoding: .utf8)
+                .split(separator: "\n")
+                .map(String.init)
+                .first
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+        let message = try XCTUnwrap(object["m"] as? String)
+
+        XCTAssertFalse(message.contains("/Users/jane/"), "absolute paths should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("Secret/meeting.md"), "path suffix after comma should not enter app.jsonl messages")
+        XCTAssertFalse(message.contains("Roadmap/final.md"), "path suffix after closing parenthesis should not enter app.jsonl messages")
+        XCTAssertTrue(message.contains("[redacted-path]"))
+        XCTAssertTrue(message.contains("status=failed"))
+    }
+
     func testDisableFlagSkipsFileLogging() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileLoggerDisableTests-\(UUID().uuidString)", isDirectory: true)

@@ -186,21 +186,25 @@ enum LogPrivacySanitizer {
 
         while index < text.endIndex {
             let character = text[index]
-            if character == "\n" || character == "\r" || character == "\t" || character == "\"" {
+            if isHardPathDelimiter(character) {
                 break
             }
 
-            if character == "," || character == ";" || character == ")" || character == "]" || character == "}" {
+            if isSoftPathDelimiter(character),
+               softDelimiterEndsPath(in: text, at: index) {
                 break
             }
 
             if character == " " {
                 let prefix = text[start..<index]
-                let token = nextToken(in: text, after: index)
-                if looksLikeMetadataToken(token) {
+                let token = nextPathToken(in: text, after: index)
+                let pathContinuesLater = pathContinuationAppears(in: text, after: index)
+                if looksLikeMetadataToken(token) && !pathContinuesLater {
                     break
                 }
-                if pathPrefixLooksLikeFile(prefix) && !nextTokenCouldContinuePath(token) {
+                if pathPrefixLooksLikeFile(prefix)
+                    && !nextTokenCouldContinuePath(token)
+                    && !pathContinuesLater {
                     break
                 }
             }
@@ -211,7 +215,39 @@ enum LogPrivacySanitizer {
         return index
     }
 
-    private static func nextToken(in text: String, after spaceIndex: String.Index) -> String {
+    private static func isHardPathDelimiter(_ character: Character) -> Bool {
+        character == "\n"
+            || character == "\r"
+            || character == "\t"
+            || character == "\""
+    }
+
+    private static func isSoftPathDelimiter(_ character: Character) -> Bool {
+        character == ","
+            || character == ";"
+            || character == ":"
+            || character == ")"
+            || character == "]"
+            || character == "}"
+    }
+
+    private static func softDelimiterEndsPath(in text: String, at index: String.Index) -> Bool {
+        let nextIndex = text.index(after: index)
+        guard nextIndex < text.endIndex else { return true }
+
+        let nextCharacter = text[nextIndex]
+        if isHardPathDelimiter(nextCharacter) {
+            return true
+        }
+
+        if nextCharacter == " " {
+            return !nextTokenCouldContinuePath(nextPathToken(in: text, after: index))
+        }
+
+        return false
+    }
+
+    private static func nextPathToken(in text: String, after spaceIndex: String.Index) -> String {
         var index = text.index(after: spaceIndex)
         while index < text.endIndex, text[index] == " " {
             index = text.index(after: index)
@@ -220,24 +256,56 @@ enum LogPrivacySanitizer {
         var token = ""
         while index < text.endIndex {
             let character = text[index]
-            if character == " " || character == "\n" || character == "\r" || character == "\t" {
+            if character == " " || isHardPathDelimiter(character) {
                 break
             }
             token.append(character)
             index = text.index(after: index)
         }
-        return token.trimmingCharacters(in: CharacterSet(charactersIn: ",;:)]}"))
+        return token
     }
 
     private static func nextTokenCouldContinuePath(_ token: String) -> Bool {
-        let normalized = token.trimmingCharacters(in: CharacterSet(charactersIn: ",;:)]}"))
+        let normalized = normalizedPathToken(token)
         let lowercased = normalized.lowercased()
         guard !normalized.contains("@"),
               !lowercased.hasPrefix("http://"),
-              !lowercased.hasPrefix("https://") else {
+              !lowercased.hasPrefix("https://"),
+              !lowercased.hasSuffix(".local") else {
             return false
         }
         return normalized.contains("/") || pathTokenLooksLikeFile(normalized)
+    }
+
+    private static func pathContinuationAppears(in text: String, after spaceIndex: String.Index) -> Bool {
+        var index = text.index(after: spaceIndex)
+        var inspectedTokens = 0
+
+        while index < text.endIndex && inspectedTokens < 8 {
+            while index < text.endIndex, text[index] == " " {
+                index = text.index(after: index)
+            }
+            guard index < text.endIndex, !isHardPathDelimiter(text[index]) else {
+                return false
+            }
+
+            var token = ""
+            while index < text.endIndex {
+                let character = text[index]
+                if character == " " || isHardPathDelimiter(character) {
+                    break
+                }
+                token.append(character)
+                index = text.index(after: index)
+            }
+
+            if nextTokenCouldContinuePath(token) {
+                return true
+            }
+            inspectedTokens += 1
+        }
+
+        return false
     }
 
     private static func pathPrefixLooksLikeFile(_ prefix: Substring) -> Bool {
@@ -246,15 +314,21 @@ enum LogPrivacySanitizer {
     }
 
     private static func pathTokenLooksLikeFile(_ token: String) -> Bool {
-        guard let dot = token.lastIndex(of: ".") else { return false }
-        let ext = token[token.index(after: dot)...]
+        let normalized = normalizedPathToken(token)
+        guard let dot = normalized.lastIndex(of: ".") else { return false }
+        let ext = normalized[normalized.index(after: dot)...]
         guard (1...8).contains(ext.count) else { return false }
         return ext.allSatisfy { $0.isLetter || $0.isNumber }
     }
 
     private static func looksLikeMetadataToken(_ token: String) -> Bool {
-        guard let separator = token.firstIndex(of: "=") else { return false }
-        let key = String(token[..<separator]).lowercased()
+        let normalized = normalizedPathToken(token)
+        guard !normalized.contains("/"),
+              !pathTokenLooksLikeFile(normalized),
+              let separator = normalized.firstIndex(of: "=") else {
+            return false
+        }
+        let key = String(normalized[..<separator]).lowercased()
         return [
             "attempt",
             "code",
@@ -266,5 +340,9 @@ enum LogPrivacySanitizer {
             "stage",
             "status",
         ].contains(key)
+    }
+
+    private static func normalizedPathToken(_ token: String) -> String {
+        token.trimmingCharacters(in: CharacterSet(charactersIn: ",;:)]}"))
     }
 }
