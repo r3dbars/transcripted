@@ -1012,6 +1012,12 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            if saveFailureMessage == nil {
+                self.trackOnboardingFirstDictationSavedIfNeeded(
+                    delivery: pasteOutcome.delivery,
+                    wordCount: wordCount
+                )
+            }
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
         }
     }
@@ -1498,6 +1504,22 @@ class DictationSessionController: ObservableObject {
                     "delivery": delivery.rawValue
                 ]
             )
+        )
+    }
+
+    private func trackOnboardingFirstDictationSavedIfNeeded(
+        delivery: DictationDelivery,
+        wordCount: Int
+    ) {
+        guard PermissionsOnboardingPreferences.markFirstDictationSavedTrackedIfNeeded() else { return }
+
+        AnalyticsReporter.track(
+            "onboarding_first_dictation_saved",
+            properties: [
+                "delivery": delivery.rawValue,
+                "step_id": "dictation_test",
+                "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+            ]
         )
     }
 

@@ -619,16 +619,22 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        let bundle = AgentConnectionGuide.portableMeetingBundle(
+            title: preview.title,
+            date: preview.date,
+            transcriptURL: preview.transcriptURL
+        )
         ActivationTelemetry.trackAgentPromptAction(
-            promptKind: .meetingMarkdown,
+            promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
             actionKind: .copied,
             agentTarget: .localAgent,
             surface: .homePreview,
+            result: bundle == nil ? .fallbackCopied : .success,
             artifactKind: .meeting
         )
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(preview.markdown, forType: .string)
+        pasteboard.setString(bundle ?? preview.markdown, forType: .string)
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
