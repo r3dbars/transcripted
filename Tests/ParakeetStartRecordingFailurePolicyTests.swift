@@ -568,4 +568,40 @@ func testParakeetStartRecordingFailurePolicy() {
             "non-route CoreAudio errors should stay generic engine-start failures"
         )
     }
+
+    runSuite("ParakeetEngine zombie watchdog marks recording idle before graph reset") {
+        let source = readParakeetEngineSource()
+        guard let watchdogStart = source.range(of: "private func startAudioWatchdog()"),
+              let watchdogEnd = source.range(of: "func stopRecording()", range: watchdogStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the zombie watchdog body")
+            return
+        }
+        let watchdog = String(source[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
+        guard let markIdle = watchdog.range(of: "self.isRecording = false"),
+              let clearRestartFlag = watchdog.range(of: "self.configChangeWasRecording = false"),
+              let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0"),
+              let removeTap = watchdog.range(of: "await self.removeRecordingTap()"),
+              let stopEngine = watchdog.range(of: "await self.stopAudioEngine()") else {
+            assertTrue(false, "zombie watchdog should mark internal reset state before touching CoreAudio")
+            return
+        }
+
+        assertTrue(markIdle.lowerBound < removeTap.lowerBound, "zombie reset should stop being treated as active recording before tap removal can post config changes")
+        assertTrue(markIdle.lowerBound < stopEngine.lowerBound, "zombie reset should stop being treated as active recording before engine stop can post config changes")
+        assertTrue(clearRestartFlag.lowerBound < removeTap.lowerBound, "zombie reset should not leave the device-change restart flag armed")
+        assertTrue(suppressConfigChanges.lowerBound < removeTap.lowerBound, "zombie reset should suppress self-induced config changes before graph teardown")
+    }
+}
+
+private func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
+    let url = repoFixtureURL("Sources/Speech/ParakeetEngine.swift")
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        totalTests += 1
+        failedTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not read ParakeetEngine.swift: \(error)")
+        return ""
+    }
 }
