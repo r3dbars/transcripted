@@ -75,6 +75,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeShowsStatsDetails = false
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
+    @State private var homeLocalSummaryJobIDs: Set<String> = []
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
 
     init(
@@ -670,6 +671,41 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private func handleOpenOrGenerateLocalSummary(_ item: RecentMeetingItem) {
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL)
+        if FileManager.default.fileExists(atPath: summaryURL.path) {
+            trackSettingsAction("open_local_meeting_summary", page: .home)
+            NSWorkspace.shared.open(summaryURL)
+            return
+        }
+
+        generateLocalSummary(for: item)
+    }
+
+    private func generateLocalSummary(for item: RecentMeetingItem) {
+        guard !homeLocalSummaryJobIDs.contains(item.id) else { return }
+        trackSettingsAction("generate_local_meeting_summary", page: .home)
+        homeLocalSummaryJobIDs.insert(item.id)
+
+        Task { @MainActor in
+            do {
+                let result = try await LocalMeetingSummarizer().summarize(
+                    transcriptURL: item.transcriptURL,
+                    title: item.title
+                )
+                homeLocalSummaryJobIDs.remove(item.id)
+                refreshRecentCaptures(force: true)
+                NSWorkspace.shared.open(result.summaryURL)
+            } catch {
+                homeLocalSummaryJobIDs.remove(item.id)
+                homeDeleteFailure = HomeDeleteFailure(
+                    title: "Could not summarize meeting",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
         ActivationTelemetry.trackArtifactAction(
@@ -802,8 +838,20 @@ struct TranscriptedSettingsView: View {
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL)
+        let hasSummary = FileManager.default.fileExists(atPath: summaryURL.path)
+        let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
 
         items.append(contentsOf: [
+            HomeRowMenuItem(
+                title: isSummarizing
+                    ? "Summarizing locally..."
+                    : (hasSummary ? "Open local summary" : "Summarize locally with Gemma 4"),
+                symbolName: hasSummary ? "text.page" : "sparkles",
+                isEnabled: !isSummarizing
+            ) {
+                handleOpenOrGenerateLocalSummary(item)
+            },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_meeting", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
@@ -819,6 +867,18 @@ struct TranscriptedSettingsView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
         ])
+
+        if hasSummary {
+            items.append(
+                HomeRowMenuItem(
+                    title: isSummarizing ? "Regenerating local summary..." : "Regenerate local summary",
+                    symbolName: "arrow.clockwise",
+                    isEnabled: !isSummarizing
+                ) {
+                    generateLocalSummary(for: item)
+                }
+            )
+        }
 
         if let audio = item.audio, let firstAudio = audio.urls.first {
             if audio.retranscriptionInput != nil {

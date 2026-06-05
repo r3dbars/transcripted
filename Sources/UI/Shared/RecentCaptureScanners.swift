@@ -312,6 +312,8 @@ enum RecentMeetingsScanner {
     }
 
     private static func isMarkdownCandidate(_ url: URL) -> Bool {
-        url.pathExtension == "md" && !excludedMarkdownFilenames.contains(url.lastPathComponent)
+        url.pathExtension == "md"
+            && !url.deletingPathExtension().lastPathComponent.hasSuffix(".summary")
+            && !excludedMarkdownFilenames.contains(url.lastPathComponent)
     }
 }
