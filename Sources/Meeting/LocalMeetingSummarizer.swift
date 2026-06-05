@@ -76,7 +76,7 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
                 chunkCharacterLimit: 9_000,
                 chunkMaxTokens: 300,
                 directMaxTokens: 900,
-                mergeMaxTokens: 1_500,
+                mergeMaxTokens: 2_400,
                 maxKVSize: 6_144,
                 processTimeoutSeconds: 900,
                 processNiceValue: 15,
@@ -93,7 +93,7 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
             chunkCharacterLimit: 18_000,
             chunkMaxTokens: 520,
             directMaxTokens: 1_000,
-            mergeMaxTokens: 1_500,
+            mergeMaxTokens: 2_400,
             maxKVSize: 8_192,
             processTimeoutSeconds: 900,
             processNiceValue: 10,
@@ -548,6 +548,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         - Base every point only on the transcript.
         - Title must be specific, plain, and 3 to 8 words.
         - Keep it concise and useful.
+        - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the transcript.
         - Action Items are only future follow-up work after the meeting, not instructions already completed during the transcript.
@@ -576,6 +577,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Preserve every explicit decision, action item, open question, and follow-up from this chunk.
+        - Use compact one-line bullets. Do not use sub-bullets or long explanations.
         - Include timestamps and speakers when available, especially for action items and decisions.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from this chunk.
         - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
@@ -608,6 +610,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         - Base every point only on the chunk notes.
         - Title must be specific, plain, and 3 to 8 words.
         - Keep each section concise.
+        - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
         - Preserve explicit action items, decisions, open questions, and follow-ups from the chunk notes.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the chunk notes.

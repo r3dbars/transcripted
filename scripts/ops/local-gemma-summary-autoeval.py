@@ -50,7 +50,7 @@ PROFILES: dict[str, dict[str, int]] = {
         "chunk_character_limit": 9_000,
         "chunk_max_tokens": 300,
         "direct_max_tokens": 900,
-        "merge_max_tokens": 1_500,
+        "merge_max_tokens": 2_400,
         "max_kv_size": 6_144,
         "nice": 15,
         "cpu_thread_limit": 2,
@@ -60,7 +60,7 @@ PROFILES: dict[str, dict[str, int]] = {
         "chunk_character_limit": 18_000,
         "chunk_max_tokens": 520,
         "direct_max_tokens": 1_000,
-        "merge_max_tokens": 1_500,
+        "merge_max_tokens": 2_400,
         "max_kv_size": 8_192,
         "nice": 10,
         "cpu_thread_limit": 4,
@@ -697,6 +697,7 @@ Rules:
 - Base every point only on the transcript.
 - Title must be specific, plain, and 3 to 8 words.
 - Keep it concise and useful.
+- Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
 - Include timestamps when available.
 - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the transcript.
 - Action Items are only future follow-up work after the meeting, not instructions already completed during the transcript.
@@ -724,6 +725,7 @@ Return markdown with these exact headings:
 Rules:
 - Always include every section heading exactly as listed, even when the section says "None found."
 - Preserve every explicit decision, action item, open question, and follow-up from this chunk.
+- Use compact one-line bullets. Do not use sub-bullets or long explanations.
 - Include timestamps and speakers when available, especially for action items and decisions.
 - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from this chunk.
 - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
@@ -755,6 +757,7 @@ Rules:
 - Base every point only on the chunk notes.
 - Title must be specific, plain, and 3 to 8 words.
 - Keep each section concise.
+- Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
 - Include timestamps when available.
 - Preserve explicit action items, decisions, open questions, and follow-ups from the chunk notes.
 - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the chunk notes.
