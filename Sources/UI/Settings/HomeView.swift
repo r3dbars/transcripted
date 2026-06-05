@@ -1538,7 +1538,7 @@ struct HomeMeetingRow: View {
                 if let summaryPreview = item.summaryPreview {
                     if isSummaryExpanded {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(summaryPreview.sections) { section in
+                            ForEach(expandedSections(for: summaryPreview)) { section in
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(section.title)
                                         .font(.system(size: 10.5, weight: .semibold))
@@ -1583,6 +1583,13 @@ struct HomeMeetingRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private struct ExpandedSummarySection: Identifiable {
+        let title: String
+        let text: String
+
+        var id: String { title }
     }
 
     private var reviewSpeakersAccessory: AnyView? {
@@ -1632,6 +1639,47 @@ struct HomeMeetingRow: View {
         preview.sections.count > 1
             || preview.summary.count > collapsedSummaryCharacterLimit
             || preview.summary.contains("\n")
+    }
+
+    private func expandedSections(for preview: RecentMeetingSummaryPreview) -> [ExpandedSummarySection] {
+        let summary = sectionText("Summary", in: preview.sections) ?? preview.summary
+        let nextSteps = combinedSectionText(
+            titles: ["Action Items", "Risks or Follow-ups"],
+            in: preview.sections
+        )
+        let decisionsAndQuestions = combinedSectionText(
+            titles: ["Decisions", "Open Questions"],
+            in: preview.sections
+        )
+
+        return [
+            ExpandedSummarySection(title: "Summary", text: summary),
+            ExpandedSummarySection(title: "Next Steps", text: nextSteps),
+            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions)
+        ].filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func combinedSectionText(
+        titles: [String],
+        in sections: [RecentMeetingSummarySection]
+    ) -> String {
+        titles
+            .compactMap { sectionText($0, in: sections) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sectionText(
+        _ title: String,
+        in sections: [RecentMeetingSummarySection]
+    ) -> String? {
+        guard let text = sections.first(where: { $0.title == title })?.text
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            return nil
+        }
+        return text
     }
 
     private func summaryDisplayText(_ summary: String) -> String {
