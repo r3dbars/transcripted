@@ -2464,8 +2464,20 @@ func testRepoCommandContract() {
             "Codex and Cowork setup actions should prepare the workspace and server before handing prompts to agents"
         )
         assertTrue(
+            contents.contains("Label(\"Live Transcript\", systemImage: \"doc.text\")")
+                && contents.contains("starting a meeting opens a private local transcript page"),
+            "Agent settings should name the customer-facing feature Live Transcript and explain the meeting-start behavior"
+        )
+        assertTrue(
             helperBlock.contains("LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)"),
             "the shared setup helper should start the loopback preview server when supported"
+        )
+        assertTrue(
+            controllerContents.contains("openLiveMeetingPreviewForActiveRecording()")
+                && controllerContents.contains("LiveMeetingPreviewServer.shared.start(workspaceURL: liveCodexSession.workspaceRoot)")
+                && controllerContents.contains("NSWorkspace.shared.open(previewURL)")
+                && controllerContents.contains("live_meeting_preview_opened"),
+            "starting an enabled live transcript meeting should open the private local transcript page automatically"
         )
         assertTrue(
             stopBlock.contains("LiveMeetingPreviewServer.shared.stop()"),

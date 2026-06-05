@@ -102,7 +102,7 @@ struct AgentConnectionSettingsPage: View {
                             Label("Web chats are fallback only", systemImage: "globe")
                                 .font(.subheadline.weight(.semibold))
 
-                            Text("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Cowork needs the sidecar folder granted for live meetings.")
+                            Text("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Cowork needs access to the Live Transcript folder for live meetings.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -222,7 +222,7 @@ struct AgentConnectionSettingsPage: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(isOn: $liveMeetingCodexEnabled) {
-                    Label("Live meeting sidecar", systemImage: "waveform")
+                    Label("Live Transcript", systemImage: "doc.text")
                         .font(.subheadline.weight(.semibold))
                 }
                 .toggleStyle(.switch)
@@ -253,7 +253,7 @@ struct AgentConnectionSettingsPage: View {
                     }
 
                     SettingsInlineActionButton(
-                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Preview",
+                        title: openedLiveMeetingPreview ? "Opened Transcript" : "Open Transcript",
                         symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
                         tone: .accent
                     ) {
@@ -261,7 +261,7 @@ struct AgentConnectionSettingsPage: View {
                     }
                 }
 
-                Text("Use the same local sidecar from Codex or Claude Cowork. Codex can open the workspace directly; Cowork gets a copied setup prompt and folder path.")
+                Text("When this is on, starting a meeting opens a private local transcript page. Codex and Cowork can use the same local files if you set them up.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -526,7 +526,7 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(false)
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = "Could not set up Live Transcript: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .codex,
@@ -546,7 +546,7 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(false)
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = "Could not prepare Live Transcript: \(error.localizedDescription)"
         }
     }
 
@@ -580,7 +580,7 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(false)
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = "Could not set up Live Transcript: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .cowork,
@@ -639,7 +639,7 @@ struct AgentConnectionSettingsPage: View {
             LiveMeetingCodexPreferences.setEnabled(false)
             meetingSession?.stopLiveCodexSessionFromSettings()
             stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = "Could not open Live Transcript: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,

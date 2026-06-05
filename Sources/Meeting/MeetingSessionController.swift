@@ -21,6 +21,7 @@
 // The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
 // wires those up.
 
+import AppKit
 import Combine
 import Foundation
 import TranscriptedCore
@@ -1543,6 +1544,7 @@ final class MeetingSessionController: ObservableObject {
             liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
+            openLiveMeetingPreviewForActiveRecording()
             if canStartLiveBackend {
                 liveMeetingTranscriber.start(
                     capture: capture,
@@ -1579,6 +1581,36 @@ final class MeetingSessionController: ObservableObject {
                 event: "live_codex_session_start_failed",
                 message: "Live meeting sidecar could not start",
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
+    private func openLiveMeetingPreviewForActiveRecording() {
+        do {
+            let previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: liveCodexSession.workspaceRoot)
+            if NSWorkspace.shared.open(previewURL) {
+                DiagnosticsTrail.record(
+                    engine: "meeting",
+                    event: "live_meeting_preview_opened",
+                    message: "Live meeting transcript preview opened",
+                    context: baseDiagnosticsContext()
+                )
+            } else {
+                DiagnosticsTrail.record(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "live_meeting_preview_open_failed",
+                    message: "Live meeting transcript preview could not be opened",
+                    context: baseDiagnosticsContext()
+                )
+            }
+        } catch {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_meeting_preview_open_failed",
+                message: error.localizedDescription,
+                context: baseDiagnosticsContext()
             )
         }
     }
