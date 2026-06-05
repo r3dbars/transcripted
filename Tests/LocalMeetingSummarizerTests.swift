@@ -91,6 +91,7 @@ func testLocalMeetingSummarizer() {
     runSuite("LocalMeetingSummaryNormalizer restores missing sections") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("# Summary\nUseful brief.")
         for heading in [
+            "# Title",
             "# Summary",
             "# Decisions",
             "# Action Items",
@@ -100,5 +101,21 @@ func testLocalMeetingSummarizer() {
         ] {
             assertTrue(normalized.contains(heading), "normalized summaries should include \(heading)")
         }
+    }
+
+    runSuite("LocalMeetingSummaryNormalizer extracts generated titles") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        # Title
+        Launch Pricing Review
+
+        # Summary
+        Team agreed to keep the first version small.
+        """)
+
+        assertEqual(
+            LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
+            "Launch Pricing Review",
+            "summaries should expose a short generated title for Home"
+        )
     }
 }

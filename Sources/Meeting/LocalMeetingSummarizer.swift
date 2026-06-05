@@ -466,10 +466,12 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
             }
 
             let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
             let rendered = renderSummary(
-                body: LocalMeetingSummaryNormalizer.normalized(summaryBody),
+                body: normalizedBody,
                 transcriptURL: transcriptURL,
                 title: title,
+                summaryTitle: LocalMeetingSummaryNormalizer.summaryTitle(in: normalizedBody),
                 date: date,
                 chunkCount: chunks.count
             )
@@ -500,6 +502,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         Summarize "\(title)" accurately. Do not invent decisions, tasks, dates, names, or facts. If something is unclear, write unclear.
 
         Return markdown with exactly these sections:
+        # Title
         # Summary
         # Decisions
         # Action Items
@@ -509,6 +512,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         Rules:
         - Base every point only on the transcript.
+        - Title must be specific, plain, and 3 to 8 words.
         - Keep it concise and useful.
         - Include timestamps when available.
         - If a section has nothing supported, write "None found."
@@ -548,6 +552,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         Do not invent decisions, tasks, dates, names, or facts. Remove duplicates.
 
         Return markdown with exactly these sections:
+        # Title
         # Summary
         # Decisions
         # Action Items
@@ -557,6 +562,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         Rules:
         - Base every point only on the chunk notes.
+        - Title must be specific, plain, and 3 to 8 words.
         - Keep each section concise.
         - Include timestamps when available.
         - If a section has nothing supported, write "None found."
@@ -570,16 +576,20 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         body: String,
         transcriptURL: URL,
         title: String,
+        summaryTitle: String?,
         date: Date,
         chunkCount: Int
     ) -> String {
         let escapedTitle = title.replacingOccurrences(of: "\"", with: "'")
+        let escapedSummaryTitle = summaryTitle?.replacingOccurrences(of: "\"", with: "'")
         let createdAt = ISO8601DateFormatter().string(from: date)
         let sourceName = transcriptURL.lastPathComponent.replacingOccurrences(of: "\"", with: "'")
+        let summaryTitleLine = escapedSummaryTitle.map { "summary_title: \"\($0)\"\n" } ?? ""
         return """
         ---
         capture_type: meeting_summary
         title: "\(escapedTitle)"
+        \(summaryTitleLine)\
         source_transcript: "\(sourceName)"
         summary_model: \(configuration.modelID)
         summary_runtime: mlx-vlm
@@ -595,6 +605,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
 enum LocalMeetingSummaryNormalizer {
     private static let requiredSections = [
+        "# Title",
         "# Summary",
         "# Decisions",
         "# Action Items",
@@ -614,6 +625,25 @@ enum LocalMeetingSummaryNormalizer {
         }
 
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func summaryTitle(in raw: String) -> String? {
+        let lines = raw.components(separatedBy: .newlines)
+        guard let startIndex = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) == "# Title"
+        }) else {
+            return nil
+        }
+
+        for line in lines[lines.index(after: startIndex)..<lines.endIndex] {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("#") { return nil }
+            if !trimmed.isEmpty, trimmed != "None found." {
+                return String(trimmed.prefix(96))
+            }
+        }
+
+        return nil
     }
 
     private static func containsHeading(_ heading: String, in text: String) -> Bool {

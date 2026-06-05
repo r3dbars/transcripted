@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct RecentMeetingItem: Identifiable, Sendable {
     let title: String
@@ -6,8 +9,23 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
+    let summaryPreview: RecentMeetingSummaryPreview?
 
     var id: String { transcriptURL.path }
+    var displayTitle: String { summaryPreview?.title ?? title }
+    var hasGeneratedTitle: Bool {
+        guard let generated = summaryPreview?.title else { return false }
+        return generated.compare(
+            title,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        ) != .orderedSame
+    }
+}
+
+struct RecentMeetingSummaryPreview: Equatable, Sendable {
+    let title: String?
+    let summary: String
+    let url: URL
 }
 
 enum RecentMeetingSpeakerStatus: Equatable, Sendable {
@@ -259,6 +277,7 @@ private final class LoadTaskBox: @unchecked Sendable {
 
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
+    private static let summaryPreviewByteLimit = 64 * 1024
 
     static func loadRecent(limit: Int = 3, directory: URL? = nil) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }
@@ -300,7 +319,8 @@ enum RecentMeetingsScanner {
                     date: entry.date,
                     transcriptURL: styled.url,
                     audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
-                    speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown)
+                    speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
+                    summaryPreview: loadSummaryPreview(for: styled.url)
                 )
             )
             if recentItems.count >= limit {
@@ -315,5 +335,126 @@ enum RecentMeetingsScanner {
         url.pathExtension == "md"
             && !url.deletingPathExtension().lastPathComponent.hasSuffix(".summary")
             && !excludedMarkdownFilenames.contains(url.lastPathComponent)
+    }
+
+    private static func loadSummaryPreview(for transcriptURL: URL) -> RecentMeetingSummaryPreview? {
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+        guard FileManager.default.fileExists(atPath: summaryURL.path),
+              let markdown = readSummaryPreviewMarkdown(at: summaryURL) else {
+            return nil
+        }
+        return RecentMeetingSummaryPreviewParser.preview(
+            from: markdown,
+            url: summaryURL,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
+        )
+    }
+
+    private static func readSummaryPreviewMarkdown(at url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: summaryPreviewByteLimit),
+              !data.isEmpty else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+}
+
+enum RecentMeetingSummaryPreviewParser {
+    private static let maximumPreviewCharacters = 2_400
+
+    static func preview(
+        from markdown: String,
+        url: URL,
+        sourceTranscriptFilename: String? = nil
+    ) -> RecentMeetingSummaryPreview? {
+        let frontmatter = TranscriptFrontmatter.document(in: markdown)
+        guard let frontmatter,
+              frontmatter.values["capture_type"] == "meeting_summary" else {
+            return nil
+        }
+        if let sourceTranscriptFilename,
+           let sourceTranscript = frontmatter.values["source_transcript"],
+           sourceTranscript != sourceTranscriptFilename {
+            return nil
+        }
+        let body = frontmatter.body
+        let title = cleanTitle(frontmatter.values["summary_title"])
+            ?? summaryTitle(in: body)
+        let summary = summaryText(in: body)
+
+        guard !summary.isEmpty else { return nil }
+        return RecentMeetingSummaryPreview(
+            title: title,
+            summary: limited(summary, to: maximumPreviewCharacters),
+            url: url
+        )
+    }
+
+    private static func summaryTitle(in body: String) -> String? {
+        cleanTitle(section("# Title", in: body)?.components(separatedBy: .newlines).first)
+    }
+
+    private static func summaryText(in body: String) -> String {
+        guard let raw = section("# Summary", in: body) else { return "" }
+        let lines = raw
+            .components(separatedBy: .newlines)
+            .map(cleanSummaryLine)
+            .filter { !$0.isEmpty }
+
+        let text = lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text == "None found." ? "" : text
+    }
+
+    private static func section(_ heading: String, in body: String) -> String? {
+        let lines = body.components(separatedBy: .newlines)
+        guard let startIndex = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
+        }) else {
+            return nil
+        }
+
+        var endIndex = lines.endIndex
+        for index in lines.index(after: startIndex)..<lines.endIndex {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("#") {
+                endIndex = index
+                break
+            }
+        }
+
+        return lines[lines.index(after: startIndex)..<endIndex]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func cleanTitle(_ raw: String?) -> String? {
+        let title = cleanMarkdown(raw)
+        guard !title.isEmpty, title != "None found." else { return nil }
+        return String(title.prefix(96))
+    }
+
+    private static func cleanSummaryLine(_ raw: String) -> String {
+        cleanMarkdown(raw)
+    }
+
+    private static func cleanMarkdown(_ raw: String?) -> String {
+        var text = raw?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        for prefix in ["- ", "* "] where text.hasPrefix(prefix) {
+            text.removeFirst(prefix.count)
+        }
+        return text
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func limited(_ value: String, to characterLimit: Int) -> String {
+        guard value.count > characterLimit else { return value }
+        return String(value.prefix(characterLimit))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

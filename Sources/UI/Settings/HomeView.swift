@@ -364,7 +364,7 @@ struct HomeMeetingPreview: Identifiable {
 
     init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
         id = item.id
-        title = item.title
+        title = item.displayTitle
         date = item.date
         transcriptURL = item.transcriptURL
         audio = item.audio
@@ -1479,6 +1479,11 @@ struct HomeMeetingRow: View {
     let onRetranscribe: () -> Void
     let menuItems: [HomeRowMenuItem]
 
+    @State private var isSummaryExpanded = false
+
+    private let collapsedSummaryCharacterLimit = 260
+    private let expandedSummaryCharacterLimit = 1_400
+
     var body: some View {
         HomeActivityRowShell(
             timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
@@ -1488,13 +1493,67 @@ struct HomeMeetingRow: View {
             onFlag: onFlag,
             menuItems: menuItems,
             leadingAccessory: reviewSpeakersAccessory,
-            compact: true
+            compact: item.summaryPreview == nil,
+            opensOnRowClick: false
         ) {
-            Text(item.title)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: item.summaryPreview == nil ? 0 : 5) {
+                Button(action: onOpen) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(item.displayTitle)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+
+                            if item.summaryPreview != nil {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .help("Local summary")
+                            }
+                        }
+
+                        if item.hasGeneratedTitle {
+                            Text(item.title)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help("Preview meeting")
+
+                if let summary = item.summaryPreview?.summary {
+                    Text(summaryDisplayText(summary))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(isSummaryExpanded ? 8 : 2)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if canExpandSummary(summary) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                isSummaryExpanded.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(isSummaryExpanded ? "Show less" : "Show more")
+                                Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                        .help(isSummaryExpanded ? "Collapse summary" : "Expand summary")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1529,6 +1588,16 @@ struct HomeMeetingRow: View {
             )
                 .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
+    }
+
+    private func canExpandSummary(_ summary: String) -> Bool {
+        summary.count > collapsedSummaryCharacterLimit || summary.contains("\n")
+    }
+
+    private func summaryDisplayText(_ summary: String) -> String {
+        let limit = isSummaryExpanded ? expandedSummaryCharacterLimit : collapsedSummaryCharacterLimit
+        guard summary.count > limit else { return summary }
+        return "\(summary.prefix(limit).trimmingCharacters(in: .whitespacesAndNewlines))..."
     }
 }
 

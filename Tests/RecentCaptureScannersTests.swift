@@ -248,6 +248,69 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingSummaryPreviewParser extracts generated title and summary only") {
+        let summaryURL = URL(fileURLWithPath: "/tmp/launch.summary.md")
+        let markdown = """
+        ---
+        capture_type: meeting_summary
+        title: "Quick notes"
+        summary_title: "Launch Pricing Review"
+        source_transcript: "launch.md"
+        ---
+
+        # Title
+        Ignored Body Title
+
+        # Summary
+        - Team agreed to keep the launch simple.
+        - Alex will check pricing language before Friday.
+
+        # Decisions
+        This should not appear in the Home preview.
+        """
+
+        guard let preview = RecentMeetingSummaryPreviewParser.preview(
+            from: markdown,
+            url: summaryURL,
+            sourceTranscriptFilename: "launch.md"
+        ) else {
+            assertTrue(false, "valid local summary should produce a Home preview")
+            return
+        }
+
+        assertEqual(preview.title, "Launch Pricing Review", "summary_title should become the generated display title")
+        assertEqual(
+            preview.summary,
+            "Team agreed to keep the launch simple.\nAlex will check pricing language before Friday.",
+            "Home preview should use only the # Summary section"
+        )
+        assertFalse(preview.summary.contains("Decisions"), "preview should not bleed later sections into the row")
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser fails closed for mismatched summaries") {
+        let summaryURL = URL(fileURLWithPath: "/tmp/other.summary.md")
+        let markdown = """
+        ---
+        capture_type: meeting_summary
+        title: "Other"
+        summary_title: "Other Summary"
+        source_transcript: "other.md"
+        ---
+
+        # Summary
+        This belongs to another meeting.
+        """
+
+        assertTrue(
+            RecentMeetingSummaryPreviewParser.preview(
+                from: markdown,
+                url: summaryURL,
+                sourceTranscriptFilename: "launch.md"
+            ) == nil,
+            "summary previews should ignore sibling files that point at a different transcript"
+        )
+    }
+
     await runSuite("RecentCaptureLoader keeps Home dashboard loading bounded with a large local history") {
         let fm = FileManager.default
         let root = temporaryRecentCapturePerformanceRoot(fileManager: fm)
@@ -1278,6 +1341,40 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner attaches local summary previews without counting summary files as rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("launch.md", isDirectory: false)
+
+            try? writeRecentLoaderMeeting(
+                title: "Quick notes",
+                date: recentLoaderDate("2026-05-24T14:00:00Z"),
+                to: transcriptURL
+            )
+            try? writeRecentLoaderSummary(
+                title: "Launch Pricing Review",
+                summary: "Team agreed to keep launch pricing simple.",
+                sourceTranscript: transcriptURL.lastPathComponent,
+                to: LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            )
+            setRecentLoaderFileDate(
+                recentLoaderDate("2026-05-25T14:00:00Z"),
+                at: LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+
+            assertEqual(meetings.count, 1, "summary markdown should enhance its meeting row, not become a second row")
+            assertEqual(meetings.first?.title, "Quick notes", "original meeting title should stay available")
+            assertEqual(meetings.first?.displayTitle, "Launch Pricing Review", "generated title should drive Home display")
+            assertEqual(
+                meetings.first?.summaryPreview?.summary,
+                "Team agreed to keep launch pricing simple.",
+                "scanner should attach the local summary preview"
+            )
+        }
+    }
+
     await runSuite("RecentMeetingsScanner returns empty for non-positive limits") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -1475,6 +1572,37 @@ private func writeRecentLoaderMeeting(
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
     setRecentLoaderFileDate(fileDate ?? date, at: url)
+}
+
+private func writeRecentLoaderSummary(
+    title: String,
+    summary: String,
+    sourceTranscript: String,
+    to url: URL
+) throws {
+    let markdown = """
+    ---
+    capture_type: meeting_summary
+    title: "Quick notes"
+    summary_title: "\(title)"
+    source_transcript: "\(sourceTranscript)"
+    summary_model: mlx-community/gemma-4-12B-it-4bit
+    summary_runtime: mlx-vlm
+    summary_profile: m1-low-memory
+    summary_chunk_count: 1
+    created_at: 2026-05-24T14:00:00Z
+    ---
+
+    # Title
+    \(title)
+
+    # Summary
+    \(summary)
+
+    # Decisions
+    None found.
+    """
+    try markdown.write(to: url, atomically: true, encoding: .utf8)
 }
 
 private func setRecentLoaderFileDate(_ date: Date, at url: URL) {
