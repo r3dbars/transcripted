@@ -102,6 +102,14 @@ class DictationSessionController: ObservableObject {
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             return
         }
+        guard allowDictationStartForCurrentMeetingState(
+            appState: appState,
+            overlayController: overlayController,
+            sourceApp: sourceApp,
+            trigger: trigger
+        ) else {
+            return
+        }
         isDictating = true
         currentDictationSessionID = UUID()
         sessionSourceApp = sourceApp
@@ -198,6 +206,75 @@ class DictationSessionController: ObservableObject {
         )
     }
 
+    private func allowDictationStartForCurrentMeetingState(
+        appState: TranscriptedAppState,
+        overlayController: FloatingOverlayController,
+        sourceApp: NSRunningApplication?,
+        trigger: DictationTrigger,
+        resetActiveSession: Bool = false
+    ) -> Bool {
+        let meetingCaptureIsActive = currentMeetingCaptureIsActive(appState: appState)
+        let decision = ActiveAudioCaptureStartGate.evaluateDictationStart(
+            meetingCaptureIsActive: meetingCaptureIsActive
+        )
+        guard decision.canStart else {
+            let failureReason = decision.failureReason ?? "meeting_capture_active"
+            let message = decision.errorMessage ?? "Stop the meeting recording before starting dictation."
+
+            DiagnosticsTrail.record(
+                logger: appState.logger,
+                level: .warning,
+                engine: "dictation",
+                event: "dictation_start_blocked_active_meeting",
+                message: message,
+                context: dictationContext(
+                    extra: [
+                        "trigger": trigger.rawValue,
+                        "failure_kind": failureReason,
+                        "meeting_capture_active": "\(meetingCaptureIsActive)"
+                    ]
+                )
+            )
+            AnalyticsReporter.track(
+                "dictation_start_failed",
+                properties: dictationAnalyticsProperties(
+                    extra: [
+                        "failure_kind": failureReason,
+                        "trigger": trigger.rawValue
+                    ]
+                )
+            )
+
+            if resetActiveSession {
+                startupTask?.cancel()
+                startupTask = nil
+                recordingStartRetryTask?.cancel()
+                recordingStartRetryTask = nil
+                sessionTimeoutTask?.cancel()
+                sessionTimeoutTask = nil
+                appState.runtimeDiagnostics.clearSession(
+                    kind: "dictation",
+                    outcome: failureReason,
+                    resetToIdle: true
+                )
+                isDictating = false
+            }
+
+            overlayController.showError(message)
+            return false
+        }
+
+        return true
+    }
+
+    private func currentMeetingCaptureIsActive(appState: TranscriptedAppState) -> Bool {
+        if #available(macOS 14.0, *) {
+            return appState.meetingSession.shouldConfirmQuitForActiveCapture
+        }
+
+        return false
+    }
+
     private func dictationStartFailureKind(for status: AVAuthorizationStatus) -> String {
         switch status {
         case .denied:
@@ -232,6 +309,15 @@ class DictationSessionController: ObservableObject {
         guard isDictating else { return }
 
         guard let appState = appState else { return }
+        guard allowDictationStartForCurrentMeetingState(
+            appState: appState,
+            overlayController: overlayController,
+            sourceApp: sourceApp,
+            trigger: currentDictationTrigger,
+            resetActiveSession: true
+        ) else {
+            return
+        }
 
         switch DictationRecordingStartOverlayPolicy.plan(
             isRecovering: appState.sttRouter.isRecovering,
@@ -247,6 +333,15 @@ class DictationSessionController: ObservableObject {
                       self.isDictating,
                       let appState = self.appState,
                       let overlayController = self.overlayController else { return }
+                guard self.allowDictationStartForCurrentMeetingState(
+                    appState: appState,
+                    overlayController: overlayController,
+                    sourceApp: sourceApp,
+                    trigger: self.currentDictationTrigger,
+                    resetActiveSession: true
+                ) else {
+                    return
+                }
                 let startAttemptedAt = CFAbsoluteTimeGetCurrent()
                 let started = await appState.sttRouter.startRecording()
                 let startMs = Int((CFAbsoluteTimeGetCurrent() - startAttemptedAt) * 1000)
@@ -341,6 +436,15 @@ class DictationSessionController: ObservableObject {
             presentMicrophonePermissionError(microphoneStatus, sourceApp: sourceApp)
             return
         }
+        guard allowDictationStartForCurrentMeetingState(
+            appState: appState,
+            overlayController: overlayController,
+            sourceApp: sourceApp,
+            trigger: currentDictationTrigger,
+            resetActiveSession: true
+        ) else {
+            return
+        }
 
         let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + TranscriptedConstants.dictationRecoveryBudget
@@ -365,6 +469,15 @@ class DictationSessionController: ObservableObject {
 
         while ProcessInfo.processInfo.systemUptime < deadline {
             guard isDictating, !Task.isCancelled else { return }
+            guard allowDictationStartForCurrentMeetingState(
+                appState: appState,
+                overlayController: overlayController,
+                sourceApp: sourceApp,
+                trigger: currentDictationTrigger,
+                resetActiveSession: true
+            ) else {
+                return
+            }
 
             let now = ProcessInfo.processInfo.systemUptime
             if let staleRefresh = readinessRefresher.cancelIfTimedOut(now: now) {

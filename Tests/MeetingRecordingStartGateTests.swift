@@ -83,4 +83,56 @@ func testMeetingRecordingStartGate() {
             "onboarding footnote should match the current meeting recording requirement"
         )
     }
+
+    runSuite("ActiveAudioCaptureStartGate blocks meeting start while dictation is recording") {
+        let decision = ActiveAudioCaptureStartGate.evaluateMeetingStart(
+            dictationIsRecording: true,
+            dictationIsTranscribing: false
+        )
+
+        assertFalse(decision.canStart, "meeting capture should not open the mic while dictation owns the route")
+        assertEqual(decision.failureReason, "dictation_recording_active", "blocked meeting starts should keep a stable reason")
+        assertEqual(
+            decision.errorMessage,
+            "Finish the current dictation before recording a meeting.",
+            "blocked meeting starts should tell the user what to finish"
+        )
+    }
+
+    runSuite("ActiveAudioCaptureStartGate blocks meeting start while dictation is transcribing") {
+        let decision = ActiveAudioCaptureStartGate.evaluateMeetingStart(
+            dictationIsRecording: false,
+            dictationIsTranscribing: true
+        )
+
+        assertFalse(decision.canStart, "meeting capture should wait for shared dictation STT work to finish")
+        assertEqual(decision.failureReason, "dictation_transcribing_active", "transcription blocks should stay distinguishable")
+    }
+
+    runSuite("ActiveAudioCaptureStartGate blocks dictation start while meeting capture is active") {
+        let decision = ActiveAudioCaptureStartGate.evaluateDictationStart(
+            meetingCaptureIsActive: true
+        )
+
+        assertFalse(decision.canStart, "dictation should not start a second live mic route during a meeting recording")
+        assertEqual(decision.failureReason, "meeting_recording_active", "dictation blocks should keep a stable reason")
+        assertEqual(
+            decision.errorMessage,
+            "Stop the meeting recording before starting dictation.",
+            "blocked dictation starts should name the active meeting recording"
+        )
+    }
+
+    runSuite("ActiveAudioCaptureStartGate allows either mode when no live capture overlaps") {
+        let meetingDecision = ActiveAudioCaptureStartGate.evaluateMeetingStart(
+            dictationIsRecording: false,
+            dictationIsTranscribing: false
+        )
+        let dictationDecision = ActiveAudioCaptureStartGate.evaluateDictationStart(
+            meetingCaptureIsActive: false
+        )
+
+        assertEqual(meetingDecision, .allowed, "meeting start should remain normal without active dictation")
+        assertEqual(dictationDecision, .allowed, "dictation start should remain normal without active meeting capture")
+    }
 }
