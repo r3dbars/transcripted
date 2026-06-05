@@ -165,6 +165,7 @@ APP_SOURCES=(
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
+    "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"

@@ -7,7 +7,7 @@ struct SettingsSidebarSection: Identifiable {
 
     static let defaultSections = [
         SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .connectAgent]),
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .connectAgent, .beta]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.support, .about])
     ]
 }

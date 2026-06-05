@@ -76,6 +76,9 @@ struct TranscriptedSettingsView: View {
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var homeLocalSummaryJobIDs: Set<String> = []
+    @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
+    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @State private var betaFeatureStatus: String?
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
 
     init(
@@ -278,6 +281,8 @@ struct TranscriptedSettingsView: View {
             storagePage
         case .connectAgent:
             connectAgentPage
+        case .beta:
+            betaPage
         case .privacy:
             privacyPage
         case .support:
@@ -388,6 +393,7 @@ struct TranscriptedSettingsView: View {
                     canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
                     copiedRowID: homeCopiedRowID,
                     summarizingMeetingIDs: homeLocalSummaryJobIDs,
+                    localMeetingSummariesEnabled: localMeetingSummariesEnabled,
                     canRetryFailedMeetings: canRetryFailedMeetings,
                     failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
                     canRetranscribeSavedMeetings: canRetranscribeSavedMeetings,
@@ -673,6 +679,8 @@ struct TranscriptedSettingsView: View {
     }
 
     private func handleOpenOrGenerateLocalSummary(_ item: RecentMeetingItem) {
+        guard localMeetingSummariesEnabled else { return }
+
         if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
             NSWorkspace.shared.open(item.transcriptURL)
@@ -683,6 +691,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func generateLocalSummary(for item: RecentMeetingItem) {
+        guard localMeetingSummariesEnabled else { return }
         guard !homeLocalSummaryJobIDs.contains(item.id) else { return }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         homeLocalSummaryJobIDs.insert(item.id)
@@ -840,16 +849,21 @@ struct TranscriptedSettingsView: View {
         let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
 
+        if localMeetingSummariesEnabled {
+            items.append(
+                HomeRowMenuItem(
+                    title: isSummarizing
+                        ? "Running AI summary..."
+                        : (hasSummary ? "Open enhanced transcript" : "Run AI summary with Gemma 4"),
+                    symbolName: hasSummary ? "doc.text" : "sparkles",
+                    isEnabled: !isSummarizing
+                ) {
+                    handleOpenOrGenerateLocalSummary(item)
+                }
+            )
+        }
+
         items.append(contentsOf: [
-            HomeRowMenuItem(
-                title: isSummarizing
-                    ? "Running AI summary..."
-                    : (hasSummary ? "Open enhanced transcript" : "Run AI summary with Gemma 4"),
-                symbolName: hasSummary ? "doc.text" : "sparkles",
-                isEnabled: !isSummarizing
-            ) {
-                handleOpenOrGenerateLocalSummary(item)
-            },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_meeting", page: .home)
                 homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
@@ -866,7 +880,7 @@ struct TranscriptedSettingsView: View {
             }
         ])
 
-        if hasSummary {
+        if localMeetingSummariesEnabled, hasSummary {
             items.append(
                 HomeRowMenuItem(
                     title: isSummarizing ? "Regenerating AI summary..." : "Regenerate AI summary",
@@ -2294,6 +2308,102 @@ struct TranscriptedSettingsView: View {
 
     private var connectAgentPage: some View {
         AgentConnectionSettingsPage(meetingSession: meetingSession)
+    }
+
+    private var betaPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Beta",
+                summary: "Turn on experimental local features when you want to test them."
+            )
+
+            SettingsSection(
+                title: "Experimental Features",
+                detail: "These are off by default. Nothing runs automatically unless you turn it on here."
+            ) {
+                SettingsToggleRow(
+                    title: "AI meeting summaries",
+                    detail: localMeetingSummariesEnabled
+                        ? "Home shows enhanced titles, summary previews, and Gemma summary actions. Summaries still run only when you choose them."
+                        : "Off. Home uses original meeting titles and hides the Gemma summary actions.",
+                    isOn: Binding(
+                        get: { localMeetingSummariesEnabled },
+                        set: { enabled in
+                            localMeetingSummariesEnabled = enabled
+                            LocalMeetingSummaryPreferences.setEnabled(enabled)
+                            trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
+                            if !enabled {
+                                homeLocalSummaryJobIDs.removeAll()
+                            }
+                        }
+                    ),
+                    help: "Opt in to local Gemma meeting summaries on Home."
+                )
+
+                Divider()
+
+                SettingsToggleRow(
+                    title: "Codex live sidecar",
+                    detail: betaLiveMeetingCodexEnabled
+                        ? "On. Transcripted prepares the local sidecar workspace for Codex and Cowork during live meetings."
+                        : "Off. Live meetings do not write the agent sidecar workspace.",
+                    isOn: Binding(
+                        get: { betaLiveMeetingCodexEnabled },
+                        set: { enabled in
+                            betaLiveMeetingCodexEnabled = enabled
+                            LiveMeetingCodexPreferences.setEnabled(enabled)
+                            trackSettingsToggle("codex_live_sidecar", enabled: enabled, page: .beta)
+                            handleBetaLiveMeetingSidecarToggle(enabled)
+                        }
+                    ),
+                    help: "Opt in to the live meeting sidecar workspace for Codex."
+                )
+
+                if let betaFeatureStatus {
+                    Label(
+                        betaFeatureStatus,
+                        systemImage: betaFeatureStatus.hasPrefix("Could not") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(betaFeatureStatus.hasPrefix("Could not") ? Color.orange : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
+        betaFeatureStatus = nil
+
+        if enabled {
+            do {
+                _ = try prepareBetaLiveMeetingSidecarWorkspaceForUse()
+                betaFeatureStatus = "Codex live sidecar is ready."
+            } catch {
+                betaLiveMeetingCodexEnabled = false
+                LiveMeetingCodexPreferences.setEnabled(false)
+                meetingSession.stopLiveCodexSessionFromSettings()
+                stopBetaLiveMeetingSidecarPreview()
+                betaFeatureStatus = "Could not prepare Codex live sidecar: \(error.localizedDescription)"
+            }
+        } else {
+            meetingSession.stopLiveCodexSessionFromSettings()
+            stopBetaLiveMeetingSidecarPreview()
+        }
+    }
+
+    private func prepareBetaLiveMeetingSidecarWorkspaceForUse() throws -> URL {
+        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+        if #available(macOS 14.0, *) {
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+        }
+        return workspaceURL
+    }
+
+    private func stopBetaLiveMeetingSidecarPreview() {
+        if #available(macOS 14.0, *) {
+            LiveMeetingPreviewServer.shared.stop()
+        }
     }
 
     private var privacyPage: some View {

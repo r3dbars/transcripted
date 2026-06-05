@@ -1480,6 +1480,7 @@ struct HomeMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
     let isSummarizingSummary: Bool
+    let localMeetingSummariesEnabled: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
@@ -1504,11 +1505,11 @@ struct HomeMeetingRow: View {
             onFlag: onFlag,
             menuItems: menuItems,
             leadingAccessory: meetingAttentionAccessories,
-            compact: item.summaryPreview == nil,
+            compact: visibleSummaryPreview == nil,
             showsLeadingTimeColumn: false,
             opensOnRowClick: false
         ) {
-            VStack(alignment: .leading, spacing: item.summaryPreview == nil ? 0 : 5) {
+            VStack(alignment: .leading, spacing: visibleSummaryPreview == nil ? 0 : 5) {
                 Button(action: onOpen) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(timeRangeString)
@@ -1517,12 +1518,12 @@ struct HomeMeetingRow: View {
                             .lineLimit(1)
 
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(item.displayTitle)
+                            Text(displayedTitle)
                                 .font(.system(size: 12.5, weight: .medium))
                                 .foregroundStyle(Color.primary)
                                 .lineLimit(1)
 
-                            if item.summaryPreview != nil {
+                            if visibleSummaryPreview != nil {
                                 Image(systemName: "sparkles")
                                     .font(.system(size: 9, weight: .semibold))
                                     .foregroundStyle(Color.accentColor)
@@ -1536,7 +1537,7 @@ struct HomeMeetingRow: View {
                 .buttonStyle(.plain)
                 .help("Preview meeting")
 
-                if let summaryPreview = item.summaryPreview {
+                if let summaryPreview = visibleSummaryPreview {
                     if isSummaryExpanded {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(expandedSections(for: summaryPreview)) { section in
@@ -1607,7 +1608,7 @@ struct HomeMeetingRow: View {
     }
 
     private var aiSummaryAccessory: AnyView? {
-        guard item.summaryPreview == nil else { return nil }
+        guard localMeetingSummariesEnabled, visibleSummaryPreview == nil else { return nil }
         return AnyView(
             attentionDot(
                 color: .blue,
@@ -1660,6 +1661,14 @@ struct HomeMeetingRow: View {
     private var timeRangeString: String {
         guard let endTimeString else { return startTimeString }
         return "\(startTimeString) - \(endTimeString)"
+    }
+
+    private var visibleSummaryPreview: RecentMeetingSummaryPreview? {
+        localMeetingSummariesEnabled ? item.summaryPreview : nil
+    }
+
+    private var displayedTitle: String {
+        localMeetingSummariesEnabled ? item.displayTitle : item.title
     }
 
     private func canExpandSummary(_ preview: RecentMeetingSummaryPreview) -> Bool {
@@ -2078,6 +2087,7 @@ struct HomeActivityTabsCard: View {
     let canLoadMoreMeetings: Bool
     let copiedRowID: String?
     let summarizingMeetingIDs: Set<String>
+    let localMeetingSummariesEnabled: Bool
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
     let canRetranscribeSavedMeetings: Bool
@@ -2145,6 +2155,7 @@ struct HomeActivityTabsCard: View {
                                 item: meeting,
                                 isCopied: copiedRowID == meeting.id,
                                 isSummarizingSummary: summarizingMeetingIDs.contains(meeting.id),
+                                localMeetingSummariesEnabled: localMeetingSummariesEnabled,
                                 onOpen: { onOpenMeeting(meeting) },
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },
