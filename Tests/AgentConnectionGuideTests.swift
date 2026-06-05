@@ -410,7 +410,7 @@ func testAgentConnectionGuide() {
         )
 
         let prompt = AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL)
-        assertTrue(prompt.contains("Transcripted Live Meeting Sidecar Setup"), "prompt should name the live setup")
+        assertTrue(prompt.contains("Transcripted Live Meeting Codex Setup"), "prompt should name the live setup")
         assertTrue(prompt.contains("live_transcript.md"), "prompt should point Codex at the live transcript")
         assertTrue(prompt.contains("agent-watcher-state.json"), "prompt should point agents at watcher state")
         assertTrue(prompt.contains("preview.html"), "prompt should point Codex at the live preview")
@@ -420,6 +420,12 @@ func testAgentConnectionGuide() {
         )
         assertTrue(prompt.contains(AgentConnectionGuide.liveMeetingCodexSkill.id), "prompt should name the live skill")
         assertTrue(prompt.contains("Do not change Transcripted's normal meeting output"), "prompt should preserve normal output")
+        assertTrue(
+            prompt.contains("codexThreadID")
+                && prompt.contains("codexThreadURL")
+                && prompt.contains("/status"),
+            "prompt should explain the one-time saved Codex chat handoff"
+        )
 
         let url = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL)
         assertNotNil(url, "live setup should produce a Codex deep link")
@@ -437,6 +443,57 @@ func testAgentConnectionGuide() {
         assertTrue(
             queryItems.first { $0.name == "prompt" }?.value?.contains(LiveMeetingCodexSession.setupFilename) == true,
             "live setup prompt should point at the setup file"
+        )
+
+        let savedThreadURL = AgentConnectionGuide.liveMeetingCodexOpenURL(
+            workspaceURL: workspaceURL,
+            codexThreadID: "codex://threads/019e9900-0000-7000-9000-livechat0001"
+        )
+        assertEqual(savedThreadURL?.scheme ?? "", "codex", "saved live chat should use Codex deep links")
+        assertEqual(savedThreadURL?.host ?? "", "threads", "saved live chat should target Codex threads")
+        assertEqual(
+            savedThreadURL?.path ?? "",
+            "/019e9900-0000-7000-9000-livechat0001",
+            "saved live chat should reopen the existing Codex thread"
+        )
+        assertEqual(
+            AgentConnectionGuide.liveMeetingCodexOpenURL(workspaceURL: workspaceURL, codexThreadID: nil)?.path,
+            "/new",
+            "missing saved thread id should still open a new setup thread"
+        )
+        try? """
+        {
+          "version": 1,
+          "lastHandledFinalTranscriptPath": null,
+          "lastHandledAt": null,
+          "codexThreadID": "019e9900-1111-7000-9000-livechat0002",
+          "codexThreadURL": "codex://threads/019e9900-1111-7000-9000-livechat0002",
+          "codexThreadUpdatedAt": "2026-06-05T18:00:00Z"
+        }
+        """.write(
+            to: workspaceURL.appendingPathComponent(LiveMeetingCodexSession.watcherStateFilename),
+            atomically: true,
+            encoding: .utf8
+        )
+        assertEqual(
+            AgentConnectionGuide.liveMeetingCodexStoredThreadID(workspaceURL: workspaceURL),
+            "019e9900-1111-7000-9000-livechat0002",
+            "live setup should read a Codex thread id from the agent watcher state"
+        )
+        assertEqual(
+            AgentConnectionGuide.liveMeetingCodexOpenURL(workspaceURL: workspaceURL, codexThreadID: nil)?.path,
+            "/019e9900-1111-7000-9000-livechat0002",
+            "saved watcher state should let the app reopen the durable Codex chat"
+        )
+        assertEqual(
+            LiveMeetingCodexPreferences.normalizedCodexThreadID("Thread ID: 019e9900-0000-7000-9000-livechat0001"),
+            "019e9900-0000-7000-9000-livechat0001",
+            "thread id normalizer should accept pasted status text"
+        )
+        assertEqual(
+            LiveMeetingCodexPreferences.normalizedCodexThreadID("codex://threads/019e9900-0000-7000-9000-livechat0001"),
+            "019e9900-0000-7000-9000-livechat0001",
+            "thread id normalizer should accept pasted Codex links"
         )
 
         let coworkPrompt = AgentConnectionGuide.liveMeetingCoworkSetupPrompt(workspaceURL: workspaceURL)

@@ -72,6 +72,10 @@ func testLiveMeetingCodexSession() {
             watcherStateText.contains("\"lastHandledFinalTranscriptPath\": null"),
             "watcher state should start without a handled final transcript"
         )
+        assertTrue(
+            watcherStateText.contains("\"codexThreadID\": null"),
+            "watcher state should start without a saved Codex chat"
+        )
         let previewToken = ((try? String(contentsOf: session.previewAuthTokenURL, encoding: .utf8)) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         assertTrue(previewToken.count >= 32, "preview auth token should be unguessable enough for localhost routing")

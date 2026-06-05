@@ -320,13 +320,55 @@ enum AgentConnectionGuide {
         return components.url
     }
 
+    static func liveMeetingCodexOpenURL(
+        workspaceURL: URL = liveMeetingCodexFolder,
+        codexThreadID: String?
+    ) -> URL? {
+        let storedThreadID = LiveMeetingCodexPreferences.normalizedCodexThreadID(codexThreadID)
+            ?? liveMeetingCodexStoredThreadID(workspaceURL: workspaceURL)
+
+        guard let threadID = storedThreadID else {
+            return liveMeetingCodexSetupURL(workspaceURL: workspaceURL)
+        }
+
+        var components = URLComponents()
+        components.scheme = "codex"
+        components.host = "threads"
+        components.path = "/\(threadID)"
+        return components.url
+    }
+
+    static func liveMeetingCodexStoredThreadID(workspaceURL: URL = liveMeetingCodexFolder) -> String? {
+        let watcherStateURL = workspaceURL
+            .appendingPathComponent(LiveMeetingCodexSession.watcherStateFilename, isDirectory: false)
+            .standardizedFileURL
+
+        guard let data = try? Data(contentsOf: watcherStateURL),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return nil
+        }
+
+        if let threadURL = dictionary["codexThreadURL"] as? String,
+           let normalized = LiveMeetingCodexPreferences.normalizedCodexThreadID(threadURL) {
+            return normalized
+        }
+
+        if let threadID = dictionary["codexThreadID"] as? String,
+           let normalized = LiveMeetingCodexPreferences.normalizedCodexThreadID(threadID) {
+            return normalized
+        }
+
+        return nil
+    }
+
     static func liveMeetingCodexSetupPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
         let session = LiveMeetingCodexSession(workspaceRoot: workspaceURL)
         let browserPreviewURL = session.previewServerBrowserURL().absoluteString
         return """
-        # Transcripted Live Meeting Sidecar Setup
+        # Transcripted Live Meeting Codex Setup
 
-        Set this agent chat up as my live Transcripted meeting room.
+        Set this Codex thread up as my Transcripted Live chat.
 
         Local paths:
         - Workspace: \(workspaceURL.standardizedFileURL.path)
@@ -348,6 +390,7 @@ enum AgentConnectionGuide {
         - Do not change Transcripted's normal meeting output.
         - Keep live answers short and say when the stream is too sparse to answer.
         - For a live transcript panel in Codex, open \(browserPreviewURL) while Transcripted is running.
+        - If you can see this Codex thread ID, update `agent-watcher-state.json` with `codexThreadID`, `codexThreadURL`, and `codexThreadUpdatedAt` so Transcripted can reopen this same chat. If you cannot see it, tell me to run `/status` in Codex and paste the thread ID into Transcripted Settings > Agent > Live Transcript.
 
         Skill:
         - \(liveMeetingCodexSkill.title) v\(liveMeetingCodexSkill.version): \(skillFileURL(for: liveMeetingCodexSkill).path)
@@ -386,7 +429,7 @@ enum AgentConnectionGuide {
 
     static func liveMeetingCodexOpenPrompt(workspaceURL: URL = liveMeetingCodexFolder) -> String {
         """
-        Use this thread as my Transcripted Live Meeting room. Read \(LiveMeetingCodexSession.setupFilename) in this folder and tell me when you are ready to watch the live transcript.
+        Use this thread as my Transcripted Live chat. Read \(LiveMeetingCodexSession.setupFilename) in this folder and tell me when you are ready to watch the live transcript.
         """
     }
 

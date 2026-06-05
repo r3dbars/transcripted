@@ -22,6 +22,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var liveMeetingCodexSetupError: String?
     @State private var showAdvancedAgentSetup = false
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @AppStorage(LiveMeetingCodexPreferences.codexThreadIDKey) private var liveMeetingCodexThreadID = ""
 
     init(meetingSession: MeetingSessionController? = nil) {
         self.meetingSession = meetingSession
@@ -237,7 +238,7 @@ struct AgentConnectionSettingsPage: View {
 
                 HStack(spacing: 10) {
                     SettingsInlineActionButton(
-                        title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
+                        title: liveMeetingCodexChatButtonTitle,
                         symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
                         tone: .accent
                     ) {
@@ -253,7 +254,7 @@ struct AgentConnectionSettingsPage: View {
                     }
 
                     SettingsInlineActionButton(
-                        title: openedLiveMeetingPreview ? "Opened Transcript" : "Open Transcript",
+                        title: openedLiveMeetingPreview ? "Opened Live Transcript" : "Open Live Transcript",
                         symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
                         tone: .accent
                     ) {
@@ -261,7 +262,19 @@ struct AgentConnectionSettingsPage: View {
                     }
                 }
 
-                Text("When this is on, starting a meeting opens a private local transcript page. Codex and Cowork can use the same local files if you set them up.")
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Codex thread ID or codex:// link", text: $liveMeetingCodexThreadID)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .onSubmit(normalizeLiveMeetingCodexThreadID)
+
+                    Label(liveMeetingCodexThreadHelpText, systemImage: liveMeetingCodexThreadHelpSymbol)
+                        .font(.caption)
+                        .foregroundStyle(liveMeetingCodexThreadHelpTint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text("When this is on, starting a meeting opens a private local transcript page. Codex can use the same local files from one saved chat.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -474,15 +487,21 @@ struct AgentConnectionSettingsPage: View {
             liveMeetingCodexEnabled = true
             LiveMeetingCodexPreferences.setEnabled(true)
             let workspaceURL = try prepareLiveMeetingSidecarWorkspaceForUse()
-            copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .liveMeetingCodexSetup,
-                actionKind: .copied,
-                agentTarget: .codex,
-                surface: .agentSettings
-            )
+            let savedThreadID = normalizedLiveMeetingCodexThreadID
+            if savedThreadID == nil {
+                copyText(AgentConnectionGuide.liveMeetingCodexSetupPrompt(workspaceURL: workspaceURL))
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .liveMeetingCodexSetup,
+                    actionKind: .copied,
+                    agentTarget: .codex,
+                    surface: .agentSettings
+                )
+            }
 
-            guard let setupURL = AgentConnectionGuide.liveMeetingCodexSetupURL(workspaceURL: workspaceURL) else {
+            guard let setupURL = AgentConnectionGuide.liveMeetingCodexOpenURL(
+                workspaceURL: workspaceURL,
+                codexThreadID: savedThreadID
+            ) else {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 liveMeetingCodexSetupError = "The setup prompt was copied. Open Codex and paste it."
                 ActivationTelemetry.trackAgentSetupCTA(
@@ -500,12 +519,14 @@ struct AgentConnectionSettingsPage: View {
                     agentTarget: .codex,
                     surface: .agentSettings
                 )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .liveMeetingCodexSetup,
-                    actionKind: .opened,
-                    agentTarget: .codex,
-                    surface: .agentSettings
-                )
+                if savedThreadID == nil {
+                    ActivationTelemetry.trackAgentPromptAction(
+                        promptKind: .liveMeetingCodexSetup,
+                        actionKind: .opened,
+                        agentTarget: .codex,
+                        surface: .agentSettings
+                    )
+                }
                 openedLiveMeetingCodexSetup = true
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -513,7 +534,9 @@ struct AgentConnectionSettingsPage: View {
                 }
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-                liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
+                liveMeetingCodexSetupError = savedThreadID == nil
+                    ? "Codex was not found. The setup prompt was copied and the live folder is open."
+                    : "Could not reopen the saved Codex chat. Clear the thread ID to open a new one."
                 ActivationTelemetry.trackAgentSetupCTA(
                     setupKind: .liveSidecar,
                     agentTarget: .codex,
@@ -534,6 +557,50 @@ struct AgentConnectionSettingsPage: View {
                 result: .failed
             )
         }
+    }
+
+    private var normalizedLiveMeetingCodexThreadID: String? {
+        LiveMeetingCodexPreferences.normalizedCodexThreadID(liveMeetingCodexThreadID)
+            ?? AgentConnectionGuide.liveMeetingCodexStoredThreadID()
+    }
+
+    private var liveMeetingCodexChatButtonTitle: String {
+        if openedLiveMeetingCodexSetup {
+            return normalizedLiveMeetingCodexThreadID == nil ? "Opened Codex" : "Opened Codex Chat"
+        }
+
+        return normalizedLiveMeetingCodexThreadID == nil ? "Open in Codex" : "Reopen Codex Chat"
+    }
+
+    private var liveMeetingCodexThreadHelpText: String {
+        let trimmed = liveMeetingCodexThreadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if LiveMeetingCodexPreferences.normalizedCodexThreadID(liveMeetingCodexThreadID) != nil {
+            return "Saved. The Codex button will reopen this same chat."
+        }
+        if AgentConnectionGuide.liveMeetingCodexStoredThreadID() != nil {
+            return "Saved in the live workspace. The Codex button will reopen that chat."
+        }
+        if !trimmed.isEmpty {
+            return "That does not look like a Codex thread ID yet."
+        }
+        return "First click opens a Codex chat. Paste its thread ID once to reuse it."
+    }
+
+    private var liveMeetingCodexThreadHelpSymbol: String {
+        normalizedLiveMeetingCodexThreadID == nil ? "bubble.left" : "checkmark.circle.fill"
+    }
+
+    private var liveMeetingCodexThreadHelpTint: Color {
+        let trimmed = liveMeetingCodexThreadID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedLiveMeetingCodexThreadID != nil {
+            return .green
+        }
+        return trimmed.isEmpty ? .secondary : .orange
+    }
+
+    private func normalizeLiveMeetingCodexThreadID() {
+        guard let normalized = normalizedLiveMeetingCodexThreadID else { return }
+        liveMeetingCodexThreadID = normalized
     }
 
     private func prepareLiveMeetingSidecarWorkspace() {

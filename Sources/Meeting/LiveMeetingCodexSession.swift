@@ -606,7 +606,7 @@ final class LiveMeetingCodexSession {
         - `live_transcript.md` is the provisional live transcript stream.
         - `state.json` says whether recording is active and where the final Transcripted Markdown lands.
         - `agent-handoff.md` is the automatic handoff marker for the final transcript.
-        - `agent-watcher-state.json` is agent-owned memory for the last final transcript already handled.
+        - `agent-watcher-state.json` is agent-owned memory for the last final transcript already handled and the saved Codex chat, if one exists.
         - `agent-live-meeting.md` is the setup prompt for Codex or Claude Cowork.
         - `preview.html` is a live transcript preview snapshot. The local browser URL updates without full-page refreshes.
         - `\(browserPreviewURL)` is the live browser preview while Transcripted is running.
@@ -644,6 +644,7 @@ final class LiveMeetingCodexSession {
         - If `agent-handoff.md` says `Status: ready` or `state.json` has `finalTranscriptPath`, read that final Markdown and prefer it for participant names, diarization, quotes, decisions, and durable notes.
         - Before handling a ready final transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` matches the ready final path, stay quiet unless the user asks.
         - After handling a ready final transcript, update `lastHandledFinalTranscriptPath` and `lastHandledAt` in `agent-watcher-state.json`.
+        - If you know this Codex thread ID, store it in `agent-watcher-state.json` as `codexThreadID` and `codexThreadURL` so Transcripted can reopen this same chat.
         - Do not change Transcripted's meeting files unless the user asks.
         - Keep live answers short. Say when the live stream is too sparse to answer.
         - Keep the workflow local. Do not ask the user to paste the transcript elsewhere.
@@ -675,7 +676,8 @@ final class LiveMeetingCodexSession {
         6. Before posting a post-meeting brief or waking me about the ready transcript, check `agent-watcher-state.json`. If `lastHandledFinalTranscriptPath` already matches the ready final path, stay quiet unless I ask.
         7. After you handle a ready final transcript, update `agent-watcher-state.json` with that path and the current time.
         8. For Codex, open \(browserPreviewURL) for the live view while Transcripted is running. For Claude Cowork, use the same workspace files or `preview.html` if folder access is granted.
-        9. Keep this local. Do not ask me to copy the transcript into another tool.
+        9. If you can see this Codex thread ID, update `agent-watcher-state.json` with `codexThreadID`, `codexThreadURL`, and `codexThreadUpdatedAt`. If you cannot see it, tell me to run `/status` in Codex and paste the thread ID into Transcripted Settings > Agent > Live Transcript.
+        10. Keep this local. Do not ask me to copy the transcript into another tool.
 
         Do not alter the normal Transcripted meeting output.
         """
@@ -687,6 +689,9 @@ final class LiveMeetingCodexSession {
           "version": 1,
           "lastHandledFinalTranscriptPath": null,
           "lastHandledAt": null,
+          "codexThreadID": null,
+          "codexThreadURL": null,
+          "codexThreadUpdatedAt": null,
           "note": "An agent may update this file after handling a final transcript so repeat watchers stay quiet."
         }
         """

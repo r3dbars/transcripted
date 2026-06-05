@@ -2469,6 +2469,13 @@ func testRepoCommandContract() {
             "Agent settings should name the customer-facing feature Live Transcript and explain the meeting-start behavior"
         )
         assertTrue(
+            contents.contains("@AppStorage(LiveMeetingCodexPreferences.codexThreadIDKey)")
+                && contents.contains("Reopen Codex Chat")
+                && contents.contains("AgentConnectionGuide.liveMeetingCodexOpenURL(")
+                && contents.contains("AgentConnectionGuide.liveMeetingCodexStoredThreadID()"),
+            "Agent settings should let Live Transcript reopen a durable Codex chat instead of always creating a new setup thread"
+        )
+        assertTrue(
             helperBlock.contains("LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)"),
             "the shared setup helper should start the loopback preview server when supported"
         )
