@@ -841,8 +841,8 @@ final class LiveMeetingCodexSession {
             .live-note {
               display: grid;
               min-height: calc(100vh - 28px);
-              grid-template-rows: auto auto minmax(220px, 1fr) auto auto auto;
-              gap: 12px;
+              grid-template-rows: auto auto 1fr;
+              gap: 16px;
             }
             .note-header {
               position: static;
@@ -875,114 +875,12 @@ final class LiveMeetingCodexSession {
               font-weight: 620;
               line-height: 1.05;
             }
-            .scratchpad {
-              display: grid;
-              min-height: 140px;
-              padding: 10px 8px;
-            }
-            .scratchpad textarea {
-              width: 100%;
-              min-height: 120px;
-              resize: vertical;
-              border: 0;
-              outline: 0;
-              background: transparent;
-              color: var(--text);
-              font: inherit;
-              font-size: 15px;
-              line-height: 1.45;
-            }
-            .scratchpad textarea::placeholder {
-              color: rgba(243, 245, 247, 0.34);
-            }
-            .transcript-toggle {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              width: calc(100% - 16px);
-              margin: 0 8px;
-              border: 1px solid var(--line);
-              border-radius: 18px;
-              padding: 13px 14px;
-              background: rgba(255, 255, 255, 0.03);
-              color: var(--text);
-              font: inherit;
-              font-size: 14px;
-              cursor: pointer;
-            }
-            .transcript-count {
-              color: var(--muted);
-              font-size: 12px;
-            }
             .transcript-shell {
-              min-height: 220px;
-              max-height: min(58vh, 560px);
-              overflow: auto;
               margin: 0 8px;
-              border: 1px solid var(--line);
-              border-radius: 18px;
-              background: rgba(255, 255, 255, 0.025);
-            }
-            .transcript-shell[hidden] {
-              display: none;
+              min-height: 260px;
             }
             .transcript-shell .stream {
-              padding: 0 12px 8px;
-            }
-            .recorder-dock {
-              position: sticky;
-              bottom: 0;
-              display: grid;
-              grid-template-columns: auto auto;
-              gap: 12px;
-              align-items: center;
-              justify-content: space-between;
-              margin: 0 0 4px;
-              border: 1px solid var(--line);
-              border-radius: 999px;
-              padding: 12px 14px;
-              background: rgba(43, 45, 45, 0.92);
-              box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
-              backdrop-filter: blur(22px);
-            }
-            .recorder-left {
-              display: flex;
-              align-items: center;
-              gap: 10px;
-            }
-            .record-dot {
-              width: 12px;
-              height: 12px;
-              border-radius: 999px;
-              background: #ff5f57;
-              box-shadow: 0 0 0 6px rgba(255, 95, 87, 0.13);
-            }
-            .stop-square {
-              width: 13px;
-              height: 13px;
-              border-radius: 3px;
-              background: rgba(243, 245, 247, 0.72);
-            }
-            .waveform {
-              display: flex;
-              align-items: center;
-              gap: 3px;
-              min-width: 72px;
-            }
-            .waveform span {
-              width: 3px;
-              height: var(--h);
-              border-radius: 999px;
-              background: var(--ready);
-              opacity: 0.88;
-            }
-            .live-pill {
-              border-radius: 999px;
-              padding: 5px 9px;
-              background: rgba(117, 227, 156, 0.11);
-              color: var(--ready);
-              font-size: 12px;
-              white-space: nowrap;
+              padding: 0 0 8px;
             }
             @media (prefers-color-scheme: light) {
               :root {
@@ -1018,33 +916,10 @@ final class LiveMeetingCodexSession {
             <section class="handoff" id="handoff" hidden>
               <p class="handoff-title">Final transcript ready.</p>
             </section>
-            <section class="transcript-shell" id="transcript-shell">
+            <section class="transcript-shell" aria-label="Live transcript">
               <section class="stream" id="transcript" aria-live="polite"></section>
             </section>
-            <button class="transcript-toggle" id="transcript-toggle" type="button" aria-expanded="true">
-              <span>Hide transcript</span>
-              <span class="transcript-count" id="source-summary">No transcript yet</span>
-            </button>
-            <section class="scratchpad" aria-label="Personal notes">
-              <textarea id="scratchpad" placeholder="Notes for yourself" spellcheck="true"></textarea>
-            </section>
             <textarea class="hidden" id="initial-transcript" readonly>\(escapedTranscript)</textarea>
-            <footer class="recorder-dock" aria-label="Live recording status">
-              <div class="recorder-left">
-                <span class="record-dot" aria-hidden="true"></span>
-                <div class="waveform" aria-hidden="true">
-                  <span style="--h: 8px"></span>
-                  <span style="--h: 14px"></span>
-                  <span style="--h: 20px"></span>
-                  <span style="--h: 12px"></span>
-                  <span style="--h: 18px"></span>
-                  <span style="--h: 9px"></span>
-                  <span style="--h: 15px"></span>
-                </div>
-                <span class="stop-square" aria-hidden="true"></span>
-              </div>
-              <span class="live-pill">Live</span>
-            </footer>
           </main>
           <script>
             const previewAuthToken = "\(escapedPreviewAuthToken)";
@@ -1063,16 +938,10 @@ final class LiveMeetingCodexSession {
             const transcriptURL = window.location.protocol === "file:" ? "live_transcript.md" : withPreviewAuthToken("/live_transcript.md");
             const statusElement = document.getElementById("status");
             const titleElement = document.getElementById("meeting-title");
-            const sourceSummaryElement = document.getElementById("source-summary");
             const transcriptElement = document.getElementById("transcript");
             const initialTranscriptElement = document.getElementById("initial-transcript");
             const handoffElement = document.getElementById("handoff");
-            const transcriptToggle = document.getElementById("transcript-toggle");
-            const transcriptShell = document.getElementById("transcript-shell");
-            const scratchpadElement = document.getElementById("scratchpad");
-            const scratchpadKey = "transcripted-live-meeting-scratchpad";
             let lastTranscript = initialTranscriptElement.value;
-            let transcriptOpen = true;
 
             function isNearBottom() {
               return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
@@ -1176,11 +1045,9 @@ final class LiveMeetingCodexSession {
 
             function renderTranscript(markdown) {
               const entries = parseTranscript(markdown);
-              const lineLabel = entries.length === 1 ? "1 line" : `${entries.length} lines`;
-              sourceSummaryElement.textContent = entries.length > 0 ? lineLabel : "No transcript yet";
 
               if (entries.length === 0) {
-                transcriptElement.innerHTML = '<div class="empty-state">Start recording to see the live transcript.</div>';
+                transcriptElement.innerHTML = '<div class="empty-state">Start recording to see the transcript here.</div>';
                 return;
               }
 
@@ -1204,20 +1071,8 @@ final class LiveMeetingCodexSession {
               }).join("");
             }
 
-            transcriptToggle.addEventListener("click", () => {
-              transcriptOpen = !transcriptOpen;
-              transcriptShell.hidden = !transcriptOpen;
-              transcriptToggle.setAttribute("aria-expanded", String(transcriptOpen));
-              transcriptToggle.querySelector("span").textContent = transcriptOpen ? "Hide transcript" : "Transcript";
-            });
-
-            scratchpadElement.value = window.localStorage.getItem(scratchpadKey) || "";
-            scratchpadElement.addEventListener("input", () => {
-              window.localStorage.setItem(scratchpadKey, scratchpadElement.value);
-            });
-
             async function refreshPreview() {
-              const shouldFollow = transcriptOpen && isNearBottom();
+              const shouldFollow = isNearBottom();
               try {
                 const [stateResponse, transcriptResponse] = await Promise.all([
                   fetch(cacheBusted(stateURL), { cache: "no-store" }),
