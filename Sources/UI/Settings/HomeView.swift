@@ -1262,6 +1262,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     var trailingAccessory: AnyView? = nil
     var rowTone: HomeArtifactStatusTone? = nil
     var compact: Bool = false
+    var showsLeadingTimeColumn: Bool = true
     var opensOnRowClick: Bool = true
     @ViewBuilder let content: () -> Content
 
@@ -1365,17 +1366,19 @@ private struct HomeActivityRowShell<Content: View>: View {
 
     private var mainContent: some View {
         HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(timeString)
-                    .foregroundStyle(.secondary)
-                if let secondaryTimeString {
-                    Text(secondaryTimeString)
-                        .foregroundStyle(.tertiary)
+            if showsLeadingTimeColumn {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(timeString)
+                        .foregroundStyle(.secondary)
+                    if let secondaryTimeString {
+                        Text(secondaryTimeString)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .frame(width: 64, alignment: .leading)
+                .padding(.top, 2)
             }
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .frame(width: 64, alignment: .leading)
-            .padding(.top, 2)
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1501,11 +1504,17 @@ struct HomeMeetingRow: View {
             menuItems: menuItems,
             leadingAccessory: reviewSpeakersAccessory,
             compact: item.summaryPreview == nil,
+            showsLeadingTimeColumn: false,
             opensOnRowClick: false
         ) {
             VStack(alignment: .leading, spacing: item.summaryPreview == nil ? 0 : 5) {
                 Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(timeRangeString)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(item.displayTitle)
                                 .font(.system(size: 12.5, weight: .medium))
@@ -1618,6 +1627,11 @@ struct HomeMeetingRow: View {
     private var endTimeString: String? {
         guard let endDate = item.endDate else { return nil }
         return HomeActivityRowFormatting.timeFormatter.string(from: endDate)
+    }
+
+    private var timeRangeString: String {
+        guard let endTimeString else { return startTimeString }
+        return "\(startTimeString) - \(endTimeString)"
     }
 
     private func canExpandSummary(_ preview: RecentMeetingSummaryPreview) -> Bool {
