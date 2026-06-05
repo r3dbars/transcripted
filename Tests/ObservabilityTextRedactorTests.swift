@@ -188,15 +188,18 @@ func testObservabilityTextRedactor() {
     }
 
     runSuite("ObservabilityTextRedactor scrubs JSON source_app and bundle_id assignments") {
-        let input = #"{"source_app":"com.slack.Slack","source_app_name":"Slack","bundle_id":"com.private.app"}"#
+        let input = #"{"source_app":"com.slack.Slack","source_app_bundle":"com.private.short","source_app_name":"Slack","bundle_id":"com.private.app"}"#
         let redacted = ObservabilityTextRedactor.redact(input)
 
         assertFalse(redacted.contains("com.slack.Slack"), "source_app bundle id must not survive")
+        assertFalse(redacted.contains("com.private.short"), "short source_app_bundle value must not survive")
         assertFalse(redacted.contains("\"Slack\""), "source_app_name must not survive")
         assertFalse(redacted.contains("com.private.app"), "bundle_id must not survive")
         // All three should collapse to the sensitive marker form.
         assertTrue(redacted.contains("\"source_app\":\"[redacted-sensitive-value]\""),
                    "source_app should collapse to marker")
+        assertTrue(redacted.contains("\"source_app_bundle\":\"[redacted-sensitive-value]\""),
+                   "source_app_bundle should collapse to marker")
         assertTrue(redacted.contains("\"source_app_name\":\"[redacted-sensitive-value]\""),
                    "source_app_name should collapse to marker")
         assertTrue(redacted.contains("\"bundle_id\":\"[redacted-sensitive-value]\""),

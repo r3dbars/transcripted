@@ -71,7 +71,9 @@ func testObservabilityLogWriter() {
                 "default_input_name": "Studio Mic",
                 "default_output_name": "Studio Display Speakers",
                 "meeting_title": "Customer Roadmap",
+                "meeting_url": "https://meet.example.com/private-room",
                 "source_app_name": "Private Notes",
+                "source_app_bundle": "com.private.short",
                 "source_app_bundle_id": "com.private.notes",
                 "audio_device": "Jane's AirPods Pro",
                 "file_path": "/Users/jane/Documents/Client Calls/ACME Roadmap.md",
@@ -98,8 +100,10 @@ func testObservabilityLogWriter() {
         assertEqual(sanitized.context?["default_input_name"], "[redacted-sensitive-value]", "raw input names should be redacted locally")
         assertEqual(sanitized.context?["default_output_name"], "[redacted-sensitive-value]", "raw output names should be redacted locally")
         assertEqual(sanitized.context?["meeting_title"], "[redacted-sensitive-value]", "meeting titles should be redacted locally")
+        assertEqual(sanitized.context?["meeting_url"], "[redacted-sensitive-value]", "meeting URLs should be redacted locally")
         assertEqual(sanitized.context?["prompt_text"], "[redacted-sensitive-value]", "raw prompt text should be redacted locally")
         assertEqual(sanitized.context?["raw_url"], "[redacted-sensitive-value]", "raw URLs should be redacted locally")
+        assertEqual(sanitized.context?["source_app_bundle"], "[redacted-sensitive-value]", "short source app bundle keys should be redacted locally")
         assertEqual(sanitized.context?["speaker_name"], "[redacted-sensitive-value]", "speaker names should be redacted locally")
         assertEqual(sanitized.context?["title"], "[redacted-sensitive-value]", "generic titles should be redacted locally")
         assertEqual(sanitized.context?["transcript_path"], "[redacted-sensitive-value]", "transcript paths should be redacted locally")
