@@ -642,7 +642,7 @@ struct TranscriptedSettingsView: View {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         ActivationTelemetry.trackAgentPromptAction(
-            promptKind: .meetingBundle,
+            promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
             actionKind: .copied,
             agentTarget: .localAgent,
             surface: .homePreview,
