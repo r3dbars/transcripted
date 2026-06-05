@@ -1529,12 +1529,6 @@ struct HomeMeetingRow: View {
                             }
                         }
 
-                        if item.hasGeneratedTitle {
-                            Text(item.title)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
