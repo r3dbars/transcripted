@@ -59,6 +59,9 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
     let mergeMaxTokens: Int
     let maxKVSize: Int
     let processTimeoutSeconds: TimeInterval
+    let processNiceValue: Int
+    let cpuThreadLimit: Int
+    let interJobCooldownSeconds: TimeInterval
 
     static func m1Optimized(physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory) -> LocalGemmaSummaryConfiguration {
         let gib = UInt64(1024 * 1024 * 1024)
@@ -70,12 +73,15 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
                 runtimePackage: "mlx-vlm",
                 profileName: "m1-low-memory",
                 minimumPhysicalMemoryBytes: 12 * gib,
-                chunkCharacterLimit: 14_000,
-                chunkMaxTokens: 420,
+                chunkCharacterLimit: 9_000,
+                chunkMaxTokens: 300,
                 directMaxTokens: 900,
-                mergeMaxTokens: 1_300,
-                maxKVSize: 8_192,
-                processTimeoutSeconds: 900
+                mergeMaxTokens: 1_500,
+                maxKVSize: 6_144,
+                processTimeoutSeconds: 900,
+                processNiceValue: 15,
+                cpuThreadLimit: 2,
+                interJobCooldownSeconds: 4
             )
         }
 
@@ -89,7 +95,10 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
             directMaxTokens: 1_000,
             mergeMaxTokens: 1_500,
             maxKVSize: 8_192,
-            processTimeoutSeconds: 900
+            processTimeoutSeconds: 900,
+            processNiceValue: 10,
+            cpuThreadLimit: 4,
+            interJobCooldownSeconds: 2
         )
     }
 
@@ -298,9 +307,8 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
         fileManager.restrictFileToOwnerOnly(at: jobsURL)
 
         let process = Process()
-        process.executableURL = uvURL
         let batchLabel = prompts.map { $0.label }.joined(separator: ", ")
-        process.arguments = [
+        let uvArguments = [
             "run",
             "--with",
             configuration.runtimePackage,
@@ -308,8 +316,19 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
             runnerURL.path,
             "--jobs-file", jobsURL.path,
             "--model", configuration.modelID,
-            "--max-kv-size", "\(configuration.maxKVSize)"
+            "--max-kv-size", "\(configuration.maxKVSize)",
+            "--cooldown-seconds", "\(configuration.interJobCooldownSeconds)"
         ]
+        if configuration.processNiceValue > 0 {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/nice")
+            process.arguments = [
+                "-n", "\(min(configuration.processNiceValue, 20))",
+                uvURL.path
+            ] + uvArguments
+        } else {
+            process.executableURL = uvURL
+            process.arguments = uvArguments
+        }
 
         var processEnvironment = environment
         processEnvironment["HF_HUB_DISABLE_TELEMETRY"] = "1"
@@ -318,6 +337,11 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
         processEnvironment["PYTHONUNBUFFERED"] = "1"
         processEnvironment["UV_NO_PROGRESS"] = "1"
         processEnvironment["NO_COLOR"] = "1"
+        let threadLimit = "\(max(1, configuration.cpuThreadLimit))"
+        processEnvironment["OMP_NUM_THREADS"] = threadLimit
+        processEnvironment["OPENBLAS_NUM_THREADS"] = threadLimit
+        processEnvironment["VECLIB_MAXIMUM_THREADS"] = threadLimit
+        processEnvironment["NUMEXPR_NUM_THREADS"] = threadLimit
         process.environment = processEnvironment
 
         let stderr = Pipe()
@@ -520,10 +544,15 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         # Accuracy Notes
 
         Rules:
+        - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the transcript.
         - Title must be specific, plain, and 3 to 8 words.
         - Keep it concise and useful.
         - Include timestamps when available.
+        - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the transcript.
+        - Action Items are only future follow-up work after the meeting, not instructions already completed during the transcript.
+        - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the transcript leaves them as unfinished follow-up work.
+        - Put brainstorms, proposals, or maybes in Open Questions or Risks unless the transcript clearly says they were decided.
         - If a section has nothing supported, write "None found."
 
         Transcript:
@@ -545,8 +574,13 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         ## Risks or Follow-ups
 
         Rules:
-        - Include timestamps when available.
-        - Keep speaker labels only when useful.
+        - Always include every section heading exactly as listed, even when the section says "None found."
+        - Preserve every explicit decision, action item, open question, and follow-up from this chunk.
+        - Include timestamps and speakers when available, especially for action items and decisions.
+        - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from this chunk.
+        - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the chunk leaves them as unfinished follow-up work.
+        - Keep brainstorms, proposals, or maybes out of Decisions unless the chunk clearly says they were decided.
         - If a heading has nothing supported, write "None found."
 
         Chunk transcript:
@@ -558,7 +592,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         """
         You are Transcripted's local meeting summarizer. Merge these chunk notes for "\(title)" into one accurate meeting summary.
 
-        Do not invent decisions, tasks, dates, names, or facts. Remove duplicates.
+        Do not invent decisions, tasks, dates, names, or facts.
 
         Return markdown with exactly these sections:
         # Title
@@ -570,10 +604,17 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         # Accuracy Notes
 
         Rules:
+        - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the chunk notes.
         - Title must be specific, plain, and 3 to 8 words.
         - Keep each section concise.
         - Include timestamps when available.
+        - Preserve explicit action items, decisions, open questions, and follow-ups from the chunk notes.
+        - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the chunk notes.
+        - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the notes leave them as unfinished follow-up work.
+        - Remove duplicates only when the same owner, same task or decision, and same topic are repeated.
+        - Never promote brainstorms, proposals, or unresolved questions into Decisions.
         - If a section has nothing supported, write "None found."
 
         Chunk notes:
@@ -621,11 +662,12 @@ enum LocalMeetingSummaryNormalizer {
     }
 
     static func summaryTitle(in raw: String) -> String? {
-        section("# Title", in: raw)?
+        let explicitTitle = section("# Title", in: raw)?
             .components(separatedBy: .newlines)
             .first
             .map(cleanSectionText)
-            .flatMap { $0.isEmpty || $0 == "None found." ? nil : String($0.prefix(96)) }
+            .flatMap { isStructuralGeneratedTitle($0) ? nil : String($0.prefix(96)) }
+        return explicitTitle ?? firstGeneratedTitleHeading(in: raw)
     }
 
     static func section(_ heading: String, in raw: String) -> String? {
@@ -655,6 +697,32 @@ enum LocalMeetingSummaryNormalizer {
         text.components(separatedBy: .newlines).contains { line in
             line.trimmingCharacters(in: .whitespacesAndNewlines) == heading
         }
+    }
+
+    private static func firstGeneratedTitleHeading(in raw: String) -> String? {
+        raw.components(separatedBy: .newlines).compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("# "), !requiredSections.contains(trimmed) else {
+                return nil
+            }
+            let title = cleanSectionText(String(trimmed.dropFirst(2)))
+            return isStructuralGeneratedTitle(title) ? nil : String(title.prefix(96))
+        }.first
+    }
+
+    private static func isStructuralGeneratedTitle(_ title: String) -> Bool {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        if normalized.isEmpty || normalized == "none found." {
+            return true
+        }
+        if normalized == "title" || normalized == "summary" {
+            return true
+        }
+        if normalized.hasPrefix("chunk ") {
+            let suffix = normalized.dropFirst("chunk ".count)
+            return !suffix.isEmpty && suffix.allSatisfy { $0.isNumber }
+        }
+        return false
     }
 
     private static func cleanSectionText(_ raw: String) -> String {

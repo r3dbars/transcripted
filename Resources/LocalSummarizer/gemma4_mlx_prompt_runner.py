@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="mlx-community/gemma-4-12B-it-4bit")
     parser.add_argument("--max-tokens", type=int, default=800)
     parser.add_argument("--max-kv-size", type=int, default=8192)
+    parser.add_argument("--cooldown-seconds", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -111,8 +112,11 @@ def main() -> int:
         mx = None
 
     model, processor = load(args.model)
-    for job in load_jobs(args):
+    jobs = load_jobs(args)
+    for index, job in enumerate(jobs):
         run_job(job, model, processor, generate, args.max_kv_size, mx)
+        if args.cooldown_seconds > 0 and index < len(jobs) - 1:
+            time.sleep(args.cooldown_seconds)
 
     return 0
 

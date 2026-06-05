@@ -59,7 +59,12 @@ func testLocalMeetingSummarizer() {
         let gib = UInt64(1024 * 1024 * 1024)
         let m1Config = LocalGemmaSummaryConfiguration.m1Optimized(physicalMemoryBytes: 16 * gib)
         assertEqual(m1Config.profileName, "m1-low-memory", "16GB Apple Silicon should use the low-memory profile")
-        assertTrue(m1Config.chunkCharacterLimit <= 14_000, "M1 profile should keep chunks small")
+        assertTrue(m1Config.chunkCharacterLimit <= 9_000, "M1 profile should keep chunks small enough for 16GB unified-memory Macs")
+        assertTrue(m1Config.maxKVSize <= 6_144, "M1 profile should keep KV cache below the hotter baseline")
+        assertTrue(m1Config.mergeMaxTokens >= 1_500, "M1 profile should leave enough merge budget to emit every summary section")
+        assertTrue(m1Config.processNiceValue >= 10, "M1 profile should lower local Gemma process priority")
+        assertTrue(m1Config.cpuThreadLimit <= 2, "M1 profile should cap CPU helper threads conservatively")
+        assertTrue(m1Config.interJobCooldownSeconds >= 2, "M1 profile should cool down between local Gemma jobs")
         do {
             try m1Config.validateHardware(physicalMemoryBytes: 16 * gib)
             assertTrue(true, "16GB should be allowed")
@@ -116,6 +121,42 @@ func testLocalMeetingSummarizer() {
             LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
             "Launch Pricing Review",
             "summaries should expose a short generated title for Home"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryNormalizer accepts first heading titles from Gemma") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        # Launch Pricing Review
+
+        # Summary
+        Team agreed to keep the first version small.
+
+        # Decisions
+        Ship the smaller launch first.
+        """)
+
+        assertEqual(
+            LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
+            "Launch Pricing Review",
+            "Gemma sometimes returns the generated title as the first H1 instead of under # Title"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryNormalizer ignores structural chunk headings as titles") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        # Chunk 1
+
+        # Summary
+        The team discussed launch scope.
+
+        # Decisions
+        None found.
+        """)
+
+        assertEqual(
+            LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
+            nil,
+            "Chunk labels should not become generated meeting titles"
         )
     }
 
