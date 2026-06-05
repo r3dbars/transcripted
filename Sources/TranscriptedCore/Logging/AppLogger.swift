@@ -35,8 +35,11 @@ public final class AppLogger: @unchecked Sendable {
     }
 
     public func log(level: String, subsystem: String, message: String, metadata: [String: String]?) {
+        let safeMessage = LogPrivacySanitizer.sanitizeText(message)
+        let safeMetadata = LogPrivacySanitizer.sanitizeMetadata(metadata)
+
         // Write to file logger (agent-readable)
-        fileLogger.write(level: level, subsystem: subsystem, message: message, metadata: metadata)
+        fileLogger.write(level: level, subsystem: subsystem, message: safeMessage, metadata: safeMetadata)
 
         // Write to os.Logger (Console.app)
         let osLog = cachedOSLog(for: subsystem)
@@ -49,7 +52,7 @@ public final class AppLogger: @unchecked Sendable {
         // Default to %{private}@ so caller-supplied metadata (paths, titles, errors)
         // is redacted in production system logs. Console.app on a development device
         // can still surface this with `sudo log config --mode "private_data:on"`.
-        os_log("%{private}@", log: osLog, type: logType, "[\(subsystem)] \(message)\(metadataString(metadata))")
+        os_log("%{private}@", log: osLog, type: logType, "[\(subsystem)] \(safeMessage)\(metadataString(safeMetadata))")
     }
 
     /// Synchronous flush — call from applicationWillTerminate
