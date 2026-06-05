@@ -698,22 +698,22 @@ final class LiveMeetingCodexSession {
         let statusLine: String
         switch state.status {
         case .recording:
-            statusLine = "Recording locally"
+            statusLine = "Listening"
         case .transcriptSaved:
-            statusLine = "Transcript saved"
+            statusLine = "Final transcript ready"
         case .stopped:
-            statusLine = "Waiting for transcript"
+            statusLine = "Saving final transcript"
         case .cancelled:
-            statusLine = "Recording cancelled."
+            statusLine = "Recording cancelled"
         case .failed:
             statusLine = "Needs attention"
         case .disabled:
-            statusLine = "Live sidecar disabled"
+            statusLine = "Live transcript off"
         case .idle:
-            statusLine = "Not recording"
+            statusLine = "Ready when you start recording"
         }
         let escapedDisplayStatus = Self.htmlEscaped(statusLine)
-        let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
+        let escapedTitle = Self.htmlEscaped(state.title ?? "Live Transcript")
         let escapedTranscript = Self.htmlEscaped(transcript)
         let previewAuthToken = (try? ensurePreviewAuthToken()) ?? ""
         let escapedPreviewAuthToken = Self.javaScriptEscaped(previewAuthToken)
@@ -723,7 +723,7 @@ final class LiveMeetingCodexSession {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>Transcripted Live Meeting</title>
+          <title>Transcripted Live Transcript</title>
           <style>
             :root {
               color-scheme: light dark;
@@ -841,8 +841,8 @@ final class LiveMeetingCodexSession {
             .live-note {
               display: grid;
               min-height: calc(100vh - 28px);
-              grid-template-rows: auto auto 1fr auto;
-              gap: 14px;
+              grid-template-rows: auto auto minmax(220px, 1fr) auto auto auto;
+              gap: 12px;
             }
             .note-header {
               position: static;
@@ -877,19 +877,19 @@ final class LiveMeetingCodexSession {
             }
             .scratchpad {
               display: grid;
-              min-height: 420px;
+              min-height: 140px;
               padding: 10px 8px;
             }
             .scratchpad textarea {
               width: 100%;
-              min-height: 420px;
+              min-height: 120px;
               resize: vertical;
               border: 0;
               outline: 0;
               background: transparent;
               color: var(--text);
               font: inherit;
-              font-size: 22px;
+              font-size: 15px;
               line-height: 1.45;
             }
             .scratchpad textarea::placeholder {
@@ -915,7 +915,8 @@ final class LiveMeetingCodexSession {
               font-size: 12px;
             }
             .transcript-shell {
-              max-height: 42vh;
+              min-height: 220px;
+              max-height: min(58vh, 560px);
               overflow: auto;
               margin: 0 8px;
               border: 1px solid var(--line);
@@ -1015,20 +1016,20 @@ final class LiveMeetingCodexSession {
               <h1 id="meeting-title">\(escapedTitle)</h1>
             </header>
             <section class="handoff" id="handoff" hidden>
-              <p class="handoff-title">Transcript saved.</p>
+              <p class="handoff-title">Final transcript ready.</p>
             </section>
-            <section class="scratchpad" aria-label="Meeting scratchpad">
-              <textarea id="scratchpad" placeholder="Write notes" spellcheck="true"></textarea>
-            </section>
-            <button class="transcript-toggle" id="transcript-toggle" type="button" aria-expanded="false">
-              <span>Transcript</span>
-              <span class="transcript-count" id="source-summary">Waiting</span>
-            </button>
-            <section class="transcript-shell" id="transcript-shell" hidden>
+            <section class="transcript-shell" id="transcript-shell">
               <section class="stream" id="transcript" aria-live="polite"></section>
             </section>
+            <button class="transcript-toggle" id="transcript-toggle" type="button" aria-expanded="true">
+              <span>Hide transcript</span>
+              <span class="transcript-count" id="source-summary">No transcript yet</span>
+            </button>
+            <section class="scratchpad" aria-label="Personal notes">
+              <textarea id="scratchpad" placeholder="Notes for yourself" spellcheck="true"></textarea>
+            </section>
             <textarea class="hidden" id="initial-transcript" readonly>\(escapedTranscript)</textarea>
-            <footer class="recorder-dock" aria-label="Live recording controls">
+            <footer class="recorder-dock" aria-label="Live recording status">
               <div class="recorder-left">
                 <span class="record-dot" aria-hidden="true"></span>
                 <div class="waveform" aria-hidden="true">
@@ -1071,7 +1072,7 @@ final class LiveMeetingCodexSession {
             const scratchpadElement = document.getElementById("scratchpad");
             const scratchpadKey = "transcripted-live-meeting-scratchpad";
             let lastTranscript = initialTranscriptElement.value;
-            let transcriptOpen = false;
+            let transcriptOpen = true;
 
             function isNearBottom() {
               return window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
@@ -1087,7 +1088,7 @@ final class LiveMeetingCodexSession {
             }
 
             function displaySource(source) {
-              return source === "system" ? "System" : "Mic";
+              return source === "system" ? "Computer audio" : "You";
             }
 
             function hasFinalTranscript(state) {
@@ -1096,30 +1097,34 @@ final class LiveMeetingCodexSession {
 
             function friendlyStatus(state) {
               if (!state || !state.status) {
-                return "Not recording";
+                return "Ready when you start recording";
               }
 
               if (state.status === "recording") {
-                return "Recording locally";
+                return "Listening";
               }
 
               if (state.status === "transcript_saved") {
-                return "Transcript saved";
+                return "Final transcript ready";
               }
 
               if (state.status === "stopped") {
-                return "Waiting for transcript";
+                return "Saving final transcript";
               }
 
               if (state.status === "cancelled") {
-                return "Recording cancelled.";
+                return "Recording cancelled";
               }
 
               if (state.status === "failed") {
                 return "Needs attention";
               }
 
-              return "Not recording";
+              if (state.status === "disabled") {
+                return "Live transcript off";
+              }
+
+              return "Ready when you start recording";
             }
 
             function updateHandoff(state) {
@@ -1171,11 +1176,11 @@ final class LiveMeetingCodexSession {
 
             function renderTranscript(markdown) {
               const entries = parseTranscript(markdown);
-              const snippetLabel = entries.length === 1 ? "1 snippet" : `${entries.length} snippets`;
-              sourceSummaryElement.textContent = entries.length > 0 ? snippetLabel : "Empty";
+              const lineLabel = entries.length === 1 ? "1 line" : `${entries.length} lines`;
+              sourceSummaryElement.textContent = entries.length > 0 ? lineLabel : "No transcript yet";
 
               if (entries.length === 0) {
-                transcriptElement.innerHTML = '<div class="empty-state">Waiting for live transcript text.</div>';
+                transcriptElement.innerHTML = '<div class="empty-state">Start recording to see the live transcript.</div>';
                 return;
               }
 
@@ -1223,7 +1228,7 @@ final class LiveMeetingCodexSession {
                   const state = await stateResponse.json();
                   statusElement.textContent = friendlyStatus(state);
                   statusElement.title = `${state.status || ""} - ${state.streamingBackendStatus || ""}`;
-                  titleElement.textContent = state.title || "Live Meeting";
+                  titleElement.textContent = state.title || "Live Transcript";
                   updateHandoff(state);
                 }
 

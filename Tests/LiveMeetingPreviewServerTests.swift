@@ -24,6 +24,7 @@ func testLiveMeetingPreviewServer() {
             assertTrue(false, "preview token setup should succeed: \(error)")
             return
         }
+        try? "stale preview".write(to: session.previewURL, atomically: true, encoding: .utf8)
 
         let port = availableLoopbackPort()
         let server = LiveMeetingPreviewServer(workspaceURL: root, port: port)
@@ -58,6 +59,8 @@ func testLiveMeetingPreviewServer() {
         assertEqual(preview.statusCode, 200, "authorized preview route should be readable")
         assertTrue(preview.body.contains("<!doctype html>"), "preview route should serve HTML")
         assertTrue(preview.body.contains("Status: idle"), "preview HTML should include the current sidecar state")
+        assertFalse(preview.body.contains("stale preview"), "server start should refresh a stale preview file")
+        assertTrue(preview.body.contains("Live Transcript"), "preview HTML should serve the clear live transcript UI")
 
         let transcript = sendPreviewRequest(path: "/live_transcript.md?token=\(token)", port: port)
         assertEqual(transcript.statusCode, 200, "authorized transcript route should be readable")

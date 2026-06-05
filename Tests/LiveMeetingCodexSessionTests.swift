@@ -52,14 +52,14 @@ func testLiveMeetingCodexSession() {
         assertTrue(previewText.contains("/live_transcript.md"), "preview should hot-load the live transcript route")
         assertTrue(previewText.contains("withPreviewAuthToken(\"/state.json\")"), "preview should token-gate server polling")
         assertTrue(previewText.contains("renderTranscript(lastTranscript)"), "preview should render a formatted transcript stream")
-        assertTrue(previewText.contains("Write notes"), "preview should lead with a simple scratchpad")
-        assertTrue(previewText.contains(">Transcript</span>"), "preview should keep the raw transcript expandable")
+        assertTrue(previewText.contains("Notes for yourself"), "preview should keep a simple secondary scratchpad")
+        assertTrue(previewText.contains(">Hide transcript</span>"), "preview should show the live transcript by default")
         assertFalse(previewText.contains("Ask about this meeting"), "preview should not show an ask affordance")
         assertFalse(previewText.contains("Notes stay here while you record"), "preview should avoid explanatory copy")
         assertTrue(previewText.contains("localStorage"), "scratchpad prototype should persist notes in the browser")
         assertFalse(previewText.contains("data-filter=\"microphone\""), "preview should no longer lead with source filters")
         assertFalse(previewText.contains("data-filter=\"system\""), "preview should no longer lead with source filters")
-        assertTrue(previewText.contains("Transcript saved."), "preview should include automatic handoff copy")
+        assertTrue(previewText.contains("Final transcript ready."), "preview should include automatic handoff copy")
         assertFalse(previewText.contains("navigator.clipboard.writeText"), "preview should not require manual prompt copying")
         let handoffText = (try? String(contentsOf: session.handoffURL, encoding: .utf8)) ?? ""
         assertTrue(handoffText.contains("Status: idle"), "new handoff marker should start idle")
@@ -165,7 +165,7 @@ func testLiveMeetingCodexSession() {
         assertTrue(previewText.contains("transcript_saved"), "preview should update after the final transcript is attached")
         assertTrue(previewText.contains("Product Review.md"), "preview should include the final transcript handoff")
         assertTrue(
-            previewText.contains("Transcript saved."),
+            previewText.contains("Final transcript ready."),
             "preview should show automatic final-transcript handoff after recording saves"
         )
     }

@@ -46,6 +46,7 @@ final class LiveMeetingPreviewServer {
     func start(workspaceURL: URL = LiveMeetingCodexSession.defaultWorkspaceRoot) throws -> URL {
         let standardizedWorkspaceURL = workspaceURL.standardizedFileURL
         let session = LiveMeetingCodexSession(workspaceRoot: standardizedWorkspaceURL, fileManager: fileManager)
+        try session.ensureWorkspaceFiles()
         let authToken = try session.ensurePreviewAuthToken()
 
         lock.lock()
