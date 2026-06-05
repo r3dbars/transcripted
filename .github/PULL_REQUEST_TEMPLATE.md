@@ -15,6 +15,7 @@
 ## How I checked it
 
 - [ ] `scripts/dev/agent-preflight.sh`
+- [ ] Selected checks from `.agents/test-matrix.yml` for the files changed
 - [ ] `bash build.sh --no-open`
 - [ ] `bash run-tests.sh`
 - [ ] Performance budget passed (`bash build.sh --no-open` runs the bundle gate; run `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"` for runtime-sensitive changes)

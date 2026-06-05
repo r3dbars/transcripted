@@ -233,9 +233,15 @@ func testRepoCommandContract() {
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
             "bash -n scripts/ops/daily-audio-reliability-check.sh",
+            "bash -n scripts/ops/health-probe.sh",
+            "bash -n scripts/dev/onboarding.sh",
             "bash -n scripts/dev/benchmark-home-recent-captures.sh",
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
             "python3 scripts/ops/generate-nightly-digest.py --self-test",
+            "python3 -m py_compile scripts/ops/nightly-security-check.py",
+            "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
+            "bash -n scripts/ops/nightly-transcripted-archive-miner.sh",
+            "ruby -c scripts/ops/performance-budget.rb",
             "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
         ]
 
@@ -773,13 +779,13 @@ func testRepoCommandContract() {
         assertTrue(
             releaseMatrixBlock.contains("bash build-deps.sh --force")
                 && releaseMatrixBlock.contains("bash build.sh --no-open")
-                && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"),
+                && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"),
             "release-path matrix checks should rebuild deps before app and packaging smoke"
         )
         assertTrue(
             releasePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
                 && releasePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
-                && releasePreflightBlock.contains("add_command \"SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>\""),
+                && releasePreflightBlock.contains("add_command \"SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>\""),
             "agent preflight should suggest dependency rebuilds for release-path edits"
         )
     }
@@ -2162,10 +2168,14 @@ func testRepoCommandContract() {
         let prTemplate = readRepoTextFile(".github/PULL_REQUEST_TEMPLATE.md")
         let repoHygieneWorkflow = readRepoTextFile(".github/workflows/repo-hygiene.yml")
         let qaGateAutoClose = readRepoTextFile(".github/workflows/qa-gate-auto-close-bet88.yml")
+        let qaGateStatus = readRepoTextFile(".github/workflows/qa-gate-status-bet88.yml")
+        let workflow = readRepoTextFile("WORKFLOW.md")
+        let orchestration = readRepoTextFile("docs/agent-issue-orchestration.md")
 
         assertTrue(
             matrix.contains("\".github/**\"")
                 && matrix.contains("\"WORKFLOW.md\"")
+                && matrix.contains("\"Tools/README.md\"")
                 && matrix.contains("\"scripts/dev/agent-preflight.sh\"")
                 && matrix.contains("ruby -c scripts/ops/agent-todo-runner.rb")
                 && matrix.contains("bash -n scripts/ops/qa-gate-check.sh"),
@@ -2174,6 +2184,7 @@ func testRepoCommandContract() {
         assertTrue(
             preflight.contains("\".github/*\"")
                 && preflight.contains("\"WORKFLOW.md\"")
+                && preflight.contains("\"Tools/README.md\"")
                 && preflight.contains("\"scripts/dev/agent-preflight.sh\"")
                 && preflight.contains("ruby -c scripts/ops/agent-todo-runner.rb")
                 && preflight.contains("bash -n scripts/ops/qa-gate-check.sh"),
@@ -2197,6 +2208,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             prTemplate.contains("`scripts/dev/agent-preflight.sh`")
+                && prTemplate.contains("Selected checks from `.agents/test-matrix.yml`")
                 && prTemplate.contains("`swift test` if I touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam")
                 && prTemplate.contains("Lane: `activation` / `dictation reliability` / `meeting reliability` / `release ops` / `agent workflow`")
                 && prTemplate.contains("COORD_DONE: GREEN/BRIEF/RED")
@@ -2213,8 +2225,15 @@ func testRepoCommandContract() {
         )
         assertTrue(
             qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")
+                && qaGateAutoClose.contains("Historical BET-88/#428 fixture")
+                && qaGateStatus.contains("Historical BET-88/#428 fixture")
                 && !qaGateAutoClose.contains("child_issue_number"),
             "old BET-88 auto-close workflow should be label-gated and should not mutate a hard-coded child issue"
+        )
+        assertTrue(
+            workflow.contains("symphony-workspaces` folder name is historical")
+                && orchestration.contains("symphony-workspaces` name is historical"),
+            "agent issue workflow docs should explain the historical local workspace folder name"
         )
     }
 
@@ -2245,8 +2264,14 @@ func testRepoCommandContract() {
             repoLayout.contains("docs/activation-lane.md")
                 && repoLayout.contains("docs/agent-closeout.md")
                 && repoLayout.contains("docs/agent-connect.md")
-                && repoLayout.contains("Casks/"),
-            "repo layout should list activation, handoff, agent-connect, and Homebrew release surfaces"
+                && repoLayout.contains("Casks/")
+                && repoLayout.contains("Dated audit and autoeval docs in `docs/` are point-in-time evidence"),
+            "repo layout should list activation, handoff, agent-connect, Homebrew, and point-in-time audit surfaces"
+        )
+        assertTrue(
+            onboarding.contains("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+                && onboarding.contains("Sources/TranscriptedCore/Audio/Audio.swift"),
+            "agent onboarding should flag the large Core coordination files alongside the app mega-files"
         )
         assertTrue(
             activation.contains("saved Markdown -> agent use -> return")

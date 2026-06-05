@@ -135,6 +135,16 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
         fi
 
+        if matches_any "$path" "scripts/ops/health-probe.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/health-probe.sh"
+        fi
+
+        if matches_any "$path" "scripts/dev/onboarding.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/dev/onboarding.sh"
+        fi
+
         if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
@@ -147,9 +157,24 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
-        if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh"; then
+        if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
             add_command "scripts/dev/agent-preflight.sh"
-            add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+            add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/build-codex-memory-index.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/nightly-transcripted-archive-miner.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/nightly-transcripted-archive-miner.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/performance-budget.rb"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "ruby -c scripts/ops/performance-budget.rb"
         fi
 
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
@@ -206,10 +231,10 @@ if [ -n "$changed_paths" ]; then
             add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
-            add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
+            add_command "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/CLAUDE.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/README.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"

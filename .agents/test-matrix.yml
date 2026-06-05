@@ -78,6 +78,18 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/ops/health-probe.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/health-probe.sh"
+
+  - paths:
+      - "scripts/dev/onboarding.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/onboarding.sh"
+
+  - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"
       - "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"
     checks:
@@ -93,10 +105,28 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
-      - "scripts/dev/benchmark-home-recent-captures.sh"
+      - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
-      - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+      - "python3 -m py_compile scripts/ops/nightly-security-check.py"
+
+  - paths:
+      - "scripts/ops/build-codex-memory-index.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
+
+  - paths:
+      - "scripts/ops/nightly-transcripted-archive-miner.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/nightly-transcripted-archive-miner.sh"
+
+  - paths:
+      - "scripts/ops/performance-budget.rb"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "ruby -c scripts/ops/performance-budget.rb"
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
@@ -178,7 +208,7 @@ rules:
       - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
-      - "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
+      - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
 
   - paths:
       - "Tools/TranscriptedCLI/**"
@@ -207,7 +237,7 @@ rules:
       - "scripts/README.md"
       - "Sources/CLAUDE.md"
       - "Sources/**/CLAUDE.md"
-      - "Tools/CLAUDE.md"
+      - "Tools/README.md"
       - "Tools/**/CLAUDE.md"
       - ".agents/**"
       - ".github/**"
