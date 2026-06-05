@@ -1347,17 +1347,10 @@ class ParakeetEngine: ObservableObject {
             "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
         ]
         if let selection, selection.didOverrideDefault {
-            let deviceCheckStartedAt = CFAbsoluteTimeGetCurrent()
-            let shouldApplyOverride = try await runTimedAudioEngineWork(operation: "\(operation)_device_check") { engine in
-                engine.inputNode.auAudioUnit.deviceID != selection.selectedInput.id
-            }
-            stageTimings["audio_input_device_check_ms"] = Self.elapsedMilliseconds(since: deviceCheckStartedAt)
-            if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
-                throw CancellationError()
-            }
-            if shouldApplyOverride {
-                ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
-            }
+            // Avoid touching the current default input before the override is applied.
+            // On AirPods routes, even a short read of the default input can briefly
+            // pull playback toward headset-mode audio.
+            ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
         }
 
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
@@ -1482,7 +1475,9 @@ class ParakeetEngine: ObservableObject {
                 let frameLength = monoSamples.count
                 guard frameLength > 0 else { return }
                 let bufferFormat = Self.audioFormatSummary(buffer.format)
-                let effectiveSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(bufferFormat.sampleRate)
+                let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+                    bufferSampleRate: bufferFormat.sampleRate
+                )
                 self.nativeSampleRate = effectiveSampleRate
 
                 if !self.didReceiveAudioSamples && frameLength > 0 {
