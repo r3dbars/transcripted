@@ -201,7 +201,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "stale Bluetooth output routes should map to route-not-settled")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred built-in fallback with Bluetooth output") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred built-in fallback with Bluetooth speech output") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -213,10 +213,10 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionReason: .preferredBuiltInForBluetoothHeadset
         )
 
-        assertEqual(readiness, .ready, "built-in fallback for Bluetooth output should start instead of timing out")
+        assertEqual(readiness, .routeNotSettled, "forced built-in fallback should wait until Bluetooth output leaves speech mode")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred fallback across Bluetooth speech rates") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred fallback across Bluetooth speech rates") {
         for outputRate in [8_000.0, 16_000.0] {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
                 outputSampleRate: outputRate,
@@ -229,7 +229,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 selectionReason: .preferredBuiltInForBluetoothHeadset
             )
 
-            assertEqual(readiness, .ready, "preferred built-in fallback should not wait on Bluetooth speech output rate \(outputRate)")
+            assertEqual(readiness, .routeNotSettled, "preferred built-in fallback should wait on Bluetooth speech output rate \(outputRate)")
         }
     }
 
@@ -357,11 +357,11 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "native 24k external capture should stay usable when input and output agree")
     }
 
-    runSuite("ParakeetInputOverrideSettlePolicy skips delay when immediate format is ready") {
+    runSuite("ParakeetInputOverrideSettlePolicy waits after a ready input override") {
         assertEqual(
             ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .ready),
-            0,
-            "ready formats after an input override should not pay a fixed settle delay"
+            TranscriptedConstants.audioRecoveryDelay,
+            "ready formats still get a short settle after forcing AirPods input away from the headset mic"
         )
     }
 
@@ -375,6 +375,32 @@ func testParakeetStartRecordingFailurePolicy() {
             ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .invalid),
             TranscriptedConstants.audioRecoveryDelay,
             "invalid formats should still get the full CoreAudio settle delay"
+        )
+    }
+
+    runSuite("ParakeetTapSampleRatePolicy trusts the tap buffer rate over AirPods hardware rate") {
+        let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+            bufferSampleRate: 48_000,
+            hardwareSampleRate: 24_000
+        )
+
+        assertEqual(
+            effectiveSampleRate,
+            48_000,
+            "AirPods HFP can expose 24k hardware while the tap delivers 48k buffers; dictation must resample from the tap rate"
+        )
+    }
+
+    runSuite("ParakeetTapSampleRatePolicy falls back for invalid tap rates") {
+        let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+            bufferSampleRate: 0,
+            hardwareSampleRate: 24_000
+        )
+
+        assertEqual(
+            effectiveSampleRate,
+            ParakeetAudioFormatReadinessPolicy.fallbackCaptureSampleRate,
+            "invalid tap rates should still use the central safe fallback"
         )
     }
 
