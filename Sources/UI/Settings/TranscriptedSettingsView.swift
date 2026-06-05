@@ -624,6 +624,23 @@ struct TranscriptedSettingsView: View {
             date: preview.date,
             transcriptURL: preview.transcriptURL
         )
+        let fallbackMarkdown = preview.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text = bundle ?? (fallbackMarkdown.isEmpty ? nil : preview.markdown) else {
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .meetingBundle,
+                actionKind: .copied,
+                agentTarget: .localAgent,
+                surface: .homePreview,
+                result: .failed,
+                artifactKind: .meeting
+            )
+            NSSound.beep()
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
         ActivationTelemetry.trackAgentPromptAction(
             promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
             actionKind: .copied,
@@ -632,9 +649,6 @@ struct TranscriptedSettingsView: View {
             result: bundle == nil ? .fallbackCopied : .success,
             artifactKind: .meeting
         )
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(bundle ?? preview.markdown, forType: .string)
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {

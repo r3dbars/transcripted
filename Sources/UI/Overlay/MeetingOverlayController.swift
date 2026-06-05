@@ -773,7 +773,7 @@ final class MeetingOverlayRootView: NSView {
             updateStatusDot(color: MeetingOverlayTokens.dotPrep)
             detailLabel.stringValue = ""
         case .saved:
-            titleLabel.stringValue = "Saved transcript"
+            titleLabel.stringValue = "Saved to Markdown"
             updateStatusDot(color: MeetingOverlayTokens.dotSaved)
             detailLabel.stringValue = ""
         case .error(let message):

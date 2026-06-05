@@ -159,6 +159,34 @@ func testExistingInstallModelPrefetchPolicy() {
             "saved dictation or meeting notes should count as existing content"
         )
     }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores nested archive files") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true)
+                .appendingPathComponent("Synthetic_audio", isDirectory: true)
+                .appendingPathComponent("recording.m4a", isDirectory: false)
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "startup prefetch detection should avoid recursively walking nested audio archives"
+        )
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("Meeting.md", isDirectory: false)
+        )
+
+        assertTrue(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "direct saved meeting files should still count as existing content"
+        )
+    }
 }
 
 private func writeExistingInstallTestFile(_ url: URL) {
