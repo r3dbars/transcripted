@@ -1479,6 +1479,7 @@ struct HomeDictationRow: View {
 struct HomeMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
+    let isSummarizingSummary: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
@@ -1502,7 +1503,7 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
-            leadingAccessory: reviewSpeakersAccessory,
+            leadingAccessory: meetingAttentionAccessories,
             compact: item.summaryPreview == nil,
             showsLeadingTimeColumn: false,
             opensOnRowClick: false
@@ -1590,6 +1591,32 @@ struct HomeMeetingRow: View {
         let text: String
 
         var id: String { title }
+    }
+
+    private var meetingAttentionAccessories: AnyView? {
+        let accessories = [aiSummaryAccessory, reviewSpeakersAccessory].compactMap { $0 }
+        guard !accessories.isEmpty else { return nil }
+
+        return AnyView(
+            HStack(spacing: 1) {
+                ForEach(Array(accessories.enumerated()), id: \.offset) { _, accessory in
+                    accessory
+                }
+            }
+        )
+    }
+
+    private var aiSummaryAccessory: AnyView? {
+        guard item.summaryPreview == nil else { return nil }
+        return AnyView(
+            attentionDot(
+                color: .blue,
+                help: isSummarizingSummary
+                    ? "AI summary is running"
+                    : "AI summary available from More options",
+                opacity: isSummarizingSummary ? 0.45 : 1
+            )
+        )
     }
 
     private var reviewSpeakersAccessory: AnyView? {
@@ -1703,6 +1730,16 @@ struct HomeMeetingRow: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
         .help(help)
+    }
+
+    private func attentionDot(color: Color, help: String, opacity: Double = 1) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 7, height: 7)
+            .frame(width: 18, height: 26)
+            .opacity(opacity)
+            .help(help)
+            .accessibilityLabel(help)
     }
 }
 
@@ -2040,6 +2077,7 @@ struct HomeActivityTabsCard: View {
     let canLoadMoreDictations: Bool
     let canLoadMoreMeetings: Bool
     let copiedRowID: String?
+    let summarizingMeetingIDs: Set<String>
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
     let canRetranscribeSavedMeetings: Bool
@@ -2106,6 +2144,7 @@ struct HomeActivityTabsCard: View {
                             HomeMeetingRow(
                                 item: meeting,
                                 isCopied: copiedRowID == meeting.id,
+                                isSummarizingSummary: summarizingMeetingIDs.contains(meeting.id),
                                 onOpen: { onOpenMeeting(meeting) },
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },

@@ -387,6 +387,7 @@ struct TranscriptedSettingsView: View {
                     canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
                     canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
                     copiedRowID: homeCopiedRowID,
+                    summarizingMeetingIDs: homeLocalSummaryJobIDs,
                     canRetryFailedMeetings: canRetryFailedMeetings,
                     failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
                     canRetranscribeSavedMeetings: canRetranscribeSavedMeetings,
@@ -842,8 +843,8 @@ struct TranscriptedSettingsView: View {
         items.append(contentsOf: [
             HomeRowMenuItem(
                 title: isSummarizing
-                    ? "Summarizing locally..."
-                    : (hasSummary ? "Open enhanced transcript" : "Summarize locally with Gemma 4"),
+                    ? "Running AI summary..."
+                    : (hasSummary ? "Open enhanced transcript" : "Run AI summary with Gemma 4"),
                 symbolName: hasSummary ? "doc.text" : "sparkles",
                 isEnabled: !isSummarizing
             ) {
@@ -868,7 +869,7 @@ struct TranscriptedSettingsView: View {
         if hasSummary {
             items.append(
                 HomeRowMenuItem(
-                    title: isSummarizing ? "Regenerating local summary..." : "Regenerate local summary",
+                    title: isSummarizing ? "Regenerating AI summary..." : "Regenerate AI summary",
                     symbolName: "arrow.clockwise",
                     isEnabled: !isSummarizing
                 ) {
