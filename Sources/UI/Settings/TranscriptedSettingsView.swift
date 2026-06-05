@@ -672,10 +672,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func handleOpenOrGenerateLocalSummary(_ item: RecentMeetingItem) {
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL)
-        if FileManager.default.fileExists(atPath: summaryURL.path) {
+        if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
-            NSWorkspace.shared.open(summaryURL)
+            NSWorkspace.shared.open(item.transcriptURL)
             return
         }
 
@@ -689,13 +688,12 @@ struct TranscriptedSettingsView: View {
 
         Task { @MainActor in
             do {
-                let result = try await LocalMeetingSummarizer().summarize(
+                _ = try await LocalMeetingSummarizer().summarize(
                     transcriptURL: item.transcriptURL,
                     title: item.title
                 )
                 homeLocalSummaryJobIDs.remove(item.id)
                 refreshRecentCaptures(force: true)
-                NSWorkspace.shared.open(result.summaryURL)
             } catch {
                 homeLocalSummaryJobIDs.remove(item.id)
                 homeDeleteFailure = HomeDeleteFailure(
@@ -838,16 +836,15 @@ struct TranscriptedSettingsView: View {
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
-        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL)
-        let hasSummary = FileManager.default.fileExists(atPath: summaryURL.path)
+        let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
 
         items.append(contentsOf: [
             HomeRowMenuItem(
                 title: isSummarizing
                     ? "Summarizing locally..."
-                    : (hasSummary ? "Open local summary" : "Summarize locally with Gemma 4"),
-                symbolName: hasSummary ? "text.page" : "sparkles",
+                    : (hasSummary ? "Open enhanced transcript" : "Summarize locally with Gemma 4"),
+                symbolName: hasSummary ? "doc.text" : "sparkles",
                 isEnabled: !isSummarizing
             ) {
                 handleOpenOrGenerateLocalSummary(item)

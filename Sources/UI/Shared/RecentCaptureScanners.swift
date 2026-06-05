@@ -6,6 +6,8 @@ import TranscriptedCore
 struct RecentMeetingItem: Identifiable, Sendable {
     let title: String
     let date: Date
+    let startDate: Date?
+    let endDate: Date?
     let transcriptURL: URL
     let audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
@@ -25,7 +27,15 @@ struct RecentMeetingItem: Identifiable, Sendable {
 struct RecentMeetingSummaryPreview: Equatable, Sendable {
     let title: String?
     let summary: String
+    let sections: [RecentMeetingSummarySection]
     let url: URL
+}
+
+struct RecentMeetingSummarySection: Identifiable, Equatable, Sendable {
+    let title: String
+    let text: String
+
+    var id: String { title }
 }
 
 enum RecentMeetingSpeakerStatus: Equatable, Sendable {
@@ -313,14 +323,21 @@ enum RecentMeetingsScanner {
                 continue
             }
             let markdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+            let frontmatter = TranscriptFrontmatter.document(in: markdown)
+            let timing = meetingTiming(
+                frontmatter: frontmatter,
+                fallbackDate: entry.date
+            )
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
                     date: entry.date,
+                    startDate: timing.start,
+                    endDate: timing.end,
                     transcriptURL: styled.url,
                     audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
                     speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                    summaryPreview: loadSummaryPreview(for: styled.url)
+                    summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter)
                 )
             )
             if recentItems.count >= limit {
@@ -337,7 +354,30 @@ enum RecentMeetingsScanner {
             && !excludedMarkdownFilenames.contains(url.lastPathComponent)
     }
 
-    private static func loadSummaryPreview(for transcriptURL: URL) -> RecentMeetingSummaryPreview? {
+    private static func meetingTiming(
+        frontmatter: TranscriptFrontmatterDocument?,
+        fallbackDate: Date
+    ) -> (start: Date?, end: Date?) {
+        guard let frontmatter else { return (fallbackDate, nil) }
+        let start = TranscriptFrontmatter.recordedAt(values: frontmatter.values) ?? fallbackDate
+        let durationSeconds = TranscriptFrontmatter.durationSeconds(from: frontmatter.values["duration"]) ?? 0
+        let end = durationSeconds > 0 ? start.addingTimeInterval(TimeInterval(durationSeconds)) : nil
+        return (start, end)
+    }
+
+    private static func loadSummaryPreview(
+        for transcriptURL: URL,
+        markdown: String,
+        frontmatter: TranscriptFrontmatterDocument?
+    ) -> RecentMeetingSummaryPreview? {
+        if let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
+            from: markdown,
+            frontmatter: frontmatter,
+            url: transcriptURL
+        ) {
+            return preview
+        }
+
         let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
         guard FileManager.default.fileExists(atPath: summaryURL.path),
               let markdown = readSummaryPreviewMarkdown(at: summaryURL) else {
@@ -364,6 +404,34 @@ enum RecentMeetingsScanner {
 enum RecentMeetingSummaryPreviewParser {
     private static let maximumPreviewCharacters = 2_400
 
+    static func inlinePreview(
+        from markdown: String,
+        frontmatter: TranscriptFrontmatterDocument? = nil,
+        url: URL
+    ) -> RecentMeetingSummaryPreview? {
+        let document = frontmatter ?? TranscriptFrontmatter.document(in: markdown)
+        guard let document,
+              document.values["local_summary_version"] != nil else {
+            return nil
+        }
+
+        let summarySections = sectionsFromLocalSummaryBody(document.body)
+        let frontmatterSections = sectionsFromFrontmatter(document.values)
+        let sections = summarySections.isEmpty ? frontmatterSections : summarySections
+        guard let summary = sections.first(where: { $0.title == "Summary" })?.text,
+              !summary.isEmpty,
+              summary != "None found." else {
+            return nil
+        }
+
+        return RecentMeetingSummaryPreview(
+            title: cleanTitle(document.values["local_summary_title"]),
+            summary: limited(summary, to: maximumPreviewCharacters),
+            sections: sections,
+            url: url
+        )
+    }
+
     static func preview(
         from markdown: String,
         url: URL,
@@ -382,22 +450,84 @@ enum RecentMeetingSummaryPreviewParser {
         let body = frontmatter.body
         let title = cleanTitle(frontmatter.values["summary_title"])
             ?? summaryTitle(in: body)
-        let summary = summaryText(in: body)
+        let sections = sectionsFromGeneratedSummaryBody(body)
+        let summary = sections.first(where: { $0.title == "Summary" })?.text ?? ""
 
         guard !summary.isEmpty else { return nil }
         return RecentMeetingSummaryPreview(
             title: title,
             summary: limited(summary, to: maximumPreviewCharacters),
+            sections: sections,
             url: url
         )
     }
 
+    private static func sectionsFromFrontmatter(_ values: [String: String]) -> [RecentMeetingSummarySection] {
+        [
+            ("Summary", values["local_summary"]),
+            ("Decisions", values["local_summary_decisions"]),
+            ("Action Items", values["local_summary_action_items"]),
+            ("Open Questions", values["local_summary_open_questions"]),
+            ("Risks or Follow-ups", values["local_summary_risks_or_followups"]),
+            ("Accuracy Notes", values["local_summary_accuracy_notes"])
+        ].compactMap { title, value in
+            guard let text = cleanSummaryValue(value), !text.isEmpty else { return nil }
+            return RecentMeetingSummarySection(title: title, text: text)
+        }
+    }
+
+    private static func sectionsFromLocalSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
+        guard let localSummary = section("## Local Gemma Summary", in: body, headingLevel: "##")
+            ?? section("## Local Summary", in: body, headingLevel: "##") else {
+            return []
+        }
+
+        return [
+            "Summary",
+            "Decisions",
+            "Action Items",
+            "Open Questions",
+            "Risks or Follow-ups",
+            "Accuracy Notes"
+        ].compactMap { title in
+            guard let rawText = section("### \(title)", in: localSummary, headingLevel: "###") else {
+                return nil
+            }
+            let text = cleanSectionText(rawText)
+            guard !text.isEmpty else {
+                return nil
+            }
+            return RecentMeetingSummarySection(title: title, text: text)
+        }
+    }
+
+    private static func sectionsFromGeneratedSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
+        [
+            ("Summary", "# Summary"),
+            ("Decisions", "# Decisions"),
+            ("Action Items", "# Action Items"),
+            ("Open Questions", "# Open Questions"),
+            ("Risks or Follow-ups", "# Risks or Follow-ups"),
+            ("Accuracy Notes", "# Accuracy Notes")
+        ].compactMap { title, heading in
+            guard let rawText = section(heading, in: body, headingLevel: "#") else {
+                return nil
+            }
+            let text = cleanSectionText(rawText)
+            guard !text.isEmpty,
+                  text != "None found." else {
+                return nil
+            }
+            return RecentMeetingSummarySection(title: title, text: text)
+        }
+    }
+
     private static func summaryTitle(in body: String) -> String? {
-        cleanTitle(section("# Title", in: body)?.components(separatedBy: .newlines).first)
+        cleanTitle(section("# Title", in: body, headingLevel: "#")?.components(separatedBy: .newlines).first)
     }
 
     private static func summaryText(in body: String) -> String {
-        guard let raw = section("# Summary", in: body) else { return "" }
+        guard let raw = section("# Summary", in: body, headingLevel: "#") else { return "" }
         let lines = raw
             .components(separatedBy: .newlines)
             .map(cleanSummaryLine)
@@ -408,7 +538,8 @@ enum RecentMeetingSummaryPreviewParser {
         return text == "None found." ? "" : text
     }
 
-    private static func section(_ heading: String, in body: String) -> String? {
+    private static func section(_ heading: String, in body: String, headingLevel: String) -> String? {
+        let body = LocalMeetingSummaryMarkdownUpdater.removingLocalSummaryMarkers(from: body)
         let lines = body.components(separatedBy: .newlines)
         guard let startIndex = lines.firstIndex(where: {
             $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
@@ -419,7 +550,7 @@ enum RecentMeetingSummaryPreviewParser {
         var endIndex = lines.endIndex
         for index in lines.index(after: startIndex)..<lines.endIndex {
             let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("#") {
+            if trimmed.hasPrefix("\(headingLevel) "), trimmed != heading {
                 endIndex = index
                 break
             }
@@ -438,6 +569,22 @@ enum RecentMeetingSummaryPreviewParser {
 
     private static func cleanSummaryLine(_ raw: String) -> String {
         cleanMarkdown(raw)
+    }
+
+    private static func cleanSectionText(_ raw: String) -> String {
+        let text = raw
+            .components(separatedBy: .newlines)
+            .map(cleanSummaryLine)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text == "None found." ? "" : text
+    }
+
+    private static func cleanSummaryValue(_ raw: String?) -> String? {
+        let text = cleanMarkdown(raw)
+            .replacingOccurrences(of: " | ", with: "\n")
+        return text.isEmpty || text == "None found." ? nil : text
     }
 
     private static func cleanMarkdown(_ raw: String?) -> String {

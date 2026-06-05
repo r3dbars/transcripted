@@ -79,12 +79,12 @@ func testLocalMeetingSummarizer() {
         }
     }
 
-    runSuite("LocalMeetingSummaryStore writes sibling summary files") {
+    runSuite("LocalMeetingSummaryStore keeps the legacy sibling summary path for fallback reads") {
         let transcriptURL = URL(fileURLWithPath: "/tmp/Product Sync.md")
         assertEqual(
             LocalMeetingSummaryStore.summaryURL(for: transcriptURL).path,
             "/tmp/Product Sync.summary.md",
-            "summary artifacts should sit next to the source transcript"
+            "legacy summary artifacts should still be discoverable for older local summaries"
         )
     }
 
@@ -118,4 +118,86 @@ func testLocalMeetingSummarizer() {
             "summaries should expose a short generated title for Home"
         )
     }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater embeds summary metadata into the transcript") {
+        let markdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        date: "2026-06-05"
+        speakers:
+          - "Justin"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        We should launch the smaller version first.
+        """
+        let updated = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleLocalMeetingSummarySections(),
+            to: markdown,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            chunkCount: 2
+        )
+
+        assertTrue(updated.contains("capture_type: meeting"), "existing frontmatter should be preserved")
+        assertTrue(updated.contains("  - \"Justin\""), "nested frontmatter lines should be preserved")
+        assertTrue(updated.contains("local_summary_version: \"1\""), "summary metadata should live in frontmatter")
+        assertTrue(updated.contains("local_summary_title: \"Launch Pricing Review\""), "generated title should live in frontmatter")
+        assertTrue(updated.contains("local_summary_action_items:"), "action items should live in frontmatter")
+        assertTrue(updated.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "transcript should get a managed summary block")
+        assertTrue(updated.contains("## Local Gemma Summary"), "managed block should be readable markdown")
+        assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
+    }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater replaces prior local summary metadata") {
+        let firstPass = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleLocalMeetingSummarySections(),
+            to: """
+            ---
+            capture_type: meeting
+            local_summary_title: "Old Title"
+            local_summary: "Old summary"
+            ---
+
+            ## Transcript
+
+            Original body.
+
+            \(LocalMeetingSummaryMarkdownUpdater.startMarker)
+            ## Local Gemma Summary
+
+            ### Summary
+            Old summary.
+            \(LocalMeetingSummaryMarkdownUpdater.endMarker)
+            """,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            chunkCount: 1
+        )
+
+        assertEqual(
+            firstPass.components(separatedBy: LocalMeetingSummaryMarkdownUpdater.startMarker).count - 1,
+            1,
+            "regeneration should keep exactly one managed summary block"
+        )
+        assertFalse(firstPass.contains("Old summary"), "old managed summary text should be replaced")
+        assertTrue(firstPass.contains("local_summary_title: \"Launch Pricing Review\""), "managed frontmatter should be refreshed")
+    }
+}
+
+private func sampleLocalMeetingSummarySections() -> LocalMeetingSummarySections {
+    LocalMeetingSummarySections(
+        title: "Launch Pricing Review",
+        summary: "Team agreed to keep launch pricing simple.",
+        decisions: "Ship the smaller launch version first.",
+        actionItems: "Alex will check pricing language before Friday.",
+        openQuestions: "Whether enterprise pricing needs a separate page.",
+        risksOrFollowUps: "Pricing copy could overpromise the first version.",
+        accuracyNotes: "Based only on the transcript."
+    )
 }

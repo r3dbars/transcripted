@@ -1251,6 +1251,7 @@ private enum HomeActivityRowFormatting {
 
 private struct HomeActivityRowShell<Content: View>: View {
     let timeString: String
+    var secondaryTimeString: String? = nil
     let isCopied: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
@@ -1364,11 +1365,17 @@ private struct HomeActivityRowShell<Content: View>: View {
 
     private var mainContent: some View {
         HStack(alignment: .top, spacing: 14) {
-            Text(timeString)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .leading)
-                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(timeString)
+                    .foregroundStyle(.secondary)
+                if let secondaryTimeString {
+                    Text(secondaryTimeString)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .frame(width: 64, alignment: .leading)
+            .padding(.top, 2)
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1482,11 +1489,11 @@ struct HomeMeetingRow: View {
     @State private var isSummaryExpanded = false
 
     private let collapsedSummaryCharacterLimit = 260
-    private let expandedSummaryCharacterLimit = 1_400
 
     var body: some View {
         HomeActivityRowShell(
-            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            timeString: startTimeString,
+            secondaryTimeString: endTimeString.map { "- \($0)" },
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
@@ -1525,16 +1532,34 @@ struct HomeMeetingRow: View {
                 .buttonStyle(.plain)
                 .help("Preview meeting")
 
-                if let summary = item.summaryPreview?.summary {
-                    Text(summaryDisplayText(summary))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(isSummaryExpanded ? 8 : 2)
-                        .lineSpacing(2)
-                        .multilineTextAlignment(.leading)
+                if let summaryPreview = item.summaryPreview {
+                    if isSummaryExpanded {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(summaryPreview.sections) { section in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(section.title)
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                    Text(section.text)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .lineSpacing(2)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(summaryDisplayText(summaryPreview.summary))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .lineSpacing(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                    if canExpandSummary(summary) {
+                    if canExpandSummary(summaryPreview) {
                         Button {
                             withAnimation(.snappy(duration: 0.18)) {
                                 isSummaryExpanded.toggle()
@@ -1563,13 +1588,11 @@ struct HomeMeetingRow: View {
             hasSpeakerReviewWork: hasSpeakerReviewWork
         ) {
             return AnyView(
-                HomeAttentionActionButton(
-                    title: "Review speakers",
+                reviewDotButton(
+                    help: item.speakerStatus.summary,
                     isDisabled: false,
-                    tint: .orange,
                     action: onReviewSpeakers
                 )
-                    .help("Review speakers")
             )
         }
 
@@ -1580,24 +1603,50 @@ struct HomeMeetingRow: View {
         ) else { return nil }
 
         return AnyView(
-            HomeAttentionActionButton(
-                title: "Identify speakers",
+            reviewDotButton(
+                help: retranscriptionUnavailableReason ?? "Identify speakers from retained audio",
                 isDisabled: !canRetranscribe,
-                tint: .orange,
                 action: onRetranscribe
             )
-                .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
     }
 
-    private func canExpandSummary(_ summary: String) -> Bool {
-        summary.count > collapsedSummaryCharacterLimit || summary.contains("\n")
+    private var startTimeString: String {
+        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
+    }
+
+    private var endTimeString: String? {
+        guard let endDate = item.endDate else { return nil }
+        return HomeActivityRowFormatting.timeFormatter.string(from: endDate)
+    }
+
+    private func canExpandSummary(_ preview: RecentMeetingSummaryPreview) -> Bool {
+        preview.sections.count > 1
+            || preview.summary.count > collapsedSummaryCharacterLimit
+            || preview.summary.contains("\n")
     }
 
     private func summaryDisplayText(_ summary: String) -> String {
-        let limit = isSummaryExpanded ? expandedSummaryCharacterLimit : collapsedSummaryCharacterLimit
-        guard summary.count > limit else { return summary }
-        return "\(summary.prefix(limit).trimmingCharacters(in: .whitespacesAndNewlines))..."
+        guard summary.count > collapsedSummaryCharacterLimit else { return summary }
+        return "\(summary.prefix(collapsedSummaryCharacterLimit).trimmingCharacters(in: .whitespacesAndNewlines))..."
+    }
+
+    private func reviewDotButton(
+        help: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 7, height: 7)
+                .frame(width: 18, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
+        .help(help)
     }
 }
 

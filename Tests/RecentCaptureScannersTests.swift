@@ -248,7 +248,7 @@ func testRecentCaptureScanners() async {
         )
     }
 
-    runSuite("RecentMeetingSummaryPreviewParser extracts generated title and summary only") {
+    runSuite("RecentMeetingSummaryPreviewParser extracts generated title and summary sections") {
         let summaryURL = URL(fileURLWithPath: "/tmp/launch.summary.md")
         let markdown = """
         ---
@@ -266,7 +266,10 @@ func testRecentCaptureScanners() async {
         - Alex will check pricing language before Friday.
 
         # Decisions
-        This should not appear in the Home preview.
+        Keep the first version small.
+
+        # Action Items
+        Alex will check pricing language before Friday.
         """
 
         guard let preview = RecentMeetingSummaryPreviewParser.preview(
@@ -284,7 +287,55 @@ func testRecentCaptureScanners() async {
             "Team agreed to keep the launch simple.\nAlex will check pricing language before Friday.",
             "Home preview should use only the # Summary section"
         )
+        assertEqual(
+            preview.sections.map(\.title),
+            ["Summary", "Decisions", "Action Items"],
+            "expanded Home rows should expose the full generated-summary sections"
+        )
         assertFalse(preview.summary.contains("Decisions"), "preview should not bleed later sections into the row")
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser extracts embedded transcript summaries first") {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/launch.md")
+        let baseMarkdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        date: "2026-05-24"
+        time: "14:00:00"
+        duration: "10:00"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        We should keep the launch simple.
+        """
+        let markdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleRecentCaptureLocalSummarySections(),
+            to: baseMarkdown,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+            chunkCount: 1
+        )
+
+        guard let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
+            from: markdown,
+            url: transcriptURL
+        ) else {
+            assertTrue(false, "embedded summary metadata should produce a Home preview")
+            return
+        }
+
+        assertEqual(preview.title, "Launch Pricing Review", "embedded title should drive Home display")
+        assertEqual(preview.summary, "Team agreed to keep launch pricing simple.", "summary should come from the managed transcript block")
+        assertEqual(
+            preview.sections.map(\.title),
+            ["Summary", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
+            "embedded summaries should expose every managed section for Show more"
+        )
     }
 
     runSuite("RecentMeetingSummaryPreviewParser fails closed for mismatched summaries") {
@@ -1375,6 +1426,54 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner reads embedded local summaries and meeting end times") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("embedded-launch.md", isDirectory: false)
+            let recordedAt = recentLoaderDate("2026-05-24T14:00:00Z")
+            let baseMarkdown = """
+            ---
+            title: "Quick notes"
+            capture_type: meeting
+            date: "\(recentLoaderFormat(recordedAt, "yyyy-MM-dd"))"
+            time: "\(recentLoaderFormat(recordedAt, "HH:mm:ss"))"
+            duration: "10:00"
+            ---
+
+            # Quick notes
+
+            ## Transcript
+
+            **00:01** [Mic/Justin]
+            We should keep launch pricing simple.
+            """
+            let enhancedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sampleRecentCaptureLocalSummarySections(),
+                to: baseMarkdown,
+                configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+                generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+                chunkCount: 1
+            )
+
+            try? enhancedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            setRecentLoaderFileDate(recordedAt, at: transcriptURL)
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+            let meeting = meetings.first
+
+            assertEqual(meetings.count, 1, "embedded summaries should not create an extra row")
+            assertEqual(meeting?.displayTitle, "Launch Pricing Review", "embedded generated title should drive Home display")
+            assertEqual(meeting?.summaryPreview?.summary, "Team agreed to keep launch pricing simple.", "embedded summary should attach to the row")
+            assertNotNil(meeting?.startDate, "scanner should expose the meeting start time")
+            assertNotNil(meeting?.endDate, "scanner should expose the meeting end time")
+            assertEqual(
+                meeting?.endDate?.timeIntervalSince(meeting?.startDate ?? Date.distantPast),
+                600,
+                "scanner should derive end time from frontmatter duration"
+            )
+        }
+    }
+
     await runSuite("RecentMeetingsScanner returns empty for non-positive limits") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -1603,6 +1702,18 @@ private func writeRecentLoaderSummary(
     None found.
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
+}
+
+private func sampleRecentCaptureLocalSummarySections() -> LocalMeetingSummarySections {
+    LocalMeetingSummarySections(
+        title: "Launch Pricing Review",
+        summary: "Team agreed to keep launch pricing simple.",
+        decisions: "Keep the first version small.",
+        actionItems: "Alex will check pricing language before Friday.",
+        openQuestions: "Whether enterprise pricing needs a separate page.",
+        risksOrFollowUps: "Pricing copy could overpromise the first version.",
+        accuracyNotes: "Based only on the transcript."
+    )
 }
 
 private func setRecentLoaderFileDate(_ date: Date, at url: URL) {

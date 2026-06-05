@@ -4,9 +4,19 @@ import TranscriptedCore
 #endif
 
 struct LocalMeetingSummaryResult: Equatable, Sendable {
-    let summaryURL: URL
+    let transcriptURL: URL
     let chunkCount: Int
     let profileName: String
+}
+
+struct LocalMeetingSummarySections: Equatable, Sendable {
+    let title: String?
+    let summary: String
+    let decisions: String
+    let actionItems: String
+    let openQuestions: String
+    let risksOrFollowUps: String
+    let accuracyNotes: String
 }
 
 enum LocalMeetingSummaryError: LocalizedError, Equatable {
@@ -465,21 +475,20 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
                 )
             }
 
-            let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
             let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
-            let rendered = renderSummary(
-                body: normalizedBody,
-                transcriptURL: transcriptURL,
-                title: title,
-                summaryTitle: LocalMeetingSummaryNormalizer.summaryTitle(in: normalizedBody),
-                date: date,
+            let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+            let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sections,
+                to: markdown,
+                configuration: configuration,
+                generatedAt: date,
                 chunkCount: chunks.count
             )
-            try rendered.write(to: summaryURL, atomically: true, encoding: .utf8)
-            fileManager.restrictFileToOwnerOnly(at: summaryURL)
+            try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
 
             return LocalMeetingSummaryResult(
-                summaryURL: summaryURL,
+                transcriptURL: transcriptURL,
                 chunkCount: chunks.count,
                 profileName: configuration.profileName
             )
@@ -572,35 +581,6 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         """
     }
 
-    private func renderSummary(
-        body: String,
-        transcriptURL: URL,
-        title: String,
-        summaryTitle: String?,
-        date: Date,
-        chunkCount: Int
-    ) -> String {
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "'")
-        let escapedSummaryTitle = summaryTitle?.replacingOccurrences(of: "\"", with: "'")
-        let createdAt = ISO8601DateFormatter().string(from: date)
-        let sourceName = transcriptURL.lastPathComponent.replacingOccurrences(of: "\"", with: "'")
-        let summaryTitleLine = escapedSummaryTitle.map { "summary_title: \"\($0)\"\n" } ?? ""
-        return """
-        ---
-        capture_type: meeting_summary
-        title: "\(escapedTitle)"
-        \(summaryTitleLine)\
-        source_transcript: "\(sourceName)"
-        summary_model: \(configuration.modelID)
-        summary_runtime: mlx-vlm
-        summary_profile: \(configuration.profileName)
-        summary_chunk_count: \(chunkCount)
-        created_at: \(createdAt)
-        ---
-
-        \(body)
-        """
-    }
 }
 
 enum LocalMeetingSummaryNormalizer {
@@ -627,28 +607,245 @@ enum LocalMeetingSummaryNormalizer {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func sections(in raw: String) -> LocalMeetingSummarySections {
+        let text = normalized(raw)
+        return LocalMeetingSummarySections(
+            title: summaryTitle(in: text),
+            summary: section("# Summary", in: text) ?? "None found.",
+            decisions: section("# Decisions", in: text) ?? "None found.",
+            actionItems: section("# Action Items", in: text) ?? "None found.",
+            openQuestions: section("# Open Questions", in: text) ?? "None found.",
+            risksOrFollowUps: section("# Risks or Follow-ups", in: text) ?? "None found.",
+            accuracyNotes: section("# Accuracy Notes", in: text) ?? "None found."
+        )
+    }
+
     static func summaryTitle(in raw: String) -> String? {
+        section("# Title", in: raw)?
+            .components(separatedBy: .newlines)
+            .first
+            .map(cleanSectionText)
+            .flatMap { $0.isEmpty || $0 == "None found." ? nil : String($0.prefix(96)) }
+    }
+
+    static func section(_ heading: String, in raw: String) -> String? {
         let lines = raw.components(separatedBy: .newlines)
         guard let startIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines) == "# Title"
+            $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
         }) else {
             return nil
         }
 
-        for line in lines[lines.index(after: startIndex)..<lines.endIndex] {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("#") { return nil }
-            if !trimmed.isEmpty, trimmed != "None found." {
-                return String(trimmed.prefix(96))
+        var endIndex = lines.endIndex
+        for index in lines.index(after: startIndex)..<lines.endIndex {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("#") {
+                endIndex = index
+                break
             }
         }
 
-        return nil
+        return cleanSectionText(
+            lines[lines.index(after: startIndex)..<endIndex]
+                .joined(separator: "\n")
+        )
     }
 
     private static func containsHeading(_ heading: String, in text: String) -> Bool {
         text.components(separatedBy: .newlines).contains { line in
             line.trimmingCharacters(in: .whitespacesAndNewlines) == heading
         }
+    }
+
+    private static func cleanSectionText(_ raw: String) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "None found." : text
+    }
+}
+
+enum LocalMeetingSummaryMarkdownUpdater {
+    static let startMarker = "<!-- transcripted:local-summary:start v=1 -->"
+    static let endMarker = "<!-- transcripted:local-summary:end -->"
+
+    private static let managedFrontmatterKeys: Set<String> = [
+        "local_summary_version",
+        "local_summary_title",
+        "local_summary_generated_at",
+        "local_summary_model",
+        "local_summary_runtime",
+        "local_summary_profile",
+        "local_summary_chunk_count",
+        "local_summary",
+        "local_summary_decisions",
+        "local_summary_action_items",
+        "local_summary_open_questions",
+        "local_summary_risks_or_followups",
+        "local_summary_accuracy_notes"
+    ]
+
+    static func markdown(
+        byApplying sections: LocalMeetingSummarySections,
+        to markdown: String,
+        configuration: LocalGemmaSummaryConfiguration,
+        generatedAt: Date,
+        chunkCount: Int
+    ) -> String {
+        let document = TranscriptFrontmatter.document(in: markdown)
+        let body = document?.body ?? markdown
+        let frontmatterLines = updatedFrontmatterLines(
+            existing: document?.lines ?? [],
+            sections: sections,
+            configuration: configuration,
+            generatedAt: generatedAt,
+            chunkCount: chunkCount
+        )
+        let updatedBody = removingLocalSummaryBlock(from: body)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let renderedBody = [updatedBody, renderedLocalSummarySection(sections)]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+
+        return """
+        ---
+        \(frontmatterLines.joined(separator: "\n"))
+        ---
+
+        \(renderedBody)
+        """
+    }
+
+    private static func updatedFrontmatterLines(
+        existing: [String],
+        sections: LocalMeetingSummarySections,
+        configuration: LocalGemmaSummaryConfiguration,
+        generatedAt: Date,
+        chunkCount: Int
+    ) -> [String] {
+        let retained = existing.filter { line in
+            guard let key = frontmatterKey(in: line) else { return true }
+            return !managedFrontmatterKeys.contains(key)
+        }
+        let generatedAtString = ISO8601DateFormatter().string(from: generatedAt)
+        return retained + [
+            "local_summary_version: \"1\"",
+            yamlLine("local_summary_title", sections.title ?? ""),
+            "local_summary_generated_at: \"\(generatedAtString)\"",
+            yamlLine("local_summary_model", configuration.modelID),
+            yamlLine("local_summary_runtime", configuration.runtimePackage),
+            yamlLine("local_summary_profile", configuration.profileName),
+            "local_summary_chunk_count: \"\(chunkCount)\"",
+            yamlLine("local_summary", frontmatterSummaryValue(sections.summary)),
+            yamlLine("local_summary_decisions", frontmatterSummaryValue(sections.decisions)),
+            yamlLine("local_summary_action_items", frontmatterSummaryValue(sections.actionItems)),
+            yamlLine("local_summary_open_questions", frontmatterSummaryValue(sections.openQuestions)),
+            yamlLine("local_summary_risks_or_followups", frontmatterSummaryValue(sections.risksOrFollowUps)),
+            yamlLine("local_summary_accuracy_notes", frontmatterSummaryValue(sections.accuracyNotes))
+        ]
+    }
+
+    private static func renderedLocalSummarySection(_ sections: LocalMeetingSummarySections) -> String {
+        """
+        \(startMarker)
+        ## Local Gemma Summary
+
+        ### Summary
+        \(sections.summary)
+
+        ### Decisions
+        \(sections.decisions)
+
+        ### Action Items
+        \(sections.actionItems)
+
+        ### Open Questions
+        \(sections.openQuestions)
+
+        ### Risks or Follow-ups
+        \(sections.risksOrFollowUps)
+
+        ### Accuracy Notes
+        \(sections.accuracyNotes)
+        \(endMarker)
+        """
+    }
+
+    static func localSummaryBlock(in body: String) -> String? {
+        guard let startRange = body.range(of: startMarker),
+              let endRange = body.range(
+                of: endMarker,
+                range: startRange.upperBound..<body.endIndex
+              ) else {
+            return nil
+        }
+        return String(body[startRange.lowerBound..<endRange.upperBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func removingLocalSummaryBlock(from body: String) -> String {
+        guard let startRange = body.range(of: startMarker),
+              let endRange = body.range(
+                of: endMarker,
+                range: startRange.upperBound..<body.endIndex
+              ) else {
+            return bodyWithoutLegacyLocalSummarySection(body)
+        }
+
+        var updated = body
+        updated.removeSubrange(startRange.lowerBound..<endRange.upperBound)
+        return updated
+    }
+
+    private static func bodyWithoutLegacyLocalSummarySection(_ body: String) -> String {
+        var lines = body.components(separatedBy: .newlines)
+        guard let startIndex = lines.firstIndex(where: {
+            let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed == "## Local Summary" || trimmed == "## Local Gemma Summary"
+        }) else {
+            return body
+        }
+
+        var endIndex = lines.endIndex
+        for index in lines.index(after: startIndex)..<lines.endIndex {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("## "),
+               trimmed != "## Local Summary",
+               trimmed != "## Local Gemma Summary" {
+                endIndex = index
+                break
+            }
+        }
+
+        lines.removeSubrange(startIndex..<endIndex)
+        return lines.joined(separator: "\n")
+    }
+
+    static func removingLocalSummaryMarkers(from body: String) -> String {
+        body.replacingOccurrences(of: startMarker, with: "")
+            .replacingOccurrences(of: endMarker, with: "")
+    }
+
+    private static func frontmatterKey(in line: String) -> String? {
+        guard line.first?.isWhitespace != true else { return nil }
+        return line.split(separator: ":", maxSplits: 1).first.map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private static func yamlLine(_ key: String, _ value: String) -> String {
+        "\(key): \"\(yamlValue(value))\""
+    }
+
+    private static func yamlValue(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func frontmatterSummaryValue(_ raw: String) -> String {
+        let flattened = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
+        return String(flattened.prefix(1_200))
     }
 }
