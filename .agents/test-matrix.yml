@@ -111,6 +111,13 @@ rules:
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
 
   - paths:
+      - "scripts/ops/privacy-leak-sweep.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/privacy-leak-sweep.py"
+      - "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+
+  - paths:
       - "scripts/ops/build-codex-memory-index.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
