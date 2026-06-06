@@ -1,0 +1,16 @@
+{
+  "tagName": "v1.1.46",
+  "isDraft": false,
+  "isPrerelease": false,
+  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.46",
+  "assets": [
+    {
+      "name": "Transcripted-1.1.46.dmg",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.46/Transcripted-1.1.46.dmg",
+      "contentType": "application/x-apple-diskimage",
+      "size": 535870030,
+      "digest": "sha256:12f9d94caf9f43d93f5739da34bbcf60faba0c61d40e9aeebd94a783b1ba7999",
+      "state": "uploaded"
+    }
+  ]
+}

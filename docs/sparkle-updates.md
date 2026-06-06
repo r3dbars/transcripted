@@ -69,6 +69,15 @@ bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
 7. Commit and push the updated `docs/appcast.xml`.
+8. After the final appcast push and any expected Homebrew/Sentry release
+   surfaces are live, run the strict live-surface gate:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
+```
+
+That live gate also checks the GitHub release asset size/digest against the
+committed appcast and Homebrew cask.
 
 If the final push has not happened yet, Sparkle clients will keep seeing the old
 version.

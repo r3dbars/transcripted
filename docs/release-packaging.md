@@ -124,6 +124,22 @@ Before you publish a user-facing release note, sanity-check the release state:
 - run `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json` before publishing release notes or PR text that summarize QA, support, or observability work
 - if you want a clean starting point, use `docs/release-notes-template.md`
 
+Use the strict release-health gate when validating release surfaces:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
+python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
+```
+
+The live surface gate compares the committed appcast against the live appcast,
+download routes, GitHub release asset size/digest, and Homebrew cask checksum.
+
+After a packaging build, add local dSYM verification:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --require-release-debug-files
+```
+
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.
