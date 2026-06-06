@@ -72,7 +72,9 @@ extension TranscriptionTaskManager {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
-        removeSourceAudioAfterArchive: Bool = true
+        removeSourceAudioAfterArchive: Bool = true,
+        targetTranscriptURL: URL? = nil,
+        archiveRecordingAudio: Bool = true
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -292,6 +294,7 @@ extension TranscriptionTaskManager {
             speakerStore: speakerDB,
             statsStore: DeferredTranscriptStatsStore(),
             recordingDate: transcriptDate,
+            targetURL: targetTranscriptURL,
             transcriptionEngine: speechEngine,
             formatOptions: formatOptions
         ) else {
@@ -301,11 +304,17 @@ extension TranscriptionTaskManager {
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
-        let archiveOutcome = await archiveRecordingAudioIfConfigured(
-            micURL: micURL,
-            systemURL: systemURL,
-            savedURL: savedURL
-        )
+        let archiveOutcome = archiveRecordingAudio
+            ? await archiveRecordingAudioIfConfigured(
+                micURL: micURL,
+                systemURL: systemURL,
+                savedURL: savedURL
+            )
+            : RecordingAudioArchiveOutcome(
+                didArchiveRecordingAudio: false,
+                retainedAudioDirectory: nil,
+                retainedAudioURLs: []
+            )
         try await checkCancellationAfterTranscriptSideEffects(
             savedURL: savedURL,
             retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,

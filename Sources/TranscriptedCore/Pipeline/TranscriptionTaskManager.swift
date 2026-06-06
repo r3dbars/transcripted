@@ -336,7 +336,9 @@ public class TranscriptionTaskManager: ObservableObject {
         systemURL: URL,
         outputFolder: URL,
         meetingTitle: String? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        replacementTranscriptURL: URL? = nil,
+        recordingDate: Date? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting saved-audio retranscription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -394,7 +396,10 @@ public class TranscriptionTaskManager: ObservableObject {
                     healthInfo: nil,
                     splitLocalSpeakers: splitLocalSpeakers,
                     meetingTitle: meetingTitle,
-                    removeSourceAudioAfterArchive: false
+                    recordingDate: recordingDate,
+                    removeSourceAudioAfterArchive: false,
+                    targetTranscriptURL: replacementTranscriptURL,
+                    archiveRecordingAudio: replacementTranscriptURL == nil
                 )
 
                 await MainActor.run {

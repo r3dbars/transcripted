@@ -192,10 +192,12 @@ public class TranscriptSaver {
         speakerStore: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil,
         recordingDate: Date? = nil,
+        targetURL: URL? = nil,
         transcriptionEngine: SpeechTranscriptionEngineDescriptor,
         formatOptions: TranscriptFormatOptions = .default
     ) -> URL? {
-        let saveDir = directory ?? defaultSaveDirectory
+        let explicitFileURL = targetURL
+        let saveDir = explicitFileURL?.deletingLastPathComponent() ?? directory ?? defaultSaveDirectory
 
         do {
             try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
@@ -213,12 +215,18 @@ public class TranscriptSaver {
         }
 
         let transcriptDate = recordingDate ?? Date()
-        let timestamp = DateFormattingHelper.formatFilename(transcriptDate)
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
+        let fileURL: URL
+        if let explicitFileURL {
+            fileURL = explicitFileURL
+        } else {
+            let timestamp = DateFormattingHelper.formatFilename(transcriptDate)
+            var candidateURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
+            var counter = 1
+            while FileManager.default.fileExists(atPath: candidateURL.path) {
+                candidateURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
+                counter += 1
+            }
+            fileURL = candidateURL
         }
 
         let markdown = formatTranscriptMarkdown(

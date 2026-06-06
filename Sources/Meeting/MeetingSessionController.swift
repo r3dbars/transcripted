@@ -1217,7 +1217,9 @@ final class MeetingSessionController: ObservableObject {
     func retranscribeSavedMeeting(
         micAudioURL: URL?,
         systemAudioURL: URL,
-        title: String?
+        title: String?,
+        transcriptURL: URL? = nil,
+        recordingDate: Date? = nil
     ) async -> Bool {
         guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
             state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
@@ -1278,7 +1280,9 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true
+            splitLocalSpeakers: true,
+            replacementTranscriptURL: transcriptURL,
+            recordingDate: recordingDate
         )
         return true
     }

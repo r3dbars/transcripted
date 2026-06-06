@@ -194,6 +194,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         NSWorkspace.shared.open(item.transcriptURL)
     }
 
+    func hasPendingReview(forTranscript transcriptURL: URL) -> Bool {
+        let targetPath = transcriptURL.standardizedFileURL.path
+        return reviewQueueItems.contains {
+            $0.transcriptURL.standardizedFileURL.path == targetPath
+        }
+    }
+
     func namePendingReviewItem(_ item: SpeakerPendingReviewItem, to newName: String) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

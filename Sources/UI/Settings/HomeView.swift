@@ -2168,7 +2168,7 @@ struct HomeActivityTabsCard: View {
                                 onOpen: { onOpenMeeting(meeting) },
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },
-                                hasSpeakerReviewWork: hasSpeakerReviewWork,
+                                hasSpeakerReviewWork: hasSpeakerReviewWork(for: meeting),
                                 canRetranscribe: canRetranscribeSavedMeetings,
                                 retranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
                                 onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
@@ -2194,8 +2194,11 @@ struct HomeActivityTabsCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var hasSpeakerReviewWork: Bool {
-        !speakerPeopleModel.hasLoadedProfiles || speakerPeopleModel.needsReviewCount > 0
+    private func hasSpeakerReviewWork(for meeting: RecentMeetingItem) -> Bool {
+        guard speakerPeopleModel.hasLoadedProfiles else {
+            return meeting.speakerStatus.needsReview
+        }
+        return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
     @ViewBuilder

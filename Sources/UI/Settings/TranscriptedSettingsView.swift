@@ -674,7 +674,9 @@ struct TranscriptedSettingsView: View {
             let didStart = await meetingSession.retranscribeSavedMeeting(
                 micAudioURL: input.micURL,
                 systemAudioURL: input.systemURL,
-                title: item.title
+                title: item.title,
+                transcriptURL: item.transcriptURL,
+                recordingDate: item.startDate ?? item.date
             )
             if !didStart {
                 NSSound.beep()
