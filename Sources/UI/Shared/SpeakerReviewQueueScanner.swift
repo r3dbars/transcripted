@@ -113,7 +113,7 @@ enum SpeakerReviewQueueScanner {
         )
         let recordedAt = TranscriptFrontmatter.recordedAt(values: document.values)
 
-        return frontmatterSpeakers(from: document.lines).compactMap { speaker in
+        let items: [SpeakerPendingReviewItem] = frontmatterSpeakers(from: document.lines).compactMap { speaker in
             guard speaker.source == "db_pending",
                   let dbId = speaker.dbId,
                   let profile = profilesById[dbId],
@@ -140,6 +140,13 @@ enum SpeakerReviewQueueScanner {
                 sourceName: speaker.name
             )
         }
+
+        return deduplicatedPendingItems(items)
+    }
+
+    private static func deduplicatedPendingItems(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingReviewItem] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 
     private struct FrontmatterSpeaker {
