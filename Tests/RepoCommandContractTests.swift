@@ -1564,6 +1564,14 @@ func testRepoCommandContract() {
             reportBlock.contains("context[\"route_change_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)"),
             "degraded meeting Sentry events should preserve coarse route-change counts"
         )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"gap_count\")"),
+            "raw gap counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"route_change_count\")"),
+            "raw route-change counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
         assertFalse(
             reportBlock.contains("context[\"gap_count\"] ="),
             "raw gap counts should stay out of degraded meeting Sentry context"

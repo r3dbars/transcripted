@@ -2414,6 +2414,8 @@ final class MeetingSessionController: ObservableObject {
         guard shouldReport else { return }
 
         var context = captureDiagnostics
+        context.removeValue(forKey: "gap_count")
+        context.removeValue(forKey: "route_change_count")
         context["capture_quality"] = healthInfo.captureQuality.rawValue
         context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
         context["gap_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)
