@@ -97,6 +97,56 @@ func testHomeMeetingDeletion() {
             }
         }
     }
+
+    runSuite("HomeMeetingDeletion does not clean up owned siblings from a non-owned selected row") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let selectedURL = meetingsRoot.appendingPathComponent("Manual.md")
+            let ownedURL = meetingsRoot.appendingPathComponent("Manual 2.md")
+            try writeDeletionMeeting(title: "Manual", transcriptURL: selectedURL, includeIDs: false)
+            try writeDeletionMeeting(title: "Manual", transcriptURL: ownedURL)
+            try writeDeletionAudio(for: selectedURL, systemBytes: "same system", micBytes: "same mic")
+            let ownedAudio = try writeDeletionAudio(for: ownedURL, systemBytes: "same system", micBytes: "same mic")
+            guard let item = deletionMeetingItem(selectedURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingDeletion.delete(item)
+
+                assertFalse(FileManager.default.fileExists(atPath: selectedURL.path), "selected manual transcript should still be deleted")
+                assertTrue(FileManager.default.fileExists(atPath: ownedURL.path), "owned sibling should stay when the selected row is not app-owned")
+                assertTrue(FileManager.default.fileExists(atPath: ownedAudio.path), "owned sibling audio should stay when the selected row is not app-owned")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
+
+    runSuite("HomeMeetingDeletion leaves same-audio app-owned meetings with different titles alone") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let selectedURL = meetingsRoot.appendingPathComponent("Quick notes.md")
+            let otherURL = meetingsRoot.appendingPathComponent("Other call.md")
+            try writeDeletionMeeting(title: "Quick notes", transcriptURL: selectedURL)
+            try writeDeletionMeeting(title: "Other call", transcriptURL: otherURL)
+            try writeDeletionAudio(for: selectedURL, systemBytes: "same system", micBytes: "same mic")
+            let otherAudio = try writeDeletionAudio(for: otherURL, systemBytes: "same system", micBytes: "same mic")
+            guard let item = deletionMeetingItem(selectedURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+
+            do {
+                _ = try HomeMeetingDeletion.delete(item)
+
+                assertFalse(FileManager.default.fileExists(atPath: selectedURL.path), "selected transcript should be deleted")
+                assertTrue(FileManager.default.fileExists(atPath: otherURL.path), "same-audio transcript with a different title should stay")
+                assertTrue(FileManager.default.fileExists(atPath: otherAudio.path), "same-audio directory with a different title should stay")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
 }
 
 private func withTemporaryHomeMeetingDeletionLibrary(_ body: (URL) throws -> Void) {

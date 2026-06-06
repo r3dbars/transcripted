@@ -23,14 +23,16 @@ enum HomeMeetingDeletion {
         summaryURLs.insert(LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL))
         if let audio = item.audio {
             audioDirectoryURLs.insert(audio.directoryURL)
-            for duplicate in duplicateRetainedAudioMeetings(
-                matching: audio,
-                selectedTranscriptURL: item.transcriptURL,
-                fileManager: fileManager
-            ) {
-                transcriptURLs.insert(duplicate.transcriptURL)
-                summaryURLs.insert(LocalMeetingSummaryStore.summaryURL(for: duplicate.transcriptURL))
-                audioDirectoryURLs.insert(duplicate.audio.directoryURL)
+            if isAppOwnedMeetingTranscript(item.transcriptURL) {
+                for duplicate in duplicateRetainedAudioMeetings(
+                    matching: audio,
+                    selectedTranscriptURL: item.transcriptURL,
+                    fileManager: fileManager
+                ) {
+                    transcriptURLs.insert(duplicate.transcriptURL)
+                    summaryURLs.insert(LocalMeetingSummaryStore.summaryURL(for: duplicate.transcriptURL))
+                    audioDirectoryURLs.insert(duplicate.audio.directoryURL)
+                }
             }
         }
 
@@ -50,7 +52,9 @@ enum HomeMeetingDeletion {
         selectedTranscriptURL: URL,
         fileManager: FileManager
     ) -> [(transcriptURL: URL, audio: MeetingAudioAttachment)] {
-        guard let selectedSignature = audioSignature(for: selectedAudio) else {
+        guard let selectedValues = appOwnedMeetingTranscriptValues(selectedTranscriptURL),
+              let selectedTitle = normalizedTitle(selectedValues["title"]),
+              let selectedSignature = audioSignature(for: selectedAudio) else {
             return []
         }
 
@@ -71,7 +75,8 @@ enum HomeMeetingDeletion {
                   !url.deletingPathExtension().lastPathComponent.hasSuffix(".summary"),
                   canonicalPath(url) != selectedPath,
                   isRegularFile(url, fileManager: fileManager),
-                  isAppOwnedMeetingTranscript(url),
+                  let values = appOwnedMeetingTranscriptValues(url),
+                  normalizedTitle(values["title"]) == selectedTitle,
                   let audio = MeetingAudioArchiveResolver.attachment(forTranscript: url, fileManager: fileManager),
                   audioSignature(for: audio) == selectedSignature else {
                 continue
@@ -82,12 +87,26 @@ enum HomeMeetingDeletion {
     }
 
     private static func isAppOwnedMeetingTranscript(_ url: URL) -> Bool {
+        appOwnedMeetingTranscriptValues(url) != nil
+    }
+
+    private static func appOwnedMeetingTranscriptValues(_ url: URL) -> [String: String]? {
         guard let values = try? TranscriptFrontmatter.readValues(from: url),
               values["capture_type"]?.lowercased() == "meeting" else {
-            return false
+            return nil
         }
-        return isValidTranscriptIdentifier(values["transcript_id"])
+        guard isValidTranscriptIdentifier(values["transcript_id"])
             || isValidTranscriptIdentifier(values["capture_id"])
+        else {
+            return nil
+        }
+        return values
+    }
+
+    private static func normalizedTitle(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
     }
 
     private static func isValidTranscriptIdentifier(_ value: String?) -> Bool {
