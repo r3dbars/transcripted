@@ -67,11 +67,23 @@ func testObservabilityLogWriter() {
             event: "dictation_toggle_requested",
             message: "source /Users/jane/Documents/Client Calls/ACME Roadmap.md",
             context: [
+                "audio_path": "/Users/jane/Private/customer.wav",
+                "default_input_name": "Studio Mic",
+                "default_output_name": "Studio Display Speakers",
+                "meeting_title": "Customer Roadmap",
+                "meeting_url": "https://meet.example.com/private-room",
                 "source_app_name": "Private Notes",
+                "source_app_bundle": "com.private.short",
                 "source_app_bundle_id": "com.private.notes",
                 "audio_device": "Jane's AirPods Pro",
                 "file_path": "/Users/jane/Documents/Client Calls/ACME Roadmap.md",
+                "prompt_text": "Read my private transcript",
+                "raw_url": "https://meet.example.com/private-room",
+                "speaker_name": "Alice Customer",
+                "title": "Customer Roadmap",
                 "trigger": "physical_key",
+                "transcript_path": "/Users/jane/Private/customer.md",
+                "transcript_text": "private transcript words",
             ],
             appVersion: "1.2.3",
             osVersion: "Version 26.0"
@@ -84,7 +96,61 @@ func testObservabilityLogWriter() {
         assertEqual(sanitized.context?["source_app_bundle_id"], "[redacted-sensitive-value]", "bundle id should be redacted locally")
         assertEqual(sanitized.context?["audio_device"], "[redacted-sensitive-value]", "raw audio device names should be redacted locally")
         assertEqual(sanitized.context?["file_path"], "[redacted-sensitive-value]", "file paths should be redacted locally")
+        assertEqual(sanitized.context?["audio_path"], "[redacted-sensitive-value]", "audio paths should be redacted locally")
+        assertEqual(sanitized.context?["default_input_name"], "[redacted-sensitive-value]", "raw input names should be redacted locally")
+        assertEqual(sanitized.context?["default_output_name"], "[redacted-sensitive-value]", "raw output names should be redacted locally")
+        assertEqual(sanitized.context?["meeting_title"], "[redacted-sensitive-value]", "meeting titles should be redacted locally")
+        assertEqual(sanitized.context?["meeting_url"], "[redacted-sensitive-value]", "meeting URLs should be redacted locally")
+        assertEqual(sanitized.context?["prompt_text"], "[redacted-sensitive-value]", "raw prompt text should be redacted locally")
+        assertEqual(sanitized.context?["raw_url"], "[redacted-sensitive-value]", "raw URLs should be redacted locally")
+        assertEqual(sanitized.context?["source_app_bundle"], "[redacted-sensitive-value]", "short source app bundle keys should be redacted locally")
+        assertEqual(sanitized.context?["speaker_name"], "[redacted-sensitive-value]", "speaker names should be redacted locally")
+        assertEqual(sanitized.context?["title"], "[redacted-sensitive-value]", "generic titles should be redacted locally")
+        assertEqual(sanitized.context?["transcript_path"], "[redacted-sensitive-value]", "transcript paths should be redacted locally")
+        assertEqual(sanitized.context?["transcript_text"], "[redacted-sensitive-value]", "transcript text should be redacted locally")
         assertEqual(sanitized.context?["trigger"], "physical_key", "coarse diagnostics should stay useful")
+    }
+
+    runSuite("AppLogger routes direct debug-log messages through the shared redactor") {
+        let appLoggerSource = readObservabilityTestRepoTextFile("Sources/Observability/AppLogger.swift")
+        assertTrue(
+            appLoggerSource.contains("ObservabilityTextRedactor.redact(message)"),
+            "AppLogger.log should scrub direct debug messages before storing or writing"
+        )
+
+        let sanitized = ObservabilityTextRedactor.redact(
+            "DICTATION | started (parakeet, Jane's AirPods Pro) then saved /Users/jane/Private/meeting.md for person@example.com with token sk-private"
+        )
+
+        assertFalse(sanitized.contains("Jane's AirPods Pro"), "raw device names should not enter debug logs")
+        assertFalse(sanitized.contains("/Users/jane/Private/meeting.md"), "absolute paths should not enter debug logs")
+        assertFalse(sanitized.contains("person@example.com"), "emails should not enter debug logs")
+        assertFalse(sanitized.contains("sk-private"), "tokens should not enter debug logs")
+        assertTrue(sanitized.contains("(parakeet, [redacted-sensitive-value])"), "engine/device tuples should keep a safe marker")
+        assertTrue(sanitized.contains("[redacted-path]"), "path redaction marker should remain")
+        assertTrue(sanitized.contains("[redacted-email]"), "email redaction marker should remain")
+    }
+
+    runSuite("Observability file writer console diagnostics avoid absolute paths") {
+        let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+        let reliabilityRecorder = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
+
+        assertFalse(
+            eventReporter.contains("\\(storageDir.path)"),
+            "EventReporter stderr diagnostics should not print absolute storage paths"
+        )
+        assertFalse(
+            eventReporter.contains("\\(fileURL.path)"),
+            "EventReporter stdout/stderr diagnostics should not print absolute log paths"
+        )
+        assertFalse(
+            reliabilityRecorder.contains("\\(storageDir.path)"),
+            "Reliability recorder stderr diagnostics should not print absolute storage paths"
+        )
+        assertFalse(
+            reliabilityRecorder.contains("\\(fileURL.path)"),
+            "Reliability recorder stderr diagnostics should not print absolute log paths"
+        )
     }
 
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {

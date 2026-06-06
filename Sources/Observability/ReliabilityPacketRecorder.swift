@@ -55,7 +55,7 @@ private actor ReliabilityPacketFileWriter {
         do {
             try FileManager.default.createPrivateDirectory(at: storageDir)
         } catch {
-            fputs("⚠️ RELIABILITY | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
+            fputs("⚠️ RELIABILITY | failed to create reliability directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
             return false
         }
 
@@ -70,7 +70,7 @@ private actor ReliabilityPacketFileWriter {
             isPrepared = true
             return true
         } catch {
-            fputs("⚠️ RELIABILITY | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
+            fputs("⚠️ RELIABILITY | failed to open reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
             return false
         }
     }

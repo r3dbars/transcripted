@@ -331,7 +331,11 @@ final class MeetingPromptDetector {
         guard let meetingURL = extractMeetingURL(from: event), let provider = provider(for: meetingURL) else { return nil }
 
         let startsIn = event.startDate.timeIntervalSince(now)
-        let genericWindow = MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn)
+        let endsIn = event.endDate.timeIntervalSince(now)
+        let genericWindow = MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+            startsIn: startsIn,
+            endsIn: endsIn
+        )
         let runtimeReason = activeRuntimeReason(
             for: provider,
             runningBundleIDs: runningBundleIDs,

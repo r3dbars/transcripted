@@ -69,6 +69,7 @@ Relevant direct coverage:
 - `Tests/SentryEventPolicyTests.swift`
 - `Tests/SentryPayloadSanitizerTests.swift`
 - `Tests/SentryRuntimeConfigurationTests.swift`
+- `Tests/ObservabilityTextRedactorTests.swift`
 - `Tests/ObservabilityLogWriterTests.swift`
 - `Tests/ReliabilityPacketRecorderTests.swift`
 - `Tests/RuntimeDiagnosticsStoreTests.swift`

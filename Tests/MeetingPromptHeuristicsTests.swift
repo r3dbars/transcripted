@@ -243,13 +243,15 @@ func testMeetingPromptHeuristics() {
     runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — only prompts in the one-minute lead window") {
         assertFalse(
             MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
-                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime + 1
+                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime + 1,
+                endsIn: 30 * 60
             ),
             "calendar prompts should not fire earlier than one minute before the meeting"
         )
         assertTrue(
             MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
-                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime
+                startsIn: MeetingPromptHeuristics.calendarReminderLeadTime,
+                endsIn: 30 * 60
             ),
             "calendar prompts should fire at one minute before the meeting"
         )
@@ -258,15 +260,41 @@ func testMeetingPromptHeuristics() {
     runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — keeps a short grace period after start") {
         assertTrue(
             MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
-                startsIn: -MeetingPromptHeuristics.calendarReminderPostStartGrace
+                startsIn: -MeetingPromptHeuristics.calendarReminderPostStartGrace,
+                endsIn: 25 * 60
             ),
             "calendar prompts should still be eligible during the short after-start grace period"
         )
         assertFalse(
             MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
-                startsIn: -(MeetingPromptHeuristics.calendarReminderPostStartGrace + 1)
+                startsIn: -(MeetingPromptHeuristics.calendarReminderPostStartGrace + 1),
+                endsIn: 25 * 60
             ),
             "calendar prompts should expire after the post-start grace period"
+        )
+    }
+
+    runSuite("MeetingPromptWindowPolicy.shouldOfferCalendarPrompt — rejects ended calendar events") {
+        assertFalse(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: -3 * 60,
+                endsIn: -30
+            ),
+            "calendar prompts should not fire after a Zoom calendar event has already ended"
+        )
+        assertFalse(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: -3 * 60,
+                endsIn: 0
+            ),
+            "calendar prompts should stop at the event end boundary"
+        )
+        assertTrue(
+            MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
+                startsIn: -3 * 60,
+                endsIn: 20 * 60
+            ),
+            "in-progress calendar-backed meetings should still be eligible during the post-start grace period"
         )
     }
 }

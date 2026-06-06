@@ -25,6 +25,7 @@ Use these as the active command surface:
 bash scripts/dev/agent-preflight.sh
 bash build-deps.sh
 bash build.sh --no-open
+bash build-beta.sh '' <user>
 bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-e2e-smoke.sh
@@ -80,6 +81,10 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Casks/` — committed Homebrew cask release surface
 - `Resources/` — bundled app assets
 - `scripts/entrypoints/` — implementations behind the thin root command wrappers
+
+Dated audit and autoeval docs in `docs/` are point-in-time evidence. Use the
+current command map, local `CLAUDE.md`, and `.agents/test-matrix.yml` for live
+instructions unless a dated doc is explicitly the target of the task.
 
 ## Docs Map
 

@@ -107,13 +107,13 @@ private actor EventFileWriter {
         do {
             try FileManager.default.createPrivateDirectory(at: storageDir)
         } catch {
-            fputs("⚠️ EVENT | failed to create directory \(storageDir.path): \(error.localizedDescription)\n", stderr)
+            fputs("⚠️ EVENT | failed to create local event directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
             return false
         }
 
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-            print("📊 EVENT | created events.jsonl at \(fileURL.path)")
+            print("📊 EVENT | created events.jsonl")
         }
         FileManager.default.restrictFileToOwnerOnly(at: fileURL)
 
@@ -123,7 +123,7 @@ private actor EventFileWriter {
             isPrepared = true
             return true
         } catch {
-            fputs("⚠️ EVENT | failed to open FileHandle for \(fileURL.path): \(error.localizedDescription)\n", stderr)
+            fputs("⚠️ EVENT | failed to open local event log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
             return false
         }
     }

@@ -1,5 +1,10 @@
 # Dictation Start Time Autoeval - 2026-05-31
 
+> Update 2026-06-05: The kept input-override change from this run is historical.
+> AirPods route hardening later restored the fixed settle wait even when the
+> immediate format is `.ready`, because a ready snapshot can still be mid-route.
+> Treat the "skip ready settle delay" rows below as superseded.
+
 ## Goal
 
 Improve the ready-engine dictation start path, measured by `dictation_recording_fast_start` `start_ms`.

@@ -61,27 +61,30 @@ enum ExistingInstallModelPrefetchPolicy {
     ) -> Bool {
         ["dictations", "meetings"].contains { subdirectory in
             let directory = captureLibraryURL.appendingPathComponent(subdirectory, isDirectory: true)
-            return directoryContainsRegularFile(directory, fileManager: fileManager)
+            return directoryContainsDirectRegularFile(directory, fileManager: fileManager)
         }
     }
 
-    private static func directoryContainsRegularFile(
+    private static func directoryContainsDirectRegularFile(
         _ directory: URL,
         fileManager: FileManager
     ) -> Bool {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
-              isDirectory.boolValue,
-              let enumerator = fileManager.enumerator(
-                at: directory,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-              )
+              isDirectory.boolValue
         else {
             return false
         }
 
-        for case let fileURL as URL in enumerator {
+        guard let fileURLs = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        for fileURL in fileURLs {
             let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
             if values?.isRegularFile == true {
                 return true

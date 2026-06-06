@@ -953,6 +953,130 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finalized timeout system scratch should be removed after archive")
     }
 
+    func testLateStopTimeoutFinalizationWithoutRetainedArchiveUpdatesFailedQueueOnly() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let initialMicURL = scratchDirectory.appendingPathComponent("timeout-initial-mic.wav")
+        let finalMicURL = scratchDirectory.appendingPathComponent("timeout-final-mic.wav")
+        let failedId = UUID()
+        try writeMonoWAV(to: initialMicURL, duration: 2.5)
+        try writeMonoWAV(to: finalMicURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: initialMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedId,
+            archiveAudio: false
+        ))
+
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: finalMicURL,
+            systemAudioURL: nil
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.id, failedId)
+        XCTAssertEqual(failed.micAudioURL, finalMicURL)
+        XCTAssertNil(failed.systemAudioURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: initialMicURL.path), "without an archive, promotion should not delete older scratch audio")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finalMicURL.path), "promoted scratch audio should remain available for retry")
+    }
+
+    func testLateStopTimeoutFinalizationMissingFailedEntryDoesNotArchiveOrDeleteScratch() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("missing-entry-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("missing-entry-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertFalse(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: UUID(),
+            micAudioURL: micURL,
+            systemAudioURL: systemURL
+        ))
+
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "missing queue entry should not delete finalized mic scratch")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "missing queue entry should not delete finalized system scratch")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retainedAudioDirectory.path), "missing queue entry should not create retained audio")
+    }
+
+    func testLateStopTimeoutFinalizationRollsBackRetainedArchiveWhenPersistenceFails() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("rollback-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("rollback-system.wav")
+        let failedQueueURL = tempDirectory.appendingPathComponent("failed_transcriptions.json")
+        let failedId = UUID()
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedId,
+            archiveAudio: false
+        ))
+        try FileManager.default.removeItem(at: failedQueueURL)
+        try FileManager.default.createDirectory(at: failedQueueURL, withIntermediateDirectories: true)
+
+        XCTAssertFalse(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: micURL,
+            systemAudioURL: systemURL
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.micAudioURL, micURL)
+        XCTAssertEqual(failed.systemAudioURL, systemURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path), "persistence failure should leave finalized mic scratch in place")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "persistence failure should leave finalized system scratch in place")
+        let retainedChildren = (try? FileManager.default.contentsOfDirectory(
+            at: retainedAudioDirectory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        XCTAssertTrue(retainedChildren.isEmpty, "persistence failure should remove newly retained audio")
+    }
+
+    func testLateStopTimeoutFinalizationRejectsUnsafeFinalizedAudioWithoutArchive() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let safeMicURL = scratchDirectory.appendingPathComponent("safe-mic.wav")
+        let unsafeMicURL = tempDirectory.appendingPathComponent("unsafe-final-mic.wav")
+        let failedId = UUID()
+        try writeMonoWAV(to: safeMicURL, duration: 2.5)
+        try writeMonoWAV(to: unsafeMicURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: safeMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedId,
+            archiveAudio: false
+        ))
+
+        XCTAssertFalse(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: unsafeMicURL,
+            systemAudioURL: nil
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.micAudioURL, safeMicURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: safeMicURL.path), "unsafe promotion should not delete the original safe mic scratch")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unsafeMicURL.path), "unsafe finalized audio should not be deleted by failed-queue promotion")
+    }
+
     func testRetryFailedTranscriptionSuccessCreatesMarkdownAndClearsFailedQueue() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact.")

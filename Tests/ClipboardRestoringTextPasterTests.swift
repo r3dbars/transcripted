@@ -215,6 +215,55 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
+    await runSuite("ClipboardRestoringTextPaster.paste — covers slower consumers beyond the old fallback window") {
+        let existingClipboard = "synthetic existing clipboard"
+        let dictationText = "synthetic slow consumer dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedSlowPasteConsumerTest-\(UUID().uuidString)")
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: TranscriptedConstants.clipboardRestoreFallbackDelay
+            )
+        }
+
+        assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        let waitTask = Task { @MainActor in
+            await paster.waitForPendingClipboardRestore()
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        try? await Task.sleep(nanoseconds: 950_000_000)
+
+        let delayedRead = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            delayedRead,
+            dictationText,
+            "a target that reads after the old 900ms fallback should still get the dictation text"
+        )
+
+        let restoredClipboard = await waitTask.value
+        assertEqual(
+            restoredClipboard,
+            existingClipboard,
+            "slow-consumer pasteback should still restore the previous clipboard afterward"
+        )
+    }
+
     await runSuite("ClipboardRestoringTextPaster.waitForPendingClipboardRestore — waits for fallback restore") {
         let existingClipboard = "synthetic existing clipboard"
         let pasteText = "synthetic paste text"

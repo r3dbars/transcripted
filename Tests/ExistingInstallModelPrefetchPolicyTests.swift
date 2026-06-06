@@ -159,6 +159,105 @@ func testExistingInstallModelPrefetchPolicy() {
             "saved dictation or meeting notes should count as existing content"
         )
     }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores nested archive files") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true)
+                .appendingPathComponent("Synthetic_audio", isDirectory: true)
+                .appendingPathComponent("recording.m4a", isDirectory: false)
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "startup prefetch detection should avoid recursively walking nested audio archives"
+        )
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("Meeting.md", isDirectory: false)
+        )
+
+        assertTrue(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "direct saved meeting files should still count as existing content"
+        )
+    }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores files outside capture buckets") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("loose-note.md", isDirectory: false)
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "files outside dictations or meetings should not count as capture history"
+        )
+    }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores hidden direct files") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        writeExistingInstallTestFile(
+            root.appendingPathComponent("dictations", isDirectory: true)
+                .appendingPathComponent(".hidden.md", isDirectory: false)
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "hidden files should not make a fresh install look like it has saved captures"
+        )
+    }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — ignores direct child directories") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try? FileManager.default.createDirectory(
+            at: root.appendingPathComponent("meetings", isDirectory: true)
+                .appendingPathComponent("audio", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        assertFalse(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "top-level capture subdirectories should not count without a direct saved file"
+        )
+    }
+
+    runSuite("ExistingInstallModelPrefetchPolicy.captureLibraryHasContent — visible direct files win with ignored siblings") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ExistingInstallModelPrefetchPolicyTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let dictations = root.appendingPathComponent("dictations", isDirectory: true)
+
+        try? FileManager.default.createDirectory(
+            at: dictations.appendingPathComponent("drafts", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        writeExistingInstallTestFile(
+            dictations.appendingPathComponent(".hidden.md", isDirectory: false)
+        )
+        writeExistingInstallTestFile(
+            dictations.appendingPathComponent("saved.md", isDirectory: false)
+        )
+
+        assertTrue(
+            ExistingInstallModelPrefetchPolicy.captureLibraryHasContent(at: root),
+            "a visible direct saved file should still count when ignored siblings are present"
+        )
+    }
 }
 
 private func writeExistingInstallTestFile(_ url: URL) {

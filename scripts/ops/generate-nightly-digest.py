@@ -67,6 +67,16 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
 )
+POSTHOG_FIRST_VALUE_EVENTS = (
+    "dictation_completed",
+    "onboarding_first_dictation_saved",
+    "meeting_transcript_saved",
+    "onboarding_agent_cta_clicked",
+    "activation_artifact_action_clicked",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "activation_return_proxy_observed",
+)
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
     "https://eu.posthog.com",
@@ -1134,16 +1144,19 @@ def query_posthog_dau() -> dict[str, Any]:
     host_error = posthog_host_error(host)
     if host_error:
         return {"dau": None, "event_count": None, "error": host_error}
-    event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+    active_event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+    first_value_event_list = ", ".join(sql_quote(event) for event in POSTHOG_FIRST_VALUE_EVENTS)
+    query_event_list = ", ".join(sql_quote(event) for event in dict.fromkeys(POSTHOG_ACTIVE_EVENTS + POSTHOG_FIRST_VALUE_EVENTS))
 
     current_query = (
         "SELECT "
         "uniq(distinct_id) AS dau, "
         "countIf(event = 'app_launched') AS launches_24h, "
-        "count() AS workflow_events_24h "
+        f"countIf(event IN ({active_event_list})) AS workflow_events_24h, "
+        f"countIf(event IN ({first_value_event_list})) AS first_value_events_24h "
         "FROM events "
         "WHERE timestamp >= now() - INTERVAL 24 HOUR "
-        f"AND event IN ({event_list})"
+        f"AND event IN ({query_event_list})"
     )
     daily_query = (
         "SELECT "
@@ -1151,7 +1164,7 @@ def query_posthog_dau() -> dict[str, Any]:
         "uniq(distinct_id) AS active_devices "
         "FROM events "
         "WHERE timestamp >= now() - INTERVAL 30 DAY "
-        f"AND event IN ({event_list}) "
+        f"AND event IN ({query_event_list}) "
         "GROUP BY day "
         "ORDER BY day ASC"
     )
@@ -1168,11 +1181,20 @@ def query_posthog_dau() -> dict[str, Any]:
     try:
         row = (payload.get("results") or payload.get("data") or [])[0]
         dau = int(row[0])
+        launch_count = int(row[1]) if len(row) > 1 and row[1] is not None else None
         event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
+        first_value_event_count = int(row[3]) if len(row) > 3 and row[3] is not None else None
     except (IndexError, TypeError, ValueError):
         return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
     history = build_dau_history(daily_payload.get("results") or daily_payload.get("data") or [], datetime.now(timezone.utc).date())
-    return {"dau": dau, "event_count": event_count, "history": history, "error": None}
+    return {
+        "dau": dau,
+        "launch_count": launch_count,
+        "event_count": event_count,
+        "first_value_event_count": first_value_event_count,
+        "history": history,
+        "error": None,
+    }
 
 
 def build_dau_status(
@@ -1228,6 +1250,12 @@ def build_dau_status(
         confidence = "Low" if ops_tokens_incomplete else "Medium"
 
     proxy_parts: list[str] = []
+    first_value_event_count = posthog_dau.get("first_value_event_count") if posthog_dau else None
+    if isinstance(first_value_event_count, int):
+        proxy_parts.append(f"{first_value_event_count} first-value events in the last 24 hours")
+    launch_count = posthog_dau.get("launch_count") if posthog_dau else None
+    if isinstance(launch_count, int):
+        proxy_parts.append(f"{launch_count} app launches in the last 24 hours")
     event_count = posthog_dau.get("event_count") if posthog_dau else None
     if isinstance(event_count, int):
         proxy_parts.append(f"{event_count} PostHog events in the last 24 hours")
@@ -1240,7 +1268,7 @@ def build_dau_status(
     proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
 
     if exact_source == "PostHog":
-        note = "Exact DAU came from PostHog active workflow events for the last 24 hours."
+        note = "Exact DAU came from PostHog active workflow and first-value events for the last 24 hours."
     elif exact_dau is not None:
         note = "Exact DAU came from a nightly automation memory entry."
     elif posthog_dau and posthog_dau.get("error"):
@@ -1254,6 +1282,14 @@ def build_dau_status(
         "goal": f"{DAU_GOAL:,} daily active users",
         "current": current,
         "gap": gap,
+        "first_value": f"{first_value_event_count} events" if isinstance(first_value_event_count, int) else "Unknown",
+        "first_value_note": "PostHog last 24 hours"
+        if isinstance(first_value_event_count, int)
+        else "No first-value count in this run",
+        "launches": f"{launch_count} launches" if isinstance(launch_count, int) else "Unknown",
+        "launch_note": "PostHog last 24 hours"
+        if isinstance(launch_count, int)
+        else "No launch count in this run",
         "proxy": proxy,
         "confidence": confidence,
         "note": note,
@@ -1366,6 +1402,8 @@ def first_screen_payload(
         "do_first": ceo_brief["do_now"],
         "current_dau": dau_status["current"],
         "gap_to_1000_dau": dau_status["gap"],
+        "first_value": dau_status["first_value"],
+        "first_value_note": dau_status["first_value_note"],
         "open_nightly_pr_count": open_pr_count,
         "human_action_count": human_action_count,
         "blocked": blocked_count > 0,
@@ -2135,6 +2173,8 @@ a:hover {{ text-decoration: underline; }}
   <section class="summary-strip">
     <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
     <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
+    <div><span>Launches</span><strong>{escape(dau.get('launches', 'Unknown'))}</strong><small>{escape(dau.get('launch_note', ''))}</small></div>
+    <div><span>First-value</span><strong>{escape(dau.get('first_value', 'Unknown'))}</strong><small>{escape(dau.get('first_value_note', ''))}</small></div>
     <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
     <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
     <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
@@ -2341,6 +2381,15 @@ def run_self_test() -> None:
         assert normalize_posthog_host("https://us.i.posthog.com") == "https://us.posthog.com"
         assert posthog_host_error("http://posthog.invalid") == "PostHog host must use HTTPS"
         assert posthog_host_error("https://example.invalid") is not None
+        dau_with_first_value = build_dau_status(
+            {},
+            False,
+            {"dau": 4, "launch_count": 9, "event_count": 12, "first_value_event_count": 7, "error": None},
+        )
+        assert dau_with_first_value["first_value"] == "7 events"
+        assert dau_with_first_value["launches"] == "9 launches"
+        assert "7 first-value events" in dau_with_first_value["proxy"]
+        assert "9 app launches" in dau_with_first_value["proxy"]
         health_probe_workflow_events = {
             "app_launched",
             "app_unclean_shutdown_detected",
@@ -2365,6 +2414,12 @@ def run_self_test() -> None:
             "activation_return_proxy_observed",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
+        assert {
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed",
+        }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
         assert Path(paths["latest_json"]).exists()

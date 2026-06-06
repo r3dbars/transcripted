@@ -18,12 +18,27 @@ func testTranscriptedConstants() async {
             "fallback restore should give slow paste consumers longer to read the borrowed dictation text"
         )
         assertTrue(
-            TranscriptedConstants.clipboardRestoreFallbackDelay <= 1_000_000_000,
+            TranscriptedConstants.clipboardRestoreFallbackDelay >= 2_000_000_000,
+            "fallback restore should cover slower apps that consume Cmd+V after the old sub-second window"
+        )
+        assertTrue(
+            TranscriptedConstants.clipboardRestoreFallbackDelay <= 3_000_000_000,
             "fallback restore should still return the user's clipboard promptly when no paste consumer reads it"
         )
         assertTrue(
             TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,
             "auto-enter should stay tuned for a fast opt-in stop path"
+        )
+    }
+
+    runSuite("TranscriptedConstants keeps no-speech recovery copy readable") {
+        assertTrue(
+            TranscriptedConstants.noSpeechDismissDelay >= 2_000_000_000,
+            "no-speech overlay should stay visible long enough to read the physical-key recovery hint"
+        )
+        assertTrue(
+            TranscriptedConstants.noSpeechDismissDelay < TranscriptedConstants.errorDismissDelay,
+            "no-speech recovery should still dismiss faster than regular error states"
         )
     }
 
