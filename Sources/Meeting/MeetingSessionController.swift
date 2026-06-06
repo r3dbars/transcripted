@@ -1282,9 +1282,36 @@ final class MeetingSessionController: ObservableObject {
             meetingTitle: title,
             splitLocalSpeakers: true,
             replacementTranscriptURL: transcriptURL,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
+                self?.clearGeneratedSummaryAfterReplacementRetranscription(for: committedTranscriptURL)
+            }
         )
         return true
+    }
+
+    private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
+        do {
+            guard try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL) else {
+                return
+            }
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidated",
+                message: "Removed stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidation_failed",
+                message: "Failed to remove stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext(extra: [
+                    "error_type": "\(type(of: error))"
+                ])
+            )
+        }
     }
 
     @discardableResult

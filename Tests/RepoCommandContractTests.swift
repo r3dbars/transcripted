@@ -2100,6 +2100,29 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - replacement retranscription clears stale local summaries") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+        let summaryContents = readRepoTextFile("Sources/Meeting/LocalMeetingSummarizer.swift")
+
+        assertTrue(
+            managerContents.contains("onReplacementTranscriptCommitted")
+                && managerContents.contains("if replacementTranscriptURL != nil {\n                        onReplacementTranscriptCommitted?(transcriptURL)"),
+            "Core should notify the app after a replacement transcript commits"
+        )
+        assertTrue(
+            controllerContents.contains("onReplacementTranscriptCommitted:")
+                && controllerContents.contains("clearGeneratedSummaryAfterReplacementRetranscription"),
+            "saved-meeting replacement should clear stale local summary sidecars after commit"
+        )
+        assertTrue(
+            summaryContents.contains("static func removeGeneratedSummary")
+                && summaryContents.contains("values[\"capture_type\"] == \"meeting_summary\"")
+                && summaryContents.contains("values[\"source_transcript\"] == transcriptURL.lastPathComponent"),
+            "local summary cleanup should only remove generated summaries for the matching transcript"
+        )
+    }
+
     runSuite("Repo command contract - Home failed meeting actions surface failures") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")

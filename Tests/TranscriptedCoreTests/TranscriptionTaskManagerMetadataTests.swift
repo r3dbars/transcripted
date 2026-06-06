@@ -1528,6 +1528,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
         try writeMonoWAV(to: micURL, duration: 2.5)
         try writeMonoWAV(to: systemURL, duration: 2.5)
+        var committedReplacementURLs: [URL] = []
 
         manager.startSavedAudioRetranscription(
             micURL: micURL,
@@ -1536,7 +1537,10 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             meetingTitle: "Reviewed Call",
             splitLocalSpeakers: true,
             replacementTranscriptURL: originalTranscriptURL,
-            recordingDate: originalRecordingDate
+            recordingDate: originalRecordingDate,
+            onReplacementTranscriptCommitted: { url in
+                committedReplacementURLs.append(url)
+            }
         )
 
         try await waitUntil {
@@ -1580,6 +1584,11 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             statsStore.recordedSessions.map(\.id),
             [originalTranscriptId.uuidString],
             "replacement retranscription should update stats for the existing transcript ID instead of creating a second history row"
+        )
+        XCTAssertEqual(
+            committedReplacementURLs,
+            [originalTranscriptURL],
+            "replacement retranscription should notify the app only after the selected transcript is committed"
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
