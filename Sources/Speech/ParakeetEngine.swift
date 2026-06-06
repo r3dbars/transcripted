@@ -2293,12 +2293,14 @@ class ParakeetEngine: ObservableObject {
             self.pendingSamplesLock.withLock {
                 self.pendingSamples.removeAll(keepingCapacity: true)
             }
+            self.isRecording = false
+            self.audioLevel = 0
+            self.configChangeWasRecording = false
+            self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
             await self.eouManager?.reset()
             await self.removeRecordingTap()
             await self.stopAudioEngine()
             self.isEnginePrewarmed = false
-            self.isRecording = false
-            self.audioLevel = 0
 
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled else { return }
