@@ -77,6 +77,7 @@ class ParakeetEngine: ObservableObject {
     private var modelFilePrefetchTask: Task<URL, Error>?
     private var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
+    private var zombieRecoveryRestartPending = false
     private var asrInferenceActivity = ParakeetASRInferenceActivityState()
     private var asrInferenceHandoffCount = 0
     private var asrInferenceWaiters: [CheckedContinuation<Void, Never>] = []
@@ -2293,6 +2294,7 @@ class ParakeetEngine: ObservableObject {
             self.pendingSamplesLock.withLock {
                 self.pendingSamples.removeAll(keepingCapacity: true)
             }
+            self.zombieRecoveryRestartPending = true
             self.isRecording = false
             self.audioLevel = 0
             self.configChangeWasRecording = false
@@ -2303,7 +2305,11 @@ class ParakeetEngine: ObservableObject {
             self.isEnginePrewarmed = false
 
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, self.zombieRecoveryRestartPending else {
+                self.zombieRecoveryRestartPending = false
+                return
+            }
+            self.zombieRecoveryRestartPending = false
 
             // Retry once — isRecoveryAttempt prevents another watchdog
             if await self.startRecording(isRecoveryAttempt: true) {
@@ -2322,6 +2328,12 @@ class ParakeetEngine: ObservableObject {
 
     func stopRecording() async {
         guard isRecording else {
+            if zombieRecoveryRestartPending {
+                audioGraphGeneration += 1
+                cancelAudioWatchdog()
+                clearRecoveredRecordingTimeline(keepingCapacity: true)
+                return
+            }
             if audioStartInProgress {
                 audioGraphGeneration += 1
             } else {
@@ -2976,6 +2988,7 @@ class ParakeetEngine: ObservableObject {
     private func cancelAudioWatchdog() {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
+        zombieRecoveryRestartPending = false
     }
 
     func cleanup() {
