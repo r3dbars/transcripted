@@ -7,6 +7,7 @@ func testAudioAutomationCoverageContract() {
         let expectedSyntheticRows = [
             "synthetic-dictation-pasteback-lifecycle",
             "synthetic-meeting-mic-system-split",
+            "synthetic-mic-output-mismatch-diagnostics",
             "synthetic-webrtc-zoom-contention-proxy",
             "synthetic-bluetooth-airpods-route-settling-proxy",
             "synthetic-audio-privacy-security"

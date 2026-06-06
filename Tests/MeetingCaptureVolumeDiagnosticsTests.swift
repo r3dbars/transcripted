@@ -90,6 +90,38 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["output_ducking_detected"], "true", "during-recording output drops should still mark possible ducking")
     }
 
+    runSuite("MeetingCaptureVolumeDiagnostics keeps mic/output mismatch facts separate") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "captured_input_volume_before": "0.650",
+                "captured_input_volume_during": "0.650",
+                "default_input_volume_before": "0.500",
+                "default_input_volume_during": "0.500",
+                "default_output_volume_before": "0.750",
+                "default_output_volume_during": "0.750",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_during": "0.750",
+                "input_device_class": "built_in",
+                "mic_processed_peak": "0.30000",
+                "mic_raw_peak": "0.02000",
+                "output_device_class": "bluetooth",
+                "system_output_device_class": "bluetooth",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.500",
+                "default_output_volume_after": "0.750",
+                "default_system_output_volume_after": "0.400",
+            ]
+        )
+
+        assertEqual(context["captured_input_volume_dropped"], "false", "selected mic scalar should not inherit output-route drops")
+        assertEqual(context["default_input_volume_dropped"], "false", "default input scalar should stay separate from output volume")
+        assertEqual(context["default_output_volume_dropped"], "false", "normal output volume should not hide system-output ducking")
+        assertEqual(context["default_system_output_volume_dropped"], "true", "system output drop should stay queryable")
+        assertEqual(context["output_ducking_detected"], "true", "mismatched Bluetooth output ducking should be visible")
+        assertEqual(context["attenuation_kind"], "voice_processed", "quiet mic without an input scalar drop should stay classified as voice-processing attenuation")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics classifies quiet mic recovery") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [

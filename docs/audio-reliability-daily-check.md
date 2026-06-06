@@ -122,9 +122,10 @@ matrix for the state-machine contract:
 - the seven meeting-failure questions
 
 It also writes an audio route automation proxy matrix for dictation pasteback,
-meeting mic/system audio, WebRTC/Zoom contention, Bluetooth/AirPods settling,
-and privacy/security. Those rows document deterministic coverage only; real
-Zoom/Meet/AirPods volume proof still uses `docs/qa-issue-500-meeting-audio.md`.
+meeting mic/system audio, mic/output mismatch diagnostics, WebRTC/Zoom
+contention, Bluetooth/AirPods settling, and privacy/security. Those rows
+document deterministic coverage only; real Zoom/Meet/AirPods volume proof still
+uses `docs/qa-issue-500-meeting-audio.md`.
 
 The same seven-field contract is covered by fast tests in:
 
