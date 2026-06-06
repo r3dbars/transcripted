@@ -58,6 +58,11 @@ func testRepoCommandContract() {
                 && contents.contains("lastSeen=\\(.lastSeen"),
             "Sentry probe should show aggregate issue counts and freshness for operator triage"
         )
+        assertTrue(
+            contents.contains("sentry_test_event")
+                && contents.contains("select(((.title // \"\") | contains(\"sentry_test_event\")) | not)"),
+            "Sentry probe should filter manual verification events out of health rollups"
+        )
         assertFalse(
             contents.contains("/events/"),
             "Sentry health probe should not fetch raw event payloads for the nightly rollup"

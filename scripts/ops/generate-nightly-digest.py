@@ -1181,6 +1181,7 @@ def query_posthog_dau() -> dict[str, Any]:
     try:
         row = (payload.get("results") or payload.get("data") or [])[0]
         dau = int(row[0])
+        launch_count = int(row[1]) if len(row) > 1 and row[1] is not None else None
         event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
         first_value_event_count = int(row[3]) if len(row) > 3 and row[3] is not None else None
     except (IndexError, TypeError, ValueError):
@@ -1188,6 +1189,7 @@ def query_posthog_dau() -> dict[str, Any]:
     history = build_dau_history(daily_payload.get("results") or daily_payload.get("data") or [], datetime.now(timezone.utc).date())
     return {
         "dau": dau,
+        "launch_count": launch_count,
         "event_count": event_count,
         "first_value_event_count": first_value_event_count,
         "history": history,
@@ -1251,6 +1253,9 @@ def build_dau_status(
     first_value_event_count = posthog_dau.get("first_value_event_count") if posthog_dau else None
     if isinstance(first_value_event_count, int):
         proxy_parts.append(f"{first_value_event_count} first-value events in the last 24 hours")
+    launch_count = posthog_dau.get("launch_count") if posthog_dau else None
+    if isinstance(launch_count, int):
+        proxy_parts.append(f"{launch_count} app launches in the last 24 hours")
     event_count = posthog_dau.get("event_count") if posthog_dau else None
     if isinstance(event_count, int):
         proxy_parts.append(f"{event_count} PostHog events in the last 24 hours")
@@ -1281,6 +1286,10 @@ def build_dau_status(
         "first_value_note": "PostHog last 24 hours"
         if isinstance(first_value_event_count, int)
         else "No first-value count in this run",
+        "launches": f"{launch_count} launches" if isinstance(launch_count, int) else "Unknown",
+        "launch_note": "PostHog last 24 hours"
+        if isinstance(launch_count, int)
+        else "No launch count in this run",
         "proxy": proxy,
         "confidence": confidence,
         "note": note,
@@ -2164,6 +2173,7 @@ a:hover {{ text-decoration: underline; }}
   <section class="summary-strip">
     <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
     <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
+    <div><span>Launches</span><strong>{escape(dau.get('launches', 'Unknown'))}</strong><small>{escape(dau.get('launch_note', ''))}</small></div>
     <div><span>First-value</span><strong>{escape(dau.get('first_value', 'Unknown'))}</strong><small>{escape(dau.get('first_value_note', ''))}</small></div>
     <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
     <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
@@ -2374,10 +2384,12 @@ def run_self_test() -> None:
         dau_with_first_value = build_dau_status(
             {},
             False,
-            {"dau": 4, "event_count": 12, "first_value_event_count": 7, "error": None},
+            {"dau": 4, "launch_count": 9, "event_count": 12, "first_value_event_count": 7, "error": None},
         )
         assert dau_with_first_value["first_value"] == "7 events"
+        assert dau_with_first_value["launches"] == "9 launches"
         assert "7 first-value events" in dau_with_first_value["proxy"]
+        assert "9 app launches" in dau_with_first_value["proxy"]
         health_probe_workflow_events = {
             "app_launched",
             "app_unclean_shutdown_detected",
