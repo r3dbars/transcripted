@@ -533,6 +533,7 @@ extension TranscriptionTaskManager {
     private struct ReplacementTranscriptRollback: Sendable {
         let url: URL
         let originalData: Data
+        private let originalFileDates: OriginalFileDates?
         let transcriptId: UUID?
 
         static func capture(for targetURL: URL?) throws -> ReplacementTranscriptRollback? {
@@ -545,11 +546,13 @@ extension TranscriptionTaskManager {
             }
 
             let originalData = try Data(contentsOf: targetURL)
+            let originalFileDates = OriginalFileDates.capture(for: targetURL)
             let values = try? TranscriptFrontmatter.readValues(from: targetURL)
             let transcriptId = replacementTranscriptId(from: values)
             return ReplacementTranscriptRollback(
                 url: targetURL,
                 originalData: originalData,
+                originalFileDates: originalFileDates,
                 transcriptId: transcriptId
             )
         }
@@ -558,10 +561,46 @@ extension TranscriptionTaskManager {
             do {
                 try originalData.write(to: url, options: .atomic)
                 FileManager.default.restrictToOwnerOnly(atPath: url.path)
+                originalFileDates?.restore(to: url)
             } catch {
                 AppLogger.pipeline.error("Failed to restore cancelled replacement transcript", [
                     "error": error.localizedDescription
                 ])
+            }
+        }
+
+        private struct OriginalFileDates: Sendable {
+            let creationDate: Date?
+            let modificationDate: Date?
+
+            static func capture(for url: URL) -> OriginalFileDates? {
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                    return nil
+                }
+
+                return OriginalFileDates(
+                    creationDate: attributes[.creationDate] as? Date,
+                    modificationDate: attributes[.modificationDate] as? Date
+                )
+            }
+
+            func restore(to url: URL) {
+                var attributes: [FileAttributeKey: Any] = [:]
+                if let creationDate {
+                    attributes[.creationDate] = creationDate
+                }
+                if let modificationDate {
+                    attributes[.modificationDate] = modificationDate
+                }
+                guard !attributes.isEmpty else { return }
+
+                do {
+                    try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+                } catch {
+                    AppLogger.pipeline.warning("Failed to restore replacement rollback file dates", [
+                        "error_type": String(describing: type(of: error))
+                    ])
+                }
             }
         }
 

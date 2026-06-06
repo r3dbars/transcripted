@@ -2075,6 +2075,11 @@ func testRepoCommandContract() {
             "replacement retranscription cancellation should restore the selected original transcript"
         )
         assertTrue(
+            runnerContents.contains("let originalFileDates = OriginalFileDates.capture(for: targetURL)")
+                && runnerContents.contains("originalFileDates?.restore(to: url)"),
+            "replacement retranscription rollback should preserve the selected transcript's file dates for Home ordering"
+        )
+        assertTrue(
             runnerContents.contains("speakerClipURLs: namingEntries.map(\\.clipURL),\n                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,\n                replacementTranscriptRollback: replacementTranscriptRollback"),
             "replacement retranscription cancellation during speaker clip extraction should restore the selected original transcript"
         )
