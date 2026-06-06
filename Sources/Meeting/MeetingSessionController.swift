@@ -152,6 +152,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var displayStatus: DisplayStatus = .idle
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
+    @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
@@ -1217,7 +1218,9 @@ final class MeetingSessionController: ObservableObject {
     func retranscribeSavedMeeting(
         micAudioURL: URL?,
         systemAudioURL: URL,
-        title: String?
+        title: String?,
+        transcriptURL: URL? = nil,
+        recordingDate: Date? = nil
     ) async -> Bool {
         guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
             state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
@@ -1278,9 +1281,43 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true
+            splitLocalSpeakers: true,
+            replacementTranscriptURL: transcriptURL,
+            recordingDate: recordingDate,
+            onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
+                self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
+            }
         )
         return true
+    }
+
+    private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
+        clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
+        savedMeetingReplacementCommitCount &+= 1
+    }
+
+    private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
+        do {
+            guard try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL) else {
+                return
+            }
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidated",
+                message: "Removed stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidation_failed",
+                message: "Failed to remove stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext(extra: [
+                    "error_type": "\(type(of: error))"
+                ])
+            )
+        }
     }
 
     @discardableResult

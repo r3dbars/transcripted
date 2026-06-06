@@ -192,10 +192,12 @@ public class TranscriptSaver {
         speakerStore: (any SpeakerStore)? = nil,
         statsStore: (any StatsStore)? = nil,
         recordingDate: Date? = nil,
+        targetURL: URL? = nil,
         transcriptionEngine: SpeechTranscriptionEngineDescriptor,
         formatOptions: TranscriptFormatOptions = .default
     ) -> URL? {
-        let saveDir = directory ?? defaultSaveDirectory
+        let explicitFileURL = targetURL
+        let saveDir = explicitFileURL?.deletingLastPathComponent() ?? directory ?? defaultSaveDirectory
 
         do {
             try FileManager.default.createDirectory(at: saveDir, withIntermediateDirectories: true)
@@ -213,12 +215,19 @@ public class TranscriptSaver {
         }
 
         let transcriptDate = recordingDate ?? Date()
-        let timestamp = DateFormattingHelper.formatFilename(transcriptDate)
-        var fileURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: fileURL.path) {
-            fileURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
-            counter += 1
+        let fileURL: URL
+        let replacementFileDates = ExistingFileDates.capture(for: explicitFileURL)
+        if let explicitFileURL {
+            fileURL = explicitFileURL
+        } else {
+            let timestamp = DateFormattingHelper.formatFilename(transcriptDate)
+            var candidateURL = saveDir.appendingPathComponent("Call_\(timestamp).md")
+            var counter = 1
+            while FileManager.default.fileExists(atPath: candidateURL.path) {
+                candidateURL = saveDir.appendingPathComponent("Call_\(timestamp)_\(counter).md")
+                counter += 1
+            }
+            fileURL = candidateURL
         }
 
         let markdown = formatTranscriptMarkdown(
@@ -239,6 +248,7 @@ public class TranscriptSaver {
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+                replacementFileDates?.restore(to: fileURL)
 
                 AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
@@ -268,6 +278,43 @@ public class TranscriptSaver {
         }
 
         return savedURL
+    }
+
+    private struct ExistingFileDates {
+        let creationDate: Date?
+        let modificationDate: Date?
+
+        static func capture(for url: URL?) -> ExistingFileDates? {
+            guard let url,
+                  FileManager.default.fileExists(atPath: url.path),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                return nil
+            }
+
+            return ExistingFileDates(
+                creationDate: attributes[.creationDate] as? Date,
+                modificationDate: attributes[.modificationDate] as? Date
+            )
+        }
+
+        func restore(to url: URL) {
+            var attributes: [FileAttributeKey: Any] = [:]
+            if let creationDate {
+                attributes[.creationDate] = creationDate
+            }
+            if let modificationDate {
+                attributes[.modificationDate] = modificationDate
+            }
+            guard !attributes.isEmpty else { return }
+
+            do {
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+            } catch {
+                AppLogger.pipeline.warning("Failed to restore replacement transcript file dates", [
+                    "error_type": String(describing: type(of: error))
+                ])
+            }
+        }
     }
 }
 

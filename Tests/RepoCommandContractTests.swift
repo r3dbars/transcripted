@@ -2089,6 +2089,86 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - replacement retranscription cancellation keeps original transcript") {
+        let runnerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+
+        assertTrue(
+            managerContents.contains("targetTranscriptURL: replacementTranscriptURL")
+                && managerContents.contains("archiveRecordingAudio: replacementTranscriptURL == nil"),
+            "saved-audio replacement should overwrite the selected transcript without archiving duplicate retained audio"
+        )
+        assertTrue(
+            runnerContents.contains("let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)")
+                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()"),
+            "replacement retranscription should snapshot the selected transcript and reuse its existing ID"
+        )
+        assertTrue(
+            runnerContents.contains("replacementTranscriptRollback: replacementTranscriptRollback")
+                && runnerContents.contains("replacementTranscriptRollback.restore()"),
+            "replacement retranscription cancellation should restore the selected original transcript"
+        )
+        assertTrue(
+            runnerContents.contains("let originalFileDates = OriginalFileDates.capture(for: targetURL)")
+                && runnerContents.contains("originalFileDates?.restore(to: url)"),
+            "replacement retranscription rollback should preserve the selected transcript's file dates for Home ordering"
+        )
+        assertTrue(
+            runnerContents.contains("speakerClipURLs: namingEntries.map(\\.clipURL),\n                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,\n                replacementTranscriptRollback: replacementTranscriptRollback"),
+            "replacement retranscription cancellation during speaker clip extraction should restore the selected original transcript"
+        )
+        assertTrue(
+            runnerContents.contains("if deleteSavedTranscript {")
+                && runnerContents.contains("try? FileManager.default.removeItem(at: savedURL)"),
+            "new cancelled transcripts should still be removed when they are not replacing an existing file"
+        )
+    }
+
+    runSuite("Repo command contract - replacement stats do not double-count existing recordings") {
+        let statsContents = readRepoTextFile("Sources/TranscriptedCore/Stats/StatsDatabase.swift")
+
+        assertTrue(
+            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)\n                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)")
+                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: storedMetadata)"),
+            "stats recording should detect same-ID and same-path replacements before updating daily totals"
+        )
+        assertTrue(
+            statsContents.contains("recordingCountDelta: 0")
+                && statsContents.contains("durationDelta: metadata.durationSeconds - existing.durationSeconds"),
+            "same-day replacement stats should adjust duration without incrementing recording count"
+        )
+    }
+
+    runSuite("Repo command contract - replacement retranscription clears stale local summaries") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let summaryContents = readRepoTextFile("Sources/Meeting/LocalMeetingSummarizer.swift")
+
+        assertTrue(
+            managerContents.contains("onReplacementTranscriptCommitted")
+                && managerContents.contains("if replacementTranscriptURL != nil {\n                        onReplacementTranscriptCommitted?(transcriptURL)"),
+            "Core should notify the app after a replacement transcript commits"
+        )
+        assertTrue(
+            controllerContents.contains("onReplacementTranscriptCommitted:")
+                && controllerContents.contains("handleReplacementTranscriptCommitted")
+                && controllerContents.contains("savedMeetingReplacementCommitCount &+= 1"),
+            "saved-meeting replacement should clear stale local summary sidecars and emit a same-URL refresh signal after commit"
+        )
+        assertTrue(
+            settingsContents.contains(".onChange(of: meetingSession.savedMeetingReplacementCommitCount)")
+                && settingsContents.contains("speakerPeopleModel.refresh()"),
+            "Settings Home should refresh meeting rows and speaker review state after same-URL replacement retranscription"
+        )
+        assertTrue(
+            summaryContents.contains("static func removeGeneratedSummary")
+                && summaryContents.contains("values[\"capture_type\"] == \"meeting_summary\"")
+                && summaryContents.contains("values[\"source_transcript\"] == transcriptURL.lastPathComponent"),
+            "local summary cleanup should only remove generated summaries for the matching transcript"
+        )
+    }
+
     runSuite("Repo command contract - Home failed meeting actions surface failures") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")

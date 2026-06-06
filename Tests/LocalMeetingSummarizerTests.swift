@@ -160,6 +160,50 @@ func testLocalMeetingSummarizer() async {
         )
     }
 
+    runSuite("LocalMeetingSummaryStore removes only generated summaries for the matching transcript") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryRemovalTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Call.md")
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+        let unrelatedURL = root.appendingPathComponent("Other.summary.md")
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try "transcript".write(to: transcriptURL, atomically: true, encoding: .utf8)
+            try """
+            ---
+            capture_type: meeting_summary
+            source_transcript: "Call.md"
+            ---
+
+            # Summary
+            Old summary.
+            """.write(to: summaryURL, atomically: true, encoding: .utf8)
+            try """
+            ---
+            capture_type: meeting_summary
+            source_transcript: "Different.md"
+            ---
+
+            # Summary
+            Other summary.
+            """.write(to: unrelatedURL, atomically: true, encoding: .utf8)
+
+            assertTrue(
+                try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL),
+                "matching generated summary should be removed"
+            )
+            assertFalse(FileManager.default.fileExists(atPath: summaryURL.path), "matching summary sidecar should be gone")
+            assertTrue(FileManager.default.fileExists(atPath: unrelatedURL.path), "unrelated summary sidecar should stay")
+            assertFalse(
+                try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL),
+                "removing an already-cleared summary should be a no-op"
+            )
+        } catch {
+            assertionFailure("summary removal fixture should not throw: \(error)")
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
+
     runSuite("LocalMeetingSummaryNormalizer restores missing sections") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("# Summary\nUseful brief.")
         for heading in [
