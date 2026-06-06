@@ -216,6 +216,7 @@ public class TranscriptSaver {
 
         let transcriptDate = recordingDate ?? Date()
         let fileURL: URL
+        let replacementFileDates = ExistingFileDates.capture(for: explicitFileURL)
         if let explicitFileURL {
             fileURL = explicitFileURL
         } else {
@@ -247,6 +248,7 @@ public class TranscriptSaver {
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+                replacementFileDates?.restore(to: fileURL)
 
                 AppLogger.pipeline.info("Transcript saved", ["path": fileURL.path])
 
@@ -276,6 +278,43 @@ public class TranscriptSaver {
         }
 
         return savedURL
+    }
+
+    private struct ExistingFileDates {
+        let creationDate: Date?
+        let modificationDate: Date?
+
+        static func capture(for url: URL?) -> ExistingFileDates? {
+            guard let url,
+                  FileManager.default.fileExists(atPath: url.path),
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                return nil
+            }
+
+            return ExistingFileDates(
+                creationDate: attributes[.creationDate] as? Date,
+                modificationDate: attributes[.modificationDate] as? Date
+            )
+        }
+
+        func restore(to url: URL) {
+            var attributes: [FileAttributeKey: Any] = [:]
+            if let creationDate {
+                attributes[.creationDate] = creationDate
+            }
+            if let modificationDate {
+                attributes[.modificationDate] = modificationDate
+            }
+            guard !attributes.isEmpty else { return }
+
+            do {
+                try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+            } catch {
+                AppLogger.pipeline.warning("Failed to restore replacement transcript file dates", [
+                    "error_type": String(describing: type(of: error))
+                ])
+            }
+        }
     }
 }
 
