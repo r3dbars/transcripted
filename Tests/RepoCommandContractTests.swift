@@ -2433,12 +2433,13 @@ func testRepoCommandContract() {
         )
 
         assertTrue(
-            deleteBlock.contains("MeetingAudioPlayback.shared.stop()"),
-            "Home delete should stop retained-audio playback before deleting selected or duplicate meeting files"
+            deleteBlock.contains("HomeMeetingDeletion.plan(for: item)")
+                && deleteBlock.contains("MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))"),
+            "Home delete should stop retained-audio playback only when the active attachment is part of the planned deletion"
         )
         assertTrue(
             deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
-                deleteBlock.contains("try HomeMeetingDeletion.delete(item)") &&
+                deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
                 deleteBlock.contains("_ = try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
         )

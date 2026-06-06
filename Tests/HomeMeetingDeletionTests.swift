@@ -80,6 +80,13 @@ func testHomeMeetingDeletion() {
                 assertionFailure("synthetic meeting should scan")
                 return
             }
+            let duplicateAttachment = MeetingAudioArchiveResolver.attachment(forTranscript: duplicateURL)
+            let plan = HomeMeetingDeletion.plan(for: item)
+            assertEqual(
+                Set(plan.audioAttachmentIDs),
+                Set([item.audio?.id, duplicateAttachment?.id].compactMap { $0 }),
+                "deletion plan should identify selected and duplicate audio playback attachments"
+            )
 
             do {
                 let result = try HomeMeetingDeletion.delete(item)

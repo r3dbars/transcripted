@@ -11,18 +11,49 @@ struct HomeMeetingDeletionResult: Equatable {
 }
 
 enum HomeMeetingDeletion {
+    struct Plan: Equatable, Sendable {
+        let transcriptURLs: [URL]
+        let summaryURLs: [URL]
+        let audioDirectoryURLs: [URL]
+        let audioAttachmentIDs: [String]
+    }
+
     static func delete(
         _ item: RecentMeetingItem,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingDeletionResult {
+        try delete(plan(for: item, fileManager: fileManager), fileManager: fileManager)
+    }
+
+    static func delete(
+        _ plan: Plan,
+        fileManager: FileManager = .default
+    ) throws -> HomeMeetingDeletionResult {
+        let removedSummaries = try removeExistingItems(plan.summaryURLs, fileManager: fileManager)
+        let removedTranscripts = try removeExistingItems(plan.transcriptURLs, fileManager: fileManager)
+        let removedAudioDirectories = try removeExistingItems(plan.audioDirectoryURLs, fileManager: fileManager)
+
+        return HomeMeetingDeletionResult(
+            removedTranscriptURLs: removedTranscripts,
+            removedSummaryURLs: removedSummaries,
+            removedAudioDirectoryURLs: removedAudioDirectories
+        )
+    }
+
+    static func plan(
+        for item: RecentMeetingItem,
+        fileManager: FileManager = .default
+    ) -> Plan {
         var transcriptURLs = OrderedURLSet()
         var summaryURLs = OrderedURLSet()
         var audioDirectoryURLs = OrderedURLSet()
+        var audioAttachmentIDs: [String] = []
 
         transcriptURLs.insert(item.transcriptURL)
         insertOwnedSummary(for: item.transcriptURL, into: &summaryURLs, fileManager: fileManager)
         if let audio = item.audio {
             audioDirectoryURLs.insert(audio.directoryURL)
+            audioAttachmentIDs.append(audio.id)
             if isAppOwnedMeetingTranscript(item.transcriptURL) {
                 for duplicate in duplicateRetainedAudioMeetings(
                     matching: audio,
@@ -32,18 +63,16 @@ enum HomeMeetingDeletion {
                     transcriptURLs.insert(duplicate.transcriptURL)
                     insertOwnedSummary(for: duplicate.transcriptURL, into: &summaryURLs, fileManager: fileManager)
                     audioDirectoryURLs.insert(duplicate.audio.directoryURL)
+                    audioAttachmentIDs.append(duplicate.audio.id)
                 }
             }
         }
 
-        let removedSummaries = try removeExistingItems(summaryURLs.urls, fileManager: fileManager)
-        let removedTranscripts = try removeExistingItems(transcriptURLs.urls, fileManager: fileManager)
-        let removedAudioDirectories = try removeExistingItems(audioDirectoryURLs.urls, fileManager: fileManager)
-
-        return HomeMeetingDeletionResult(
-            removedTranscriptURLs: removedTranscripts,
-            removedSummaryURLs: removedSummaries,
-            removedAudioDirectoryURLs: removedAudioDirectories
+        return Plan(
+            transcriptURLs: transcriptURLs.urls,
+            summaryURLs: summaryURLs.urls,
+            audioDirectoryURLs: audioDirectoryURLs.urls,
+            audioAttachmentIDs: audioAttachmentIDs
         )
     }
 

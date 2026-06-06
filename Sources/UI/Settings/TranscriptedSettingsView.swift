@@ -962,12 +962,12 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
-        if item.audio != nil {
-            MeetingAudioPlayback.shared.stop()
-        }
-
         let deletionTask = Task.detached(priority: .userInitiated) {
-            try HomeMeetingDeletion.delete(item)
+            let plan = HomeMeetingDeletion.plan(for: item)
+            await MainActor.run {
+                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
+            }
+            return try HomeMeetingDeletion.delete(plan)
         }
 
         Task { @MainActor in
