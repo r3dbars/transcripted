@@ -2424,6 +2424,26 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let deleteBlock = sourceSlice(
+            settingsContents,
+            from: "private func deleteMeeting(_ item: RecentMeetingItem)",
+            to: "private func failedMeetingAudioAttachment"
+        )
+
+        assertTrue(
+            deleteBlock.contains("MeetingAudioPlayback.shared.stop()"),
+            "Home delete should stop retained-audio playback before deleting selected or duplicate meeting files"
+        )
+        assertTrue(
+            deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
+                deleteBlock.contains("try HomeMeetingDeletion.delete(item)") &&
+                deleteBlock.contains("_ = try await deletionTask.value"),
+            "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+    }
+
     runSuite("Repo command contract - Agent setup details has an explicit toggle") {
         let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
 

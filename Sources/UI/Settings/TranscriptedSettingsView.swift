@@ -962,17 +962,24 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
-        do {
-            if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
-                MeetingAudioPlayback.shared.stop()
+        if item.audio != nil {
+            MeetingAudioPlayback.shared.stop()
+        }
+
+        let deletionTask = Task.detached(priority: .userInitiated) {
+            try HomeMeetingDeletion.delete(item)
+        }
+
+        Task { @MainActor in
+            do {
+                _ = try await deletionTask.value
+                refreshRecentCaptures(force: true)
+            } catch {
+                presentHomeDeleteFailure(
+                    title: "Could not delete meeting",
+                    error: error
+                )
             }
-            _ = try HomeMeetingDeletion.delete(item)
-            refreshRecentCaptures(force: true)
-        } catch {
-            presentHomeDeleteFailure(
-                title: "Could not delete meeting",
-                error: error
-            )
         }
     }
 
