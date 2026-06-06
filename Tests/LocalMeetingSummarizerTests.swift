@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-func testLocalMeetingSummarizer() {
+func testLocalMeetingSummarizer() async {
     runSuite("LocalMeetingTranscriptExtractor strips frontmatter and keeps only transcript text") {
         let markdown = """
         ---
@@ -103,7 +103,7 @@ func testLocalMeetingSummarizer() {
         )
 
         assertEqual(status.modelID, "mlx-community/gemma-4-12B-it-4bit", "setup status should expose the exact MLX model")
-        assertEqual(status.runtimePackage, "mlx-vlm", "setup status should expose the MLX runtime package")
+        assertEqual(status.runtimePackage, "mlx-vlm==0.6.1", "setup status should expose the pinned MLX runtime package")
         assertEqual(status.profileName, "m1-low-memory", "16GB machines should report the low-memory profile")
         assertEqual(status.physicalMemoryGB, 16, "status should show rounded physical memory")
         assertEqual(status.minimumMemoryGB, 12, "Gemma summary setup should communicate the minimum memory")
@@ -119,6 +119,36 @@ func testLocalMeetingSummarizer() {
 
         assertFalse(lowMemoryStatus.hasEnoughMemory, "8GB should be below the local Gemma memory floor")
         assertFalse(lowMemoryStatus.isReady, "low-memory Macs should not be setup-ready even with uv")
+    }
+
+    runSuite("LocalGemmaSummaryRuntime passes only a safe subprocess environment") {
+        let runtime = LocalGemmaSummaryRuntime(
+            configuration: localMeetingSummaryTestConfiguration(),
+            environment: [
+                "PATH": "/usr/bin",
+                "HOME": "/Users/example",
+                "TMPDIR": "/tmp/example",
+                "HF_HOME": "/tmp/hf-cache",
+                "SENTRY_DSN": "https://secret@example.invalid/1",
+                "POSTHOG_API_KEY": "phc_secret",
+                "OPENAI_API_KEY": "sk-secret",
+                "HF_TOKEN": "hf_secret",
+                "TRANSCRIPTED_UV_PATH": "/opt/homebrew/bin/uv"
+            ]
+        )
+
+        let env = runtime.sanitizedProcessEnvironment(threadLimit: "2")
+
+        assertEqual(env["PATH"], "/usr/bin", "safe executable lookup should be preserved")
+        assertEqual(env["HOME"], "/Users/example", "safe home path should be preserved for cache resolution")
+        assertEqual(env["HF_HOME"], "/tmp/hf-cache", "explicit local Hugging Face cache should be preserved")
+        assertEqual(env["OMP_NUM_THREADS"], "2", "thread cap should be forwarded")
+        assertEqual(env["TOKENIZERS_PARALLELISM"], "false", "tokenizer helper threads should stay disabled")
+        assertNil(env["SENTRY_DSN"], "Sentry DSNs should not reach local model subprocesses")
+        assertNil(env["POSTHOG_API_KEY"], "PostHog keys should not reach local model subprocesses")
+        assertNil(env["OPENAI_API_KEY"], "generic API keys should not reach local model subprocesses")
+        assertNil(env["HF_TOKEN"], "Hugging Face tokens should not reach local model subprocesses")
+        assertNil(env["TRANSCRIPTED_UV_PATH"], "runtime discovery override should not be forwarded to the child process")
     }
 
     runSuite("LocalMeetingSummaryStore keeps the legacy sibling summary path for fallback reads") {
@@ -232,6 +262,98 @@ func testLocalMeetingSummarizer() {
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
     }
 
+    await runSuite("LocalMeetingSummarizer aborts when transcript text changes during generation") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryStaleTranscriptTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try localMeetingSummaryMarkdown(title: "Launch Review", transcript: localMeetingSummaryLongTranscript())
+                .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let changedMarkdown = localMeetingSummaryMarkdown(
+                title: "Launch Review",
+                transcript: localMeetingSummaryChangedTranscript()
+            )
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { _, _ in
+                    try changedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                    return [localMeetingSummaryModelOutput()]
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            do {
+                _ = try await summarizer.summarize(
+                    transcriptURL: transcriptURL,
+                    title: "Launch Review",
+                    date: Date(timeIntervalSince1970: 1_780_000_000)
+                )
+                assertTrue(false, "summarizer should reject stale writes when transcript text changed")
+            } catch {
+                guard case LocalMeetingSummaryError.transcriptChanged = error else {
+                    assertTrue(false, "expected transcriptChanged, got \(error)")
+                    return
+                }
+                let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertFalse(
+                    currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                    "stale generation should not write a managed summary block"
+                )
+            }
+        } catch {
+            assertTrue(false, "stale-transcript fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer applies summaries to the latest unchanged transcript file") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryLatestMarkdownTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            let transcript = localMeetingSummaryLongTranscript()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try localMeetingSummaryMarkdown(title: "Original Title", transcript: transcript)
+                .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let editedMarkdown = localMeetingSummaryMarkdown(title: "Edited Title", transcript: transcript)
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { _, _ in
+                    try editedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                    return [localMeetingSummaryModelOutput()]
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            _ = try await summarizer.summarize(
+                transcriptURL: transcriptURL,
+                title: "Launch Review",
+                date: Date(timeIntervalSince1970: 1_780_000_000)
+            )
+
+            let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+            assertTrue(currentMarkdown.contains("title: \"Edited Title\""), "unchanged transcript text should preserve latest metadata edits")
+            assertTrue(
+                currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                "summary should be written after confirming transcript text stayed stable"
+            )
+        } catch {
+            assertTrue(false, "latest-markdown fixture should run: \(error)")
+        }
+    }
+
     runSuite("LocalMeetingSummaryMarkdownUpdater replaces prior local summary metadata") {
         let firstPass = LocalMeetingSummaryMarkdownUpdater.markdown(
             byApplying: sampleLocalMeetingSummarySections(),
@@ -266,6 +388,87 @@ func testLocalMeetingSummarizer() {
         assertFalse(firstPass.contains("Old summary"), "old managed summary text should be replaced")
         assertTrue(firstPass.contains("local_summary_title: \"Launch Pricing Review\""), "managed frontmatter should be refreshed")
     }
+}
+
+private func localMeetingSummaryTestConfiguration() -> LocalGemmaSummaryConfiguration {
+    LocalGemmaSummaryConfiguration(
+        modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+        runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
+        profileName: "test",
+        minimumPhysicalMemoryBytes: 0,
+        chunkCharacterLimit: 100_000,
+        chunkMaxTokens: 64,
+        directMaxTokens: 64,
+        mergeMaxTokens: 64,
+        maxKVSize: 1_024,
+        processTimeoutSeconds: 5,
+        processNiceValue: 0,
+        cpuThreadLimit: 1,
+        interJobCooldownSeconds: 0
+    )
+}
+
+private func localMeetingSummaryMarkdown(title: String, transcript: String) -> String {
+    """
+    ---
+    capture_type: meeting
+    title: "\(title)"
+    ---
+
+    # \(title)
+
+    ## Transcript
+
+    \(transcript)
+    """
+}
+
+private func localMeetingSummaryLongTranscript() -> String {
+    """
+    **00:01** [Mic/Justin]
+    We reviewed the beta launch plan and agreed that the first version should stay small, private, and focused on saved meeting summaries for people who explicitly turn on the local model setting.
+
+    **00:22** [System/Maya]
+    Maya will check the release notes, confirm the install instructions, and report back before Friday with any wording that might confuse people during setup.
+
+    **00:44** [Mic/Justin]
+    The open question is whether the summary action should appear for every meeting or only when the model runtime is already installed and ready.
+    """
+}
+
+private func localMeetingSummaryChangedTranscript() -> String {
+    """
+    **00:01** [Mic/Justin]
+    We changed the transcript while the summary was still running, so the local model output should not overwrite this newer user-edited version of the meeting notes.
+
+    **00:20** [System/Maya]
+    Maya added a different follow-up, changed the scope, and marked the release note copy as blocked until a separate review finishes later this week.
+    """
+}
+
+private func localMeetingSummaryModelOutput() -> String {
+    """
+    # Title
+    Launch Summary Review
+
+    # Summary
+    Team agreed to keep the beta launch small and private.
+
+    # Decisions
+    Ship the smaller launch first.
+
+    # Action Items
+    Maya will check release notes before Friday.
+
+    # Open Questions
+    Whether to show the action only when the runtime is installed.
+
+    # Risks or Follow-ups
+    Setup wording could confuse beta users.
+
+    # Accuracy Notes
+    Based only on the transcript.
+    """
 }
 
 private func sampleLocalMeetingSummarySections() -> LocalMeetingSummarySections {

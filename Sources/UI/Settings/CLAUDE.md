@@ -18,6 +18,9 @@ settings-side agent connection flow.
   recent-meeting audio controls.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page, including Claude
   Desktop install/copy/reveal flows.
+- `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
+  showing opt-in local AI meeting-summary titles, previews, badges, and menu
+  actions.
 - `HomeView.swift` - Home dashboard, recent capture lists, stats, preview,
   feedback, failed meeting, and speaker review entry points.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
@@ -39,6 +42,10 @@ settings-side agent connection flow.
 - Do not put meeting transcript parsing, speaker database work, or retained
   audio cleanup here. Use `Sources/Meeting/`, `Sources/TranscriptedCore/`, or
   `Sources/UI/Shared/` for those ownership seams.
+- Local AI meeting summary actions must stay blocked during active dictation,
+  active meeting recording, model prep, background meeting work, and speaker
+  review. Keep those gates in shared policy instead of duplicating state checks
+  across row actions.
 
 ## Verification
 

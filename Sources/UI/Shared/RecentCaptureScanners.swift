@@ -191,6 +191,33 @@ enum SavedMeetingRetranscriptionAvailabilityPolicy {
     }
 }
 
+enum LocalMeetingSummaryAvailabilityPolicy {
+    static func unavailableReason(
+        isDictationActive: Bool,
+        isMeetingRecording: Bool,
+        isPreparingModels: Bool,
+        hasMeetingWork: Bool,
+        isSpeakerReviewPending: Bool
+    ) -> String? {
+        if isDictationActive {
+            return "Wait for the current dictation to finish before summarizing a meeting."
+        }
+        if isMeetingRecording {
+            return "Stop the current recording before summarizing a saved meeting."
+        }
+        if isPreparingModels {
+            return "Preparing models..."
+        }
+        if hasMeetingWork {
+            return "Wait for the current meeting to finish saving or transcribing before summarizing."
+        }
+        if isSpeakerReviewPending {
+            return "Finish the speaker review window before summarizing a meeting."
+        }
+        return nil
+    }
+}
+
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]

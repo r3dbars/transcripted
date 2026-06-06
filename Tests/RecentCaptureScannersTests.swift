@@ -248,6 +248,80 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("LocalMeetingSummaryAvailabilityPolicy blocks while models prepare") {
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: true,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Preparing models...",
+            "local meeting summaries should not start while model prep is in flight"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryAvailabilityPolicy blocks during live work") {
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: true,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current dictation to finish before summarizing a meeting.",
+            "local meeting summaries should not race an active dictation"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: true,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Stop the current recording before summarizing a saved meeting.",
+            "local meeting summaries should not start while a meeting is recording"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: true,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current meeting to finish saving or transcribing before summarizing.",
+            "local meeting summaries should stay single-flight with background meeting work"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: true
+            ),
+            "Finish the speaker review window before summarizing a meeting.",
+            "local meeting summaries should wait until speaker review is resolved"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryAvailabilityPolicy allows idle saved meetings") {
+        assertNil(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "idle saved meetings should stay summarizable"
+        )
+    }
+
     runSuite("RecentMeetingSummaryPreviewParser extracts generated title and summary sections") {
         let summaryURL = URL(fileURLWithPath: "/tmp/launch.summary.md")
         let markdown = """

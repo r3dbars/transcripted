@@ -77,6 +77,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page, including Claude Desktop install/repair, copy prompts, folder paths, and config reveal actions
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
+- `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
 - `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, meeting-audio playback, failed-meeting recovery, summary stats, and lightweight copy/feedback/delete affordances
@@ -174,6 +175,7 @@ Relevant direct coverage:
 - `Tests/DictationRecordingStartOverlayPolicyTests.swift`
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
+- `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`

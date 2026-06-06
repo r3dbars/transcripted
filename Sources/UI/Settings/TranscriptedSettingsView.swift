@@ -697,6 +697,13 @@ struct TranscriptedSettingsView: View {
     private func generateLocalSummary(for item: RecentMeetingItem) {
         guard localMeetingSummariesEnabled else { return }
         guard homeLocalSummaryTasks[item.id] == nil else { return }
+        if let unavailableReason = localMeetingSummaryUnavailableReason {
+            homeDeleteFailure = HomeDeleteFailure(
+                title: "Could not summarize meeting",
+                message: unavailableReason
+            )
+            return
+        }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         homeLocalSummaryJobIDs.insert(item.id)
 
@@ -869,6 +876,7 @@ struct TranscriptedSettingsView: View {
         var items: [HomeRowMenuItem] = []
         let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
+        let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
 
         if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled) {
             items.append(
@@ -877,7 +885,7 @@ struct TranscriptedSettingsView: View {
                         ? "Running AI summary..."
                         : (hasSummary ? "Open enhanced transcript" : "Run AI summary"),
                     symbolName: hasSummary ? "doc.text" : "sparkles",
-                    isEnabled: !isSummarizing
+                    isEnabled: !isSummarizing && (hasSummary || canGenerateSummary)
                 ) {
                     handleOpenOrGenerateLocalSummary(item)
                 }
@@ -907,7 +915,7 @@ struct TranscriptedSettingsView: View {
                 HomeRowMenuItem(
                     title: isSummarizing ? "Regenerating AI summary..." : "Regenerate AI summary",
                     symbolName: "arrow.clockwise",
-                    isEnabled: !isSummarizing
+                    isEnabled: !isSummarizing && canGenerateSummary
                 ) {
                     generateLocalSummary(for: item)
                 }
@@ -1231,6 +1239,16 @@ struct TranscriptedSettingsView: View {
 
     private var savedMeetingRetranscriptionUnavailableReason: String? {
         SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
+            isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
+            isMeetingRecording: meetingSession.isRecording,
+            isPreparingModels: meetingSession.state == .loadingModels,
+            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        )
+    }
+
+    private var localMeetingSummaryUnavailableReason: String? {
+        LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,

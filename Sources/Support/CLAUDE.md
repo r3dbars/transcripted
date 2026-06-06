@@ -75,6 +75,7 @@ Relevant direct coverage includes:
 - `Tests/DictationOverlayPresentationPreferencesTests.swift`
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
+- `Tests/LocalMeetingSummaryPreferencesTests.swift`
 - `Tests/MenuBarVisibilityPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`

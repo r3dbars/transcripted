@@ -28,8 +28,10 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNER = REPO_ROOT / "Resources" / "LocalSummarizer" / "gemma4_mlx_prompt_runner.py"
 DEFAULT_MODEL = "mlx-community/gemma-4-12B-it-4bit"
-DEFAULT_RUNTIME_PACKAGE = "mlx-vlm"
+DEFAULT_RUNTIME_PACKAGE = "mlx-vlm==0.6.1"
 DEFAULT_PROFILE = "m1-low-memory"
+PRIVATE_DIR_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
 WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9']*")
 ZOOM_LINE_RE = re.compile(r"^\[[^\]]+\]\s+\d{1,2}:\d{2}:\d{2}(?:\s+(.*))?$")
 VTT_TIME_RE = re.compile(r"^\d{1,2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{1,2}:\d{2}:\d{2}\.\d{3}")
@@ -114,6 +116,68 @@ RESULT_FIELDS = [
 ]
 
 
+def mkdir_private(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, PRIVATE_DIR_MODE)
+
+
+def write_private_text(path: Path, text: str) -> None:
+    mkdir_private(path.parent)
+    path.write_text(text, encoding="utf-8")
+    os.chmod(path, PRIVATE_FILE_MODE)
+
+
+def write_private_json(path: Path, value: Any) -> None:
+    write_private_text(path, json.dumps(value, indent=2) + "\n")
+
+
+def open_private_text(path: Path, mode: str = "w", newline: str | None = None):
+    mkdir_private(path.parent)
+    handle = path.open(mode, encoding="utf-8", newline=newline)
+    os.chmod(path, PRIVATE_FILE_MODE)
+    return handle
+
+
+def safe_subprocess_env(source: dict[str, str], cpu_thread_limit: int) -> dict[str, str]:
+    allowed_parent_keys = [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "XDG_CACHE_HOME",
+        "HF_HOME",
+        "HF_HUB_CACHE",
+        "TRANSFORMERS_CACHE",
+        "UV_CACHE_DIR",
+    ]
+    env: dict[str, str] = {}
+    for key in allowed_parent_keys:
+        value = source.get(key, "").strip()
+        if value:
+            env[key] = value
+
+    thread_limit = str(max(1, cpu_thread_limit))
+    env.update(
+        {
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+            "TOKENIZERS_PARALLELISM": "false",
+            "PYTHONUNBUFFERED": "1",
+            "UV_NO_PROGRESS": "1",
+            "NO_COLOR": "1",
+            "OMP_NUM_THREADS": thread_limit,
+            "OPENBLAS_NUM_THREADS": thread_limit,
+            "VECLIB_MAXIMUM_THREADS": thread_limit,
+            "NUMEXPR_NUM_THREADS": thread_limit,
+        }
+    )
+    return env
+
+
 @dataclass(frozen=True)
 class TranscriptCase:
     case_id: str
@@ -194,14 +258,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    os.umask(0o077)
     args = parse_args()
     profile = PROFILES[args.profile]
     apply_profile_defaults(args, profile)
     run_dir = make_run_dir(args)
     logs_dir = run_dir / "logs"
     raw_dir = run_dir / "raw"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    mkdir_private(logs_dir)
+    mkdir_private(raw_dir)
 
     discovered_cases = discover_cases(args, profile)
     if args.paired_direct_vs_chunk and args.direct_fit_only:
@@ -219,7 +284,7 @@ def main() -> int:
     )
 
     results_path = run_dir / "results.tsv"
-    with results_path.open("w", encoding="utf-8", newline="") as handle:
+    with open_private_text(results_path, newline="") as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=RESULT_FIELDS,
@@ -347,7 +412,7 @@ def make_run_dir(args: argparse.Namespace) -> Path:
         out_root = REPO_ROOT / out_root
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_dir = out_root / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    mkdir_private(run_dir)
     return run_dir
 
 
@@ -784,8 +849,8 @@ def run_case(
     raw_dir: Path,
 ) -> dict[str, Any]:
     case_dir = raw_dir / f"{attempt:03d}-{case.case_id}-r{repeat}"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    (case_dir / "transcript.txt").write_text(case.transcript, encoding="utf-8")
+    mkdir_private(case_dir)
+    write_private_text(case_dir / "transcript.txt", case.transcript)
     arm = run_summary_arm(
         arm="summary",
         attempt=attempt,
@@ -798,7 +863,7 @@ def run_case(
         chunk_character_limit=args.chunk_character_limit,
         force_direct=False,
     )
-    (case_dir / "final-output.md").write_text(arm.final_output.strip() + "\n", encoding="utf-8")
+    write_private_text(case_dir / "final-output.md", arm.final_output.strip() + "\n")
     return result_from_arm(attempt, repeat, case, args, run_dir, arm, quality_source=case.transcript)
 
 
@@ -813,8 +878,8 @@ def run_paired_case(
     raw_dir: Path,
 ) -> list[dict[str, Any]]:
     case_dir = raw_dir / f"{attempt:03d}-{case.case_id}-r{repeat}"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    (case_dir / "transcript.txt").write_text(case.transcript, encoding="utf-8")
+    mkdir_private(case_dir)
+    write_private_text(case_dir / "transcript.txt", case.transcript)
 
     direct = run_summary_arm(
         arm="direct",
@@ -840,8 +905,8 @@ def run_paired_case(
         chunk_character_limit=args.paired_chunk_character_limit,
         force_direct=False,
     )
-    (case_dir / "direct-output.md").write_text(direct.final_output.strip() + "\n", encoding="utf-8")
-    (case_dir / "chunked-output.md").write_text(chunked.final_output.strip() + "\n", encoding="utf-8")
+    write_private_text(case_dir / "direct-output.md", direct.final_output.strip() + "\n")
+    write_private_text(case_dir / "chunked-output.md", chunked.final_output.strip() + "\n")
 
     direct_row = result_from_arm(attempt, repeat, case, args, run_dir, direct, quality_source=case.transcript)
     chunk_row = result_from_arm(
@@ -865,27 +930,23 @@ def run_paired_case(
     )
     chunk_row["paired_quality_delta"] = delta
     chunk_row["paired_pass"] = "pass" if paired_pass else "fail"
-    (case_dir / "quality-diff.json").write_text(
-        json.dumps(
-            {
-                "case_id": case.case_id,
-                "quality_delta_chunk_minus_direct": delta,
-                "paired_pass": paired_pass,
-                "chunked_retention": {
-                    key: chunk_row.get(key, "")
-                    for key in [
-                        "action_item_recall",
-                        "decision_recall",
-                        "open_question_recall",
-                        "none_found_regressions",
-                        "retention_guardrail",
-                    ]
-                },
+    write_private_json(
+        case_dir / "quality-diff.json",
+        {
+            "case_id": case.case_id,
+            "quality_delta_chunk_minus_direct": delta,
+            "paired_pass": paired_pass,
+            "chunked_retention": {
+                key: chunk_row.get(key, "")
+                for key in [
+                    "action_item_recall",
+                    "decision_recall",
+                    "open_question_recall",
+                    "none_found_regressions",
+                    "retention_guardrail",
+                ]
             },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+        },
     )
     return [direct_row, chunk_row]
 
@@ -902,7 +963,7 @@ def run_summary_arm(
     chunk_character_limit: int,
     force_direct: bool,
 ) -> SummaryArmResult:
-    case_dir.mkdir(parents=True, exist_ok=True)
+    mkdir_private(case_dir)
     chunks = [case.transcript] if force_direct else chunk_transcript(case.transcript, chunk_character_limit)
     started = time.monotonic()
     prompt_runs: list[PromptRun] = []
@@ -975,10 +1036,10 @@ def run_summary_arm(
         error = str(exc)
 
     if error:
-        (case_dir / "error.txt").write_text(error + "\n", encoding="utf-8")
-    (case_dir / "final-output.md").write_text(final_output.strip() + "\n", encoding="utf-8")
+        write_private_text(case_dir / "error.txt", error + "\n")
+    write_private_text(case_dir / "final-output.md", final_output.strip() + "\n")
     if notes:
-        (case_dir / "chunk-notes.md").write_text(notes.strip() + "\n", encoding="utf-8")
+        write_private_text(case_dir / "chunk-notes.md", notes.strip() + "\n")
     return SummaryArmResult(
         arm=arm,
         status=status,
@@ -1053,7 +1114,7 @@ def make_job(case_dir: Path, label: str, prompt: str, max_tokens: int) -> dict[s
     prompt_path = case_dir / f"{safe}-prompt.txt"
     output_path = case_dir / f"{safe}-output.md"
     metrics_path = case_dir / f"{safe}-metrics.json"
-    prompt_path.write_text(prompt, encoding="utf-8")
+    write_private_text(prompt_path, prompt)
     return {
         "label": label,
         "prompt_file": str(prompt_path),
@@ -1072,7 +1133,7 @@ def run_jobs(
     log_path: Path,
 ) -> PromptRun:
     jobs_path = log_path.with_suffix(".jobs.json")
-    jobs_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
+    write_private_json(jobs_path, jobs)
     uv_command = [
         str(uv_path),
         "run",
@@ -1092,23 +1153,9 @@ def run_jobs(
     if args.nice and args.nice > 0:
         uv_command = ["/usr/bin/nice", "-n", str(min(args.nice, 20))] + uv_command
     command = ["/usr/bin/time", "-l"] + uv_command
-    env = os.environ.copy()
-    env.update(
-        {
-            "HF_HUB_DISABLE_TELEMETRY": "1",
-            "HF_HUB_DISABLE_PROGRESS_BARS": "1",
-            "TOKENIZERS_PARALLELISM": "false",
-            "PYTHONUNBUFFERED": "1",
-            "UV_NO_PROGRESS": "1",
-            "NO_COLOR": "1",
-            "OMP_NUM_THREADS": str(max(1, args.cpu_thread_limit)),
-            "OPENBLAS_NUM_THREADS": str(max(1, args.cpu_thread_limit)),
-            "VECLIB_MAXIMUM_THREADS": str(max(1, args.cpu_thread_limit)),
-            "NUMEXPR_NUM_THREADS": str(max(1, args.cpu_thread_limit)),
-        }
-    )
+    env = safe_subprocess_env(os.environ, args.cpu_thread_limit)
     started = time.monotonic()
-    with log_path.open("w", encoding="utf-8") as log:
+    with open_private_text(log_path) as log:
         log.write("$ " + " ".join(shell_quote(part) for part in command) + "\n\n")
         try:
             completed = subprocess.run(
@@ -1517,7 +1564,7 @@ def dry_result(
 
 
 def append_results(results_path: Path, results: list[dict[str, Any]]) -> None:
-    with results_path.open("a", encoding="utf-8", newline="") as handle:
+    with open_private_text(results_path, mode="a", newline="") as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=RESULT_FIELDS,
@@ -1671,7 +1718,7 @@ def write_report(
             "Run with more repeats and a mix of longest plus random meetings before changing prompts or chunk sizes.",
         ]
     )
-    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_private_text(report, "\n".join(lines) + "\n")
 
 
 def write_resume(
@@ -1699,7 +1746,7 @@ def write_resume(
 - Next attempt: {next_attempt}
 - Noise rule: repeat likely winners with the same repeat count as baseline; single-run results are directional only
 """
-    (run_dir / "resume.md").write_text(text, encoding="utf-8")
+    write_private_text(run_dir / "resume.md", text)
 
 
 def resolve_uv(explicit_path: str) -> Path | None:

@@ -24,6 +24,7 @@ enum LocalMeetingSummaryError: LocalizedError, Equatable {
     case insufficientMemory(availableGB: Int, requiredGB: Int)
     case runtimeUnavailable
     case missingBundledRunner
+    case transcriptChanged
     case processTimedOut(label: String)
     case processFailed(label: String, exitCode: Int32, detail: String)
     case outputMissing(label: String)
@@ -38,6 +39,8 @@ enum LocalMeetingSummaryError: LocalizedError, Equatable {
             return "Transcripted could not find the local MLX runner. Install uv, or set TRANSCRIPTED_UV_PATH to a uv executable."
         case .missingBundledRunner:
             return "Transcripted could not find the bundled Gemma summary runner."
+        case .transcriptChanged:
+            return "This meeting changed while the local summary was running. Run the summary again to avoid overwriting newer edits."
         case .processTimedOut:
             return "The local Gemma summary took too long and was stopped."
         case .processFailed(_, _, let detail):
@@ -117,7 +120,7 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
 
 struct LocalMeetingSummarySetupStatus: Equatable, Sendable {
     static let defaultModelID = "mlx-community/gemma-4-12B-it-4bit"
-    static let defaultRuntimePackage = "mlx-vlm"
+    static let defaultRuntimePackage = "mlx-vlm==0.6.1"
 
     let modelID: String
     let runtimePackage: String
@@ -316,6 +319,7 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     var environment: [String: String] = ProcessInfo.processInfo.environment
     var bundle: Bundle = .main
     var fileManager: FileManager = .default
+    var generateBatchOverride: (@Sendable ([LocalGemmaSummaryPrompt], URL) throws -> [String])?
 
     func generate(prompt: String, label: String, maxTokens: Int, workDirectory: URL) throws -> String {
         let outputs = try generateBatch(
@@ -330,6 +334,9 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
 
     func generateBatch(_ prompts: [LocalGemmaSummaryPrompt], workDirectory: URL) throws -> [String] {
         guard !prompts.isEmpty else { return [] }
+        if let generateBatchOverride {
+            return try generateBatchOverride(prompts, workDirectory)
+        }
         guard let runnerURL = runnerURL() else {
             throw LocalMeetingSummaryError.missingBundledRunner
         }
@@ -389,19 +396,8 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
             process.arguments = uvArguments
         }
 
-        var processEnvironment = environment
-        processEnvironment["HF_HUB_DISABLE_TELEMETRY"] = "1"
-        processEnvironment["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-        processEnvironment["TOKENIZERS_PARALLELISM"] = "false"
-        processEnvironment["PYTHONUNBUFFERED"] = "1"
-        processEnvironment["UV_NO_PROGRESS"] = "1"
-        processEnvironment["NO_COLOR"] = "1"
         let threadLimit = "\(max(1, configuration.cpuThreadLimit))"
-        processEnvironment["OMP_NUM_THREADS"] = threadLimit
-        processEnvironment["OPENBLAS_NUM_THREADS"] = threadLimit
-        processEnvironment["VECLIB_MAXIMUM_THREADS"] = threadLimit
-        processEnvironment["NUMEXPR_NUM_THREADS"] = threadLimit
-        process.environment = processEnvironment
+        process.environment = sanitizedProcessEnvironment(threadLimit: threadLimit)
 
         let stderr = Pipe()
         process.standardOutput = FileHandle.nullDevice
@@ -462,6 +458,42 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
             environment: environment,
             fileManager: fileManager
         )
+    }
+
+    func sanitizedProcessEnvironment(threadLimit: String) -> [String: String] {
+        let allowedParentKeys = [
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "XDG_CACHE_HOME",
+            "HF_HOME",
+            "HF_HUB_CACHE",
+            "TRANSFORMERS_CACHE",
+            "UV_CACHE_DIR",
+        ]
+        var sanitized: [String: String] = [:]
+        for key in allowedParentKeys {
+            if let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                sanitized[key] = value
+            }
+        }
+        sanitized["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        sanitized["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        sanitized["TOKENIZERS_PARALLELISM"] = "false"
+        sanitized["PYTHONUNBUFFERED"] = "1"
+        sanitized["UV_NO_PROGRESS"] = "1"
+        sanitized["NO_COLOR"] = "1"
+        sanitized["OMP_NUM_THREADS"] = threadLimit
+        sanitized["OPENBLAS_NUM_THREADS"] = threadLimit
+        sanitized["VECLIB_MAXIMUM_THREADS"] = threadLimit
+        sanitized["NUMEXPR_NUM_THREADS"] = threadLimit
+        return sanitized
     }
 
     private func fileSafeLabel(_ label: String) -> String {
@@ -561,9 +593,14 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         try Task.checkCancellation()
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+        let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
+        guard latestTranscript == transcript else {
+            throw LocalMeetingSummaryError.transcriptChanged
+        }
         let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
             byApplying: sections,
-            to: markdown,
+            to: latestMarkdown,
             configuration: configuration,
             generatedAt: date,
             chunkCount: chunks.count
