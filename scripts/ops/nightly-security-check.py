@@ -72,6 +72,17 @@ SHELL_GUARD_PATTERNS = [
 ]
 
 SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
+REQUIRED_SENTRY_RELEASE_CHECK_IDS = {
+    "sentry-auth-missing",
+    "sentry-cli-missing",
+    "sentry-release-missing",
+}
+REQUIRED_RELEASE_DEBUG_CHECK_IDS = {
+    "release-binary-missing",
+    "release-dsym-missing",
+    "dwarfdump-missing",
+    "release-dsym-uuid-mismatch",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -1364,6 +1375,16 @@ def print_report(report: dict) -> None:
             print(f"  {item['detail']}")
 
 
+def has_required_release_health_failure(args: argparse.Namespace, findings: list[dict]) -> bool:
+    required_check_ids: set[str] = set()
+    if args.require_sentry_release_health:
+        required_check_ids.update(REQUIRED_SENTRY_RELEASE_CHECK_IDS)
+    if args.require_release_debug_files:
+        required_check_ids.update(REQUIRED_RELEASE_DEBUG_CHECK_IDS)
+
+    return any(finding.get("check_id") in required_check_ids for finding in findings)
+
+
 def main() -> int:
     args = parse_args()
     root = repo_root()
@@ -1406,7 +1427,7 @@ def main() -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
-    if args.strict and findings:
+    if (args.strict and findings) or has_required_release_health_failure(args, findings):
         return 1
     return 0
 

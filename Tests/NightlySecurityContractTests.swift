@@ -94,11 +94,12 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("--sentry-release-health"), "nightly checker should expose Sentry release existence checks")
         assertTrue(checker.contains("--require-sentry-release-health"), "nightly checker should expose required Sentry release checks")
         assertTrue(checker.contains("--require-release-debug-files"), "nightly checker should expose release dSYM verification")
+        assertTrue(checker.contains("has_required_release_health_failure"), "required release-health checks should fail even outside strict mode")
         assertTrue(checker.contains("check_cask"), "nightly checker should verify Homebrew cask parity")
         assertTrue(checker.contains("check_observability_payload_keys"), "nightly checker should scan observability allowlists for raw payload keys")
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
-        assertTrue(preflight.contains("nightly-security-check.py --strict"), "agent preflight should suggest the strict nightly checker")
-        assertTrue(matrix.contains("nightly-security-check.py --strict"), "test matrix should suggest the strict nightly checker")
+        assertTrue(preflight.contains("nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml"), "agent preflight should suggest a strict checker command that is independent of local automation state")
+        assertTrue(matrix.contains("nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml"), "test matrix should suggest a strict checker command that is independent of local automation state")
     }
 }
 
