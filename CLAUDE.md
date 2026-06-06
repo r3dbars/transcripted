@@ -42,7 +42,7 @@ bash run-integration-smoke.sh      # app/core linkage + wake recovery + MicRecor
 bash run-e2e-smoke.sh              # deterministic release-critical artifact smoke (no mic/TCC)
 bash run-live-capture-smoke.sh     # local hardware/TCC smoke (needs mic + System Audio Recording perms)
 swift test                         # Swift Package tests for TranscriptedCore seam only
-bash build-beta.sh <token> <user>  # signed beta/distribution build; SKIP_NOTARIZATION=1 for packaging smoke
+bash build-beta.sh '' <user>       # signed beta/distribution build; first arg is compatibility-only
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
 ```
 
@@ -55,7 +55,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
 - Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
-- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
+- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
 - Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
 - Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`

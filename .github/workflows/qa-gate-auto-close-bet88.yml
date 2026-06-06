@@ -1,4 +1,5 @@
 name: BET-88 QA Gate Auto Close
+# Historical BET-88/#428 fixture. Keep label-gated unless this closed QA gate is retired.
 
 on:
   issue_comment:

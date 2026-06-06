@@ -201,7 +201,7 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "stale Bluetooth output routes should map to route-not-settled")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred built-in fallback with Bluetooth output") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred built-in fallback with Bluetooth speech output") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 24_000,
             outputChannelCount: 1,
@@ -213,10 +213,10 @@ func testParakeetStartRecordingFailurePolicy() {
             selectionReason: .preferredBuiltInForBluetoothHeadset
         )
 
-        assertEqual(readiness, .ready, "built-in fallback for Bluetooth output should start instead of timing out")
+        assertEqual(readiness, .routeNotSettled, "forced built-in fallback should wait until Bluetooth output leaves speech mode")
     }
 
-    runSuite("ParakeetAudioFormatReadinessPolicy accepts preferred fallback across Bluetooth speech rates") {
+    runSuite("ParakeetAudioFormatReadinessPolicy defers preferred fallback across Bluetooth speech rates") {
         for outputRate in [8_000.0, 16_000.0] {
             let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
                 outputSampleRate: outputRate,
@@ -229,7 +229,7 @@ func testParakeetStartRecordingFailurePolicy() {
                 selectionReason: .preferredBuiltInForBluetoothHeadset
             )
 
-            assertEqual(readiness, .ready, "preferred built-in fallback should not wait on Bluetooth speech output rate \(outputRate)")
+            assertEqual(readiness, .routeNotSettled, "preferred built-in fallback should wait on Bluetooth speech output rate \(outputRate)")
         }
     }
 
@@ -357,11 +357,11 @@ func testParakeetStartRecordingFailurePolicy() {
         assertEqual(readiness, .ready, "native 24k external capture should stay usable when input and output agree")
     }
 
-    runSuite("ParakeetInputOverrideSettlePolicy skips delay when immediate format is ready") {
+    runSuite("ParakeetInputOverrideSettlePolicy waits after a ready input override") {
         assertEqual(
             ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .ready),
-            0,
-            "ready formats after an input override should not pay a fixed settle delay"
+            TranscriptedConstants.audioRecoveryDelay,
+            "ready formats still get a short settle after forcing AirPods input away from the headset mic"
         )
     }
 
@@ -375,6 +375,32 @@ func testParakeetStartRecordingFailurePolicy() {
             ParakeetInputOverrideSettlePolicy.delayNanoseconds(afterImmediateReadiness: .invalid),
             TranscriptedConstants.audioRecoveryDelay,
             "invalid formats should still get the full CoreAudio settle delay"
+        )
+    }
+
+    runSuite("ParakeetTapSampleRatePolicy trusts the tap buffer rate over AirPods hardware rate") {
+        let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+            bufferSampleRate: 48_000,
+            hardwareSampleRate: 24_000
+        )
+
+        assertEqual(
+            effectiveSampleRate,
+            48_000,
+            "AirPods HFP can expose 24k hardware while the tap delivers 48k buffers; dictation must resample from the tap rate"
+        )
+    }
+
+    runSuite("ParakeetTapSampleRatePolicy falls back for invalid tap rates") {
+        let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+            bufferSampleRate: 0,
+            hardwareSampleRate: 24_000
+        )
+
+        assertEqual(
+            effectiveSampleRate,
+            ParakeetAudioFormatReadinessPolicy.fallbackCaptureSampleRate,
+            "invalid tap rates should still use the central safe fallback"
         )
     }
 
@@ -541,5 +567,41 @@ func testParakeetStartRecordingFailurePolicy() {
             .audioEngineStartFailed,
             "non-route CoreAudio errors should stay generic engine-start failures"
         )
+    }
+
+    runSuite("ParakeetEngine zombie watchdog marks recording idle before graph reset") {
+        let source = readParakeetEngineSource()
+        guard let watchdogStart = source.range(of: "private func startAudioWatchdog()"),
+              let watchdogEnd = source.range(of: "func stopRecording()", range: watchdogStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the zombie watchdog body")
+            return
+        }
+        let watchdog = String(source[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
+        guard let markIdle = watchdog.range(of: "self.isRecording = false"),
+              let clearRestartFlag = watchdog.range(of: "self.configChangeWasRecording = false"),
+              let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0"),
+              let removeTap = watchdog.range(of: "await self.removeRecordingTap()"),
+              let stopEngine = watchdog.range(of: "await self.stopAudioEngine()") else {
+            assertTrue(false, "zombie watchdog should mark internal reset state before touching CoreAudio")
+            return
+        }
+
+        assertTrue(markIdle.lowerBound < removeTap.lowerBound, "zombie reset should stop being treated as active recording before tap removal can post config changes")
+        assertTrue(markIdle.lowerBound < stopEngine.lowerBound, "zombie reset should stop being treated as active recording before engine stop can post config changes")
+        assertTrue(clearRestartFlag.lowerBound < removeTap.lowerBound, "zombie reset should not leave the device-change restart flag armed")
+        assertTrue(suppressConfigChanges.lowerBound < removeTap.lowerBound, "zombie reset should suppress self-induced config changes before graph teardown")
+    }
+}
+
+private func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
+    let url = repoFixtureURL("Sources/Speech/ParakeetEngine.swift")
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        totalTests += 1
+        failedTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not read ParakeetEngine.swift: \(error)")
+        return ""
     }
 }

@@ -174,10 +174,19 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "meeting_transcript_failed",
             context: [
+                "audio_device": "Jane's AirPods Pro",
+                "audio_path": "/Users/jane/Private/customer.wav",
+                "email": "person@example.com",
                 "failure_kind": "transcription_inference_failed",
+                "file_path": "/Users/jane/Private/customer.md",
                 "input_device_class": "usb",
+                "meeting_title": "Customer Roadmap",
                 "queue_depth_bucket": "zero",
+                "raw_url": "https://meet.example.com/private-room",
+                "speaker_name": "Alice Customer",
                 "system_status": "healthy",
+                "token": "sk-private",
+                "transcript_text": "private transcript words",
                 "trigger": "hotkey",
             ]
         )
@@ -187,6 +196,15 @@ func testSentryEventPolicy() {
         assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
         assertEqual(tags["system_status"], "healthy", "system capture status should be queryable")
         assertEqual(tags["trigger"], "hotkey", "trigger should be queryable")
+        assertNil(tags["audio_device"], "raw device names should stay out of Sentry tags")
+        assertNil(tags["audio_path"], "audio paths should stay out of Sentry tags")
+        assertNil(tags["email"], "emails should stay out of Sentry tags")
+        assertNil(tags["file_path"], "file paths should stay out of Sentry tags")
+        assertNil(tags["meeting_title"], "meeting titles should stay out of Sentry tags")
+        assertNil(tags["raw_url"], "raw URLs should stay out of Sentry tags")
+        assertNil(tags["speaker_name"], "speaker names should stay out of Sentry tags")
+        assertNil(tags["token"], "tokens should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags ignores skipped meeting transcripts") {

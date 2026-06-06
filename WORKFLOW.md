@@ -38,6 +38,9 @@ Workspace:
 
 {{ workspace.path }}
 
+The `symphony-workspaces` folder name is historical. Treat it as the current
+local runner workspace root unless the frontmatter above changes.
+
 ## Job
 
 Take this GitHub issue from `agent todo` or `agent in progress` to a reviewable pull request.

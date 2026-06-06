@@ -100,8 +100,9 @@ struct MeetingPromptBackoffDecision: Equatable {
 }
 
 enum MeetingPromptWindowPolicy {
-    static func shouldOfferCalendarPrompt(startsIn: TimeInterval) -> Bool {
-        (-MeetingPromptHeuristics.calendarReminderPostStartGrace ... MeetingPromptHeuristics.calendarReminderLeadTime)
+    static func shouldOfferCalendarPrompt(startsIn: TimeInterval, endsIn: TimeInterval) -> Bool {
+        guard endsIn > 0 else { return false }
+        return (-MeetingPromptHeuristics.calendarReminderPostStartGrace ... MeetingPromptHeuristics.calendarReminderLeadTime)
             .contains(startsIn)
     }
 }

@@ -148,7 +148,7 @@ enum ParakeetAudioFormatReadinessPolicy {
         selectedInputClass: String,
         outputDeviceClass: String,
         selectionOverrodeDefault: Bool,
-        selectionReason: DictationInputDeviceSelectionReason? = nil
+        selectionReason _: DictationInputDeviceSelectionReason? = nil
     ) -> ParakeetAudioFormatReadiness {
         guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
               isUsableCaptureSampleRate(inputSampleRate), inputChannelCount > 0 else {
@@ -158,7 +158,6 @@ enum ParakeetAudioFormatReadinessPolicy {
         let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
         let overriddenBluetoothOutputRoute = selectionOverrodeDefault
             && outputDeviceClass == "bluetooth"
-            && selectionReason != .preferredBuiltInForBluetoothHeadset
 
         if selectedInputClass != "bluetooth",
            inputSampleRate >= 44_100,
@@ -199,7 +198,19 @@ enum ParakeetAudioFormatReadinessPolicy {
 
 enum ParakeetInputOverrideSettlePolicy {
     static func delayNanoseconds(afterImmediateReadiness readiness: ParakeetAudioFormatReadiness) -> UInt64 {
-        readiness == .ready ? 0 : TranscriptedConstants.audioRecoveryDelay
+        switch readiness {
+        case .ready, .invalid, .routeNotSettled:
+            return TranscriptedConstants.audioRecoveryDelay
+        }
+    }
+}
+
+enum ParakeetTapSampleRatePolicy {
+    static func effectiveSampleRate(
+        bufferSampleRate: Double,
+        hardwareSampleRate _: Double? = nil
+    ) -> Double {
+        ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(bufferSampleRate)
     }
 }
 

@@ -61,6 +61,9 @@ final class FileLogger: @unchecked Sendable {
     /// Write a log entry asynchronously (non-blocking)
     func write(level: String, subsystem: String, message: String, metadata: [String: String]?) {
         guard !isDisabled else { return }
+        let message = LogPrivacySanitizer.sanitizeText(message)
+        let metadata = LogPrivacySanitizer.sanitizeMetadata(metadata)
+        guard !message.isEmpty else { return }
         queue.async { [weak self] in
             self?.writeSync(level: level, subsystem: subsystem, message: message, metadata: metadata)
         }
