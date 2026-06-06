@@ -14,53 +14,6 @@ struct MeetingRecordingStartDecision: Equatable {
     )
 }
 
-struct ActiveAudioCaptureStartDecision: Equatable {
-    let canStart: Bool
-    let errorMessage: String?
-    let failureReason: String?
-
-    static let allowed = ActiveAudioCaptureStartDecision(
-        canStart: true,
-        errorMessage: nil,
-        failureReason: nil
-    )
-}
-
-enum ActiveAudioCaptureStartGate {
-    static func evaluateMeetingStart(
-        dictationIsRecording: Bool,
-        dictationIsTranscribing: Bool
-    ) -> ActiveAudioCaptureStartDecision {
-        if dictationIsRecording {
-            return ActiveAudioCaptureStartDecision(
-                canStart: false,
-                errorMessage: "Finish the current dictation before recording a meeting.",
-                failureReason: "dictation_recording_active"
-            )
-        }
-
-        if dictationIsTranscribing {
-            return ActiveAudioCaptureStartDecision(
-                canStart: false,
-                errorMessage: "Transcripted is still finishing dictation. Try recording the meeting again in a moment.",
-                failureReason: "dictation_transcribing_active"
-            )
-        }
-
-        return .allowed
-    }
-
-    static func evaluateDictationStart(meetingCaptureIsActive: Bool) -> ActiveAudioCaptureStartDecision {
-        guard meetingCaptureIsActive else { return .allowed }
-
-        return ActiveAudioCaptureStartDecision(
-            canStart: false,
-            errorMessage: "Stop the meeting recording before starting dictation.",
-            failureReason: "meeting_recording_active"
-        )
-    }
-}
-
 enum MeetingRecordingStartGate {
     static var systemAudioRecordingSummary: String {
         TranscriptedPermissionKind.systemAudioRecordingSummary

@@ -362,11 +362,6 @@ final class MeetingSessionController: ObservableObject {
             break
         }
 
-        guard allowMeetingStartForCurrentDictationState(trigger: trigger) else {
-            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "active_dictation")
-            return false
-        }
-
         let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
             DiagnosticsTrail.record(
@@ -392,11 +387,6 @@ final class MeetingSessionController: ObservableObject {
 
         guard await ensureModelsReadyForRecording(trigger: trigger) else {
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "models_unavailable")
-            return false
-        }
-
-        guard allowMeetingStartForCurrentDictationState(trigger: trigger) else {
-            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "active_dictation")
             return false
         }
 
@@ -459,42 +449,6 @@ final class MeetingSessionController: ObservableObject {
                 uniquingKeysWith: { _, new in new }
             )
         )
-        return true
-    }
-
-    private func allowMeetingStartForCurrentDictationState(trigger: StartTrigger) -> Bool {
-        let decision = ActiveAudioCaptureStartGate.evaluateMeetingStart(
-            dictationIsRecording: sttRouter.isRecording,
-            dictationIsTranscribing: sttRouter.isTranscribing
-        )
-        guard decision.canStart else {
-            let failureReason = decision.failureReason ?? "active_dictation"
-            let message = decision.errorMessage ?? "Finish dictation before recording a meeting."
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "meeting_start_blocked_active_dictation",
-                message: message,
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "trigger": trigger.rawValue,
-                        "failure_reason": failureReason,
-                        "stt_recording": boolString(sttRouter.isRecording),
-                        "stt_transcribing": boolString(sttRouter.isTranscribing)
-                    ]
-                )
-            )
-            AnalyticsReporter.track(
-                "meeting_recording_start_failed",
-                properties: [
-                    "failure_kind": failureReason,
-                    "trigger": trigger.rawValue
-                ]
-            )
-            state = .error(message)
-            return false
-        }
-
         return true
     }
 
