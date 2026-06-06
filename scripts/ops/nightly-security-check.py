@@ -779,6 +779,97 @@ def check_sanitizer_corpus(root: Path, manifest: dict) -> list[dict]:
     return findings
 
 
+def check_privacy_leak_sweep(root: Path, manifest: dict) -> list[dict]:
+    relative_path = manifest["paths"].get("privacy_leak_sweep")
+    if not relative_path:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-missing-manifest-path",
+                "Nightly manifest should point at the synthetic privacy leak sweep.",
+                "Missing paths.privacy_leak_sweep.",
+            )
+        ]
+
+    script_path = root / relative_path
+    if not script_path.is_file():
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-missing",
+                "Synthetic privacy leak sweep script is missing.",
+                f"Expected {relative_path}.",
+                relative_path,
+            )
+        ]
+
+    report_path = "build/privacy-leak-sweep-nightly.json"
+    result = run(["python3", relative_path, "--write-report", report_path], cwd=root)
+    if result.returncode != 0:
+        detail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[:8])
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-failed",
+                "Synthetic privacy leak sweep found a report or handoff surface leak.",
+                detail or "privacy-leak-sweep.py exited non-zero.",
+                relative_path,
+            )
+        ]
+
+    try:
+        report = json.loads((root / report_path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-report-invalid",
+                "Synthetic privacy leak sweep did not write a parseable report.",
+                str(exc),
+                report_path,
+            )
+        ]
+
+    if report.get("status") != "pass" or report.get("finding_count", 0) != 0:
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-report-attention",
+                "Synthetic privacy leak sweep report is not clean.",
+                f"Status {report.get('status')!r}; findings {report.get('finding_count')!r}.",
+                report_path,
+            )
+        ]
+
+    expected_lanes = {
+        "logs-events-reliability",
+        "sentry-posthog-payloads",
+        "qa-report-artifacts",
+        "pr-release-docs",
+        "automated-scanner-test-pr",
+    }
+    actual_lanes = {str(item.get("id")) for item in report.get("lanes", [])}
+    missing_lanes = sorted(expected_lanes - actual_lanes)
+    if missing_lanes:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-lane-drift",
+                "Synthetic privacy leak sweep no longer covers every expected lane.",
+                f"Missing lanes: {', '.join(missing_lanes)}.",
+                relative_path,
+            )
+        ]
+
+    return []
+
+
 def score_report(findings: list[dict], manifest: dict) -> tuple[int, dict]:
     weights = manifest["scoring"]["weights"]
     multipliers = manifest["scoring"]["severity_multipliers"]
@@ -876,6 +967,7 @@ def main() -> int:
     findings.extend(check_built_app(root, manifest, args.app_bundle))
     findings.extend(check_automation_prompt(manifest, automation_path))
     findings.extend(check_sanitizer_corpus(root, manifest))
+    findings.extend(check_privacy_leak_sweep(root, manifest))
 
     report = build_report(root, manifest, findings, watch_items, args.app_bundle, automation_path)
     print_report(report)

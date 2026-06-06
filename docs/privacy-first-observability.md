@@ -180,6 +180,16 @@ If the run built a fresh app or needs build-output verification, rerun it with:
 python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json
 ```
 
+For a focused local privacy sweep, run:
+
+```bash
+python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json
+```
+
+That command uses synthetic values only. It covers logs/events/reliability
+JSONL, Sentry/PostHog payloads, QA and local report text, PR/release text, and
+the scanner handoff summary shape.
+
 The shared regression corpus for off-device scrubbers lives at
 `Tests/Fixtures/ObservabilitySanitizerCorpus.json`. Both the Sentry and
 analytics sanitizer tests should stay pinned to that same corpus so privacy

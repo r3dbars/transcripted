@@ -8,6 +8,7 @@
     "beta_entitlements": "config/entitlements/beta.plist",
     "build_script": "scripts/entrypoints/build.sh",
     "build_beta_script": "scripts/entrypoints/build-beta.sh",
+    "privacy_leak_sweep": "scripts/ops/privacy-leak-sweep.py",
     "sanitizer_corpus": "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
     "sentry_sanitizer_tests": "Tests/SentryPayloadSanitizerTests.swift",
     "analytics_sanitizer_tests": "Tests/AnalyticsPayloadSanitizerTests.swift"
