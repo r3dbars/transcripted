@@ -121,6 +121,7 @@ Before you publish a user-facing release note, sanity-check the release state:
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
 - verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
+- run `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json` before publishing release notes or PR text that summarize QA, support, or observability work
 - if you want a clean starting point, use `docs/release-notes-template.md`
 
 Use the strict release-health gate when validating release surfaces:

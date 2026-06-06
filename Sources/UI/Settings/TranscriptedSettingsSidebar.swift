@@ -31,6 +31,7 @@ struct SettingsSidebarRow: View {
                 shadow: Color.accentColor.opacity(0.08),
                 shadowRadius: 7
             )
+            .accessibilityIdentifier(page.automationIdentifier)
             .onHover { isHovering = $0 }
     }
 }

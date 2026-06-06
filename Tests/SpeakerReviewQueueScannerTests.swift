@@ -54,6 +54,50 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(items.count, 0, "named profiles should not keep stale db_pending rows in the queue")
     }
 
+    runSuite("SpeakerReviewQueueScanner deduplicates repeated deferred speaker metadata") {
+        let speakerId = UUID()
+        let transcriptURL = URL(fileURLWithPath: "/tmp/Duplicate_Review.md")
+        let markdown = """
+        ---
+        title: "Duplicate Review"
+        date: 2026-05-20
+        time: 09:30:00
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        # Duplicate Review
+
+        ## Transcript
+
+        **00:01** [System/Speaker 1]
+        This duplicated metadata should produce one row.
+        """
+
+        let items = SpeakerReviewQueueScanner.pendingItems(
+            in: markdown,
+            transcriptURL: transcriptURL,
+            profilesById: [
+                speakerId: makeReviewQueueProfile(id: speakerId, name: nil)
+            ],
+            clipURLsByProfileID: [:]
+        )
+
+        assertEqual(items.count, 1, "duplicate frontmatter for the same pending speaker should not create duplicate review rows")
+        assertEqual(items.first?.sampleText, "This duplicated metadata should produce one row.", "deduplicated rows should keep the transcript sample")
+    }
+
     runSuite("SpeakerReviewQueueScanner clears Home review status after deferred speaker naming") {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory

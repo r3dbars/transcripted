@@ -73,6 +73,57 @@ func testReliabilityPacketRecorder() {
         assertNil(ReliabilityPacketRecorder.packet(from: event), "boring app launch should not create a packet")
     }
 
+    runSuite("ReliabilityPacketRecorder preserves mic/output mismatch diagnostics safely") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-06-06T18:15:11.605Z",
+            level: "info",
+            engine: "meeting",
+            event: "meeting_recording_stopped",
+            message: "Meeting recording stopped",
+            context: [
+                "audio_device": "Private AirPods Pro",
+                "captured_input_volume_before": "0.650",
+                "captured_input_volume_changed": "false",
+                "captured_input_volume_dropped": "false",
+                "captured_input_volume_during": "0.650",
+                "default_input_volume_after": "0.500",
+                "default_input_volume_before": "0.500",
+                "default_input_volume_dropped": "false",
+                "default_input_volume_during": "0.500",
+                "default_output_volume_after": "0.750",
+                "default_output_volume_before": "0.750",
+                "default_output_volume_dropped": "false",
+                "default_output_volume_during": "0.750",
+                "default_system_output_volume_after": "0.400",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_dropped": "true",
+                "default_system_output_volume_during": "0.750",
+                "input_device_class": "built_in",
+                "input_volume_scalar_available": "true",
+                "mic_processed_peak": "0.30000",
+                "mic_raw_peak": "0.02000",
+                "output_device_class": "bluetooth",
+                "output_ducking_detected": "true",
+                "system_output_device_class": "bluetooth",
+                "transcript_text": "private words",
+            ],
+            appVersion: "1.1.46",
+            osVersion: "Version 26.5.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertNotNil(packet, "meeting stop should produce a reliability packet")
+        assertEqual(packet?.context["input_device_class"], "built_in", "coarse selected mic class should survive")
+        assertEqual(packet?.context["output_device_class"], "bluetooth", "coarse output class should survive")
+        assertEqual(packet?.context["system_output_device_class"], "bluetooth", "coarse system output class should survive")
+        assertEqual(packet?.context["captured_input_volume_dropped"], "false", "captured mic scalar should stay separate from default route facts")
+        assertEqual(packet?.context["default_system_output_volume_dropped"], "true", "system-output ducking should stay queryable")
+        assertEqual(packet?.context["output_ducking_detected"], "true", "derived ducking flag should survive")
+        assertNil(packet?.context["audio_device"], "raw device names should not be copied into reliability packets")
+        assertNil(packet?.context["transcript_text"], "transcript text should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder maps dictation microphone timeout route shape safely") {
         let event = ObservabilityEvent(
             timestamp: "2026-06-02T14:18:42.771Z",

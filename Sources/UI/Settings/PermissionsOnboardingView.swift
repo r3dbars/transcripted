@@ -156,7 +156,8 @@ struct PermissionsOnboardingView: View {
                         detail: "Record calls from the app. No dictation shortcut required.",
                         footnote: "Best if you mainly want meeting notes.",
                         icon: "person.2.wave.2.fill",
-                        isSelected: selectedUseCase == .meetings
+                        isSelected: selectedUseCase == .meetings,
+                        automationIdentifier: "transcripted.onboarding.use-case.meetings"
                     ) {
                         selectedUseCase = .meetings
                     }
@@ -165,7 +166,8 @@ struct PermissionsOnboardingView: View {
                         detail: "Talk to type anywhere with a shortcut.",
                         footnote: "Best if you want paste-back in other apps.",
                         icon: "keyboard",
-                        isSelected: selectedUseCase == .dictation
+                        isSelected: selectedUseCase == .dictation,
+                        automationIdentifier: "transcripted.onboarding.use-case.dictation"
                     ) {
                         selectedUseCase = .dictation
                     }
@@ -197,7 +199,8 @@ struct PermissionsOnboardingView: View {
                     ToggleCard(
                         title: "Leave dictation shortcuts off",
                         detail: "You can still start meetings from the app. Turn dictation on later in Settings > Shortcuts.",
-                        isOn: $leaveDictationShortcutsOff
+                        isOn: $leaveDictationShortcutsOff,
+                        automationIdentifier: "transcripted.onboarding.permissions.leave-dictation-shortcuts-off"
                     )
                     .frame(width: 500)
                     .padding(.top, 2)
@@ -262,6 +265,7 @@ struct PermissionsOnboardingView: View {
                 }
                 .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted))
                 .padding(.top, 12)
+                .accessibilityIdentifier("transcripted.onboarding.system-audio.enable")
                 Text("You can skip this now, but meeting transcripts need it to include the other side of the call.")
                     .font(.system(size: 12))
                     .foregroundStyle(OnboardingTheme.muted)
@@ -286,7 +290,8 @@ struct PermissionsOnboardingView: View {
                 ToggleCard(
                     title: "Meeting reminders",
                     detail: "Use read-only calendar access to notice upcoming calls.",
-                    isOn: $meetingPromptsEnabled
+                    isOn: $meetingPromptsEnabled,
+                    automationIdentifier: "transcripted.onboarding.calendar.meeting-reminders"
                 )
                 .frame(maxWidth: 440)
                 .padding(.top, 4)
@@ -301,6 +306,7 @@ struct PermissionsOnboardingView: View {
                 .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
                 .disabled(!meetingPromptsEnabled)
                 .padding(.top, 6)
+                .accessibilityIdentifier("transcripted.onboarding.calendar.allow")
                 Text("Read-only. Events stay on your Mac.")
                     .font(.system(size: 12))
                     .foregroundStyle(OnboardingTheme.muted)
@@ -342,11 +348,12 @@ struct PermissionsOnboardingView: View {
                 Kicker("One last thing")
                 Headline(primary: "Help us make it better?", size: 42)
                 BodyCopy("Anonymous diagnostics help us find bugs and fix them fast.", maxWidth: 480)
-                ToggleCard(
-                    title: "Share anonymous diagnostics",
-                    detail: "Crash reports, feature counts, app version, and macOS version. Never audio, transcripts, or anything you type or say.",
-                    isOn: $diagnosticsEnabled
-                )
+                    ToggleCard(
+                        title: "Share anonymous diagnostics",
+                        detail: "Crash reports, feature counts, app version, and macOS version. Never audio, transcripts, or anything you type or say.",
+                        isOn: $diagnosticsEnabled,
+                        automationIdentifier: "transcripted.onboarding.diagnostics.share"
+                    )
                 .frame(width: 480)
                 .padding(.top, 10)
                 .onChange(of: diagnosticsEnabled) { _, newValue in
@@ -381,7 +388,8 @@ struct PermissionsOnboardingView: View {
                 reason: selectedUseCase == .meetings ? "For your side of the meeting." : "So Transcripted can hear you.",
                 icon: "mic.fill",
                 granted: micGranted,
-                actionTitle: "Allow"
+                actionTitle: "Allow",
+                automationIdentifier: "transcripted.onboarding.permissions.microphone"
             ) {
                 requestPermission(.microphone, required: true)
             }
@@ -393,7 +401,8 @@ struct PermissionsOnboardingView: View {
                     reason: "For everyone else on the call.",
                     icon: "speaker.wave.2.fill",
                     granted: screenRecordingGranted,
-                    actionTitle: "Allow"
+                    actionTitle: "Allow",
+                    automationIdentifier: "transcripted.onboarding.permissions.system-audio"
                 ) {
                     requestPermission(.systemAudioRecording, required: true)
                 }
@@ -403,7 +412,8 @@ struct PermissionsOnboardingView: View {
                     reason: "So paste-back works in other apps.",
                     icon: "hand.raised.fill",
                     granted: accessibilityGranted,
-                    actionTitle: "Allow"
+                    actionTitle: "Allow",
+                    automationIdentifier: "transcripted.onboarding.permissions.accessibility"
                 ) {
                     requestPermission(.accessibility, required: true)
                 }
@@ -965,6 +975,7 @@ private struct NavBar: View {
             .buttonStyle(.plain)
             .opacity(canGoBack ? 1 : 0)
             .disabled(!canGoBack)
+            .accessibilityIdentifier("transcripted.onboarding.nav.back")
 
             Spacer()
 
@@ -975,6 +986,7 @@ private struct NavBar: View {
                 .font(.system(size: 13))
                 .buttonStyle(.plain)
                 .foregroundStyle(OnboardingTheme.muted)
+                .accessibilityIdentifier("transcripted.onboarding.nav.skip")
             }
 
             Button {
@@ -995,6 +1007,7 @@ private struct NavBar: View {
             }
             .buttonStyle(.plain)
             .disabled(primaryDisabled)
+            .accessibilityIdentifier("transcripted.onboarding.nav.primary")
         }
         .padding(.horizontal, 32)
         .frame(height: 78)
@@ -1186,6 +1199,7 @@ private struct PermissionGrantRow: View {
     let icon: String
     let granted: Bool
     let actionTitle: String
+    let automationIdentifier: String
     let action: () -> Void
 
     var body: some View {
@@ -1215,6 +1229,7 @@ private struct PermissionGrantRow: View {
             }
             .buttonStyle(InkButtonStyle(isSubtle: granted, compact: true))
             .disabled(granted)
+            .accessibilityIdentifier(automationIdentifier)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -1237,6 +1252,7 @@ private struct UseCaseChoiceCard: View {
     let footnote: String
     let icon: String
     let isSelected: Bool
+    let automationIdentifier: String
     let action: () -> Void
 
     var body: some View {
@@ -1286,6 +1302,7 @@ private struct UseCaseChoiceCard: View {
             .shadow(color: .black.opacity(isSelected ? 0.08 : 0.03), radius: isSelected ? 16 : 8, y: 8)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(automationIdentifier)
     }
 }
 
@@ -1661,6 +1678,7 @@ private struct ToggleCard: View {
     let title: String
     let detail: String
     @Binding var isOn: Bool
+    var automationIdentifier: String? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -1676,6 +1694,7 @@ private struct ToggleCard: View {
             Toggle("", isOn: $isOn)
                 .toggleStyle(.switch)
                 .labelsHidden()
+                .onboardingAutomationIdentifier(automationIdentifier)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -1686,6 +1705,17 @@ private struct ToggleCard: View {
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func onboardingAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
     }
 }
 
@@ -1997,7 +2027,8 @@ private struct ConnectAgentStage: View {
                     detail: "Copy the setup steps, then install Transcripted direct tools from Settings > Agent.",
                     glyph: "◆",
                     color: OnboardingTheme.claude,
-                    buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps"
+                    buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps",
+                    automationIdentifier: "transcripted.onboarding.agent.copy-claude-desktop-steps"
                 ) {
                     onCopy(.claudeDesktopSetup)
                 }
@@ -2008,7 +2039,8 @@ private struct ConnectAgentStage: View {
                     detail: "Copy one prompt for local coding agents that can read your Transcripted Markdown folders.",
                     glyph: "●",
                     color: OnboardingTheme.codex,
-                    buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt"
+                    buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
+                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt"
                 ) {
                     onCopy(.localAgentPrompt)
                 }
@@ -2035,6 +2067,7 @@ private struct AgentOptionCard: View {
     let glyph: String
     let color: Color
     let buttonTitle: String
+    let automationIdentifier: String
     var inverted = false
     let action: () -> Void
 
@@ -2064,6 +2097,7 @@ private struct AgentOptionCard: View {
                 action()
             }
             .buttonStyle(InkButtonStyle(isSubtle: inverted))
+            .accessibilityIdentifier(automationIdentifier)
         }
         .foregroundStyle(inverted ? OnboardingTheme.window : OnboardingTheme.ink)
         .padding(22)

@@ -265,6 +265,14 @@ enum HomeHeroMode: String, CaseIterable, Identifiable {
         }
     }
 
+    var automationIdentifier: String {
+        switch self {
+        case .dictation: return "transcripted.home.mode.dictation"
+        case .meeting: return "transcripted.home.mode.meetings"
+        case .speakers: return "transcripted.home.mode.speakers"
+        }
+    }
+
     var activityTab: HomeActivityTab {
         switch self {
         case .dictation: return .dictations
@@ -552,6 +560,7 @@ private struct HomeHeroModeTab: View {
         .animation(reduceMotion ? nil : SettingsInteractionPalette.animation, value: isHovering)
         .accessibilityLabel(mode.switchTitle)
         .accessibilityValue(isSelected ? "Selected" : "")
+        .accessibilityIdentifier(mode.automationIdentifier)
     }
 
     private var tabFill: Color {
@@ -859,6 +868,7 @@ struct HomeStatsBadge: View {
         }
         .buttonStyle(.plain)
         .help("Show more stats")
+        .accessibilityIdentifier("transcripted.home.stats.view")
     }
 
     private var metricColumns: [GridItem] {
@@ -938,6 +948,7 @@ struct HomeStatsDetailSheet: View {
 
                 Button("Done", action: onDone)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("transcripted.home.stats.done")
             }
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
@@ -1096,11 +1107,13 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
         .help(help)
+        .accessibilityIdentifier("transcripted.home.row.copy")
     }
 }
 
 struct HomeRowMoreMenuButton: NSViewRepresentable {
     let items: [HomeRowMenuItem]
+    var automationIdentifier = "transcripted.home.row.more"
 
     func makeCoordinator() -> Coordinator {
         Coordinator(items: items)
@@ -1119,6 +1132,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         button.action = #selector(Coordinator.showMenu(_:))
         button.setButtonType(.momentaryChange)
         button.setAccessibilityLabel("More options")
+        button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+        button.setAccessibilityIdentifier(automationIdentifier)
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
         return button
@@ -1127,6 +1142,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.items = items
         button.isEnabled = !items.isEmpty
+        button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+        button.setAccessibilityIdentifier(automationIdentifier)
     }
 
     final class Coordinator: NSObject {
@@ -1427,6 +1444,7 @@ struct HomeDictationRow: View {
                     }
                     .buttonStyle(.plain)
                     .help("Open Markdown")
+                    .accessibilityIdentifier("transcripted.home.dictation.open-markdown")
                 }
 
                 if canExpand {
@@ -1445,6 +1463,7 @@ struct HomeDictationRow: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
                     .help(isExpanded ? "Collapse dictation" : "Expand dictation")
+                    .accessibilityIdentifier("transcripted.home.dictation.expand")
                 }
             }
         }
@@ -1536,6 +1555,7 @@ struct HomeMeetingRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Preview meeting")
+                .accessibilityIdentifier("transcripted.home.meeting.preview")
 
                 if let summaryPreview = visibleSummaryPreview {
                     if isSummaryExpanded {
@@ -1580,6 +1600,7 @@ struct HomeMeetingRow: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.accentColor)
                         .help(isSummaryExpanded ? "Collapse summary" : "Expand summary")
+                        .accessibilityIdentifier("transcripted.home.meeting.summary-expand")
                     }
                 }
             }
@@ -1632,6 +1653,7 @@ struct HomeMeetingRow: View {
                 reviewDotButton(
                     help: item.speakerStatus.summary,
                     isDisabled: false,
+                    automationIdentifier: "transcripted.home.meeting.review-speakers",
                     action: onReviewSpeakers
                 )
             )
@@ -1647,6 +1669,7 @@ struct HomeMeetingRow: View {
             reviewDotButton(
                 help: retranscriptionUnavailableReason ?? "Identify speakers from retained audio",
                 isDisabled: !canRetranscribe,
+                automationIdentifier: "transcripted.home.meeting.retranscribe-speakers",
                 action: onRetranscribe
             )
         )
@@ -1735,6 +1758,7 @@ struct HomeMeetingRow: View {
     private func reviewDotButton(
         help: String,
         isDisabled: Bool,
+        automationIdentifier: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -1748,6 +1772,7 @@ struct HomeMeetingRow: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
         .help(help)
+        .accessibilityIdentifier(automationIdentifier)
     }
 
     private func attentionDot(color: Color, help: String, opacity: Double = 1) -> some View {
@@ -1806,12 +1831,14 @@ struct HomeFailedMeetingInlineRow: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .help("Show saved audio in Finder")
+                .accessibilityIdentifier("transcripted.home.failed-meeting.show-audio")
             }
 
             if inlinePresentation.canShowRetryAction {
                 HomeAttentionActionButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
                     isDisabled: retryDisabled,
+                    automationIdentifier: "transcripted.home.failed-meeting.retry",
                     action: onRetry
                 )
                 .help(retryHelp)
@@ -1824,7 +1851,7 @@ struct HomeFailedMeetingInlineRow: View {
                     isDestructive: hasRetainedAudioFiles,
                     action: onClear
                 )
-            ])
+            ], automationIdentifier: "transcripted.home.failed-meeting.more")
             .frame(width: 26, height: 26)
             .help("More options")
         }
@@ -1898,6 +1925,7 @@ private struct HomeAttentionActionButton: View {
     let title: String
     let isDisabled: Bool
     var tint: Color = .red
+    var automationIdentifier: String? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -1923,6 +1951,7 @@ private struct HomeAttentionActionButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .onHover { isHovering = $0 }
+        .homeAutomationIdentifier(automationIdentifier)
     }
 
     private var foregroundColor: Color {
@@ -1970,6 +1999,18 @@ private struct HomeAudioIconButton: View {
             cornerRadius: 7
         ))
         .accessibilityLabel(title)
+        .accessibilityIdentifier("transcripted.home.audio.\(isPlaying ? "pause" : "play")")
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func homeAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
     }
 }
 
@@ -2027,6 +2068,7 @@ private struct HomeMeetingAudioControl: View {
                 normalStroke: isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
             ))
             .accessibilityLabel(title)
+            .accessibilityIdentifier("transcripted.home.audio.inline-toggle")
 
             if let scrubber {
                 scrubber
@@ -2503,15 +2545,28 @@ struct HomeMeetingPreviewSheet: View {
             }
 
             HStack {
-                SettingsInlineActionButton(title: "Open Markdown", symbolName: "doc.text") {
+                SettingsInlineActionButton(
+                    title: "Open Markdown",
+                    symbolName: "doc.text",
+                    automationIdentifier: "transcripted.home.meeting-preview.open-markdown"
+                ) {
                     onOpenMarkdown()
                 }
 
-                SettingsInlineActionButton(title: "Copy for agent", symbolName: "square.on.square") {
+                SettingsInlineActionButton(
+                    title: "Copy for agent",
+                    symbolName: "square.on.square",
+                    automationIdentifier: "transcripted.home.meeting-preview.copy-for-agent"
+                ) {
                     onCopyForAgent()
                 }
 
-                SettingsInlineActionButton(title: "Report issue", symbolName: "flag", tone: .warning) {
+                SettingsInlineActionButton(
+                    title: "Report issue",
+                    symbolName: "flag",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.home.meeting-preview.report-issue"
+                ) {
                     onReportIssue()
                 }
 
@@ -2571,7 +2626,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 34,
                         isPrimary: false,
                         isDisabled: !canSeek,
-                        help: "Skip back 15 seconds"
+                        help: "Skip back 15 seconds",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-back"
                     ) {
                         playback.skip(audio, by: -15)
                     }
@@ -2581,7 +2637,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 46,
                         isPrimary: playback.isActive(audio, choice: selectedPlaybackChoice),
                         isDisabled: false,
-                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio"
+                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.toggle"
                     ) {
                         playback.toggle(audio, choice: selectedPlaybackChoice)
                     }
@@ -2591,7 +2648,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 34,
                         isPrimary: false,
                         isDisabled: !canSeek,
-                        help: "Skip forward 15 seconds"
+                        help: "Skip forward 15 seconds",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-forward"
                     ) {
                         playback.skip(audio, by: 15)
                     }
@@ -2638,6 +2696,7 @@ private struct HomePodcastPlayerButton: View {
     let isPrimary: Bool
     let isDisabled: Bool
     let help: String
+    let automationIdentifier: String
     let action: () -> Void
 
     var body: some View {
@@ -2660,6 +2719,7 @@ private struct HomePodcastPlayerButton: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.42 : 1)
         .help(help)
+        .accessibilityIdentifier(automationIdentifier)
     }
 
     private var foreground: Color {
@@ -2755,6 +2815,7 @@ private enum HomeMeetingSpeakerColor {
 struct HomeLoadMoreButton: View {
     let title: String
     let isLoading: Bool
+    var automationIdentifier = "transcripted.home.load-more"
     let action: () -> Void
 
     @State private var isHovering = false
@@ -2779,6 +2840,7 @@ struct HomeLoadMoreButton: View {
             .disabled(isLoading)
             .onHover { isHovering = $0 }
             .animation(.easeOut(duration: 0.14), value: isHovering)
+            .accessibilityIdentifier(automationIdentifier)
 
             Spacer(minLength: 0)
         }
@@ -2860,6 +2922,7 @@ struct HomeNeedsAttentionCard: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .accessibilityIdentifier("transcripted.home.needs-attention.review")
         } else {
             Menu {
                 ForEach(issues) { issue in
@@ -2879,6 +2942,7 @@ struct HomeNeedsAttentionCard: View {
             .menuStyle(.borderlessButton)
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .accessibilityIdentifier("transcripted.home.needs-attention.review-menu")
         }
     }
 }
@@ -2904,7 +2968,12 @@ struct HomeFailedMeetingsCard: View {
                     .font(.headline)
                 Spacer()
                 if hiddenCount > 0 {
-                    SettingsInlineActionButton(title: showAllTitle, tone: .warning, action: onShowAll)
+                    SettingsInlineActionButton(
+                        title: showAllTitle,
+                        tone: .warning,
+                        automationIdentifier: "transcripted.home.failed-meetings.show-all",
+                        action: onShowAll
+                    )
                 }
             }
 
@@ -3005,7 +3074,11 @@ private struct HomeFailedMeetingRow: View {
                             }
                         }
 
-                        SettingsInlineActionButton(title: "Show Audio", symbolName: "folder") {
+                        SettingsInlineActionButton(
+                            title: "Show Audio",
+                            symbolName: "folder",
+                            automationIdentifier: "transcripted.home.failed-meetings.show-audio"
+                        ) {
                             onRevealAudio()
                         }
                     } else {
@@ -3020,7 +3093,8 @@ private struct HomeFailedMeetingRow: View {
                         SettingsInlineActionButton(
                             title: item.isRetrying ? "Retrying..." : "Try Again",
                             symbolName: "arrow.clockwise",
-                            tone: .accent
+                            tone: .accent,
+                            automationIdentifier: "transcripted.home.failed-meetings.retry"
                         ) {
                             onRetry()
                         }
@@ -3031,7 +3105,10 @@ private struct HomeFailedMeetingRow: View {
                     SettingsInlineActionButton(
                         title: hasRetainedAudioFiles ? "Delete" : "Dismiss",
                         symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-                        tone: hasRetainedAudioFiles ? .destructive : .neutral
+                        tone: hasRetainedAudioFiles ? .destructive : .neutral,
+                        automationIdentifier: hasRetainedAudioFiles
+                            ? "transcripted.home.failed-meetings.delete"
+                            : "transcripted.home.failed-meetings.dismiss"
                     ) {
                         onClear()
                     }

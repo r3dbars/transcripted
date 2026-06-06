@@ -123,9 +123,18 @@ struct DictationPasteTarget: Equatable {
 final class ClipboardRestoringTextPaster {
     typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
 
+    private struct PendingClipboardRestore {
+        let savedItems: PasteboardSnapshot
+        let temporaryString: String
+        let temporaryChangeCount: Int
+        let pasteboard: any ClipboardPasteboard
+        let generation: Int
+    }
+
     private var clipboardRestoreTask: Task<Void, Never>?
     private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
     private var clipboardAutoEnterReadyGeneration: Int?
+    private var pendingClipboardRestore: PendingClipboardRestore?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
     private var pasteGeneration = 0
 
@@ -141,6 +150,7 @@ final class ClipboardRestoringTextPaster {
         clipboardAutoEnterReadinessTask?.cancel()
         clipboardAutoEnterReadinessTask = nil
         clipboardAutoEnterReadyGeneration = nil
+        pendingClipboardRestore = nil
         temporaryPasteboardDataProvider = nil
     }
 
@@ -174,12 +184,12 @@ final class ClipboardRestoringTextPaster {
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay
     ) -> TextPasteOutcome {
-        cancelPendingClipboardRestore()
+        restorePendingClipboardBeforeNewPaste()
 
         if let target,
            !target.matchesCurrentFrontmostApp(),
            !waitForTargetActivation(target, timeout: activationWait) {
-            copyTextToClipboard(text)
+            copyTextToClipboard(text, to: pasteboard)
             return .copied(
                 "Focus changed before Transcripted could paste, so the text was copied.",
                 reason: .focusChanged
@@ -246,6 +256,29 @@ final class ClipboardRestoringTextPaster {
         return .pasted
     }
 
+    private func restorePendingClipboardBeforeNewPaste() {
+        guard let pendingClipboardRestore else {
+            cancelPendingClipboardRestore()
+            return
+        }
+
+        pasteGeneration += 1
+        clipboardRestoreTask?.cancel()
+        clipboardRestoreTask = nil
+        clipboardAutoEnterReadinessTask?.cancel()
+        clipboardAutoEnterReadinessTask = nil
+        clipboardAutoEnterReadyGeneration = nil
+        temporaryPasteboardDataProvider = nil
+        self.pendingClipboardRestore = nil
+
+        restorePasteboardItems(
+            pendingClipboardRestore.savedItems,
+            temporaryString: pendingClipboardRestore.temporaryString,
+            temporaryChangeCount: pendingClipboardRestore.temporaryChangeCount,
+            to: pendingClipboardRestore.pasteboard
+        )
+    }
+
     private func scheduleClipboardRestoreAfterTemporaryRead(
         _ savedItems: PasteboardSnapshot,
         temporaryString: String,
@@ -293,6 +326,13 @@ final class ClipboardRestoringTextPaster {
     ) {
         guard generation == pasteGeneration else { return }
         clipboardRestoreTask?.cancel()
+        pendingClipboardRestore = PendingClipboardRestore(
+            savedItems: savedItems,
+            temporaryString: temporaryString,
+            temporaryChangeCount: temporaryChangeCount,
+            pasteboard: pasteboard,
+            generation: generation
+        )
         clipboardRestoreTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard let self,
@@ -305,6 +345,9 @@ final class ClipboardRestoringTextPaster {
                 to: pasteboard
             )
             self.temporaryPasteboardDataProvider = nil
+            if self.pendingClipboardRestore?.generation == generation {
+                self.pendingClipboardRestore = nil
+            }
             self.clipboardRestoreTask = nil
             self.clipboardAutoEnterReadinessTask?.cancel()
             self.clipboardAutoEnterReadinessTask = nil

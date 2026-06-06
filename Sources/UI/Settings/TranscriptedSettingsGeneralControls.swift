@@ -67,6 +67,7 @@ struct GeneralInfoButton: View {
         .buttonStyle(.plain)
         .help("Learn about \(info.title)")
         .accessibilityLabel(Text("About \(info.title)"))
+        .accessibilityIdentifier("transcripted.settings.general.info.\(automationSlug(info.title))")
         .popover(isPresented: $isPresented, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(info.title)
@@ -128,6 +129,7 @@ struct GeneralToggleRow: View {
     @Binding var isOn: Bool
     var help: String
     var info: GeneralInfo? = nil
+    var automationIdentifier: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -144,6 +146,7 @@ struct GeneralToggleRow: View {
                 .accessibilityLabel(Text(title))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityHint(Text(help))
+                .generalAutomationIdentifier(automationIdentifier)
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
@@ -186,11 +189,12 @@ struct DictationOverlayModeRow: View {
                 }
             }
             .frame(maxWidth: 374, alignment: .trailing)
-            .help(selection.detail)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(Text("Dictation window options"))
-            .accessibilityValue(Text(selection.title))
-            .accessibilityHint(Text("Choose one of two dictation window styles."))
+        .help(selection.detail)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Dictation window options"))
+        .accessibilityValue(Text(selection.title))
+        .accessibilityHint(Text("Choose one of two dictation window styles."))
+        .accessibilityIdentifier("transcripted.settings.general.dictation-window.options")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -218,6 +222,7 @@ private struct DictationOverlayModeChoice: View {
         .accessibilityLabel(Text(mode.title))
         .accessibilityValue(Text(isSelected ? "Selected" : "Not selected"))
         .accessibilityHint(Text(mode.detail))
+        .accessibilityIdentifier("transcripted.settings.general.dictation-window.\(mode.rawValue)")
         .onHover { isHovering = $0 }
     }
 
@@ -389,6 +394,7 @@ struct GeneralActionRow: View {
     let value: String
     let systemImage: String?
     let help: String
+    var automationIdentifier: String? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -430,6 +436,7 @@ struct GeneralActionRow: View {
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text(value))
         .accessibilityHint(Text(help))
+        .generalAutomationIdentifier(automationIdentifier)
     }
 }
 
@@ -438,6 +445,7 @@ struct GeneralDisclosureRow: View {
     let value: String
     @Binding var isExpanded: Bool
     let help: String
+    var automationIdentifier: String? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -483,6 +491,7 @@ struct GeneralDisclosureRow: View {
         .accessibilityLabel(Text(title))
         .accessibilityValue(Text("\(value), \(isExpanded ? "expanded" : "collapsed")"))
         .accessibilityHint(Text(help))
+        .generalAutomationIdentifier(automationIdentifier)
     }
 }
 
@@ -500,4 +509,30 @@ struct GeneralExpandedContent<Content: View>: View {
             Divider()
         }
     }
+}
+
+private extension View {
+    @ViewBuilder
+    func generalAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
+    }
+}
+
+private func automationSlug(_ value: String) -> String {
+    value
+        .lowercased()
+        .map { character -> Character in
+            character.isLetter || character.isNumber ? character : "-"
+        }
+        .reduce(into: "") { result, character in
+            if character == "-", result.last == "-" {
+                return
+            }
+            result.append(character)
+        }
+        .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 }

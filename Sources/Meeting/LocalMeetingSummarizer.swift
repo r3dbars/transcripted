@@ -350,8 +350,11 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
 
     func generateBatch(_ prompts: [LocalGemmaSummaryPrompt], workDirectory: URL) throws -> [String] {
         guard !prompts.isEmpty else { return [] }
+        try Task.checkCancellation()
         if let generateBatchOverride {
-            return try generateBatchOverride(prompts, workDirectory)
+            let outputs = try generateBatchOverride(prompts, workDirectory)
+            try Task.checkCancellation()
+            return outputs
         }
         guard let runnerURL = runnerURL() else {
             throw LocalMeetingSummaryError.missingBundledRunner

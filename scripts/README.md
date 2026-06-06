@@ -62,6 +62,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`
   - Release dSYM gate after packaging: `python3 scripts/ops/nightly-security-check.py --require-release-debug-files`
   - Optional built-app verification: `python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json`
+- `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
+  - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
   - Usage: `scripts/ops/performance-budget.rb`
   - Thin-build usage: `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`

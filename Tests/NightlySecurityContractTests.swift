@@ -8,6 +8,11 @@ func testNightlySecurityContract() {
 
         assertEqual(totalWeight, 100, "nightly scoring weights should add up to 100")
         assertNotNil(manifest["paths"]?.dictionaryValue?["sanitizer_corpus"]?.stringValue, "manifest should point at the shared sanitizer corpus")
+        assertEqual(
+            manifest["paths"]?.dictionaryValue?["privacy_leak_sweep"]?.stringValue,
+            "scripts/ops/privacy-leak-sweep.py",
+            "manifest should point at the synthetic privacy leak sweep"
+        )
         assertNotNil(manifest["expected_info_plist"]?.dictionaryValue?["SUFeedURL"]?.stringValue, "manifest should pin the Sparkle feed URL")
         assertEqual(
             manifest["expected_info_plist"]?.dictionaryValue?["TranscriptedSentryReleasePrefix"]?.stringValue,
@@ -77,11 +82,16 @@ func testNightlySecurityContract() {
         let scriptsReadme = (try? String(contentsOf: repoFixtureURL("scripts/README.md"), encoding: .utf8)) ?? ""
         let privacyDoc = (try? String(contentsOf: repoFixtureURL("docs/privacy-first-observability.md"), encoding: .utf8)) ?? ""
         let releaseDoc = (try? String(contentsOf: repoFixtureURL("docs/release-packaging.md"), encoding: .utf8)) ?? ""
+        let testMatrix = (try? String(contentsOf: repoFixtureURL(".agents/test-matrix.yml"), encoding: .utf8)) ?? ""
 
         assertTrue(scriptsReadme.contains("nightly-security-check.py"), "scripts README should mention the nightly security checker")
         assertTrue(scriptsReadme.contains("--strict --live-release-surfaces"), "scripts README should show the live release-health gate")
+        assertTrue(scriptsReadme.contains("privacy-leak-sweep.py"), "scripts README should mention the synthetic privacy leak sweep")
         assertTrue(privacyDoc.contains("nightly-security-check.py"), "privacy observability doc should mention the nightly security checker")
+        assertTrue(privacyDoc.contains("privacy-leak-sweep.py"), "privacy observability doc should mention the synthetic privacy leak sweep")
         assertTrue(releaseDoc.contains("--strict --live-release-surfaces"), "release packaging docs should point release agents at the strict live-surface gate")
+        assertTrue(releaseDoc.contains("privacy-leak-sweep.py"), "release docs should route release-note privacy checks through the synthetic sweep")
+        assertTrue(testMatrix.contains("privacy-leak-sweep.py"), "test matrix should route edits to the privacy leak sweep checks")
     }
 
     runSuite("Nightly security checker exposes strict release-health flags") {
