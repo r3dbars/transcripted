@@ -2401,7 +2401,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
-        let deletionContents = readRepoTextFile("Sources/UI/Settings/HomeMeetingDeletion.swift")
+        let deletionContents = readRepoTextFile("Sources/UI/Shared/HomeMeetingDeletion.swift")
         let duplicateBlock = sourceSlice(
             deletionContents,
             from: "private static func duplicateRetainedAudioMeetings",
