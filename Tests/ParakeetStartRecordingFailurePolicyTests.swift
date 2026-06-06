@@ -577,19 +577,54 @@ func testParakeetStartRecordingFailurePolicy() {
             return
         }
         let watchdog = String(source[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
-        guard let markIdle = watchdog.range(of: "self.isRecording = false"),
+        guard let markRestartPending = watchdog.range(of: "self.zombieRecoveryRestartPending = true"),
+              let markIdle = watchdog.range(of: "self.isRecording = false"),
               let clearRestartFlag = watchdog.range(of: "self.configChangeWasRecording = false"),
               let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0"),
+              let pendingRestartGuard = watchdog.range(of: "self.zombieRecoveryRestartPending else"),
+              let clearPendingBeforeRetry = watchdog.range(of: "self.zombieRecoveryRestartPending = false", range: pendingRestartGuard.upperBound..<watchdog.endIndex),
+              let retryStart = watchdog.range(of: "await self.startRecording(isRecoveryAttempt: true)"),
               let removeTap = watchdog.range(of: "await self.removeRecordingTap()"),
               let stopEngine = watchdog.range(of: "await self.stopAudioEngine()") else {
             assertTrue(false, "zombie watchdog should mark internal reset state before touching CoreAudio")
             return
         }
 
+        assertTrue(markRestartPending.lowerBound < markIdle.lowerBound, "zombie reset should mark the recovery restart window before publishing idle state")
         assertTrue(markIdle.lowerBound < removeTap.lowerBound, "zombie reset should stop being treated as active recording before tap removal can post config changes")
         assertTrue(markIdle.lowerBound < stopEngine.lowerBound, "zombie reset should stop being treated as active recording before engine stop can post config changes")
         assertTrue(clearRestartFlag.lowerBound < removeTap.lowerBound, "zombie reset should not leave the device-change restart flag armed")
         assertTrue(suppressConfigChanges.lowerBound < removeTap.lowerBound, "zombie reset should suppress self-induced config changes before graph teardown")
+        assertTrue(pendingRestartGuard.lowerBound < retryStart.lowerBound, "zombie retry should be gated by the pending restart flag so user stop can cancel it")
+        assertTrue(clearPendingBeforeRetry.lowerBound < retryStart.lowerBound, "zombie retry should clear pending restart state before attempting the recovery start")
+    }
+
+    runSuite("ParakeetEngine stopRecording cancels pending zombie restart while idle") {
+        let source = readParakeetEngineSource()
+        guard let stopStart = source.range(of: "func stopRecording()"),
+              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex),
+              let cancelStart = source.range(of: "private func cancelAudioWatchdog()") else {
+            assertTrue(false, "test should find stopRecording and watchdog cancellation bodies")
+            return
+        }
+        let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
+        let cancelBody = String(source[cancelStart.lowerBound..<source.endIndex])
+        guard let pendingBranch = stopBody.range(of: "if zombieRecoveryRestartPending"),
+              let graphBump = stopBody.range(of: "audioGraphGeneration += 1", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let cancelWatchdog = stopBody.range(of: "cancelAudioWatchdog()", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let clearTimeline = stopBody.range(of: "clearRecoveredRecordingTimeline(keepingCapacity: true)", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let returnFromBranch = stopBody.range(of: "return", range: pendingBranch.upperBound..<stopBody.endIndex) else {
+            assertTrue(false, "inactive stopRecording should cancel pending zombie recovery restart")
+            return
+        }
+
+        assertTrue(graphBump.lowerBound < cancelWatchdog.lowerBound, "canceling a pending zombie restart should invalidate in-flight audio starts")
+        assertTrue(cancelWatchdog.lowerBound < returnFromBranch.lowerBound, "stopRecording should cancel the watchdog before returning from pending zombie restart")
+        assertTrue(clearTimeline.lowerBound < returnFromBranch.lowerBound, "stopRecording should clear recovered timeline before returning from pending zombie restart")
+        assertTrue(
+            cancelBody.contains("zombieRecoveryRestartPending = false"),
+            "shared watchdog cancellation should clear pending zombie restart state"
+        )
     }
 }
 
