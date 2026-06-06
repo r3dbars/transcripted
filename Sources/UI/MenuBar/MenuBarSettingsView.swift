@@ -50,6 +50,12 @@ final class MenuBarSettingsView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
+        assignAutomationIdentifier("transcripted.menubar.footer.connect-agent", to: connectAgentButton)
+        assignAutomationIdentifier("transcripted.menubar.footer.settings", to: settingsButton)
+        assignAutomationIdentifier("transcripted.menubar.footer.check-updates", to: updatesButton)
+        assignAutomationIdentifier("transcripted.menubar.footer.submit-feedback", to: feedbackButton)
+        assignAutomationIdentifier("transcripted.menubar.footer.quit", to: quitButton)
+
         connectAgentButton.target = self
         connectAgentButton.action = #selector(openAgentConnect)
         addSubview(connectAgentButton)
@@ -118,4 +124,9 @@ final class MenuBarSettingsView: NSView {
     func dismissTransientUI() {}
 
     var intrinsicHeight: CGFloat { MenuTokens.secondaryButtonSize + 8 }
+
+    private func assignAutomationIdentifier(_ rawValue: String, to view: NSView) {
+        view.identifier = NSUserInterfaceItemIdentifier(rawValue)
+        view.setAccessibilityIdentifier(rawValue)
+    }
 }

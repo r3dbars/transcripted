@@ -32,6 +32,12 @@ final class MenuBarPrimaryActionsView: NSView {
         pasteRow.onPress = { [weak self] in self?.onPasteLastDictation?() }
         recentMeetingsRow.onPress = { [weak self] in self?.onOpenRecentMeetings?() }
 
+        homeRow.setAutomationIdentifier("transcripted.menubar.primary.home")
+        dictationRow.setAutomationIdentifier("transcripted.menubar.primary.start-dictation")
+        meetingRow.setAutomationIdentifier("transcripted.menubar.primary.start-meeting")
+        pasteRow.setAutomationIdentifier("transcripted.menubar.primary.paste-last-dictation")
+        recentMeetingsRow.setAutomationIdentifier("transcripted.menubar.primary.recent-meetings")
+
         homeDivider.wantsLayer = true
         homeDivider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
 

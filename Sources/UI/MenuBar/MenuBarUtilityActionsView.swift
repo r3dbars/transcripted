@@ -38,6 +38,12 @@ final class MenuBarUtilityActionsView: NSView {
             NSApplication.shared.terminate(nil)
         }
 
+        connectAgentRow.setAutomationIdentifier("transcripted.menubar.utility.connect-agent")
+        feedbackRow.setAutomationIdentifier("transcripted.menubar.utility.submit-feedback")
+        updatesRow.setAutomationIdentifier("transcripted.menubar.utility.check-updates")
+        settingsRow.setAutomationIdentifier("transcripted.menubar.utility.settings")
+        quitRow.setAutomationIdentifier("transcripted.menubar.utility.quit")
+
         [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow].forEach(addSubview(_:))
     }
 
@@ -140,5 +146,15 @@ final class MenuBarUtilityActionsView: NSView {
 
     private var visibleRows: [MenuBarActionRowView] {
         allRows.filter { !$0.isHidden }
+    }
+
+    var smokeSnapshot: [String: MenuBarActionRowSmokeSnapshot] {
+        [
+            "connectAgent": connectAgentRow.smokeSnapshot,
+            "submitFeedback": feedbackRow.smokeSnapshot,
+            "checkUpdates": updatesRow.smokeSnapshot,
+            "settings": settingsRow.smokeSnapshot,
+            "quit": quitRow.smokeSnapshot,
+        ]
     }
 }

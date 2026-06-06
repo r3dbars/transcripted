@@ -162,7 +162,8 @@ final class MenuBarPanelController: NSViewController {
                     warningText: "",
                     isReady: false
                 ),
-                primaryActions: [:]
+                primaryActions: [:],
+                utilityActions: [:]
             )
         )
     }

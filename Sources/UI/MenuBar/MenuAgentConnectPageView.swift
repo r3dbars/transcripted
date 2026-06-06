@@ -76,6 +76,11 @@ final class MenuAgentConnectPageView: NSView {
     }
 
     private func setupViews() {
+        assignAutomationIdentifier("transcripted.menubar.agent.back", to: backButton)
+        assignAutomationIdentifier("transcripted.menubar.agent.copy-claude-desktop-steps", to: copyMCPButton)
+        assignAutomationIdentifier("transcripted.menubar.agent.copy-folder-paths", to: copyFoldersButton)
+        assignAutomationIdentifier("transcripted.menubar.agent.copy-local-agent-prompt", to: copyPromptButton)
+
         titleLabel.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
@@ -262,6 +267,11 @@ final class MenuAgentConnectPageView: NSView {
             self.copyFoldersButton.title = "Copy folder paths"
             self.copyFoldersButton.setSymbol("folder", accessibilityLabel: "Copy folder paths")
         }
+    }
+
+    private func assignAutomationIdentifier(_ rawValue: String, to view: NSView) {
+        view.identifier = NSUserInterfaceItemIdentifier(rawValue)
+        view.setAccessibilityIdentifier(rawValue)
     }
 }
 

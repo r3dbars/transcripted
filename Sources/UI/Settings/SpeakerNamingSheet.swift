@@ -167,6 +167,10 @@ final class SpeakerNamingContentView: NSView {
     private func setupViews() {
         wantsLayer = true
 
+        assignAutomationIdentifier("transcripted.speaker-review.save-names", to: saveButton)
+        assignAutomationIdentifier("transcripted.speaker-review.review-later", to: cancelButton)
+        assignAutomationIdentifier("transcripted.speaker-review.keep-local-mic-as-you", to: keepAsYouButton)
+
         titleLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
         titleLabel.textColor = NSColor.labelColor
         addSubview(titleLabel)
@@ -208,6 +212,11 @@ final class SpeakerNamingContentView: NSView {
         keepAsYouButton.toolTip = "Use one \"You\" label for everyone picked up by the local microphone"
         keepAsYouButton.target = self
         keepAsYouButton.action = #selector(handleKeepAsYouToggle)
+    }
+
+    private func assignAutomationIdentifier(_ rawValue: String, to view: NSView) {
+        view.identifier = NSUserInterfaceItemIdentifier(rawValue)
+        view.setAccessibilityIdentifier(rawValue)
     }
 
     private func buildRows() {
@@ -536,6 +545,7 @@ final class SpeakerRowView: NSView {
         nameField.font = NSFont.systemFont(ofSize: 12)
         nameField.placeholderString = namePlaceholder
         nameField.toolTip = "Type a new name, choose an existing person, or leave it blank to skip this row"
+        assignAutomationIdentifier("transcripted.speaker-review.row.name", to: nameField)
         nameField.onTextAreaClick = { [weak self] in
             self?.openNameTray()
         }
@@ -543,11 +553,13 @@ final class SpeakerRowView: NSView {
 
         playButton.bezelStyle = .rounded
         playButton.toolTip = "Play this short speaker sample"
+        assignAutomationIdentifier("transcripted.speaker-review.row.play-sample", to: playButton)
         playButton.target = self
         playButton.action = #selector(handlePlaySample)
         addSubview(playButton)
 
         confirmButton.bezelStyle = .inline
+        assignAutomationIdentifier("transcripted.speaker-review.row.confirm-match", to: confirmButton)
         confirmButton.target = self
         confirmButton.action = #selector(handleConfirm)
         confirmButton.isHidden = !(entry.needsConfirmation && entry.currentName != nil)
@@ -558,6 +570,7 @@ final class SpeakerRowView: NSView {
         addSubview(confirmButton)
 
         discardButton.bezelStyle = .inline
+        assignAutomationIdentifier("transcripted.speaker-review.row.discard-voice", to: discardButton)
         discardButton.target = self
         discardButton.action = #selector(handleDiscardToggle)
         discardButton.toolTip = "Do not save this voice to People. The transcript stays saved."
@@ -578,6 +591,11 @@ final class SpeakerRowView: NSView {
                 self?.syncPlayButtonState()
             }
         }
+    }
+
+    private func assignAutomationIdentifier(_ rawValue: String, to view: NSView) {
+        view.identifier = NSUserInterfaceItemIdentifier(rawValue)
+        view.setAccessibilityIdentifier(rawValue)
     }
 
     override func viewDidChangeEffectiveAppearance() {
