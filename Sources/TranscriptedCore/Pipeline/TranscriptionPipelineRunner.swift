@@ -370,7 +370,8 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
                 retainedAudioURLs: archiveOutcome.retainedAudioURLs,
                 speakerClipURLs: namingEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
         }
 
@@ -413,7 +414,8 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
                 retainedAudioURLs: archiveOutcome.retainedAudioURLs,
                 speakerClipURLs: namingEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
         }
 

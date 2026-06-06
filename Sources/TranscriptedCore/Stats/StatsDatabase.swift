@@ -229,6 +229,17 @@ public final class StatsDatabase {
         // Wrap INSERT + daily activity update in a transaction so both succeed or neither does
         transaction {
             let existing = recordingMetadataImpl(id: metadata.id)
+                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)
+            let storedMetadata = RecordingMetadata(
+                id: existing?.id ?? metadata.id,
+                date: metadata.date,
+                durationSeconds: metadata.durationSeconds,
+                wordCount: metadata.wordCount,
+                speakerCount: metadata.speakerCount,
+                processingTimeMs: metadata.processingTimeMs,
+                transcriptPath: metadata.transcriptPath,
+                title: metadata.title
+            )
             let sql = """
             INSERT OR REPLACE INTO recordings (id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -240,25 +251,25 @@ public final class StatsDatabase {
                 let dateFormatter = DateFormatter()
                 dateFormatter.locale = Locale(identifier: "en_US_POSIX")
                 dateFormatter.dateFormat = "yyyy-MM-dd"
-                let dateString = dateFormatter.string(from: metadata.date)
+                let dateString = dateFormatter.string(from: storedMetadata.date)
 
                 let timeFormatter = DateFormatter()
                 timeFormatter.locale = Locale(identifier: "en_US_POSIX")
                 timeFormatter.dateFormat = "HH:mm:ss"
-                let timeString = timeFormatter.string(from: metadata.date)
+                let timeString = timeFormatter.string(from: storedMetadata.date)
 
                 let isoFormatter = ISO8601DateFormatter()
-                let createdAt = isoFormatter.string(from: metadata.date)
+                let createdAt = isoFormatter.string(from: storedMetadata.date)
 
-                sqlite3_bind_text(statement, 1, (metadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 1, (storedMetadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 3, (timeString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int(statement, 4, Int32(metadata.durationSeconds))
-                sqlite3_bind_int(statement, 5, Int32(metadata.wordCount))
-                sqlite3_bind_int(statement, 6, Int32(metadata.speakerCount))
-                sqlite3_bind_int(statement, 7, Int32(metadata.processingTimeMs))
-                sqlite3_bind_text(statement, 8, ((metadata.transcriptPath ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 9, ((metadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(statement, 4, Int32(storedMetadata.durationSeconds))
+                sqlite3_bind_int(statement, 5, Int32(storedMetadata.wordCount))
+                sqlite3_bind_int(statement, 6, Int32(storedMetadata.speakerCount))
+                sqlite3_bind_int(statement, 7, Int32(storedMetadata.processingTimeMs))
+                sqlite3_bind_text(statement, 8, ((storedMetadata.transcriptPath ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 9, ((storedMetadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
                 if sqlite3_step(statement) != SQLITE_DONE {
@@ -271,7 +282,7 @@ public final class StatsDatabase {
             sqlite3_finalize(statement)
 
             // Update daily activity (inside same transaction)
-            updateDailyActivityForSessionChange(from: existing, to: metadata)
+            updateDailyActivityForSessionChange(from: existing, to: storedMetadata)
         }
     }
 
@@ -290,6 +301,31 @@ public final class StatsDatabase {
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, (id as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return recordingMetadataFromRow(statement)
+    }
+
+    private func recordingMetadataImpl(transcriptPath: String?) -> RecordingMetadata? {
+        guard let transcriptPath, !transcriptPath.isEmpty else {
+            return nil
+        }
+
+        let sql = """
+        SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
+        FROM recordings
+        WHERE transcript_path = ?
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            AppLogger.stats.error("Failed to prepare recording path lookup", ["sqlite_error": dbErrorMessage()])
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
         guard sqlite3_step(statement) == SQLITE_ROW else {
             return nil
         }

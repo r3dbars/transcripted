@@ -2075,6 +2075,10 @@ func testRepoCommandContract() {
             "replacement retranscription cancellation should restore the selected original transcript"
         )
         assertTrue(
+            runnerContents.contains("speakerClipURLs: namingEntries.map(\\.clipURL),\n                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,\n                replacementTranscriptRollback: replacementTranscriptRollback"),
+            "replacement retranscription cancellation during speaker clip extraction should restore the selected original transcript"
+        )
+        assertTrue(
             runnerContents.contains("if deleteSavedTranscript {")
                 && runnerContents.contains("try? FileManager.default.removeItem(at: savedURL)"),
             "new cancelled transcripts should still be removed when they are not replacing an existing file"
@@ -2085,9 +2089,9 @@ func testRepoCommandContract() {
         let statsContents = readRepoTextFile("Sources/TranscriptedCore/Stats/StatsDatabase.swift")
 
         assertTrue(
-            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)")
-                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: metadata)"),
-            "stats recording should detect same-ID replacements before updating daily totals"
+            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)\n                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)")
+                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: storedMetadata)"),
+            "stats recording should detect same-ID and same-path replacements before updating daily totals"
         )
         assertTrue(
             statsContents.contains("recordingCountDelta: 0")

@@ -69,6 +69,43 @@ final class StatsDatabaseTests: XCTestCase {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: databaseURL.path + suffix))
         }
     }
+
+    func testReplacingLegacyRecordingMatchesByTranscriptPath() {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCoreStatsTests-\(UUID().uuidString).sqlite")
+        let date = Calendar(identifier: .gregorian).date(
+            from: DateComponents(year: 2026, month: 4, day: 5, hour: 9, minute: 0)
+        )!
+
+        do {
+            let database = StatsDatabase(path: databaseURL.path)
+            database.recordSession(RecordingMetadata(
+                id: "legacy-row-id",
+                date: date,
+                durationSeconds: 60,
+                transcriptPath: "/synthetic/legacy-meeting.md"
+            ))
+            database.recordSession(RecordingMetadata(
+                id: "fresh-replacement-id",
+                date: date,
+                durationSeconds: 95,
+                transcriptPath: "/synthetic/legacy-meeting.md"
+            ))
+            database.queue.sync {}
+
+            let recordings = database.getAllRecordings()
+            XCTAssertEqual(recordings.map(\.id), ["legacy-row-id"])
+            XCTAssertEqual(recordings.map(\.durationSeconds), [95])
+            XCTAssertEqual(
+                dailyActivity(at: databaseURL, date: "2026-04-05"),
+                DailyActivity(count: 1, duration: 95)
+            )
+        }
+
+        for suffix in ["", "-shm", "-wal"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: databaseURL.path + suffix))
+        }
+    }
 }
 
 private struct DailyActivity: Equatable {
