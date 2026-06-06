@@ -2514,6 +2514,51 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
+        let deletionContents = readRepoTextFile("Sources/UI/Shared/HomeMeetingDeletion.swift")
+        let duplicateBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "private static func isAppOwnedMeetingTranscript"
+        )
+        let preScanBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "let meetingsDirectory"
+        )
+
+        assertFalse(
+            preScanBlock.contains("audioSignature(for: selectedAudio)"),
+            "Home delete should not hash selected retained audio before checking app-owned same-title candidates"
+        )
+        assertTrue(
+            duplicateBlock.contains("var candidates: [(URL, MeetingAudioAttachment)]")
+                && duplicateBlock.contains("guard !candidates.isEmpty,\n              let selectedSignature = audioSignature(for: selectedAudio)"),
+            "Home delete should collect cheap metadata candidates before hashing retained audio"
+        )
+    }
+
+    runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let deleteBlock = sourceSlice(
+            settingsContents,
+            from: "private func deleteMeeting(_ item: RecentMeetingItem)",
+            to: "private func failedMeetingAudioAttachment"
+        )
+
+        assertTrue(
+            deleteBlock.contains("HomeMeetingDeletion.plan(for: item)")
+                && deleteBlock.contains("MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))"),
+            "Home delete should stop retained-audio playback only when the active attachment is part of the planned deletion"
+        )
+        assertTrue(
+            deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
+                deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
+                deleteBlock.contains("_ = try await deletionTask.value"),
+            "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+    }
+
     runSuite("Repo command contract - Agent setup details has an explicit toggle") {
         let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
 
