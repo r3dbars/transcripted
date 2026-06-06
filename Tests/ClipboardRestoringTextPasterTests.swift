@@ -523,6 +523,56 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
+    await runSuite("ClipboardRestoringTextPaster.paste — retry does not snapshot borrowed dictation as the user clipboard") {
+        let originalClipboard = "synthetic original clipboard"
+        let firstPaste = "synthetic first dictation"
+        let secondPaste = "synthetic retry dictation"
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+
+        let firstOutcome = await MainActor.run {
+            paster.paste(
+                firstPaste,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                fallbackRestoreDelay: 50_000_000
+            )
+        }
+        let secondOutcome = await MainActor.run {
+            paster.paste(
+                secondPaste,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                fallbackRestoreDelay: 5_000_000
+            )
+        }
+
+        assertEqual(firstOutcome, .pasted, "first paste should report automatic paste")
+        assertEqual(secondOutcome, .pasted, "retry paste should report automatic paste")
+        let clipboardDuringRetry = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(clipboardDuringRetry, secondPaste, "retry paste should borrow the new dictation text")
+
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            originalClipboard,
+            "retry paste should restore the user's original clipboard, not the previous borrowed dictation"
+        )
+    }
+
     await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — cancels scheduled restore") {
         let pasteText = "synthetic paste text"
         let paster = await MainActor.run {
