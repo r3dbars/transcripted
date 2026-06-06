@@ -966,10 +966,7 @@ struct TranscriptedSettingsView: View {
             if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
                 MeetingAudioPlayback.shared.stop()
             }
-            try removeItemIfPresent(at: item.transcriptURL)
-            if let audio = item.audio {
-                try removeItemIfPresent(at: audio.directoryURL)
-            }
+            _ = try HomeMeetingDeletion.delete(item)
             refreshRecentCaptures(force: true)
         } catch {
             presentHomeDeleteFailure(
@@ -1034,11 +1031,6 @@ struct TranscriptedSettingsView: View {
                 message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
             )
         }
-    }
-
-    private func removeItemIfPresent(at url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.removeItem(at: url)
     }
 
     private func presentHomeDeleteFailure(title: String, error: Error) {
