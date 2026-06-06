@@ -519,26 +519,24 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
     return findings, watch_items
 
 
-def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None:
-    appcast_path = root / manifest["paths"]["appcast"]
+def appcast_item_metadata(item: ET.Element | None) -> dict[str, str] | None:
     namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
-    latest = ET.parse(appcast_path).getroot().find("./channel/item")
-    if latest is None:
+    if item is None:
         return None
 
-    enclosure = latest.find("enclosure")
+    enclosure = item.find("enclosure")
     return {
         "version": (
-            latest.findtext("sparkle:shortVersionString", namespaces=namespaces)
-            or latest.findtext("sparkle:version", namespaces=namespaces)
+            item.findtext("sparkle:shortVersionString", namespaces=namespaces)
+            or item.findtext("sparkle:version", namespaces=namespaces)
             or ""
         ).strip(),
-        "build": (latest.findtext("sparkle:version", namespaces=namespaces) or "").strip(),
+        "build": (item.findtext("sparkle:version", namespaces=namespaces) or "").strip(),
         "minimum_system_version": (
-            latest.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
+            item.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
         ).strip(),
         "hardware_requirements": (
-            latest.findtext("sparkle:hardwareRequirements", namespaces=namespaces) or ""
+            item.findtext("sparkle:hardwareRequirements", namespaces=namespaces) or ""
         ).strip(),
         "url": enclosure.attrib.get("url", "") if enclosure is not None else "",
         "length": enclosure.attrib.get("length", "") if enclosure is not None else "",
@@ -548,6 +546,12 @@ def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None
             else ""
         ),
     }
+
+
+def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None:
+    appcast_path = root / manifest["paths"]["appcast"]
+    latest = ET.parse(appcast_path).getroot().find("./channel/item")
+    return appcast_item_metadata(latest)
 
 
 def check_cask(root: Path, manifest: dict) -> list[dict]:
@@ -775,26 +779,45 @@ def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> li
         )
     else:
         try:
-            live_root = ET.fromstring(result.stdout)
-            live_item = live_root.find("./channel/item")
-            live_enclosure = live_item.find("enclosure") if live_item is not None else None
-            namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
-            live_version = (
-                live_item.findtext("sparkle:shortVersionString", namespaces=namespaces)
-                if live_item is not None
-                else ""
-            ) or ""
-            live_url = live_enclosure.attrib.get("url", "") if live_enclosure is not None else ""
-            if live_version.strip() != latest["version"] or live_url != latest["url"]:
+            live_latest = appcast_item_metadata(ET.fromstring(result.stdout).find("./channel/item"))
+            if live_latest is None:
                 findings.append(
                     make_finding(
                         "release_integrity",
                         "high",
-                        "live-appcast-drift",
-                        "Live appcast drifted from the committed latest appcast item.",
-                        f"Live version/url {live_version!r}/{live_url!r}; local {latest['version']!r}/{latest['url']!r}.",
+                        "live-appcast-missing-item",
+                        "Live appcast is missing its latest release item.",
+                        "Expected a channel/item entry matching the committed appcast.",
                     )
                 )
+            else:
+                drift = {
+                    key: (live_latest.get(key, ""), latest.get(key, ""))
+                    for key in (
+                        "version",
+                        "build",
+                        "minimum_system_version",
+                        "hardware_requirements",
+                        "url",
+                        "length",
+                        "signature",
+                    )
+                    if live_latest.get(key, "") != latest.get(key, "")
+                }
+                if drift:
+                    detail = "; ".join(
+                        f"{key}: live={live!r}, local={local!r}"
+                        for key, (live, local) in drift.items()
+                    )
+                    findings.append(
+                        make_finding(
+                            "release_integrity",
+                            "high",
+                            "live-appcast-drift",
+                            "Live appcast drifted from the committed latest appcast item.",
+                            detail,
+                        )
+                    )
         except ET.ParseError as exc:
             findings.append(
                 make_finding(
@@ -821,14 +844,28 @@ def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> li
             )
 
     page_result = curl_stdout(root, ["-fsSL", manifest["live_release_surfaces"]["download_page"]])
-    if page_result.returncode != 0 or "Transcripted" not in page_result.stdout:
+    page_text = page_result.stdout if page_result.returncode == 0 else ""
+    download_markers = [
+        latest["url"],
+        "download/latest.dmg",
+        "/download/latest.dmg",
+        "/download/latest/",
+    ]
+    if (
+        page_result.returncode != 0
+        or latest["version"] not in page_text
+        or not any(marker in page_text for marker in download_markers)
+    ):
         findings.append(
             make_finding(
                 "release_integrity",
                 "medium",
-                "live-download-page-unhealthy",
-                "Live /download page did not return the expected install page.",
-                f"curl failed or page marker was missing for {manifest['live_release_surfaces']['download_page']}.",
+                "live-download-page-drift",
+                "Live /download page drifted from the committed latest release.",
+                (
+                    f"Expected version {latest['version']!r} and a current download marker "
+                    f"on {manifest['live_release_surfaces']['download_page']}."
+                ),
             )
         )
 
