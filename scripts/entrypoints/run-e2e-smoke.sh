@@ -37,6 +37,7 @@ SWIFT_SOURCES=(
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
+    "Sources/Meeting/LocalMeetingSummarizer.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/LocalMeetingSummarizer.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift"

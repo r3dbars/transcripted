@@ -2,6 +2,7 @@
 # Format: <TestFile.swift>:<top-level entry function>
 
 ActivationPolicyControllerTests.swift:testActivationPolicyController
+AudioAutomationCoverageContractTests.swift:testAudioAutomationCoverageContract
 AgentConnectionGuideTests.swift:testAgentConnectionGuide
 AudioStoragePreferencesTests.swift:testAudioStoragePreferences
 ClaudeDesktopIntegrationInstallerTests.swift:testClaudeDesktopIntegrationInstaller
