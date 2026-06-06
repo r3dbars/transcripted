@@ -705,22 +705,30 @@ def check_posthog_health_schema(root: Path, manifest: dict) -> list[dict]:
             )
         )
 
-    first_value = shell_event_variable(health_text, "first_value_events").union(
-        python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS")
-    )
+    first_value_sources = {
+        "health-probe": (
+            shell_event_variable(health_text, "first_value_events"),
+            manifest["paths"]["health_probe"],
+        ),
+        "nightly-digest": (
+            python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS"),
+            manifest["paths"]["nightly_digest"],
+        ),
+    }
     required_first_value = set(manifest["required_posthog_first_value_events"])
-    missing_first_value = sorted(required_first_value - first_value)
-    if missing_first_value:
-        findings.append(
-            make_finding(
-                "observability_privacy",
-                "medium",
-                "posthog-first-value-schema",
-                "PostHog release-health probes are missing first-value activation events.",
-                f"Missing event(s): {', '.join(missing_first_value)}.",
-                manifest["paths"]["health_probe"],
+    for source_label, (events, path) in first_value_sources.items():
+        missing_first_value = sorted(required_first_value - events)
+        if missing_first_value:
+            findings.append(
+                make_finding(
+                    "observability_privacy",
+                    "medium",
+                    f"posthog-first-value-schema-{source_label}",
+                    "PostHog release-health probe is missing first-value activation events.",
+                    f"{source_label} missing event(s): {', '.join(missing_first_value)}.",
+                    path,
+                )
             )
-        )
 
     return findings
 
@@ -1382,6 +1390,21 @@ def has_required_release_health_failure(args: argparse.Namespace, findings: list
     return any(finding.get("check_id") in required_check_ids for finding in findings)
 
 
+def release_health_mode(args: argparse.Namespace) -> bool:
+    return any(
+        [
+            args.live_release_surfaces,
+            args.sentry_release_health,
+            args.require_sentry_release_health,
+            args.require_release_debug_files,
+        ]
+    )
+
+
+def should_check_automation_prompt(args: argparse.Namespace) -> bool:
+    return bool(args.automation_toml) or not release_health_mode(args)
+
+
 def main() -> int:
     args = parse_args()
     root = repo_root()
@@ -1411,7 +1434,8 @@ def main() -> int:
     findings.extend(check_entitlements(root, manifest))
     findings.extend(check_build_script_contract(root, manifest))
     findings.extend(check_built_app(root, manifest, args.app_bundle))
-    findings.extend(check_automation_prompt(manifest, automation_path))
+    if should_check_automation_prompt(args):
+        findings.extend(check_automation_prompt(manifest, automation_path))
     findings.extend(check_sanitizer_corpus(root, manifest))
 
     report = build_report(root, manifest, findings, watch_items, args.app_bundle, automation_path)
