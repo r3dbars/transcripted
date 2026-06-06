@@ -249,6 +249,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
+    "Sources/UI/Settings/HomeMeetingSummaryBetaPresentationPolicy.swift"
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"

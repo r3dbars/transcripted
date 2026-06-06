@@ -1608,7 +1608,10 @@ struct HomeMeetingRow: View {
     }
 
     private var aiSummaryAccessory: AnyView? {
-        guard localMeetingSummariesEnabled, visibleSummaryPreview == nil else { return nil }
+        guard HomeMeetingSummaryBetaPresentationPolicy.shouldShowAvailableSummaryDot(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        ) else { return nil }
         return AnyView(
             attentionDot(
                 color: .blue,
@@ -1664,11 +1667,17 @@ struct HomeMeetingRow: View {
     }
 
     private var visibleSummaryPreview: RecentMeetingSummaryPreview? {
-        localMeetingSummariesEnabled ? item.summaryPreview : nil
+        HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
     }
 
     private var displayedTitle: String {
-        localMeetingSummariesEnabled ? item.displayTitle : item.title
+        HomeMeetingSummaryBetaPresentationPolicy.displayTitle(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
     }
 
     private func canExpandSummary(_ preview: RecentMeetingSummaryPreview) -> Bool {

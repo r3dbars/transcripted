@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 func testLocalMeetingSummarizer() {
@@ -82,6 +83,42 @@ func testLocalMeetingSummarizer() {
             }
             assertTrue(true, "8GB should be refused for Gemma 4 12B")
         }
+    }
+
+    runSuite("LocalMeetingSummarySetupStatus reports runtime and low-memory readiness") {
+        let gib = UInt64(1024 * 1024 * 1024)
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummarySetupStatusTests-\(UUID().uuidString)")
+        let uvURL = temporaryDirectory.appendingPathComponent("uv")
+        try? FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        FileManager.default.createFile(atPath: uvURL.path, contents: Data("#!/bin/sh\n".utf8))
+        chmod(uvURL.path, 0o755)
+
+        let status = LocalMeetingSummarySetupStatus.current(
+            physicalMemoryBytes: 16 * gib,
+            environment: ["TRANSCRIPTED_UV_PATH": uvURL.path],
+            fileManager: .default
+        )
+
+        assertEqual(status.modelID, "mlx-community/gemma-4-12B-it-4bit", "setup status should expose the exact MLX model")
+        assertEqual(status.runtimePackage, "mlx-vlm", "setup status should expose the MLX runtime package")
+        assertEqual(status.profileName, "m1-low-memory", "16GB machines should report the low-memory profile")
+        assertEqual(status.physicalMemoryGB, 16, "status should show rounded physical memory")
+        assertEqual(status.minimumMemoryGB, 12, "Gemma summary setup should communicate the minimum memory")
+        assertTrue(status.hasRuntime, "executable uv path should make the setup runtime-ready")
+        assertTrue(status.hasEnoughMemory, "16GB should satisfy the memory check")
+        assertTrue(status.isReady, "16GB with uv should be ready")
+
+        let lowMemoryStatus = LocalMeetingSummarySetupStatus.current(
+            physicalMemoryBytes: 8 * gib,
+            environment: ["TRANSCRIPTED_UV_PATH": uvURL.path],
+            fileManager: .default
+        )
+
+        assertFalse(lowMemoryStatus.hasEnoughMemory, "8GB should be below the local Gemma memory floor")
+        assertFalse(lowMemoryStatus.isReady, "low-memory Macs should not be setup-ready even with uv")
     }
 
     runSuite("LocalMeetingSummaryStore keeps the legacy sibling summary path for fallback reads") {

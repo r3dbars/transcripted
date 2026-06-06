@@ -69,8 +69,8 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
 
         if memoryGB <= 16 {
             return LocalGemmaSummaryConfiguration(
-                modelID: "mlx-community/gemma-4-12B-it-4bit",
-                runtimePackage: "mlx-vlm",
+                modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+                runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
                 profileName: "m1-low-memory",
                 minimumPhysicalMemoryBytes: 12 * gib,
                 chunkCharacterLimit: 9_000,
@@ -86,8 +86,8 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
         }
 
         return LocalGemmaSummaryConfiguration(
-            modelID: "mlx-community/gemma-4-12B-it-4bit",
-            runtimePackage: "mlx-vlm",
+            modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+            runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
             profileName: "apple-silicon-balanced",
             minimumPhysicalMemoryBytes: 12 * gib,
             chunkCharacterLimit: 18_000,
@@ -112,6 +112,65 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
                 requiredGB: requiredGB
             )
         }
+    }
+}
+
+struct LocalMeetingSummarySetupStatus: Equatable, Sendable {
+    static let defaultModelID = "mlx-community/gemma-4-12B-it-4bit"
+    static let defaultRuntimePackage = "mlx-vlm"
+
+    let modelID: String
+    let runtimePackage: String
+    let profileName: String
+    let physicalMemoryGB: Int
+    let minimumMemoryGB: Int
+    let hasEnoughMemory: Bool
+    let uvPath: String?
+
+    var hasRuntime: Bool { uvPath != nil }
+    var isReady: Bool { hasEnoughMemory && hasRuntime }
+
+    static func current(
+        configuration: LocalGemmaSummaryConfiguration? = nil,
+        physicalMemoryBytes: UInt64 = ProcessInfo.processInfo.physicalMemory,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> LocalMeetingSummarySetupStatus {
+        let resolvedConfiguration = configuration ?? .m1Optimized(physicalMemoryBytes: physicalMemoryBytes)
+        return LocalMeetingSummarySetupStatus(
+            modelID: resolvedConfiguration.modelID,
+            runtimePackage: resolvedConfiguration.runtimePackage,
+            profileName: resolvedConfiguration.profileName,
+            physicalMemoryGB: gigabytesRoundedUp(physicalMemoryBytes),
+            minimumMemoryGB: gigabytesRoundedUp(resolvedConfiguration.minimumPhysicalMemoryBytes),
+            hasEnoughMemory: physicalMemoryBytes >= resolvedConfiguration.minimumPhysicalMemoryBytes,
+            uvPath: uvExecutableURL(environment: environment, fileManager: fileManager)?.path
+        )
+    }
+
+    static func uvExecutableURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let candidates = [
+            environment["TRANSCRIPTED_UV_PATH"],
+            "/opt/homebrew/bin/uv",
+            "/usr/local/bin/uv",
+            environment["HOME"].map { "\($0)/.local/bin/uv" }
+        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        for path in candidates where !path.isEmpty {
+            if fileManager.isExecutableFile(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+
+        return nil
+    }
+
+    private static func gigabytesRoundedUp(_ bytes: UInt64) -> Int {
+        let gib = UInt64(1024 * 1024 * 1024)
+        return Int((bytes + gib - 1) / gib)
     }
 }
 
@@ -360,6 +419,10 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
 
         let startedAt = Date()
         while process.isRunning {
+            if Task.isCancelled {
+                process.terminate()
+                throw CancellationError()
+            }
             if Date().timeIntervalSince(startedAt) > configuration.processTimeoutSeconds {
                 process.terminate()
                 throw LocalMeetingSummaryError.processTimedOut(label: batchLabel)
@@ -395,20 +458,10 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     }
 
     private func uvExecutableURL() -> URL? {
-        let candidates = [
-            environment["TRANSCRIPTED_UV_PATH"],
-            "/opt/homebrew/bin/uv",
-            "/usr/local/bin/uv",
-            environment["HOME"].map { "\($0)/.local/bin/uv" }
-        ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-        for path in candidates where !path.isEmpty {
-            if fileManager.isExecutableFile(atPath: path) {
-                return URL(fileURLWithPath: path)
-            }
-        }
-
-        return nil
+        LocalMeetingSummarySetupStatus.uvExecutableURL(
+            environment: environment,
+            fileManager: fileManager
+        )
     }
 
     private func fileSafeLabel(_ label: String) -> String {
@@ -445,78 +498,86 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
     func summarize(transcriptURL: URL, title: String, date: Date = Date()) async throws -> LocalMeetingSummaryResult {
         try configuration.validateHardware()
+        try Task.checkCancellation()
 
-        return try await Task.detached(priority: .utility) {
-            let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-            let transcript = LocalMeetingTranscriptExtractor.transcriptText(from: markdown)
-            guard transcript.split(whereSeparator: \.isWhitespace).count >= 40 else {
-                throw LocalMeetingSummaryError.emptyTranscript
-            }
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        try Task.checkCancellation()
 
-            let chunks = LocalMeetingSummaryChunker.chunks(
-                from: transcript,
-                targetCharacterLimit: configuration.chunkCharacterLimit
+        let transcript = LocalMeetingTranscriptExtractor.transcriptText(from: markdown)
+        guard transcript.split(whereSeparator: \.isWhitespace).count >= 40 else {
+            throw LocalMeetingSummaryError.emptyTranscript
+        }
+
+        let chunks = LocalMeetingSummaryChunker.chunks(
+            from: transcript,
+            targetCharacterLimit: configuration.chunkCharacterLimit
+        )
+        let workDirectory = try makeWorkDirectory()
+        defer { try? fileManager.removeItem(at: workDirectory) }
+
+        let summaryBody: String
+        if chunks.count == 1 {
+            try Task.checkCancellation()
+            summaryBody = try runtime.generate(
+                prompt: directPrompt(title: title, transcript: chunks[0]),
+                label: "direct",
+                maxTokens: configuration.directMaxTokens,
+                workDirectory: workDirectory
             )
-            let workDirectory = try makeWorkDirectory()
-            defer { try? fileManager.removeItem(at: workDirectory) }
-
-            let summaryBody: String
-            if chunks.count == 1 {
-                summaryBody = try runtime.generate(
-                    prompt: directPrompt(title: title, transcript: chunks[0]),
-                    label: "direct",
-                    maxTokens: configuration.directMaxTokens,
-                    workDirectory: workDirectory
-                )
-            } else {
-                let chunkPrompts = chunks.enumerated().map { index, chunk in
-                    LocalGemmaSummaryPrompt(
-                        label: "chunk-\(index + 1)",
-                        prompt: chunkPrompt(
-                            title: title,
-                            chunk: chunk,
-                            index: index + 1,
-                            total: chunks.count
-                        ),
-                        maxTokens: configuration.chunkMaxTokens
-                    )
-                }
-
-                let chunkOutputs = try runtime.generateBatch(
-                    chunkPrompts,
-                    workDirectory: workDirectory
-                )
-                var chunkNotes: [String] = []
-                for (index, note) in chunkOutputs.enumerated() {
-                    chunkNotes.append("# Chunk \(index + 1)\n\n\(note)")
-                }
-
-                summaryBody = try runtime.generate(
-                    prompt: mergePrompt(title: title, notes: chunkNotes.joined(separator: "\n\n---\n\n")),
-                    label: "merge",
-                    maxTokens: configuration.mergeMaxTokens,
-                    workDirectory: workDirectory
+        } else {
+            let chunkPrompts = chunks.enumerated().map { index, chunk in
+                LocalGemmaSummaryPrompt(
+                    label: "chunk-\(index + 1)",
+                    prompt: chunkPrompt(
+                        title: title,
+                        chunk: chunk,
+                        index: index + 1,
+                        total: chunks.count
+                    ),
+                    maxTokens: configuration.chunkMaxTokens
                 )
             }
 
-            let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
-            let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
-            let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
-                byApplying: sections,
-                to: markdown,
-                configuration: configuration,
-                generatedAt: date,
-                chunkCount: chunks.count
+            try Task.checkCancellation()
+            let chunkOutputs = try runtime.generateBatch(
+                chunkPrompts,
+                workDirectory: workDirectory
             )
-            try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
-            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+            var chunkNotes: [String] = []
+            for (index, note) in chunkOutputs.enumerated() {
+                try Task.checkCancellation()
+                chunkNotes.append("# Chunk \(index + 1)\n\n\(note)")
+            }
 
-            return LocalMeetingSummaryResult(
-                transcriptURL: transcriptURL,
-                chunkCount: chunks.count,
-                profileName: configuration.profileName
+            try Task.checkCancellation()
+            summaryBody = try runtime.generate(
+                prompt: mergePrompt(title: title, notes: chunkNotes.joined(separator: "\n\n---\n\n")),
+                label: "merge",
+                maxTokens: configuration.mergeMaxTokens,
+                workDirectory: workDirectory
             )
-        }.value
+        }
+
+        try Task.checkCancellation()
+        let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
+        let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+        let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sections,
+            to: markdown,
+            configuration: configuration,
+            generatedAt: date,
+            chunkCount: chunks.count
+        )
+
+        try Task.checkCancellation()
+        try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+
+        return LocalMeetingSummaryResult(
+            transcriptURL: transcriptURL,
+            chunkCount: chunks.count,
+            profileName: configuration.profileName
+        )
     }
 
     private func makeWorkDirectory() throws -> URL {

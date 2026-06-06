@@ -76,9 +76,13 @@ struct TranscriptedSettingsView: View {
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var homeLocalSummaryJobIDs: Set<String> = []
+    @State private var homeLocalSummaryTasks: [String: Task<LocalMeetingSummaryResult, Error>] = [:]
+    @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
     @State private var betaFeatureStatus: String?
+    @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+    @State private var showLocalSummarySetupDetails = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
 
     init(
@@ -692,20 +696,37 @@ struct TranscriptedSettingsView: View {
 
     private func generateLocalSummary(for item: RecentMeetingItem) {
         guard localMeetingSummariesEnabled else { return }
-        guard !homeLocalSummaryJobIDs.contains(item.id) else { return }
+        guard homeLocalSummaryTasks[item.id] == nil else { return }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         homeLocalSummaryJobIDs.insert(item.id)
 
+        let task = Task.detached(priority: .utility) {
+            try await LocalMeetingSummarizer().summarize(
+                transcriptURL: item.transcriptURL,
+                title: item.title
+            )
+        }
+        let taskToken = UUID()
+        homeLocalSummaryTasks[item.id] = task
+        homeLocalSummaryTaskTokens[item.id] = taskToken
+
         Task { @MainActor in
+            defer {
+                if homeLocalSummaryTaskTokens[item.id] == taskToken {
+                    homeLocalSummaryJobIDs.remove(item.id)
+                    homeLocalSummaryTasks[item.id] = nil
+                    homeLocalSummaryTaskTokens[item.id] = nil
+                }
+            }
+
             do {
-                _ = try await LocalMeetingSummarizer().summarize(
-                    transcriptURL: item.transcriptURL,
-                    title: item.title
-                )
-                homeLocalSummaryJobIDs.remove(item.id)
+                _ = try await task.value
+                guard localMeetingSummariesEnabled else { return }
                 refreshRecentCaptures(force: true)
+            } catch is CancellationError {
+                return
             } catch {
-                homeLocalSummaryJobIDs.remove(item.id)
+                guard localMeetingSummariesEnabled else { return }
                 homeDeleteFailure = HomeDeleteFailure(
                     title: "Could not summarize meeting",
                     message: error.localizedDescription
@@ -849,12 +870,12 @@ struct TranscriptedSettingsView: View {
         let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
 
-        if localMeetingSummariesEnabled {
+        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled) {
             items.append(
                 HomeRowMenuItem(
                     title: isSummarizing
                         ? "Running AI summary..."
-                        : (hasSummary ? "Open enhanced transcript" : "Run AI summary with Gemma 4"),
+                        : (hasSummary ? "Open enhanced transcript" : "Run AI summary"),
                     symbolName: hasSummary ? "doc.text" : "sparkles",
                     isEnabled: !isSummarizing
                 ) {
@@ -880,7 +901,8 @@ struct TranscriptedSettingsView: View {
             }
         ])
 
-        if localMeetingSummariesEnabled, hasSummary {
+        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled),
+           hasSummary {
             items.append(
                 HomeRowMenuItem(
                     title: isSummarizing ? "Regenerating AI summary..." : "Regenerate AI summary",
@@ -2321,43 +2343,146 @@ struct TranscriptedSettingsView: View {
                 title: "Experimental Features",
                 detail: "These are off by default. Nothing runs automatically unless you turn it on here."
             ) {
-                SettingsToggleRow(
-                    title: "AI meeting summaries",
-                    detail: localMeetingSummariesEnabled
-                        ? "Home shows enhanced titles, summary previews, and Gemma summary actions. Summaries still run only when you choose them."
-                        : "Off. Home uses original meeting titles and hides the Gemma summary actions.",
-                    isOn: Binding(
-                        get: { localMeetingSummariesEnabled },
-                        set: { enabled in
-                            localMeetingSummariesEnabled = enabled
-                            LocalMeetingSummaryPreferences.setEnabled(enabled)
-                            trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
-                            if !enabled {
-                                homeLocalSummaryJobIDs.removeAll()
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "AI meeting summaries",
+                        detail: localMeetingSummariesEnabled
+                            ? "On. Home shows summary previews, and summaries run only when you choose Run AI summary from a meeting."
+                            : "Create private meeting summaries on this Mac. Nothing runs until you choose a meeting.",
+                        isOn: Binding(
+                            get: { localMeetingSummariesEnabled },
+                            set: { enabled in
+                                localMeetingSummariesEnabled = enabled
+                                LocalMeetingSummaryPreferences.setEnabled(enabled)
+                                trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
+                                refreshLocalSummarySetupStatus()
+                                if !enabled {
+                                    cancelLocalSummaryJobs()
+                                }
                             }
-                        }
-                    ),
-                    help: "Opt in to local Gemma meeting summaries on Home."
-                )
+                        ),
+                        help: "Opt in to local meeting summaries on Home."
+                    )
+
+                    betaLocalSummarySetupStatus
+                }
 
                 Divider()
 
-                SettingsToggleRow(
-                    title: "Codex live sidecar",
-                    detail: betaLiveMeetingCodexEnabled
-                        ? "On. Transcripted prepares the local sidecar workspace for Codex and Cowork during live meetings."
-                        : "Off. Live meetings do not write the agent sidecar workspace.",
-                    isOn: Binding(
-                        get: { betaLiveMeetingCodexEnabled },
-                        set: { enabled in
-                            betaLiveMeetingCodexEnabled = enabled
-                            LiveMeetingCodexPreferences.setEnabled(enabled)
-                            trackSettingsToggle("codex_live_sidecar", enabled: enabled, page: .beta)
-                            handleBetaLiveMeetingSidecarToggle(enabled)
-                        }
-                    ),
-                    help: "Opt in to the live meeting sidecar workspace for Codex."
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "Live meeting sidecar",
+                        detail: betaLiveMeetingCodexEnabled
+                            ? "On. Transcripted prepares a local folder that Codex or Claude Cowork can watch during active meetings."
+                            : "Let Codex or Claude Cowork follow an active meeting through a local sidecar folder.",
+                        isOn: Binding(
+                            get: { betaLiveMeetingCodexEnabled },
+                            set: { enabled in
+                                betaLiveMeetingCodexEnabled = enabled
+                                LiveMeetingCodexPreferences.setEnabled(enabled)
+                                trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
+                                handleBetaLiveMeetingSidecarToggle(enabled)
+                            }
+                        ),
+                        help: "Opt in to the live meeting sidecar workspace."
+                    )
+
+                    betaLiveSidecarSetupStatus
+                }
+            }
+        }
+    }
+
+    private var betaLocalSummarySetupStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: localSummarySetupStatusSymbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(localSummarySetupStatusColor)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(localSummarySetupStatusTitle)
+                        .font(.subheadline.weight(.semibold))
+                    Text(localSummarySetupStatusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                SettingsInlineActionButton(title: "Check setup", symbolName: "arrow.clockwise") {
+                    trackSettingsAction("check_local_summary_setup", page: .beta)
+                    refreshLocalSummarySetupStatus()
+                }
+            }
+
+            if !localSummarySetupStatus.hasRuntime {
+                SettingsInlineActionButton(title: "Install uv", symbolName: "arrow.down.circle", tone: .warning) {
+                    trackSettingsAction("open_uv_install_guide", page: .beta)
+                    openUVInstallGuide()
+                }
+            }
+
+            DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
+                VStack(alignment: .leading, spacing: 8) {
+                    betaSetupDetailLine(
+                        title: "Model",
+                        value: "Gemma 4 12B 4-bit MLX"
+                    )
+                    betaSetupDetailLine(
+                        title: "Download",
+                        value: "First summary may download several GB into your local Hugging Face cache."
+                    )
+                    betaSetupDetailLine(
+                        title: "Runtime",
+                        value: localSummarySetupStatus.hasRuntime
+                            ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
+                            : "Install uv so Transcripted can run the local MLX package."
+                    )
+                    betaSetupDetailLine(
+                        title: "Hardware",
+                        value: "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."
+                    )
+                    betaSetupDetailLine(
+                        title: "Privacy",
+                        value: "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached."
+                    )
+                }
+                .padding(.top, 6)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 2)
+    }
+
+    private var betaLiveSidecarSetupStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: betaLiveMeetingCodexEnabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(betaLiveMeetingCodexEnabled ? Color.green : Color.secondary)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(betaLiveMeetingCodexEnabled ? "Sidecar workspace is on" : "Sidecar workspace is off")
+                        .font(.subheadline.weight(.semibold))
+                    Text(betaLiveSidecarDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 10) {
+                SettingsInlineActionButton(title: "Open Agent setup", symbolName: "sparkles", tone: .accent) {
+                    trackSettingsAction("open_agent_setup_from_beta", page: .beta)
+                    navigation.selectedPage = .connectAgent
+                }
 
                 if let betaFeatureStatus {
                     Label(
@@ -2370,6 +2495,20 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .padding(.top, 2)
+    }
+
+    private func betaSetupDetailLine(title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
@@ -2378,13 +2517,13 @@ struct TranscriptedSettingsView: View {
         if enabled {
             do {
                 _ = try prepareBetaLiveMeetingSidecarWorkspaceForUse()
-                betaFeatureStatus = "Codex live sidecar is ready."
+                betaFeatureStatus = "Live meeting sidecar is ready."
             } catch {
                 betaLiveMeetingCodexEnabled = false
                 LiveMeetingCodexPreferences.setEnabled(false)
                 meetingSession.stopLiveCodexSessionFromSettings()
                 stopBetaLiveMeetingSidecarPreview()
-                betaFeatureStatus = "Could not prepare Codex live sidecar: \(error.localizedDescription)"
+                betaFeatureStatus = "Could not prepare live meeting sidecar: \(error.localizedDescription)"
             }
         } else {
             meetingSession.stopLiveCodexSessionFromSettings()
@@ -2404,6 +2543,65 @@ struct TranscriptedSettingsView: View {
         if #available(macOS 14.0, *) {
             LiveMeetingPreviewServer.shared.stop()
         }
+    }
+
+    private func refreshLocalSummarySetupStatus() {
+        localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+    }
+
+    private func cancelLocalSummaryJobs() {
+        for task in homeLocalSummaryTasks.values {
+            task.cancel()
+        }
+        homeLocalSummaryTasks.removeAll()
+        homeLocalSummaryTaskTokens.removeAll()
+        homeLocalSummaryJobIDs.removeAll()
+    }
+
+    private func openUVInstallGuide() {
+        guard let url = URL(string: "https://docs.astral.sh/uv/getting-started/installation/") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private var localSummarySetupStatusTitle: String {
+        if !localSummarySetupStatus.hasEnoughMemory {
+            return "Not supported on this Mac"
+        }
+        if !localSummarySetupStatus.hasRuntime {
+            return "Setup needed"
+        }
+        return "Ready for first summary"
+    }
+
+    private var localSummarySetupStatusDetail: String {
+        if !localSummarySetupStatus.hasEnoughMemory {
+            return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
+        }
+        if !localSummarySetupStatus.hasRuntime {
+            return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
+        }
+        return "uv is installed. The first summary may download a large local Gemma model; after that, summaries reuse the local cache."
+    }
+
+    private var localSummarySetupStatusSymbol: String {
+        if localSummarySetupStatus.isReady {
+            return "checkmark.circle.fill"
+        }
+        return "exclamationmark.circle.fill"
+    }
+
+    private var localSummarySetupStatusColor: Color {
+        if localSummarySetupStatus.isReady {
+            return .green
+        }
+        return .orange
+    }
+
+    private var betaLiveSidecarDetail: String {
+        if betaLiveMeetingCodexEnabled {
+            return "Transcripted prepares the local workspace. Use Agent setup to open Codex, copy Cowork setup, or open the live preview."
+        }
+        return "Normal meeting transcripts still save as usual. Turn this on only when you want a local agent to watch active meetings."
     }
 
     private var privacyPage: some View {
@@ -3035,6 +3233,7 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
