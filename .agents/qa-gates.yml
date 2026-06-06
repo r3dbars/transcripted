@@ -120,9 +120,10 @@ recommended_gates:
       - "bash run-integration-smoke.sh"
       - "bash run-e2e-smoke.sh"
       - "swift test"
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
     add_when_shipping_to_users:
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
       - "full notarized build-beta.sh"
       - "bash scripts/release/verify-sparkle-release.sh <version>"
       - "bash scripts/release/update-cask.sh <version>"
