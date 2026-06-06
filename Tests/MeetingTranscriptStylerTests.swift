@@ -15,6 +15,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerRenamesRetainedAudioDirectory()
         testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions()
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
+        testMeetingTranscriptStylerPreservesLocalGemmaSummaryBlock()
         testMeetingTranscriptStylerRestrictsRewrittenTranscript()
         testMeetingTranscriptStylerPreservesImportedRecordingDate()
     }
@@ -319,6 +320,37 @@ private func testMeetingTranscriptStylerPreservesObsidianSpeakerLinks() {
     assertTrue(updatedMarkdown?.contains("Linked speaker text should stay intact.") == true, "Styler should keep the transcript text attached to the right speaker")
 }
 
+private func testMeetingTranscriptStylerPreservesLocalGemmaSummaryBlock() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    let markdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+        byApplying: sampleMeetingTranscriptLocalSummarySections(),
+        to: sampleMeetingTranscript(),
+        configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+        generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+        chunkCount: 1
+    )
+    try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updatedMarkdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+
+    assertTrue(
+        updatedMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+        "Restyling should preserve the managed local summary block"
+    )
+    assertTrue(
+        updatedMarkdown.contains("Team agreed to keep launch pricing simple."),
+        "Restyling should preserve the local summary text"
+    )
+    assertTrue(
+        updatedMarkdown.contains("local_summary_title: \"Launch Pricing Review\""),
+        "Restyling should preserve local summary frontmatter"
+    )
+}
+
 private func testMeetingTranscriptStylerRestrictsRewrittenTranscript() {
     let directory = makeTemporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -333,6 +365,18 @@ private func testMeetingTranscriptStylerRestrictsRewrittenTranscript() {
         meetingTranscriptStylerFilePermissions(of: styled.url),
         NSNumber(value: 0o600),
         "rewriting a transcript should restore owner-only permissions"
+    )
+}
+
+private func sampleMeetingTranscriptLocalSummarySections() -> LocalMeetingSummarySections {
+    LocalMeetingSummarySections(
+        title: "Launch Pricing Review",
+        summary: "Team agreed to keep launch pricing simple.",
+        decisions: "Keep the first version small.",
+        actionItems: "Alex will check pricing language before Friday.",
+        openQuestions: "Whether enterprise pricing needs a separate page.",
+        risksOrFollowUps: "Pricing copy could overpromise the first version.",
+        accuracyNotes: "Based only on the transcript."
     )
 }
 

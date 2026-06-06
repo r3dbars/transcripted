@@ -192,7 +192,8 @@ enum MeetingTranscriptStyler {
             durationSeconds: TranscriptFrontmatter.durationSeconds(from: duration) ?? 0,
             totalWords: words,
             totalUtterances: utterances,
-            transcriptEntries: transcriptEntries
+            transcriptEntries: transcriptEntries,
+            localSummaryBlock: LocalMeetingSummaryMarkdownUpdater.localSummaryBlock(in: frontmatter.body)
         )
     }
 
@@ -266,7 +267,7 @@ enum MeetingTranscriptStyler {
                 """
             }.joined(separator: "\n\n")
 
-        return """
+        var rendered = """
         # \(title)
 
         \(detailParts.joined(separator: "  •  "))
@@ -275,6 +276,10 @@ enum MeetingTranscriptStyler {
 
         \(transcriptBlock)
         """
+        if let localSummaryBlock = document.localSummaryBlock {
+            rendered += "\n\n\(localSummaryBlock)"
+        }
+        return rendered
     }
 
     private static func buildTitle(for document: ParsedDocument) -> String {
@@ -567,6 +572,7 @@ private struct ParsedDocument {
     let totalWords: Int
     let totalUtterances: Int
     let transcriptEntries: [TranscriptEntry]
+    let localSummaryBlock: String?
 }
 
 private struct TranscriptEntry {

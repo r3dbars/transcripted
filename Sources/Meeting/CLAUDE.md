@@ -20,6 +20,7 @@
 - `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
 - `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text
+- `LocalMeetingSummarizer.swift` — opt-in local Gemma meeting-summary runner, transcript chunking, managed summary metadata, runtime env sanitizing, and stale-transcript write protection
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, and provider-aware remind/dismiss backoff rules for calendar- and runtime-based prompt candidates
@@ -69,6 +70,7 @@
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
+- Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight.
 
 ## Storage
 
@@ -125,6 +127,7 @@ Relevant direct coverage:
 - `Tests/LiveMeetingCodexSessionTests.swift`
 - `Tests/LiveMeetingPreviewServerTests.swift`
 - `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
+- `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 

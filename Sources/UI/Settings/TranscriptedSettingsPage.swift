@@ -8,6 +8,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case people
     case storage
     case connectAgent
+    case beta
     case privacy
     case support
     case about
@@ -41,6 +42,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .people: return "Speakers"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
+        case .beta: return "Beta"
         case .privacy: return "Privacy"
         case .support: return "Support"
         case .about: return "About"
@@ -63,6 +65,8 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
             return "Where your files live."
         case .connectAgent:
             return "One prompt, plus direct paths."
+        case .beta:
+            return "Experimental local features."
         case .privacy:
             return "Permissions and optional reporting."
         case .support:
@@ -81,6 +85,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .people: return "person.2.fill"
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
+        case .beta: return "wand.and.stars"
         case .privacy: return "lock.shield.fill"
         case .support: return "questionmark.bubble.fill"
         case .about: return "info.circle.fill"

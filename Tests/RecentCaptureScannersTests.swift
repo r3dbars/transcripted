@@ -248,6 +248,194 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("LocalMeetingSummaryAvailabilityPolicy blocks while models prepare") {
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: true,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Preparing models...",
+            "local meeting summaries should not start while model prep is in flight"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryAvailabilityPolicy blocks during live work") {
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: true,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current dictation to finish before summarizing a meeting.",
+            "local meeting summaries should not race an active dictation"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: true,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Stop the current recording before summarizing a saved meeting.",
+            "local meeting summaries should not start while a meeting is recording"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: true,
+                isSpeakerReviewPending: false
+            ),
+            "Wait for the current meeting to finish saving or transcribing before summarizing.",
+            "local meeting summaries should stay single-flight with background meeting work"
+        )
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: true
+            ),
+            "Finish the speaker review window before summarizing a meeting.",
+            "local meeting summaries should wait until speaker review is resolved"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryAvailabilityPolicy allows idle saved meetings") {
+        assertNil(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "idle saved meetings should stay summarizable"
+        )
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser extracts generated title and summary sections") {
+        let summaryURL = URL(fileURLWithPath: "/tmp/launch.summary.md")
+        let markdown = """
+        ---
+        capture_type: meeting_summary
+        title: "Quick notes"
+        summary_title: "Launch Pricing Review"
+        source_transcript: "launch.md"
+        ---
+
+        # Title
+        Ignored Body Title
+
+        # Summary
+        - Team agreed to keep the launch simple.
+        - Alex will check pricing language before Friday.
+
+        # Decisions
+        Keep the first version small.
+
+        # Action Items
+        Alex will check pricing language before Friday.
+        """
+
+        guard let preview = RecentMeetingSummaryPreviewParser.preview(
+            from: markdown,
+            url: summaryURL,
+            sourceTranscriptFilename: "launch.md"
+        ) else {
+            assertTrue(false, "valid local summary should produce a Home preview")
+            return
+        }
+
+        assertEqual(preview.title, "Launch Pricing Review", "summary_title should become the generated display title")
+        assertEqual(
+            preview.summary,
+            "Team agreed to keep the launch simple.\nAlex will check pricing language before Friday.",
+            "Home preview should use only the # Summary section"
+        )
+        assertEqual(
+            preview.sections.map(\.title),
+            ["Summary", "Decisions", "Action Items"],
+            "expanded Home rows should expose the full generated-summary sections"
+        )
+        assertFalse(preview.summary.contains("Decisions"), "preview should not bleed later sections into the row")
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser extracts embedded transcript summaries first") {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/launch.md")
+        let baseMarkdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        date: "2026-05-24"
+        time: "14:00:00"
+        duration: "10:00"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        We should keep the launch simple.
+        """
+        let markdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleRecentCaptureLocalSummarySections(),
+            to: baseMarkdown,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+            chunkCount: 1
+        )
+
+        guard let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
+            from: markdown,
+            url: transcriptURL
+        ) else {
+            assertTrue(false, "embedded summary metadata should produce a Home preview")
+            return
+        }
+
+        assertEqual(preview.title, "Launch Pricing Review", "embedded title should drive Home display")
+        assertEqual(preview.summary, "Team agreed to keep launch pricing simple.", "summary should come from the managed transcript block")
+        assertEqual(
+            preview.sections.map(\.title),
+            ["Summary", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
+            "embedded summaries should expose every managed section for Show more"
+        )
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser fails closed for mismatched summaries") {
+        let summaryURL = URL(fileURLWithPath: "/tmp/other.summary.md")
+        let markdown = """
+        ---
+        capture_type: meeting_summary
+        title: "Other"
+        summary_title: "Other Summary"
+        source_transcript: "other.md"
+        ---
+
+        # Summary
+        This belongs to another meeting.
+        """
+
+        assertTrue(
+            RecentMeetingSummaryPreviewParser.preview(
+                from: markdown,
+                url: summaryURL,
+                sourceTranscriptFilename: "launch.md"
+            ) == nil,
+            "summary previews should ignore sibling files that point at a different transcript"
+        )
+    }
+
     await runSuite("RecentCaptureLoader keeps Home dashboard loading bounded with a large local history") {
         let fm = FileManager.default
         let root = temporaryRecentCapturePerformanceRoot(fileManager: fm)
@@ -1278,6 +1466,88 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner attaches local summary previews without counting summary files as rows") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("launch.md", isDirectory: false)
+
+            try? writeRecentLoaderMeeting(
+                title: "Quick notes",
+                date: recentLoaderDate("2026-05-24T14:00:00Z"),
+                to: transcriptURL
+            )
+            try? writeRecentLoaderSummary(
+                title: "Launch Pricing Review",
+                summary: "Team agreed to keep launch pricing simple.",
+                sourceTranscript: transcriptURL.lastPathComponent,
+                to: LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            )
+            setRecentLoaderFileDate(
+                recentLoaderDate("2026-05-25T14:00:00Z"),
+                at: LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+
+            assertEqual(meetings.count, 1, "summary markdown should enhance its meeting row, not become a second row")
+            assertEqual(meetings.first?.title, "Quick notes", "original meeting title should stay available")
+            assertEqual(meetings.first?.displayTitle, "Launch Pricing Review", "generated title should drive Home display")
+            assertEqual(
+                meetings.first?.summaryPreview?.summary,
+                "Team agreed to keep launch pricing simple.",
+                "scanner should attach the local summary preview"
+            )
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner reads embedded local summaries and meeting end times") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("embedded-launch.md", isDirectory: false)
+            let recordedAt = recentLoaderDate("2026-05-24T14:00:00Z")
+            let baseMarkdown = """
+            ---
+            title: "Quick notes"
+            capture_type: meeting
+            date: "\(recentLoaderFormat(recordedAt, "yyyy-MM-dd"))"
+            time: "\(recentLoaderFormat(recordedAt, "HH:mm:ss"))"
+            duration: "10:00"
+            ---
+
+            # Quick notes
+
+            ## Transcript
+
+            **00:01** [Mic/Justin]
+            We should keep launch pricing simple.
+            """
+            let enhancedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sampleRecentCaptureLocalSummarySections(),
+                to: baseMarkdown,
+                configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+                generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+                chunkCount: 1
+            )
+
+            try? enhancedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            setRecentLoaderFileDate(recordedAt, at: transcriptURL)
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+            let meeting = meetings.first
+
+            assertEqual(meetings.count, 1, "embedded summaries should not create an extra row")
+            assertEqual(meeting?.displayTitle, "Launch Pricing Review", "embedded generated title should drive Home display")
+            assertEqual(meeting?.summaryPreview?.summary, "Team agreed to keep launch pricing simple.", "embedded summary should attach to the row")
+            assertNotNil(meeting?.startDate, "scanner should expose the meeting start time")
+            assertNotNil(meeting?.endDate, "scanner should expose the meeting end time")
+            assertEqual(
+                meeting?.endDate?.timeIntervalSince(meeting?.startDate ?? Date.distantPast),
+                600,
+                "scanner should derive end time from frontmatter duration"
+            )
+        }
+    }
+
     await runSuite("RecentMeetingsScanner returns empty for non-positive limits") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
@@ -1475,6 +1745,49 @@ private func writeRecentLoaderMeeting(
     """
     try markdown.write(to: url, atomically: true, encoding: .utf8)
     setRecentLoaderFileDate(fileDate ?? date, at: url)
+}
+
+private func writeRecentLoaderSummary(
+    title: String,
+    summary: String,
+    sourceTranscript: String,
+    to url: URL
+) throws {
+    let markdown = """
+    ---
+    capture_type: meeting_summary
+    title: "Quick notes"
+    summary_title: "\(title)"
+    source_transcript: "\(sourceTranscript)"
+    summary_model: mlx-community/gemma-4-12B-it-4bit
+    summary_runtime: mlx-vlm
+    summary_profile: m1-low-memory
+    summary_chunk_count: 1
+    created_at: 2026-05-24T14:00:00Z
+    ---
+
+    # Title
+    \(title)
+
+    # Summary
+    \(summary)
+
+    # Decisions
+    None found.
+    """
+    try markdown.write(to: url, atomically: true, encoding: .utf8)
+}
+
+private func sampleRecentCaptureLocalSummarySections() -> LocalMeetingSummarySections {
+    LocalMeetingSummarySections(
+        title: "Launch Pricing Review",
+        summary: "Team agreed to keep launch pricing simple.",
+        decisions: "Keep the first version small.",
+        actionItems: "Alex will check pricing language before Friday.",
+        openQuestions: "Whether enterprise pricing needs a separate page.",
+        risksOrFollowUps: "Pricing copy could overpromise the first version.",
+        accuracyNotes: "Based only on the transcript."
+    )
 }
 
 private func setRecentLoaderFileDate(_ date: Date, at url: URL) {

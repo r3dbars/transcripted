@@ -364,7 +364,7 @@ struct HomeMeetingPreview: Identifiable {
 
     init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
         id = item.id
-        title = item.title
+        title = item.displayTitle
         date = item.date
         transcriptURL = item.transcriptURL
         audio = item.audio
@@ -1251,6 +1251,7 @@ private enum HomeActivityRowFormatting {
 
 private struct HomeActivityRowShell<Content: View>: View {
     let timeString: String
+    var secondaryTimeString: String? = nil
     let isCopied: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
@@ -1261,6 +1262,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     var trailingAccessory: AnyView? = nil
     var rowTone: HomeArtifactStatusTone? = nil
     var compact: Bool = false
+    var showsLeadingTimeColumn: Bool = true
     var opensOnRowClick: Bool = true
     @ViewBuilder let content: () -> Content
 
@@ -1364,11 +1366,19 @@ private struct HomeActivityRowShell<Content: View>: View {
 
     private var mainContent: some View {
         HStack(alignment: .top, spacing: 14) {
-            Text(timeString)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+            if showsLeadingTimeColumn {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(timeString)
+                        .foregroundStyle(.secondary)
+                    if let secondaryTimeString {
+                        Text(secondaryTimeString)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                 .frame(width: 64, alignment: .leading)
                 .padding(.top, 2)
+            }
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1469,6 +1479,8 @@ struct HomeDictationRow: View {
 struct HomeMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
+    let isSummarizingSummary: Bool
+    let localMeetingSummariesEnabled: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
@@ -1479,23 +1491,136 @@ struct HomeMeetingRow: View {
     let onRetranscribe: () -> Void
     let menuItems: [HomeRowMenuItem]
 
+    @State private var isSummaryExpanded = false
+
+    private let collapsedSummaryCharacterLimit = 260
+
     var body: some View {
         HomeActivityRowShell(
-            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            timeString: startTimeString,
+            secondaryTimeString: endTimeString.map { "- \($0)" },
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
-            leadingAccessory: reviewSpeakersAccessory,
-            compact: true
+            leadingAccessory: meetingAttentionAccessories,
+            compact: visibleSummaryPreview == nil,
+            showsLeadingTimeColumn: false,
+            opensOnRowClick: false
         ) {
-            Text(item.title)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: visibleSummaryPreview == nil ? 0 : 5) {
+                Button(action: onOpen) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(timeRangeString)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(displayedTitle)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+
+                            if visibleSummaryPreview != nil {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                    .help("Local summary")
+                            }
+                        }
+
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help("Preview meeting")
+
+                if let summaryPreview = visibleSummaryPreview {
+                    if isSummaryExpanded {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(expandedSections(for: summaryPreview)) { section in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(section.title)
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundStyle(.tertiary)
+                                    Text(section.text)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .lineSpacing(2)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(summaryDisplayText(summaryPreview.summary))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .lineSpacing(2)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if canExpandSummary(summaryPreview) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                isSummaryExpanded.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(isSummaryExpanded ? "Show less" : "Show more")
+                                Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .font(.caption.weight(.medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                        .help(isSummaryExpanded ? "Collapse summary" : "Expand summary")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private struct ExpandedSummarySection: Identifiable {
+        let title: String
+        let text: String
+
+        var id: String { title }
+    }
+
+    private var meetingAttentionAccessories: AnyView? {
+        let accessories = [aiSummaryAccessory, reviewSpeakersAccessory].compactMap { $0 }
+        guard !accessories.isEmpty else { return nil }
+
+        return AnyView(
+            HStack(spacing: 1) {
+                ForEach(Array(accessories.enumerated()), id: \.offset) { _, accessory in
+                    accessory
+                }
+            }
+        )
+    }
+
+    private var aiSummaryAccessory: AnyView? {
+        guard HomeMeetingSummaryBetaPresentationPolicy.shouldShowAvailableSummaryDot(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        ) else { return nil }
+        return AnyView(
+            attentionDot(
+                color: .blue,
+                help: isSummarizingSummary
+                    ? "AI summary is running"
+                    : "AI summary available from More options",
+                opacity: isSummarizingSummary ? 0.45 : 1
+            )
+        )
     }
 
     private var reviewSpeakersAccessory: AnyView? {
@@ -1504,13 +1629,11 @@ struct HomeMeetingRow: View {
             hasSpeakerReviewWork: hasSpeakerReviewWork
         ) {
             return AnyView(
-                HomeAttentionActionButton(
-                    title: "Review speakers",
+                reviewDotButton(
+                    help: item.speakerStatus.summary,
                     isDisabled: false,
-                    tint: .orange,
                     action: onReviewSpeakers
                 )
-                    .help("Review speakers")
             )
         }
 
@@ -1521,14 +1644,120 @@ struct HomeMeetingRow: View {
         ) else { return nil }
 
         return AnyView(
-            HomeAttentionActionButton(
-                title: "Identify speakers",
+            reviewDotButton(
+                help: retranscriptionUnavailableReason ?? "Identify speakers from retained audio",
                 isDisabled: !canRetranscribe,
-                tint: .orange,
                 action: onRetranscribe
             )
-                .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
+    }
+
+    private var startTimeString: String {
+        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
+    }
+
+    private var endTimeString: String? {
+        guard let endDate = item.endDate else { return nil }
+        return HomeActivityRowFormatting.timeFormatter.string(from: endDate)
+    }
+
+    private var timeRangeString: String {
+        guard let endTimeString else { return startTimeString }
+        return "\(startTimeString) - \(endTimeString)"
+    }
+
+    private var visibleSummaryPreview: RecentMeetingSummaryPreview? {
+        HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
+    }
+
+    private var displayedTitle: String {
+        HomeMeetingSummaryBetaPresentationPolicy.displayTitle(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
+    }
+
+    private func canExpandSummary(_ preview: RecentMeetingSummaryPreview) -> Bool {
+        preview.sections.count > 1
+            || preview.summary.count > collapsedSummaryCharacterLimit
+            || preview.summary.contains("\n")
+    }
+
+    private func expandedSections(for preview: RecentMeetingSummaryPreview) -> [ExpandedSummarySection] {
+        let summary = sectionText("Summary", in: preview.sections) ?? preview.summary
+        let nextSteps = combinedSectionText(
+            titles: ["Action Items", "Risks or Follow-ups"],
+            in: preview.sections
+        )
+        let decisionsAndQuestions = combinedSectionText(
+            titles: ["Decisions", "Open Questions"],
+            in: preview.sections
+        )
+
+        return [
+            ExpandedSummarySection(title: "Summary", text: summary),
+            ExpandedSummarySection(title: "Next Steps", text: nextSteps),
+            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions)
+        ].filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func combinedSectionText(
+        titles: [String],
+        in sections: [RecentMeetingSummarySection]
+    ) -> String {
+        titles
+            .compactMap { sectionText($0, in: sections) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sectionText(
+        _ title: String,
+        in sections: [RecentMeetingSummarySection]
+    ) -> String? {
+        guard let text = sections.first(where: { $0.title == title })?.text
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !text.isEmpty
+        else {
+            return nil
+        }
+        return text
+    }
+
+    private func summaryDisplayText(_ summary: String) -> String {
+        guard summary.count > collapsedSummaryCharacterLimit else { return summary }
+        return "\(summary.prefix(collapsedSummaryCharacterLimit).trimmingCharacters(in: .whitespacesAndNewlines))..."
+    }
+
+    private func reviewDotButton(
+        help: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 7, height: 7)
+                .frame(width: 18, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
+        .help(help)
+    }
+
+    private func attentionDot(color: Color, help: String, opacity: Double = 1) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 7, height: 7)
+            .frame(width: 18, height: 26)
+            .opacity(opacity)
+            .help(help)
+            .accessibilityLabel(help)
     }
 }
 
@@ -1866,6 +2095,8 @@ struct HomeActivityTabsCard: View {
     let canLoadMoreDictations: Bool
     let canLoadMoreMeetings: Bool
     let copiedRowID: String?
+    let summarizingMeetingIDs: Set<String>
+    let localMeetingSummariesEnabled: Bool
     let canRetryFailedMeetings: Bool
     let failedMeetingRetryUnavailableReason: String?
     let canRetranscribeSavedMeetings: Bool
@@ -1932,6 +2163,8 @@ struct HomeActivityTabsCard: View {
                             HomeMeetingRow(
                                 item: meeting,
                                 isCopied: copiedRowID == meeting.id,
+                                isSummarizingSummary: summarizingMeetingIDs.contains(meeting.id),
+                                localMeetingSummariesEnabled: localMeetingSummariesEnabled,
                                 onOpen: { onOpenMeeting(meeting) },
                                 onCopy: { onCopyMeeting(meeting) },
                                 onFlag: { onFlagMeeting(meeting) },

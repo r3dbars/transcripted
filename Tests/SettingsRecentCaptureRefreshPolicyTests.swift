@@ -10,7 +10,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {
-        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about] {
+        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .beta, .privacy, .support, .about] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .none,
@@ -88,7 +88,7 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh — force does not bypass page gating") {
         let now = Date(timeIntervalSinceReferenceDate: 20)
 
-        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about] {
+        for page in [TranscriptedSettingsPage.general, .models, .shortcuts, .people, .storage, .connectAgent, .beta, .privacy, .support, .about] {
             assertFalse(
                 SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
                     for: page,
@@ -133,6 +133,8 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
         assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
+        assertEqual(TranscriptedSettingsPage.beta.title, "Beta", "beta page title should stay short")
+        assertEqual(TranscriptedSettingsPage.beta.systemImage, "wand.and.stars", "beta page should keep an experimental affordance")
         assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
         assertEqual(TranscriptedSettingsPage.privacy.systemImage, "lock.shield.fill", "privacy page should keep the shield affordance")
         assertEqual(TranscriptedSettingsPage.models.consolidatedDestination, .general, "models should now open inside General")
