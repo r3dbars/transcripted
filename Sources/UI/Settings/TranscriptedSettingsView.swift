@@ -270,6 +270,7 @@ struct TranscriptedSettingsView: View {
         ))
         .disabled(!settingsFooterActionEnabled)
         .help(settingsFooterHelp)
+        .accessibilityIdentifier("transcripted.settings.footer.check-updates")
     }
 
     @ViewBuilder
@@ -1415,7 +1416,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Launch at login",
                         message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.launch-at-login"
                 )
 
                 GeneralToggleRow(
@@ -1434,7 +1436,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Show in Dock",
                         message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.show-in-dock"
                 )
 
                 GeneralToggleRow(
@@ -1453,7 +1456,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Dictation sounds",
                         message: "These short sounds tell you when dictation starts, finishes, or hears no speech. Turn them off if you want Transcripted to stay quiet."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 GeneralToggleRow(
@@ -1472,7 +1476,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Clean up pasted text",
                         message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
                 )
 
                 DictationOverlayModeRow(
@@ -1502,7 +1507,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Confirm meeting quits",
                         message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
                 )
             }
 
@@ -1520,7 +1526,8 @@ struct TranscriptedSettingsView: View {
                         title: "Transcription model",
                         value: effectiveTranscriptionModel.title,
                         isExpanded: $showGeneralModelSettings,
-                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings."
+                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
                     ) {
                         trackSettingsAction("toggle_model_settings", page: .general)
                     }
@@ -1535,7 +1542,8 @@ struct TranscriptedSettingsView: View {
                         title: "Keyboard shortcuts",
                         value: dictationShortcutsEnabled ? "On" : "Off",
                         isExpanded: $showGeneralShortcutSettings,
-                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings."
+                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
                     ) {
                         trackSettingsAction("toggle_shortcut_settings", page: .general)
                     }
@@ -1550,7 +1558,8 @@ struct TranscriptedSettingsView: View {
                         title: "Privacy",
                         value: generalPrivacyStatusLine,
                         isExpanded: $showGeneralPrivacySettings,
-                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings."
+                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.privacy"
                     ) {
                         trackSettingsAction("toggle_privacy_settings", page: .general)
                     }
@@ -1577,7 +1586,8 @@ struct TranscriptedSettingsView: View {
                         title: "Transcribe audio file",
                         value: "Choose",
                         systemImage: "waveform",
-                        help: "Choose an audio file to transcribe."
+                        help: "Choose an audio file to transcribe.",
+                        automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
                     ) {
                         trackSettingsAction("import_recording", page: .general)
                         actions.importAudioFile()
@@ -1587,7 +1597,8 @@ struct TranscriptedSettingsView: View {
                         title: "Corrections",
                         value: customDictionaryStatusLine,
                         isExpanded: $showGeneralCorrections,
-                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings."
+                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.corrections"
                     ) {
                         trackSettingsAction("toggle_corrections", page: .general)
                     }
@@ -1898,10 +1909,14 @@ struct TranscriptedSettingsView: View {
                 .disabled(!AnalyticsReporter.isAvailable)
 
                 HStack {
-                    SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
-                        trackSettingsAction("send_test_sentry_event", page: .general)
-                        sendTestSentryEvent()
-                    }
+                SettingsInlineActionButton(
+                    title: "Send Test Sentry Event",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.settings.general.send-test-sentry-event"
+                ) {
+                    trackSettingsAction("send_test_sentry_event", page: .general)
+                    sendTestSentryEvent()
+                }
                     .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
 
                     if let sentryTestStatus {
@@ -1977,7 +1992,11 @@ struct TranscriptedSettingsView: View {
 
                 Spacer()
 
-                SettingsInlineActionButton(title: "Clear all", tone: .destructive) {
+                SettingsInlineActionButton(
+                    title: "Clear all",
+                    tone: .destructive,
+                    automationIdentifier: "transcripted.settings.general.corrections.clear-all"
+                ) {
                     trackSettingsAction("clear_corrections", page: .general)
                     clearCorrectionRows()
                 }
@@ -2384,7 +2403,8 @@ struct TranscriptedSettingsView: View {
                                 }
                             }
                         ),
-                        help: "Opt in to local meeting summaries on Home."
+                        help: "Opt in to local meeting summaries on Home.",
+                        automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
                     )
 
                     betaLocalSummarySetupStatus
@@ -2407,7 +2427,8 @@ struct TranscriptedSettingsView: View {
                                 handleBetaLiveMeetingSidecarToggle(enabled)
                             }
                         ),
-                        help: "Opt in to the live meeting sidecar workspace."
+                        help: "Opt in to the live meeting sidecar workspace.",
+                        automationIdentifier: "transcripted.settings.beta.live-meeting-sidecar"
                     )
 
                     betaLiveSidecarSetupStatus
@@ -2435,14 +2456,23 @@ struct TranscriptedSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                SettingsInlineActionButton(title: "Check setup", symbolName: "arrow.clockwise") {
+                SettingsInlineActionButton(
+                    title: "Check setup",
+                    symbolName: "arrow.clockwise",
+                    automationIdentifier: "transcripted.settings.beta.local-summary.check-setup"
+                ) {
                     trackSettingsAction("check_local_summary_setup", page: .beta)
                     refreshLocalSummarySetupStatus()
                 }
             }
 
             if !localSummarySetupStatus.hasRuntime {
-                SettingsInlineActionButton(title: "Install uv", symbolName: "arrow.down.circle", tone: .warning) {
+                SettingsInlineActionButton(
+                    title: "Install uv",
+                    symbolName: "arrow.down.circle",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.settings.beta.local-summary.install-uv"
+                ) {
                     trackSettingsAction("open_uv_install_guide", page: .beta)
                     openUVInstallGuide()
                 }
@@ -2502,7 +2532,12 @@ struct TranscriptedSettingsView: View {
             }
 
             HStack(spacing: 10) {
-                SettingsInlineActionButton(title: "Open Agent setup", symbolName: "sparkles", tone: .accent) {
+                SettingsInlineActionButton(
+                    title: "Open Agent setup",
+                    symbolName: "sparkles",
+                    tone: .accent,
+                    automationIdentifier: "transcripted.settings.beta.open-agent-setup"
+                ) {
                     trackSettingsAction("open_agent_setup_from_beta", page: .beta)
                     navigation.selectedPage = .connectAgent
                 }

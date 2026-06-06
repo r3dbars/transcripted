@@ -15,6 +15,15 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var automationIdentifier: String {
+        switch self {
+        case .connectAgent:
+            return "transcripted.settings.sidebar.connect-agent"
+        default:
+            return "transcripted.settings.sidebar.\(rawValue)"
+        }
+    }
+
     var analyticsValue: String {
         switch self {
         case .connectAgent:
