@@ -220,15 +220,44 @@ if not report.get("onboardingCompleted"):
     errors.append("onboarding was not completed for smoke")
 
 actions = report.get("content", {}).get("primaryActions", {})
-for key, expected_title in {
-    "startDictation": "Start Dictation",
-    "startMeeting": "Start Meeting",
+for key, expected in {
+    "home": ("Home", "transcripted.menubar.primary.home"),
+    "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
+    "startMeeting": ("Start Meeting", "transcripted.menubar.primary.start-meeting"),
+    "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
+    "recentMeetings": ("Recent Meetings", "transcripted.menubar.primary.recent-meetings"),
 }.items():
+    expected_title, expected_identifier = expected
     row = actions.get(key) or {}
     if row.get("title") != expected_title:
         errors.append(f"{key} title was {row.get('title')!r}")
+    if row.get("automationIdentifier") != expected_identifier:
+        errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
     if not row.get("isVisible"):
         errors.append(f"{key} row was hidden")
+for key in ("home", "startDictation", "startMeeting"):
+    row = actions.get(key) or {}
+    if not row.get("isEnabled"):
+        errors.append(f"{key} row was disabled")
+
+utility_actions = report.get("content", {}).get("utilityActions", {})
+for key, expected in {
+    "connectAgent": ("Connect Agent", "transcripted.menubar.utility.connect-agent"),
+    "submitFeedback": ("Submit feedback", "transcripted.menubar.utility.submit-feedback"),
+    "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
+    "settings": ("Settings", "transcripted.menubar.utility.settings"),
+    "quit": ("Quit", "transcripted.menubar.utility.quit"),
+}.items():
+    expected_title, expected_identifier = expected
+    row = utility_actions.get(key) or {}
+    if row.get("title") != expected_title:
+        errors.append(f"{key} title was {row.get('title')!r}")
+    if row.get("automationIdentifier") != expected_identifier:
+        errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
+    if not row.get("isVisible"):
+        errors.append(f"{key} row was hidden")
+for key in ("connectAgent", "submitFeedback", "settings", "quit"):
+    row = utility_actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
 
