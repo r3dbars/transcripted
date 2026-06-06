@@ -123,6 +123,19 @@ Before you publish a user-facing release note, sanity-check the release state:
 - verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
 - if you want a clean starting point, use `docs/release-notes-template.md`
 
+Use the strict release-health gate when validating release surfaces:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
+python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
+```
+
+After a packaging build, add local dSYM verification:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --require-release-debug-files
+```
+
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
 Sparkle steps in `docs/sparkle-updates.md`.

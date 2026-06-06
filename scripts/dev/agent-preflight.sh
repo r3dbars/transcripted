@@ -160,6 +160,7 @@ if [ -n "$changed_paths" ]; then
         if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"
+            add_command "python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json"
         fi
 
         if matches_any "$path" "scripts/ops/build-codex-memory-index.py"; then

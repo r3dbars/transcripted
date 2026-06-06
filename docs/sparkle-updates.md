@@ -66,6 +66,7 @@ bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 
 ```bash
 bash scripts/release/verify-sparkle-release.sh <version>
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 ```
 
 7. Commit and push the updated `docs/appcast.xml`.

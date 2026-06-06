@@ -109,6 +109,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
+      - "python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/build-codex-memory-index.py"

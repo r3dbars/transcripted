@@ -7,6 +7,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -89,6 +90,31 @@ def parse_args() -> argparse.Namespace:
         help="Optional built app bundle path to validate, e.g. build/Transcripted.app.",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero when deterministic findings are present.",
+    )
+    parser.add_argument(
+        "--live-release-surfaces",
+        action="store_true",
+        help="Check transcripted.app live appcast and download routes against the committed appcast.",
+    )
+    parser.add_argument(
+        "--sentry-release-health",
+        action="store_true",
+        help="Use configured Sentry auth to verify the release matching Info.plist exists.",
+    )
+    parser.add_argument(
+        "--require-sentry-release-health",
+        action="store_true",
+        help="Fail if Sentry auth, sentry-cli, or the release matching Info.plist is missing.",
+    )
+    parser.add_argument(
+        "--require-release-debug-files",
+        action="store_true",
+        help="Fail unless the configured release app binary and dSYM exist and have matching UUIDs.",
+    )
+    parser.add_argument(
         "--automation-toml",
         help="Optional explicit automation.toml path. Defaults to the local Codex automation file when present.",
     )
@@ -105,6 +131,10 @@ def read_text(path: Path) -> str:
 
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
+
+
+def command_exists(name: str) -> bool:
+    return shutil.which(name) is not None
 
 
 def normalize_path(path: str | Path) -> str:
@@ -477,6 +507,482 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
         )
 
     return findings, watch_items
+
+
+def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None:
+    appcast_path = root / manifest["paths"]["appcast"]
+    namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+    latest = ET.parse(appcast_path).getroot().find("./channel/item")
+    if latest is None:
+        return None
+
+    enclosure = latest.find("enclosure")
+    return {
+        "version": (
+            latest.findtext("sparkle:shortVersionString", namespaces=namespaces)
+            or latest.findtext("sparkle:version", namespaces=namespaces)
+            or ""
+        ).strip(),
+        "build": (latest.findtext("sparkle:version", namespaces=namespaces) or "").strip(),
+        "minimum_system_version": (
+            latest.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
+        ).strip(),
+        "hardware_requirements": (
+            latest.findtext("sparkle:hardwareRequirements", namespaces=namespaces) or ""
+        ).strip(),
+        "url": enclosure.attrib.get("url", "") if enclosure is not None else "",
+        "length": enclosure.attrib.get("length", "") if enclosure is not None else "",
+        "signature": (
+            enclosure.attrib.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature", "")
+            if enclosure is not None
+            else ""
+        ),
+    }
+
+
+def check_cask(root: Path, manifest: dict) -> list[dict]:
+    cask_path = root / manifest["paths"]["homebrew_cask"]
+    text = read_text(cask_path)
+    latest = latest_appcast_metadata(root, manifest)
+    findings: list[dict] = []
+
+    version_match = re.search(r'(?m)^\s*version\s+"([^"]+)"', text)
+    sha_match = re.search(r'(?m)^\s*sha256\s+"([^"]+)"', text)
+    if not version_match:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-version-missing",
+                "Homebrew cask is missing a version line.",
+                "Casks/transcripted.rb should pin the published Transcripted version.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+    elif latest and version_match.group(1) != latest["version"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "cask-version-mismatch",
+                "Homebrew cask version drifted from the latest appcast release.",
+                f"Cask has {version_match.group(1)!r}, appcast has {latest['version']!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    if not sha_match or not re.fullmatch(r"[0-9a-f]{64}", sha_match.group(1)):
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-sha256-invalid",
+                "Homebrew cask sha256 is missing or invalid.",
+                "Casks/transcripted.rb should carry the 64-character sha256 of the published DMG.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    expected_template = (
+        f'https://github.com/{manifest["repo_slug"]}/releases/download/'
+        'v#{version}/Transcripted-#{version}.dmg'
+    )
+    if expected_template not in text:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-url-template",
+                "Homebrew cask URL drifted from the GitHub release asset template.",
+                f"Expected template {expected_template!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    if "strategy :github_latest" not in text:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "cask-livecheck",
+                "Homebrew cask livecheck should track the latest GitHub release.",
+                "Expected livecheck strategy :github_latest.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    return findings
+
+
+def quoted_strings(text: str) -> set[str]:
+    return set(re.findall(r'"([A-Za-z0-9_]+)"', text))
+
+
+def check_observability_payload_keys(root: Path, manifest: dict) -> list[dict]:
+    findings: list[dict] = []
+    disallowed = set(manifest["disallowed_observability_payload_keys"])
+    for relative_path in manifest["paths"]["observability_policy_sources"]:
+        text = read_text(root / relative_path)
+        bad_keys = sorted(quoted_strings(text).intersection(disallowed))
+        if bad_keys:
+            findings.append(
+                make_finding(
+                    "observability_privacy",
+                    "high",
+                    "raw-observability-payload-key",
+                    "Observability policy allowlists include raw/private payload keys.",
+                    f"Disallowed key(s): {', '.join(bad_keys)}.",
+                    relative_path,
+                )
+            )
+    return findings
+
+
+def source_analytics_policy_events(root: Path, manifest: dict) -> set[str]:
+    text = read_text(root / manifest["paths"]["analytics_event_policy"])
+    return set(re.findall(r'(?m)^\s*"([a-z0-9_]+)":\s*\.init\(', text))
+
+
+def shell_event_variable(text: str, variable_name: str) -> set[str]:
+    match = re.search(rf'{re.escape(variable_name)}="([^"]+)"', text)
+    if not match:
+        return set()
+    return set(re.findall(r"'([^']+)'", match.group(1)))
+
+
+def python_tuple_events(text: str, variable_name: str) -> set[str]:
+    match = re.search(rf'{re.escape(variable_name)}\s*=\s*\((.*?)\)', text, re.DOTALL)
+    if not match:
+        return set()
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+
+def check_posthog_health_schema(root: Path, manifest: dict) -> list[dict]:
+    findings: list[dict] = []
+    policy_events = source_analytics_policy_events(root, manifest)
+    health_text = read_text(root / manifest["paths"]["health_probe"])
+    digest_text = read_text(root / manifest["paths"]["nightly_digest"])
+
+    health_events: set[str] = set()
+    for variable_name in manifest["posthog_health_probe_event_variables"]:
+        parsed = shell_event_variable(health_text, variable_name)
+        if not parsed:
+            findings.append(
+                make_finding(
+                    "automation_guardrails",
+                    "medium",
+                    f"posthog-health-schema-{variable_name}",
+                    "PostHog health probe event schema could not be parsed.",
+                    f"Expected shell variable {variable_name}.",
+                    manifest["paths"]["health_probe"],
+                )
+            )
+        health_events.update(parsed)
+
+    digest_events = python_tuple_events(digest_text, "POSTHOG_ACTIVE_EVENTS").union(
+        python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS")
+    )
+    unknown = sorted((health_events | digest_events) - policy_events)
+    if unknown:
+        findings.append(
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "posthog-schema-unknown-events",
+                "Operational PostHog probes reference events outside AnalyticsEventPolicy.",
+                f"Unknown event(s): {', '.join(unknown)}.",
+                manifest["paths"]["health_probe"],
+            )
+        )
+
+    first_value = shell_event_variable(health_text, "first_value_events").union(
+        python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS")
+    )
+    required_first_value = set(manifest["required_posthog_first_value_events"])
+    missing_first_value = sorted(required_first_value - first_value)
+    if missing_first_value:
+        findings.append(
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "posthog-first-value-schema",
+                "PostHog release-health probes are missing first-value activation events.",
+                f"Missing event(s): {', '.join(missing_first_value)}.",
+                manifest["paths"]["health_probe"],
+            )
+        )
+
+    return findings
+
+
+def curl_stdout(root: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
+    return run(["curl", "--max-time", "15", "--retry", "2", *command], cwd=root)
+
+
+def first_header_value(headers: str, name: str) -> str:
+    pattern = re.compile(rf"^{re.escape(name)}:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(headers)
+    return match.group(1).strip() if match else ""
+
+
+def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> list[dict]:
+    if not enabled:
+        return []
+
+    latest = latest_appcast_metadata(root, manifest)
+    if not latest:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "live-release-no-local-appcast",
+                "Cannot check live release surfaces without a parseable local appcast.",
+                "docs/appcast.xml needs a latest item first.",
+                manifest["paths"]["appcast"],
+            )
+        ]
+
+    findings: list[dict] = []
+    live_appcast_url = manifest["live_release_surfaces"]["appcast"]
+    result = curl_stdout(root, ["-fsSL", live_appcast_url])
+    if result.returncode != 0:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "live-appcast-unreachable",
+                "Live appcast could not be fetched.",
+                f"curl failed for {live_appcast_url}.",
+            )
+        )
+    else:
+        try:
+            live_root = ET.fromstring(result.stdout)
+            live_item = live_root.find("./channel/item")
+            live_enclosure = live_item.find("enclosure") if live_item is not None else None
+            namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+            live_version = (
+                live_item.findtext("sparkle:shortVersionString", namespaces=namespaces)
+                if live_item is not None
+                else ""
+            ) or ""
+            live_url = live_enclosure.attrib.get("url", "") if live_enclosure is not None else ""
+            if live_version.strip() != latest["version"] or live_url != latest["url"]:
+                findings.append(
+                    make_finding(
+                        "release_integrity",
+                        "high",
+                        "live-appcast-drift",
+                        "Live appcast drifted from the committed latest appcast item.",
+                        f"Live version/url {live_version!r}/{live_url!r}; local {latest['version']!r}/{latest['url']!r}.",
+                    )
+                )
+        except ET.ParseError as exc:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "high",
+                    "live-appcast-invalid",
+                    "Live appcast is not parseable XML.",
+                    str(exc),
+                )
+            )
+
+    for route in manifest["live_release_surfaces"]["direct_download_routes"]:
+        result = curl_stdout(root, ["-sSI", route])
+        location = first_header_value(result.stdout, "location")
+        if result.returncode != 0 or location != latest["url"]:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "high",
+                    "live-download-route-drift",
+                    "Live direct-download route does not redirect to the committed latest DMG.",
+                    f"{route} location={location!r}; expected {latest['url']!r}.",
+                )
+            )
+
+    page_result = curl_stdout(root, ["-fsSL", manifest["live_release_surfaces"]["download_page"]])
+    if page_result.returncode != 0 or "Transcripted" not in page_result.stdout:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "live-download-page-unhealthy",
+                "Live /download page did not return the expected install page.",
+                f"curl failed or page marker was missing for {manifest['live_release_surfaces']['download_page']}.",
+            )
+        )
+
+    crawler_result = curl_stdout(root, ["-fsSL", manifest["live_release_surfaces"]["crawler_text"]])
+    if crawler_result.returncode != 0 or latest["version"] not in crawler_result.stdout:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "live-crawler-release-drift",
+                "Crawler-facing release text does not mention the committed latest version.",
+                f"Expected to find {latest['version']!r} in {manifest['live_release_surfaces']['crawler_text']}.",
+            )
+        )
+
+    return findings
+
+
+def sentry_release_name(root: Path, manifest: dict) -> str:
+    with (root / manifest["paths"]["info_plist"]).open("rb") as handle:
+        plist = plistlib.load(handle)
+    prefix = str(plist.get("TranscriptedSentryReleasePrefix", "transcripted")).strip()
+    version = str(plist.get("CFBundleShortVersionString", "")).strip()
+    return f"{prefix}@{version}"
+
+
+def check_sentry_release_health(
+    root: Path,
+    manifest: dict,
+    enabled: bool,
+    required: bool,
+) -> tuple[list[dict], list[dict]]:
+    if not enabled and not required:
+        return [], []
+
+    release = sentry_release_name(root, manifest)
+    watch_items: list[dict] = []
+    findings: list[dict] = []
+    if not os.environ.get("SENTRY_AUTH_TOKEN"):
+        if required:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "high",
+                    "sentry-auth-missing",
+                    "Cannot verify Sentry release existence because SENTRY_AUTH_TOKEN is not configured.",
+                    f"Required release existence check for {release}.",
+                )
+            )
+            return findings, watch_items
+        watch_items.append(
+            make_watch_item(
+                "sentry-release-health-skipped",
+                "Sentry release health was requested but SENTRY_AUTH_TOKEN is not configured.",
+                f"Skipped release existence check for {release}.",
+            )
+        )
+        return findings, watch_items
+
+    if not command_exists("sentry-cli"):
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "sentry-cli-missing",
+                "Cannot verify Sentry release existence because sentry-cli is missing.",
+                "Install sentry-cli on the release-health runner.",
+            )
+        )
+        return findings, watch_items
+
+    sentry = manifest["sentry"]
+    result = run(
+        [
+            "sentry-cli",
+            "releases",
+            "info",
+            "--org",
+            sentry["org"],
+            "--project",
+            sentry["project"],
+            release,
+        ],
+        cwd=root,
+    )
+    if result.returncode != 0:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "sentry-release-missing",
+                "Sentry release matching Info.plist was not found.",
+                f"sentry-cli releases info failed for {release!r} in {sentry['org']}/{sentry['project']}.",
+            )
+        )
+
+    return findings, watch_items
+
+
+def uuid_set_for_path(root: Path, path: Path) -> tuple[set[str], str]:
+    result = run(["dwarfdump", "--uuid", str(path)], cwd=root)
+    if result.returncode != 0:
+        return set(), result.stderr.strip() or result.stdout.strip()
+    uuids = {
+        match.group(1)
+        for match in re.finditer(r"^UUID:\s+([A-Fa-f0-9-]+)\s", result.stdout, re.MULTILINE)
+    }
+    return uuids, ""
+
+
+def check_release_debug_files(root: Path, manifest: dict, required: bool) -> list[dict]:
+    if not required:
+        return []
+
+    findings: list[dict] = []
+    binary_path = root / manifest["paths"]["release_app_binary"]
+    debug_path = root / manifest["paths"]["release_debug_files"]
+    if not binary_path.exists():
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-binary-missing",
+                "Release app binary is missing for dSYM verification.",
+                f"Expected {manifest['paths']['release_app_binary']}.",
+                manifest["paths"]["release_app_binary"],
+            )
+        )
+    if not debug_path.exists():
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-dsym-missing",
+                "Release dSYM is missing.",
+                f"Expected {manifest['paths']['release_debug_files']}.",
+                manifest["paths"]["release_debug_files"],
+            )
+        )
+    if findings:
+        return findings
+
+    if not command_exists("dwarfdump"):
+        return [
+            make_finding(
+                "release_integrity",
+                "medium",
+                "dwarfdump-missing",
+                "Cannot verify release dSYM UUIDs because dwarfdump is missing.",
+                "Install Xcode command line tools on the release-health runner.",
+            )
+        ]
+
+    binary_uuids, binary_error = uuid_set_for_path(root, binary_path)
+    debug_uuids, debug_error = uuid_set_for_path(root, debug_path)
+    if not binary_uuids or not debug_uuids or binary_uuids != debug_uuids:
+        detail = (
+            f"binary UUIDs={sorted(binary_uuids)!r}; dSYM UUIDs={sorted(debug_uuids)!r}; "
+            f"errors={binary_error or debug_error or 'none'}"
+        )
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-dsym-uuid-mismatch",
+                "Release dSYM UUIDs do not match the app binary.",
+                detail,
+                manifest["paths"]["release_debug_files"],
+            )
+        )
+
+    return findings
 
 
 def load_plist(path: Path) -> dict:
@@ -871,6 +1377,19 @@ def main() -> int:
     findings.extend(check_info_plist(root, manifest))
     appcast_findings, watch_items = check_appcast(root, manifest)
     findings.extend(appcast_findings)
+    findings.extend(check_cask(root, manifest))
+    findings.extend(check_observability_payload_keys(root, manifest))
+    findings.extend(check_posthog_health_schema(root, manifest))
+    findings.extend(check_live_release_surfaces(root, manifest, args.live_release_surfaces))
+    sentry_findings, sentry_watch_items = check_sentry_release_health(
+        root,
+        manifest,
+        args.sentry_release_health,
+        args.require_sentry_release_health,
+    )
+    findings.extend(sentry_findings)
+    watch_items.extend(sentry_watch_items)
+    findings.extend(check_release_debug_files(root, manifest, args.require_release_debug_files))
     findings.extend(check_entitlements(root, manifest))
     findings.extend(check_build_script_contract(root, manifest))
     findings.extend(check_built_app(root, manifest, args.app_bundle))
@@ -887,6 +1406,8 @@ def main() -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
+    if args.strict and findings:
+        return 1
     return 0
 
 
