@@ -57,6 +57,9 @@ func testUIAutomationSurfaceContract() {
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
+        let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
+        let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
+        let generalControlsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
@@ -80,6 +83,12 @@ func testUIAutomationSurfaceContract() {
             assertTrue(pagesSource.contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
         }
 
+        assertTrue(
+            pagesSource.contains("var automationIdentifier: String")
+                && settingsSidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
+            "settings sidebar pages should expose stable automation identifiers"
+        )
+
         for requiredSourceHook in [
             "title: \"Transcribe audio file\"",
             "actions.importAudioFile()",
@@ -102,7 +111,7 @@ func testUIAutomationSurfaceContract() {
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "HomeRowMoreMenuButton(items:",
-            "SettingsInlineActionButton(title: \"Copy for agent\"",
+            "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
@@ -147,6 +156,110 @@ func testUIAutomationSurfaceContract() {
                 && deletePolicySource.contains("Delete Failed Meeting"),
             "delete confirmation copy should stay pinned for destructive-flow automation"
         )
+
+        assertTrue(
+            settingsComponentsSource.contains("settingsAutomationIdentifier")
+                && settingsComponentsSource.contains("transcripted.settings.permissions.\\(kind.rawValue).action"),
+            "settings shared controls should support stable automation IDs"
+        )
+
+        assertTrue(
+            generalControlsSource.contains("generalAutomationIdentifier")
+                && generalControlsSource.contains("transcripted.settings.general.dictation-window.options")
+                && generalControlsSource.contains("transcripted.settings.general.dictation-window.\\(mode.rawValue)")
+                && generalControlsSource.contains("transcripted.settings.general.info.\\(automationSlug(info.title))"),
+            "general settings controls should keep scriptable row and choice IDs"
+        )
+    }
+
+    runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
+        let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
+        let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+
+        for identifier in [
+            "transcripted.home.mode.meetings",
+            "transcripted.home.mode.dictation",
+            "transcripted.home.mode.speakers",
+            "transcripted.home.stats.view",
+            "transcripted.home.stats.done",
+            "transcripted.home.row.copy",
+            "transcripted.home.row.more",
+            "transcripted.home.dictation.open-markdown",
+            "transcripted.home.dictation.expand",
+            "transcripted.home.meeting.preview",
+            "transcripted.home.meeting.summary-expand",
+            "transcripted.home.meeting.review-speakers",
+            "transcripted.home.meeting.retranscribe-speakers",
+            "transcripted.home.meeting-preview.open-markdown",
+            "transcripted.home.meeting-preview.copy-for-agent",
+            "transcripted.home.meeting-preview.report-issue",
+            "transcripted.home.meeting-preview.audio.skip-back",
+            "transcripted.home.meeting-preview.audio.toggle",
+            "transcripted.home.meeting-preview.audio.skip-forward",
+            "transcripted.home.audio.inline-toggle",
+            "transcripted.home.failed-meeting.show-audio",
+            "transcripted.home.failed-meeting.retry",
+            "transcripted.home.failed-meeting.more",
+            "transcripted.home.failed-meetings.show-all",
+            "transcripted.home.failed-meetings.retry",
+            "transcripted.home.failed-meetings.show-audio",
+            "transcripted.home.failed-meetings.delete",
+            "transcripted.home.failed-meetings.dismiss",
+            "transcripted.home.load-more",
+            "transcripted.home.needs-attention.review",
+            "transcripted.home.needs-attention.review-menu",
+        ] {
+            assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
+        }
+
+        assertTrue(
+            homeSource.contains("transcripted.home.audio.\\(isPlaying ?"),
+            "Home audio play/pause action should keep a stable dynamic automation ID"
+        )
+
+        for identifier in [
+            "transcripted.settings.footer.check-updates",
+            "transcripted.settings.general.launch-at-login",
+            "transcripted.settings.general.show-in-dock",
+            "transcripted.settings.general.dictation-sounds",
+            "transcripted.settings.general.cleanup-pasted-text",
+            "transcripted.settings.general.confirm-meeting-quits",
+            "transcripted.settings.general.disclosure.transcription-model",
+            "transcripted.settings.general.disclosure.keyboard-shortcuts",
+            "transcripted.settings.general.disclosure.privacy",
+            "transcripted.settings.general.disclosure.corrections",
+            "transcripted.settings.general.transcribe-audio-file",
+            "transcripted.settings.general.send-test-sentry-event",
+            "transcripted.settings.general.corrections.clear-all",
+            "transcripted.settings.beta.ai-meeting-summaries",
+            "transcripted.settings.beta.live-meeting-sidecar",
+            "transcripted.settings.beta.local-summary.check-setup",
+            "transcripted.settings.beta.local-summary.install-uv",
+            "transcripted.settings.beta.open-agent-setup",
+        ] {
+            assertTrue(settingsSource.contains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
+        }
+
+        for identifier in [
+            "transcripted.onboarding.nav.back",
+            "transcripted.onboarding.nav.skip",
+            "transcripted.onboarding.nav.primary",
+            "transcripted.onboarding.use-case.meetings",
+            "transcripted.onboarding.use-case.dictation",
+            "transcripted.onboarding.permissions.microphone",
+            "transcripted.onboarding.permissions.system-audio",
+            "transcripted.onboarding.permissions.accessibility",
+            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
+            "transcripted.onboarding.system-audio.enable",
+            "transcripted.onboarding.calendar.meeting-reminders",
+            "transcripted.onboarding.calendar.allow",
+            "transcripted.onboarding.diagnostics.share",
+            "transcripted.onboarding.agent.copy-claude-desktop-steps",
+            "transcripted.onboarding.agent.copy-local-agent-prompt",
+        ] {
+            assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
+        }
     }
 }
 
