@@ -80,6 +80,7 @@ test_layers:
     commands:
       packaging_smoke: "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
       sparkle_verify: "bash scripts/release/verify-sparkle-release.sh <version>"
+      sentry_register: "SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>"
       cask_update: "bash scripts/release/update-cask.sh <version>"
     proves:
       - "release artifact, Sparkle appcast, Homebrew cask, and Sentry release metadata can be checked before users depend on them"
