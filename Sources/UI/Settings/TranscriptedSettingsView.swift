@@ -178,6 +178,10 @@ struct TranscriptedSettingsView: View {
                 speakerPeopleModel.refresh()
             }
         }
+        .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
+            refreshRecentCaptures(force: true)
+            speakerPeopleModel.refresh()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures(force: true)
         }
@@ -674,7 +678,9 @@ struct TranscriptedSettingsView: View {
             let didStart = await meetingSession.retranscribeSavedMeeting(
                 micAudioURL: input.micURL,
                 systemAudioURL: input.systemURL,
-                title: item.title
+                title: item.title,
+                transcriptURL: item.transcriptURL,
+                recordingDate: item.startDate ?? item.date
             )
             if !didStart {
                 NSSound.beep()
@@ -962,20 +968,24 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
-        do {
-            if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
-                MeetingAudioPlayback.shared.stop()
+        let deletionTask = Task.detached(priority: .userInitiated) {
+            let plan = HomeMeetingDeletion.plan(for: item)
+            await MainActor.run {
+                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
             }
-            try removeItemIfPresent(at: item.transcriptURL)
-            if let audio = item.audio {
-                try removeItemIfPresent(at: audio.directoryURL)
+            return try HomeMeetingDeletion.delete(plan)
+        }
+
+        Task { @MainActor in
+            do {
+                _ = try await deletionTask.value
+                refreshRecentCaptures(force: true)
+            } catch {
+                presentHomeDeleteFailure(
+                    title: "Could not delete meeting",
+                    error: error
+                )
             }
-            refreshRecentCaptures(force: true)
-        } catch {
-            presentHomeDeleteFailure(
-                title: "Could not delete meeting",
-                error: error
-            )
         }
     }
 
@@ -1034,11 +1044,6 @@ struct TranscriptedSettingsView: View {
                 message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
             )
         }
-    }
-
-    private func removeItemIfPresent(at url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.removeItem(at: url)
     }
 
     private func presentHomeDeleteFailure(title: String, error: Error) {

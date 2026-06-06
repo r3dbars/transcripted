@@ -195,6 +195,22 @@ enum LocalMeetingSummaryStore {
     static func summaryExists(for transcriptURL: URL, fileManager: FileManager = .default) -> Bool {
         fileManager.fileExists(atPath: summaryURL(for: transcriptURL).path)
     }
+
+    @discardableResult
+    static func removeGeneratedSummary(
+        for transcriptURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> Bool {
+        let url = summaryURL(for: transcriptURL)
+        guard fileManager.fileExists(atPath: url.path),
+              let values = try TranscriptFrontmatter.readValues(from: url),
+              values["capture_type"] == "meeting_summary",
+              values["source_transcript"] == transcriptURL.lastPathComponent else {
+            return false
+        }
+        try fileManager.removeItem(at: url)
+        return true
+    }
 }
 
 enum LocalMeetingTranscriptExtractor {

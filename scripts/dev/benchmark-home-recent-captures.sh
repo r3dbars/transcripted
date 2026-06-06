@@ -15,6 +15,7 @@ swiftc \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptStore.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \
+  "$ROOT_DIR/Sources/Meeting/LocalMeetingSummarizer.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerProfile.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \

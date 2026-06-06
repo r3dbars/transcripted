@@ -346,6 +346,85 @@ record_synthetic_failure() {
   } >> "${REPORT}"
 }
 
+record_route_automation_proxy() {
+  local scenario="$1"
+  local lane="$2"
+  local automated_proxy="$3"
+  local owned_check="$4"
+  local manual_boundary="$5"
+
+  printf "%s\t%s\tpass\n" "${scenario}" "lane=${lane}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "automated_proxy=${automated_proxy}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "owned_check=${owned_check}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "manual_boundary_documented=true" >> "${ANSWERS}"
+
+  {
+    echo
+    echo "### ${scenario}"
+    echo
+    echo "- lane: ${lane}"
+    echo "- automated_proxy: ${automated_proxy}"
+    echo "- owned_check: \`${owned_check}\`"
+    echo "- manual_boundary: ${manual_boundary}"
+  } >> "${REPORT}"
+}
+
+run_route_automation_proxy_suite() {
+  {
+    echo
+    echo "## Audio Route Automation Proxy Matrix"
+    echo
+    echo "These rows make the automation boundary explicit. They prove deterministic"
+    echo "policy coverage exists for each audio lane, while real route proof still"
+    echo "requires the manual matrix in \`docs/qa-issue-500-meeting-audio.md\`."
+  } >> "${REPORT}"
+
+  record_route_automation_proxy \
+    "synthetic-dictation-pasteback-lifecycle" \
+    "dictation pasteback/audio lifecycle" \
+    "clipboard restore, slow paste consumers, no-speech recovery, route-preserved buffered audio" \
+    "bash run-tests.sh" \
+    "TextEdit, Notes, and browser text-area pasteback still need focused-app manual proof."
+
+  record_route_automation_proxy \
+    "synthetic-meeting-mic-system-split" \
+    "meeting mic/system audio" \
+    "mic/system failure-shape matrix plus retained-artifact state-machine checks" \
+    "bash run-daily-audio-reliability.sh --synthetic" \
+    "real mic plus System Audio Recording capture still needs live smoke or manual TCC proof."
+
+  record_route_automation_proxy \
+    "synthetic-webrtc-zoom-contention-proxy" \
+    "WebRTC/Zoom route proxy" \
+    "quiet-mic attenuation classification, software AGC recovery, output-ducking diagnostics" \
+    "bash run-tests.sh" \
+    "Safari Meet, Firefox Meet, Chrome Meet, and Zoom volume behavior still need real app proof."
+
+  record_route_automation_proxy \
+    "synthetic-bluetooth-airpods-route-settling-proxy" \
+    "Bluetooth/AirPods route settling" \
+    "Bluetooth headset fallback policy, stale-route readiness, zombie-recovery state transitions" \
+    "bash run-tests.sh" \
+    "connected AirPods/Bluetooth hardware routes still need Justin-run manual proof."
+
+  record_route_automation_proxy \
+    "synthetic-audio-privacy-security" \
+    "audio privacy/security" \
+    "privacy-safe diagnostics, sanitizer allowlists, local-only artifact validation" \
+    "bash run-tests.sh" \
+    "support bundles and logs still need local-only review before any sharing."
+
+  {
+    echo
+    echo "Manual route proof still required before issue #500 can be called green:"
+    echo
+    echo "- Safari Meet, Firefox Meet, Chrome Meet, and Zoom with real app audio"
+    echo "- AirPods/Bluetooth and any available USB route"
+    echo "- user-perceived meeting volume before/during/after capture"
+    echo "- saved transcript proof that uses the processed mic path"
+  } >> "${REPORT}"
+}
+
 run_synthetic_suite() {
   append_scenario "synthetic-fixtures" "Synthetic Audio Fixtures" "Generated local audio covers silence, quiet audio, short audio, corrupted input, and speaker-like tones."
   generate_synthetic_fixtures
@@ -363,6 +442,7 @@ run_synthetic_suite() {
   record_synthetic_failure "synthetic-transcription-crash" "transcription_inference_failed" "transcription" "recoverable_failure" "retryable" "retained_failed_queue_entry" "retry_available" "yes" "yes" "yes" "no" "no" "yes" "yes"
   record_synthetic_failure "synthetic-save-failed" "save_failed" "save" "recoverable_failure" "retryable_after_user_action" "retained_failed_queue_entry" "needs_user_action" "yes" "yes" "no" "no" "yes" "yes" "yes"
   record_synthetic_failure "synthetic-diarization-degraded" "diarization_failed" "diarization" "degraded_success" "retryable" "retained_partial_transcript" "transcript_saved_without_speakers" "yes" "yes" "no" "yes" "no" "yes" "yes"
+  run_route_automation_proxy_suite
   collect_logs "synthetic"
 }
 

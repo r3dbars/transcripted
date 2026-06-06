@@ -82,4 +82,84 @@ final class TranscriptSaverDefaultSaveDirectoryTests: XCTestCase {
             CoreStoragePaths.default.transcripts
         )
     }
+
+    func testTargetURLReplacementPreservesOriginalFileDates() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptSaverReplacementDates-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let transcriptURL = directory.appendingPathComponent("Reviewed_Call.md")
+        try "Original transcript".write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let originalCreationDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let originalModificationDate = Date(timeIntervalSince1970: 1_700_000_123)
+        try FileManager.default.setAttributes(
+            [
+                .creationDate: originalCreationDate,
+                .modificationDate: originalModificationDate
+            ],
+            ofItemAtPath: transcriptURL.path
+        )
+        let beforeAttributes = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)
+        let expectedCreationDate = try XCTUnwrap(beforeAttributes[.creationDate] as? Date)
+        let expectedModificationDate = try XCTUnwrap(beforeAttributes[.modificationDate] as? Date)
+
+        let result = TranscriptionResult(
+            micUtterances: [],
+            systemUtterances: [
+                TranscriptionUtterance(
+                    start: 0,
+                    end: 2,
+                    channel: 1,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: "Updated synthetic transcript."
+                )
+            ],
+            duration: 2,
+            processingTime: 0.5
+        )
+
+        let savedURL = TranscriptSaver.saveTranscript(
+            result,
+            transcriptId: UUID(),
+            directory: directory,
+            meetingTitle: "Reviewed Call",
+            statsStore: TranscriptSaverNoopStatsStore(),
+            recordingDate: Date(),
+            targetURL: transcriptURL,
+            transcriptionEngine: .parakeetLocal
+        )
+
+        XCTAssertEqual(savedURL, transcriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Updated synthetic transcript."))
+
+        let afterAttributes = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)
+        let afterCreationDate = try XCTUnwrap(afterAttributes[.creationDate] as? Date)
+        let afterModificationDate = try XCTUnwrap(afterAttributes[.modificationDate] as? Date)
+        XCTAssertEqual(
+            afterCreationDate.timeIntervalSince1970,
+            expectedCreationDate.timeIntervalSince1970,
+            accuracy: 1.0
+        )
+        XCTAssertEqual(
+            afterModificationDate.timeIntervalSince1970,
+            expectedModificationDate.timeIntervalSince1970,
+            accuracy: 1.0
+        )
+    }
+}
+
+@available(macOS 14.0, *)
+private final class TranscriptSaverNoopStatsStore: StatsStore {
+    func recordSession(_ metadata: RecordingMetadata) {}
+
+    func getTotalRecordingsCount() -> Int { 0 }
+
+    func getRecordings(from startDate: Date, to endDate: Date) -> [RecordingMetadata] { [] }
+
+    func recordingExists(transcriptPath: String) -> Bool { false }
 }

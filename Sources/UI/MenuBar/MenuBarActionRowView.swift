@@ -4,6 +4,7 @@ struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
     let title: String
     let detail: String
     let trailingText: String
+    let automationIdentifier: String
     let isVisible: Bool
     let isEnabled: Bool
 }
@@ -86,6 +87,11 @@ final class MenuBarActionRowView: NSControl {
         invalidateIntrinsicContentSize()
         needsLayout = true
         updateAppearance()
+    }
+
+    func setAutomationIdentifier(_ rawValue: String) {
+        identifier = NSUserInterfaceItemIdentifier(rawValue)
+        setAccessibilityIdentifier(rawValue)
     }
 
     private func setupViews() {
@@ -276,6 +282,7 @@ final class MenuBarActionRowView: NSControl {
             title: titleLabel.stringValue,
             detail: detailLabel.stringValue,
             trailingText: trailingLabel.stringValue,
+            automationIdentifier: accessibilityIdentifier(),
             isVisible: !isHidden,
             isEnabled: isEnabled
         )
