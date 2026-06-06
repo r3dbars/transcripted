@@ -71,8 +71,8 @@ test_layers:
 
   corpus_validation:
     commands:
-      validate: "python3 scripts/ops/validate-meeting-corpus.py"
-      compare: "python3 scripts/ops/compare-meeting-corpus.py"
+      validate: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
+      compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
     proves:
       - "private meeting corpus is readable and Transcripted Markdown can be scored against Zoom truth without printing private transcript text"
 
