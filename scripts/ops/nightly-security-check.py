@@ -73,7 +73,6 @@ SHELL_GUARD_PATTERNS = [
 
 SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 REQUIRED_SENTRY_RELEASE_CHECK_IDS = {
-    "sentry-auth-missing",
     "sentry-cli-missing",
     "sentry-release-missing",
 }
@@ -860,34 +859,22 @@ def check_sentry_release_health(
     release = sentry_release_name(root, manifest)
     watch_items: list[dict] = []
     findings: list[dict] = []
-    if not os.environ.get("SENTRY_AUTH_TOKEN"):
+    if not command_exists("sentry-cli"):
         if required:
             findings.append(
                 make_finding(
                     "release_integrity",
-                    "high",
-                    "sentry-auth-missing",
-                    "Cannot verify Sentry release existence because SENTRY_AUTH_TOKEN is not configured.",
-                    f"Required release existence check for {release}.",
+                    "medium",
+                    "sentry-cli-missing",
+                    "Cannot verify Sentry release existence because sentry-cli is missing.",
+                    "Install sentry-cli on the release-health runner.",
                 )
             )
             return findings, watch_items
         watch_items.append(
             make_watch_item(
-                "sentry-release-health-skipped",
-                "Sentry release health was requested but SENTRY_AUTH_TOKEN is not configured.",
-                f"Skipped release existence check for {release}.",
-            )
-        )
-        return findings, watch_items
-
-    if not command_exists("sentry-cli"):
-        findings.append(
-            make_finding(
-                "release_integrity",
-                "medium",
                 "sentry-cli-missing",
-                "Cannot verify Sentry release existence because sentry-cli is missing.",
+                "Sentry release health was requested but sentry-cli is missing.",
                 "Install sentry-cli on the release-health runner.",
             )
         )
@@ -908,13 +895,23 @@ def check_sentry_release_health(
         cwd=root,
     )
     if result.returncode != 0:
+        detail = f"sentry-cli releases info failed for {release!r} in {sentry['org']}/{sentry['project']}."
+        if not required:
+            watch_items.append(
+                make_watch_item(
+                    "sentry-release-health-failed",
+                    "Sentry release health was requested but sentry-cli could not verify it.",
+                    detail,
+                )
+            )
+            return findings, watch_items
         findings.append(
             make_finding(
                 "release_integrity",
                 "high",
                 "sentry-release-missing",
-                "Sentry release matching Info.plist was not found.",
-                f"sentry-cli releases info failed for {release!r} in {sentry['org']}/{sentry['project']}.",
+                "Sentry release matching Info.plist could not be verified.",
+                detail,
             )
         )
 

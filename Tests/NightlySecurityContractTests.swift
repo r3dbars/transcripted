@@ -95,6 +95,7 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("--require-sentry-release-health"), "nightly checker should expose required Sentry release checks")
         assertTrue(checker.contains("--require-release-debug-files"), "nightly checker should expose release dSYM verification")
         assertTrue(checker.contains("has_required_release_health_failure"), "required release-health checks should fail even outside strict mode")
+        assertFalse(checker.contains("SENTRY_AUTH_TOKEN is not configured"), "Sentry release checks should let configured sentry-cli auth attempt the lookup")
         assertTrue(checker.contains("check_cask"), "nightly checker should verify Homebrew cask parity")
         assertTrue(checker.contains("check_observability_payload_keys"), "nightly checker should scan observability allowlists for raw payload keys")
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
