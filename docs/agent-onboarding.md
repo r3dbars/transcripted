@@ -58,10 +58,14 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Verification surfaces and fast-test runner rules.
 - `.agents/test-matrix.yml`
   Machine-readable path-to-verification map for agents.
+- `.agents/qa-gates.yml`
+  Machine-readable map from product risk and QA lane to proof gate.
 - `.github/`
   GitHub issue templates, PR checklist, and workflow automation.
 - `docs/storage-paths.md`
   Canonical app, tool, and fallback storage layout.
+- `docs/test-automation-strategy.md`
+  Agent-first QA coverage map, gate strategy, and automation roadmap.
 - `docs/activation-lane.md`
   Current activation routing: saved Markdown, agent payoff, and return-use loop.
 - `docs/agent-closeout.md`
@@ -77,7 +81,7 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
 
 When docs disagree, split the decision:
 
-- workflow contracts: `AGENTS.md`, `.agents/test-matrix.yml`, then `scripts/dev/agent-preflight.sh`
+- workflow contracts: `AGENTS.md`, `.agents/test-matrix.yml`, `.agents/qa-gates.yml`, then `scripts/dev/agent-preflight.sh`
 - runtime behavior and file existence: current source files
 - subsystem intent: current local `CLAUDE.md` files whose file lists match the tree
 - historical context: `docs/archive/` only
@@ -85,7 +89,8 @@ When docs disagree, split the decision:
 ## Validation Layers
 
 This repo has multiple verification surfaces. Treat them as distinct, and use
-`Tests/README.md` plus `.agents/test-matrix.yml` as the full current map:
+`Tests/README.md`, `.agents/test-matrix.yml`, and `.agents/qa-gates.yml` as the
+full current map:
 
 - `bash build.sh`
   The authoritative app build. Use `bash build.sh --no-open` for agent verification.
