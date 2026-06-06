@@ -91,10 +91,12 @@ func testNightlySecurityContract() {
 
         assertTrue(checker.contains("--strict"), "nightly checker should expose a failing gate mode")
         assertTrue(checker.contains("--live-release-surfaces"), "nightly checker should expose live release-surface checks")
+        assertTrue(checker.contains("live_appcast_urls"), "live release-surface checks should include the Sparkle feed used by installed apps")
         assertTrue(checker.contains("--sentry-release-health"), "nightly checker should expose Sentry release existence checks")
         assertTrue(checker.contains("--require-sentry-release-health"), "nightly checker should expose required Sentry release checks")
         assertTrue(checker.contains("--require-release-debug-files"), "nightly checker should expose release dSYM verification")
         assertTrue(checker.contains("has_required_release_health_failure"), "required release-health checks should fail even outside strict mode")
+        assertTrue(checker.contains("has_blocking_release_health_watch_item"), "release-health checks should fail on stale appcast watch items")
         assertTrue(checker.contains("should_check_automation_prompt"), "release-health gates should not depend on local Codex automation state")
         assertFalse(checker.contains("SENTRY_AUTH_TOKEN is not configured"), "Sentry release checks should let configured sentry-cli auth attempt the lookup")
         assertTrue(checker.contains("check_cask"), "nightly checker should verify Homebrew cask parity")

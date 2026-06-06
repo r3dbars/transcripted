@@ -82,6 +82,9 @@ REQUIRED_RELEASE_DEBUG_CHECK_IDS = {
     "dwarfdump-missing",
     "release-dsym-uuid-mismatch",
 }
+RELEASE_HEALTH_BLOCKING_WATCH_IDS = {
+    "appcast-release-candidate",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -747,6 +750,17 @@ def first_header_value(headers: str, name: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def live_appcast_urls(manifest: dict) -> list[str]:
+    urls: list[str] = []
+    for candidate in (
+        manifest["expected_info_plist"].get("SUFeedURL", ""),
+        manifest["live_release_surfaces"].get("appcast", ""),
+    ):
+        if candidate and candidate not in urls:
+            urls.append(candidate)
+    return urls
+
+
 def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> list[dict]:
     if not enabled:
         return []
@@ -765,69 +779,69 @@ def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> li
         ]
 
     findings: list[dict] = []
-    live_appcast_url = manifest["live_release_surfaces"]["appcast"]
-    result = curl_stdout(root, ["-fsSL", live_appcast_url])
-    if result.returncode != 0:
-        findings.append(
-            make_finding(
-                "release_integrity",
-                "medium",
-                "live-appcast-unreachable",
-                "Live appcast could not be fetched.",
-                f"curl failed for {live_appcast_url}.",
-            )
-        )
-    else:
-        try:
-            live_latest = appcast_item_metadata(ET.fromstring(result.stdout).find("./channel/item"))
-            if live_latest is None:
-                findings.append(
-                    make_finding(
-                        "release_integrity",
-                        "high",
-                        "live-appcast-missing-item",
-                        "Live appcast is missing its latest release item.",
-                        "Expected a channel/item entry matching the committed appcast.",
-                    )
+    for live_appcast_url in live_appcast_urls(manifest):
+        result = curl_stdout(root, ["-fsSL", live_appcast_url])
+        if result.returncode != 0:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "medium",
+                    "live-appcast-unreachable",
+                    "Live appcast could not be fetched.",
+                    f"curl failed for {live_appcast_url}.",
                 )
-            else:
-                drift = {
-                    key: (live_latest.get(key, ""), latest.get(key, ""))
-                    for key in (
-                        "version",
-                        "build",
-                        "minimum_system_version",
-                        "hardware_requirements",
-                        "url",
-                        "length",
-                        "signature",
-                    )
-                    if live_latest.get(key, "") != latest.get(key, "")
-                }
-                if drift:
-                    detail = "; ".join(
-                        f"{key}: live={live!r}, local={local!r}"
-                        for key, (live, local) in drift.items()
-                    )
+            )
+        else:
+            try:
+                live_latest = appcast_item_metadata(ET.fromstring(result.stdout).find("./channel/item"))
+                if live_latest is None:
                     findings.append(
                         make_finding(
                             "release_integrity",
                             "high",
-                            "live-appcast-drift",
-                            "Live appcast drifted from the committed latest appcast item.",
-                            detail,
+                            "live-appcast-missing-item",
+                            "Live appcast is missing its latest release item.",
+                            f"Expected a channel/item entry matching the committed appcast at {live_appcast_url}.",
                         )
                     )
-        except ET.ParseError as exc:
-            findings.append(
-                make_finding(
-                    "release_integrity",
-                    "high",
-                    "live-appcast-invalid",
-                    "Live appcast is not parseable XML.",
-                    str(exc),
+                else:
+                    drift = {
+                        key: (live_latest.get(key, ""), latest.get(key, ""))
+                        for key in (
+                            "version",
+                            "build",
+                            "minimum_system_version",
+                            "hardware_requirements",
+                            "url",
+                            "length",
+                            "signature",
+                        )
+                        if live_latest.get(key, "") != latest.get(key, "")
+                    }
+                    if drift:
+                        detail = "; ".join(
+                            f"{key}: live={live!r}, local={local!r}"
+                            for key, (live, local) in drift.items()
+                        )
+                        findings.append(
+                            make_finding(
+                                "release_integrity",
+                                "high",
+                                "live-appcast-drift",
+                                "Live appcast drifted from the committed latest appcast item.",
+                                f"{live_appcast_url}: {detail}",
+                            )
+                        )
+            except ET.ParseError as exc:
+                findings.append(
+                    make_finding(
+                        "release_integrity",
+                        "high",
+                        "live-appcast-invalid",
+                        "Live appcast is not parseable XML.",
+                        f"{live_appcast_url}: {exc}",
+                    )
                 )
-            )
 
     for route in manifest["live_release_surfaces"]["direct_download_routes"]:
         result = curl_stdout(root, ["-sSI", route])
@@ -1427,6 +1441,12 @@ def has_required_release_health_failure(args: argparse.Namespace, findings: list
     return any(finding.get("check_id") in required_check_ids for finding in findings)
 
 
+def has_blocking_release_health_watch_item(args: argparse.Namespace, watch_items: list[dict]) -> bool:
+    if not release_health_mode(args):
+        return False
+    return any(item.get("check_id") in RELEASE_HEALTH_BLOCKING_WATCH_IDS for item in watch_items)
+
+
 def release_health_mode(args: argparse.Namespace) -> bool:
     return any(
         [
@@ -1485,7 +1505,11 @@ def main() -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
-    if (args.strict and findings) or has_required_release_health_failure(args, findings):
+    if (
+        (args.strict and findings)
+        or has_required_release_health_failure(args, findings)
+        or has_blocking_release_health_watch_item(args, watch_items)
+    ):
         return 1
     return 0
 
