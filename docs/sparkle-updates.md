@@ -76,6 +76,9 @@ bash scripts/release/verify-sparkle-release.sh <version>
 python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 ```
 
+That live gate also checks the GitHub release asset size/digest against the
+committed appcast and Homebrew cask.
+
 If the final push has not happened yet, Sparkle clients will keep seeing the old
 version.
 

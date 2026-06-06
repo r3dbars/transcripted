@@ -91,6 +91,7 @@ func testNightlySecurityContract() {
 
         assertTrue(checker.contains("--strict"), "nightly checker should expose a failing gate mode")
         assertTrue(checker.contains("--live-release-surfaces"), "nightly checker should expose live release-surface checks")
+        assertTrue(checker.contains("--github-release-json"), "nightly checker should accept deterministic GitHub release fixtures")
         assertTrue(checker.contains("live_appcast_urls"), "live release-surface checks should include the Sparkle feed used by installed apps")
         assertTrue(checker.contains("--sentry-release-health"), "nightly checker should expose Sentry release existence checks")
         assertTrue(checker.contains("--require-sentry-release-health"), "nightly checker should expose required Sentry release checks")
@@ -100,12 +101,31 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("should_check_automation_prompt"), "release-health gates should not depend on local Codex automation state")
         assertFalse(checker.contains("SENTRY_AUTH_TOKEN is not configured"), "Sentry release checks should let configured sentry-cli auth attempt the lookup")
         assertTrue(checker.contains("check_cask"), "nightly checker should verify Homebrew cask parity")
+        assertTrue(checker.contains("check_github_release_metadata"), "nightly checker should verify GitHub release asset metadata")
+        assertTrue(checker.contains("github-release-asset-digest"), "nightly checker should compare the cask checksum to the GitHub asset digest")
         assertTrue(checker.contains("check_observability_payload_keys"), "nightly checker should scan observability allowlists for raw payload keys")
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
         assertTrue(checker.contains("first_value_sources"), "PostHog first-value event checks should inspect each probe source independently")
         assertTrue(checker.contains("posthog-first-value-schema-"), "PostHog first-value drift findings should identify the missing probe source")
-        assertTrue(preflight.contains("nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml"), "agent preflight should suggest a strict checker command that is independent of local automation state")
-        assertTrue(matrix.contains("nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml"), "test matrix should suggest a strict checker command that is independent of local automation state")
+        assertTrue(preflight.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json"), "agent preflight should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
+    }
+
+    runSuite("Nightly security checker fails stale GitHub release asset metadata") {
+        let passing = runNightlySecurityChecker(arguments: [
+            "--strict",
+            "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.46.json"
+        ])
+        let staleCask = runNightlySecurityChecker(arguments: [
+            "--strict",
+            "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-stale-cask.json"
+        ])
+
+        assertEqual(passing.status, 0, "matching release fixture should keep the strict checker green")
+        assertEqual(staleCask.status, 1, "stale GitHub asset checksum fixture should fail the strict checker")
+        assertTrue(staleCask.output.contains("github-release-asset-digest"), "stale fixture should fail on cask vs GitHub asset digest drift")
     }
 }
 
@@ -119,6 +139,30 @@ private func loadPlistDictionary(_ relativePath: String) -> [String: Any] {
     }
 
     return dictionary
+}
+
+private struct ShellResult {
+    let status: Int32
+    let output: String
+}
+
+private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
+    let process = Process()
+    let pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["python3", "scripts/ops/nightly-security-check.py"] + arguments
+    process.currentDirectoryURL = repoFixtureURL(".")
+    process.standardOutput = pipe
+    process.standardError = pipe
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return ShellResult(status: process.terminationStatus, output: output)
+    } catch {
+        return ShellResult(status: -127, output: String(describing: error))
+    }
 }
 
 struct AnyDecodable: Decodable {

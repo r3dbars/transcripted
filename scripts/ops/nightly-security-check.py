@@ -113,6 +113,10 @@ def parse_args() -> argparse.Namespace:
         help="Check transcripted.app live appcast and download routes against the committed appcast.",
     )
     parser.add_argument(
+        "--github-release-json",
+        help="Optional gh release JSON fixture for deterministic GitHub asset metadata checks.",
+    )
+    parser.add_argument(
         "--sentry-release-health",
         action="store_true",
         help="Use configured Sentry auth to verify the release matching Info.plist exists.",
@@ -561,11 +565,10 @@ def check_cask(root: Path, manifest: dict) -> list[dict]:
     cask_path = root / manifest["paths"]["homebrew_cask"]
     text = read_text(cask_path)
     latest = latest_appcast_metadata(root, manifest)
+    cask = cask_metadata(root, manifest)
     findings: list[dict] = []
 
-    version_match = re.search(r'(?m)^\s*version\s+"([^"]+)"', text)
-    sha_match = re.search(r'(?m)^\s*sha256\s+"([^"]+)"', text)
-    if not version_match:
+    if not cask["version"]:
         findings.append(
             make_finding(
                 "release_integrity",
@@ -576,19 +579,19 @@ def check_cask(root: Path, manifest: dict) -> list[dict]:
                 manifest["paths"]["homebrew_cask"],
             )
         )
-    elif latest and version_match.group(1) != latest["version"]:
+    elif latest and cask["version"] != latest["version"]:
         findings.append(
             make_finding(
                 "release_integrity",
                 "medium",
                 "cask-version-mismatch",
                 "Homebrew cask version drifted from the latest appcast release.",
-                f"Cask has {version_match.group(1)!r}, appcast has {latest['version']!r}.",
+                f"Cask has {cask['version']!r}, appcast has {latest['version']!r}.",
                 manifest["paths"]["homebrew_cask"],
             )
         )
 
-    if not sha_match or not re.fullmatch(r"[0-9a-f]{64}", sha_match.group(1)):
+    if not cask["sha256"]:
         findings.append(
             make_finding(
                 "release_integrity",
@@ -625,6 +628,220 @@ def check_cask(root: Path, manifest: dict) -> list[dict]:
                 "Homebrew cask livecheck should track the latest GitHub release.",
                 "Expected livecheck strategy :github_latest.",
                 manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    return findings
+
+
+def cask_metadata(root: Path, manifest: dict) -> dict[str, str]:
+    text = read_text(root / manifest["paths"]["homebrew_cask"])
+    version_match = re.search(r'(?m)^\s*version\s+"([^"]+)"', text)
+    sha_match = re.search(r'(?m)^\s*sha256\s+"([0-9A-Fa-f]{64})"', text)
+    return {
+        "version": version_match.group(1) if version_match else "",
+        "sha256": sha_match.group(1).lower() if sha_match else "",
+    }
+
+
+def normalized_sha256_digest(value: object) -> str:
+    digest = str(value or "").strip().lower()
+    if digest.startswith("sha256:"):
+        digest = digest[len("sha256:") :]
+    if re.fullmatch(r"[0-9a-f]{64}", digest):
+        return digest
+    return ""
+
+
+def load_github_release_json(root: Path, release_json_path: str) -> tuple[dict | None, str]:
+    path = Path(release_json_path)
+    if not path.is_absolute():
+        path = root / path
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), normalize_path(path)
+    except Exception as exc:
+        return None, f"{normalize_path(path)}: {exc}"
+
+
+def fetch_github_release_json(root: Path, manifest: dict, version: str) -> tuple[dict | None, str]:
+    if not command_exists("gh"):
+        return None, "gh CLI is missing."
+    result = run(
+        [
+            "gh",
+            "release",
+            "view",
+            f"v{version}",
+            "--repo",
+            manifest["repo_slug"],
+            "--json",
+            "tagName,isDraft,isPrerelease,url,assets",
+        ],
+        cwd=root,
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip() or result.stdout.strip() or "gh release view failed."
+    try:
+        return json.loads(result.stdout), "gh release view"
+    except json.JSONDecodeError as exc:
+        return None, f"gh release view returned invalid JSON: {exc}"
+
+
+def check_github_release_metadata(
+    root: Path,
+    manifest: dict,
+    enabled: bool,
+    release_json_path: str | None,
+) -> list[dict]:
+    if not enabled and not release_json_path:
+        return []
+
+    latest = latest_appcast_metadata(root, manifest)
+    if not latest:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-no-local-appcast",
+                "Cannot check GitHub release metadata without a parseable local appcast.",
+                "docs/appcast.xml needs a latest item first.",
+                manifest["paths"]["appcast"],
+            )
+        ]
+
+    if release_json_path:
+        release, source = load_github_release_json(root, release_json_path)
+    else:
+        release, source = fetch_github_release_json(root, manifest, latest["version"])
+
+    if release is None:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-metadata-unavailable",
+                "GitHub release metadata could not be loaded.",
+                source,
+            )
+        ]
+
+    findings: list[dict] = []
+    version = latest["version"]
+    expected_tag = f"v{version}"
+    expected_asset_name = f"Transcripted-{version}.dmg"
+    if release.get("tagName") != expected_tag:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-tag",
+                "GitHub release tag drifted from the committed appcast.",
+                f"{source}: expected {expected_tag!r}, got {release.get('tagName')!r}.",
+            )
+        )
+
+    if release.get("isDraft") is True:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-draft",
+                "GitHub release is still a draft.",
+                f"{source}: {expected_tag} must be published before release readiness is green.",
+            )
+        )
+
+    if release.get("isPrerelease") is True:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "github-release-prerelease",
+                "GitHub release is marked prerelease.",
+                f"{source}: {expected_tag} should be a normal release for public readiness.",
+            )
+        )
+
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+    asset = next(
+        (item for item in assets if isinstance(item, dict) and item.get("name") == expected_asset_name),
+        None,
+    )
+    if asset is None:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-missing",
+                "GitHub release is missing the expected Transcripted DMG asset.",
+                f"{source}: expected asset {expected_asset_name!r}.",
+            )
+        )
+        return findings
+
+    asset_url = str(asset.get("url", "")).strip()
+    if asset_url != latest["url"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-url",
+                "GitHub release asset URL drifted from the committed appcast.",
+                f"{source}: expected {latest['url']!r}, got {asset_url!r}.",
+            )
+        )
+
+    try:
+        asset_size = int(asset.get("size"))
+    except (TypeError, ValueError):
+        asset_size = -1
+    expected_size = int(latest["length"]) if latest["length"].isdigit() else -1
+    if asset_size != expected_size:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-size",
+                "GitHub release asset size drifted from the committed appcast.",
+                f"{source}: expected {expected_size}, got {asset_size}.",
+            )
+        )
+
+    asset_digest = normalized_sha256_digest(asset.get("digest"))
+    cask_sha = cask_metadata(root, manifest)["sha256"]
+    if not asset_digest:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-digest-missing",
+                "GitHub release asset is missing a sha256 digest.",
+                f"{source}: cask checksum cannot be checked against the current DMG asset.",
+            )
+        )
+    elif cask_sha and asset_digest != cask_sha:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-digest",
+                "Homebrew cask checksum drifted from the GitHub release asset digest.",
+                f"{source}: cask sha256={cask_sha!r}, asset digest={asset_digest!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    state = str(asset.get("state", "")).strip()
+    if state and state != "uploaded":
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-state",
+                "GitHub release asset is not uploaded.",
+                f"{source}: asset state is {state!r}.",
             )
         )
 
@@ -1451,6 +1668,7 @@ def release_health_mode(args: argparse.Namespace) -> bool:
     return any(
         [
             args.live_release_surfaces,
+            bool(args.github_release_json),
             args.sentry_release_health,
             args.require_sentry_release_health,
             args.require_release_debug_files,
@@ -1479,6 +1697,9 @@ def main() -> int:
     findings.extend(check_observability_payload_keys(root, manifest))
     findings.extend(check_posthog_health_schema(root, manifest))
     findings.extend(check_live_release_surfaces(root, manifest, args.live_release_surfaces))
+    findings.extend(
+        check_github_release_metadata(root, manifest, args.live_release_surfaces, args.github_release_json)
+    )
     sentry_findings, sentry_watch_items = check_sentry_release_health(
         root,
         manifest,

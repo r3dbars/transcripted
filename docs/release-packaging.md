@@ -130,6 +130,9 @@ python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
 ```
 
+The live surface gate compares the committed appcast against the live appcast,
+download routes, GitHub release asset size/digest, and Homebrew cask checksum.
+
 After a packaging build, add local dSYM verification:
 
 ```bash
