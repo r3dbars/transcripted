@@ -1548,6 +1548,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - degraded meeting Sentry context stays bucketed") {
+        let contents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let reportBlock = sourceSlice(
+            contents,
+            from: "private func reportCaptureHealthIfNeeded(",
+            to: "private func savedTranscriptAnalyticsProperties()"
+        )
+
+        assertTrue(
+            reportBlock.contains("context[\"gap_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)"),
+            "degraded meeting Sentry events should preserve coarse gap counts"
+        )
+        assertTrue(
+            reportBlock.contains("context[\"route_change_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)"),
+            "degraded meeting Sentry events should preserve coarse route-change counts"
+        )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"gap_count\")"),
+            "raw gap counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"route_change_count\")"),
+            "raw route-change counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
+        assertFalse(
+            reportBlock.contains("context[\"gap_count\"] ="),
+            "raw gap counts should stay out of degraded meeting Sentry context"
+        )
+        assertFalse(
+            reportBlock.contains("context[\"route_change_count\"] ="),
+            "raw route-change counts should stay out of degraded meeting Sentry context"
+        )
+    }
+
     runSuite("Repo command contract - queued meetings recover unloaded models before transcription") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let downloaderContents = readRepoTextFile("Sources/Meeting/MeetingModelDownloader.swift")

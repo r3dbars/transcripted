@@ -2414,12 +2414,14 @@ final class MeetingSessionController: ObservableObject {
         guard shouldReport else { return }
 
         var context = captureDiagnostics
+        context.removeValue(forKey: "gap_count")
+        context.removeValue(forKey: "route_change_count")
         context["capture_quality"] = healthInfo.captureQuality.rawValue
         context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
-        context["gap_count"] = "\(healthInfo.audioGaps)"
+        context["gap_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)
         context["mic_file_available"] = boolString(files.micURL != nil)
         context["reason"] = reason.rawValue
-        context["route_change_count"] = "\(healthInfo.deviceSwitches)"
+        context["route_change_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)
         context["stop_timed_out"] = boolString(stopTimedOut)
         context["system_stream_present"] = boolString(files.systemURL != nil)
         context["trigger"] = trigger.rawValue
