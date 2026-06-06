@@ -2055,6 +2055,30 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - replacement retranscription cancellation keeps original transcript") {
+        let runnerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+
+        assertTrue(
+            managerContents.contains("targetTranscriptURL: replacementTranscriptURL")
+                && managerContents.contains("archiveRecordingAudio: replacementTranscriptURL == nil"),
+            "saved-audio replacement should overwrite the selected transcript without archiving duplicate retained audio"
+        )
+        assertTrue(
+            runnerContents.contains("let deleteSavedTranscriptOnCancellation = targetTranscriptURL == nil"),
+            "replacement retranscription cancellation should not delete the selected original transcript"
+        )
+        assertTrue(
+            runnerContents.contains("deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation"),
+            "replacement retranscription cancellation policy should be threaded through side-effect checks"
+        )
+        assertTrue(
+            runnerContents.contains("if deleteSavedTranscript {")
+                && runnerContents.contains("try? FileManager.default.removeItem(at: savedURL)"),
+            "new cancelled transcripts should still be removed when they are not replacing an existing file"
+        )
+    }
+
     runSuite("Repo command contract - Home failed meeting actions surface failures") {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
