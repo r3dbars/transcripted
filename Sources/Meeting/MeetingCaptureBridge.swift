@@ -15,6 +15,7 @@
 //      for preview/testing without touching CoreAudio.
 
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import TranscriptedCore
@@ -42,6 +43,8 @@ final class MeetingCaptureBridge: ObservableObject {
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
+    var micLivePreviewHandler: ((AVAudioPCMBuffer) -> Void)?
+    var sharedDictationMicHandler: ((AVAudioPCMBuffer) -> Void)?
 
     init(audio: Audio = Audio()) {
         self.audio = audio

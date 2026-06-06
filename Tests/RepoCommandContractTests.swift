@@ -2025,6 +2025,37 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation and meeting recording can share the live mic") {
+        let meetingControllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let meetingBridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge+LivePreview.swift")
+        let dictationControllerContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let sttRouterContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+        let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+
+        assertFalse(
+            meetingControllerContents.contains("meeting_start_blocked_active_dictation")
+                || dictationControllerContents.contains("dictation_start_blocked_active_meeting"),
+            "meeting and dictation should not solve mic contention by blocking one live mode"
+        )
+        assertTrue(
+            meetingControllerContents.contains("handoffActiveRecordingToSharedMeetingMic()")
+                && meetingControllerContents.contains("resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()")
+                && meetingControllerContents.contains("setSharedDictationMicHandler"),
+            "meeting start/stop should hand active dictation onto and off the shared meeting mic stream"
+        )
+        assertTrue(
+            meetingBridgeContents.contains("livePreviewHandler?(buffer)")
+                && meetingBridgeContents.contains("dictationHandler?(buffer)"),
+            "meeting mic buffers should fan out to live preview and borrowed dictation consumers"
+        )
+        assertTrue(
+            dictationControllerContents.contains("startRecordingFromSharedMeetingMic()")
+                && sttRouterContents.contains("startRecordingFromSharedMeetingMic()")
+                && engineContents.contains("appendSharedMeetingMicBuffer"),
+            "dictation should be able to start from the active meeting mic without opening a second AVAudioEngine tap"
+        )
+    }
+
     runSuite("Repo command contract - saved meeting retranscription respects dictation activity") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         assertTrue(

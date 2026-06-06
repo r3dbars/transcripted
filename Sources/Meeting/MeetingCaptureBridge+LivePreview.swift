@@ -30,7 +30,16 @@ extension MeetingCaptureBridge {
     /// Install a live-preview handler for mic buffers, or clear with `nil`.
     /// Call once before `startRecording()`; do not reassign mid-session.
     func setMicLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
-        audio.onMicPCMBuffer = handler
+        micLivePreviewHandler = handler
+        refreshMicBufferHandler()
+    }
+
+    /// Install the dictation shared-mic handler. Meeting capture keeps this
+    /// handler stable for the session so dictation can opt in/out without
+    /// mutating CoreAudio taps while a meeting is live.
+    func setSharedDictationMicHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
+        sharedDictationMicHandler = handler
+        refreshMicBufferHandler()
     }
 
     /// Install a live-preview handler for system-audio buffers, or clear
@@ -38,5 +47,19 @@ extension MeetingCaptureBridge {
     /// mid-session.
     func setSystemLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
         audio.onSystemPCMBuffer = handler
+    }
+
+    private func refreshMicBufferHandler() {
+        let livePreviewHandler = micLivePreviewHandler
+        let dictationHandler = sharedDictationMicHandler
+        guard livePreviewHandler != nil || dictationHandler != nil else {
+            audio.onMicPCMBuffer = nil
+            return
+        }
+
+        audio.onMicPCMBuffer = { buffer in
+            livePreviewHandler?(buffer)
+            dictationHandler?(buffer)
+        }
     }
 }

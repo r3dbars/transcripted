@@ -226,6 +226,29 @@ class DictationSessionController: ObservableObject {
         startDictationAfterWarmup(sourceApp: sourceApp)
     }
 
+    private func startDictationAudioRecording(
+        appState: TranscriptedAppState,
+        isRecoveryAttempt: Bool = false
+    ) async -> Bool {
+        if canUseActiveMeetingMicForDictation(appState: appState) {
+            return await appState.sttRouter.startRecordingFromSharedMeetingMic()
+        }
+
+        if isRecoveryAttempt {
+            return await appState.sttRouter.startRecordingRecoveryAttempt()
+        }
+
+        return await appState.sttRouter.startRecording()
+    }
+
+    private func canUseActiveMeetingMicForDictation(appState: TranscriptedAppState) -> Bool {
+        if #available(macOS 14.0, *) {
+            return appState.meetingSession.canShareMicWithDictation
+        }
+
+        return false
+    }
+
     /// Actually start dictation recording — called directly from startDictation
     private func beginDictationRecording(sourceApp: NSRunningApplication?) {
         guard let overlayController = overlayController else { return }
@@ -248,7 +271,7 @@ class DictationSessionController: ObservableObject {
                       let appState = self.appState,
                       let overlayController = self.overlayController else { return }
                 let startAttemptedAt = CFAbsoluteTimeGetCurrent()
-                let started = await appState.sttRouter.startRecording()
+                let started = await self.startDictationAudioRecording(appState: appState)
                 let startMs = Int((CFAbsoluteTimeGetCurrent() - startAttemptedAt) * 1000)
                 guard !Task.isCancelled, self.isDictating else {
                     if started {
@@ -451,7 +474,7 @@ class DictationSessionController: ObservableObject {
                         ]
                     )
                 )
-                let started = await appState.sttRouter.startRecordingRecoveryAttempt()
+                let started = await startDictationAudioRecording(appState: appState, isRecoveryAttempt: true)
                 guard !Task.isCancelled, isDictating else {
                     if started {
                         await appState.sttRouter.stopRecording()
@@ -491,7 +514,7 @@ class DictationSessionController: ObservableObject {
 
             case .startRecording:
                 startAttempts += 1
-                let started = await appState.sttRouter.startRecording()
+                let started = await startDictationAudioRecording(appState: appState)
                 guard !Task.isCancelled, isDictating else {
                     if started {
                         await appState.sttRouter.stopRecording()

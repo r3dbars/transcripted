@@ -27,13 +27,15 @@ class ParakeetEngine: ObservableObject {
     private var audioGraphGeneration = 0
     private var audioStartInProgress = false
     private var inputTapInstalled = false
+    private var sharedMeetingMicRecording = false
+    private nonisolated(unsafe) var acceptsSharedMeetingMicBuffers = false
     private var sampleBuffer: [Float] = []
     private var recoveredRecordingTimeline = RecordedAudioTimeline()
     private var preservingRecordingAcrossRecovery = false
     private nonisolated(unsafe) var nativeSampleRate: Double = 48000
     private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     private let pendingSamplesLock = NSLock()
-    private var pendingSamples: [Float] = []
+    private nonisolated(unsafe) var pendingSamples: [Float] = []
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
@@ -90,6 +92,7 @@ class ParakeetEngine: ObservableObject {
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
+    var isRecordingFromSharedMeetingMic: Bool { sharedMeetingMicRecording }
 
     var currentAudioRouteAnalyticsContext: [String: String] {
         dictationRouteAnalyticsContext(selection: Self.loadDictationInputDeviceSelection())
@@ -824,6 +827,19 @@ class ParakeetEngine: ObservableObject {
         if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
             return
         }
+        if sharedMeetingMicRecording {
+            recoveryState.reset()
+            publishRecoveryState()
+            scheduleInputDeviceNameRefresh()
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "parakeet",
+                event: "dictation_shared_meeting_mic_route_change_deferred",
+                message: "Dictation ignored standalone mic recovery while borrowing the meeting microphone stream",
+                context: ["audio_device": inputDeviceName]
+            )
+            return
+        }
         audioGraphGeneration += 1
 
         // Track whether any config change in the current burst interrupted a
@@ -1471,7 +1487,7 @@ class ParakeetEngine: ObservableObject {
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
                 guard let self = self,
-                      let monoSamples = self.extractMonoSamples(from: buffer) else { return }
+                      let monoSamples = Self.extractMonoSamples(from: buffer) else { return }
                 let frameLength = monoSamples.count
                 guard frameLength > 0 else { return }
                 let bufferFormat = Self.audioFormatSummary(buffer.format)
@@ -2229,7 +2245,144 @@ class ParakeetEngine: ObservableObject {
         return true
     }
 
-    private func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
+    func startSharedMeetingMicRecording() -> Bool {
+        beginSharedMeetingMicRecording(reason: "meeting_already_recording")
+    }
+
+    func handoffActiveRecordingToSharedMeetingMic() async -> Bool {
+        guard !isShuttingDown else { return false }
+        guard isRecording else {
+            return beginSharedMeetingMicRecording(reason: "meeting_start_requested")
+        }
+        guard !sharedMeetingMicRecording else { return true }
+
+        cancelAudioWatchdog()
+        await removeRecordingTap()
+        preserveCurrentRecordingBuffersForRecovery()
+        await stopAudioEngine()
+        isEnginePrewarmed = false
+        audioLevel = 0
+        return beginSharedMeetingMicRecording(reason: "meeting_start_handoff")
+    }
+
+    func resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() async {
+        guard sharedMeetingMicRecording else { return }
+
+        stopSharedMeetingMicRecording(keepRecordingState: false)
+        preserveCurrentRecordingBuffersForRecovery()
+        preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
+
+        guard !isShuttingDown else { return }
+        if await startRecording(isRecoveryAttempt: true) {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "parakeet",
+                event: "dictation_shared_meeting_mic_resumed_regular_capture",
+                message: "Dictation resumed its own microphone capture after meeting recording ended",
+                context: ["audio_device": inputDeviceName]
+            )
+        } else {
+            interruptRecordingAndClearRecoveredTimeline()
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "dictation_shared_meeting_mic_resume_failed",
+                message: "Dictation could not resume its own microphone capture after meeting recording ended",
+                context: ["audio_device": inputDeviceName]
+            )
+        }
+    }
+
+    private func beginSharedMeetingMicRecording(reason: String) -> Bool {
+        guard !isShuttingDown else { return false }
+        guard !audioStartInProgress else { return false }
+
+        cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        recoveryState.reset()
+        publishRecoveryState()
+
+        recordingInterrupted = false
+        didReceiveAudioSamples = false
+        pendingSamplesLock.withLock {
+            pendingSamples.removeAll(keepingCapacity: true)
+        }
+        if !preservingRecordingAcrossRecovery {
+            sampleBuffer.removeAll(keepingCapacity: true)
+            recoveredRecordingTimeline.removeAll(keepingCapacity: true)
+        }
+        streamingSamplesLock.withLock {
+            streamingSampleBuffer.removeAll(keepingCapacity: true)
+        }
+        Task { await eouManager?.reset() }
+
+        sharedMeetingMicRecording = true
+        acceptsSharedMeetingMicBuffers = true
+        isRecording = true
+        isEnginePrewarmed = false
+        audioLevel = 0
+
+        EventReporter.shared.capture(
+            level: .info,
+            engine: "parakeet",
+            event: "dictation_shared_meeting_mic_started",
+            message: "Dictation started from the active meeting microphone stream",
+            context: ["reason": reason]
+        )
+        return true
+    }
+
+    private func stopSharedMeetingMicRecording(keepRecordingState: Bool) {
+        acceptsSharedMeetingMicBuffers = false
+        sharedMeetingMicRecording = false
+        drainPendingSamplesIntoSampleBuffer()
+        isRecording = keepRecordingState
+        audioLevel = 0
+    }
+
+    nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard acceptsSharedMeetingMicBuffers,
+              let monoSamples = Self.extractMonoSamples(from: buffer) else { return }
+        let frameLength = monoSamples.count
+        guard frameLength > 0 else { return }
+
+        let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
+            bufferSampleRate: buffer.format.sampleRate
+        )
+        nativeSampleRate = effectiveSampleRate
+        didReceiveAudioSamples = true
+
+        pendingSamplesLock.withLock {
+            pendingSamples.append(contentsOf: monoSamples)
+            let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+                sampleRate: effectiveSampleRate,
+                seconds: TranscriptedConstants.audioBufferCapacitySeconds
+            )
+            let overflowMargin = Int(effectiveSampleRate)
+            if pendingSamples.count > maxSamples + overflowMargin {
+                pendingSamples.removeFirst(pendingSamples.count - maxSamples)
+            }
+        }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastLevelUpdate > TranscriptedConstants.audioMeteringInterval else { return }
+        lastLevelUpdate = now
+
+        let normalized = DictationAudioLevelMeter.normalizedLevel(from: buffer)
+        Task { @MainActor [weak self] in
+            guard let self, self.sharedMeetingMicRecording else { return }
+            self.audioLevel = normalized
+        }
+    }
+
+    nonisolated private static func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
         let frameCount = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
 
@@ -2319,6 +2472,13 @@ class ParakeetEngine: ObservableObject {
     }
 
     func stopRecording() async {
+        if sharedMeetingMicRecording {
+            stopSharedMeetingMicRecording(keepRecordingState: false)
+            let stopSampleRate = safeNativeSampleRate()
+            print("⏹️ PARAKEET | shared meeting mic recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
+            return
+        }
+
         guard isRecording else {
             if audioStartInProgress {
                 audioGraphGeneration += 1
@@ -2860,6 +3020,8 @@ class ParakeetEngine: ObservableObject {
         configRecoveryTask = nil
         cancelConfigRecoveryTimeout()
         configChangeWasRecording = false
+        acceptsSharedMeetingMicBuffers = false
+        sharedMeetingMicRecording = false
         recoveryState.reset()
         recoveryState.markFormatUnready()
         publishRecoveryState()
@@ -2893,6 +3055,8 @@ class ParakeetEngine: ObservableObject {
         configRecoveryTask = nil
         cancelConfigRecoveryTimeout()
         configChangeWasRecording = false
+        acceptsSharedMeetingMicBuffers = false
+        sharedMeetingMicRecording = false
         recoveryState.reset()
         recoveryState.markFormatUnready()
         publishRecoveryState()
@@ -2925,6 +3089,8 @@ class ParakeetEngine: ObservableObject {
         configRecoveryTask = nil
         cancelConfigRecoveryTimeout()
         configChangeWasRecording = false
+        acceptsSharedMeetingMicBuffers = false
+        sharedMeetingMicRecording = false
         recoveryState.reset()
         publishRecoveryState()
         pendingSamplesLock.withLock {
@@ -2990,6 +3156,8 @@ class ParakeetEngine: ObservableObject {
         configRecoveryTask?.cancel()
         configRecoveryTask = nil
         cancelConfigRecoveryTimeout()
+        acceptsSharedMeetingMicBuffers = false
+        sharedMeetingMicRecording = false
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
         Task { @MainActor [weak self] in

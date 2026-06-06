@@ -28,6 +28,7 @@ class STTRouter: ObservableObject {
     }
 
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
+    var isRecordingFromSharedMeetingMic: Bool { parakeetEngine.isRecordingFromSharedMeetingMic }
     var dictationAudioRouteAnalyticsContext: [String: String] {
         parakeetEngine.currentAudioRouteAnalyticsContext
     }
@@ -109,6 +110,20 @@ class STTRouter: ObservableObject {
     func startRecordingRecoveryAttempt() async -> Bool {
         activeRecordingModel = selectedModel
         return await parakeetEngine.startRecording(isRecoveryAttempt: true)
+    }
+
+    func startRecordingFromSharedMeetingMic() async -> Bool {
+        activeRecordingModel = selectedModel
+        return parakeetEngine.startSharedMeetingMicRecording()
+    }
+
+    func handoffActiveRecordingToSharedMeetingMic() async -> Bool {
+        activeRecordingModel = selectedModel
+        return await parakeetEngine.handoffActiveRecordingToSharedMeetingMic()
+    }
+
+    func resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() async {
+        await parakeetEngine.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
     }
 
     func refreshInputReadiness() async {
