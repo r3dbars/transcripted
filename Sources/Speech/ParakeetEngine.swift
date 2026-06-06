@@ -2270,6 +2270,8 @@ class ParakeetEngine: ObservableObject {
     /// Watchdog that detects zombie audio engines — running but producing no samples.
     /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
     /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
+    /// If the user stops dictation during the recovery delay, the pending retry is cleared
+    /// so the watchdog does not revive a recording the user already ended.
     private func startAudioWatchdog() {
         cancelAudioWatchdog()
         audioWatchdogTask = Task { @MainActor [weak self] in
@@ -2328,6 +2330,8 @@ class ParakeetEngine: ObservableObject {
 
     func stopRecording() async {
         guard isRecording else {
+            // A zombie reset marks recording idle while it waits to retry. Treat a
+            // user stop in that window as cancellation of the pending restart.
             if zombieRecoveryRestartPending {
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
