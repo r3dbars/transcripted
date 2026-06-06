@@ -228,6 +228,18 @@ public final class StatsDatabase {
 
         // Wrap INSERT + daily activity update in a transaction so both succeed or neither does
         transaction {
+            let existing = recordingMetadataImpl(id: metadata.id)
+                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)
+            let storedMetadata = RecordingMetadata(
+                id: existing?.id ?? metadata.id,
+                date: metadata.date,
+                durationSeconds: metadata.durationSeconds,
+                wordCount: metadata.wordCount,
+                speakerCount: metadata.speakerCount,
+                processingTimeMs: metadata.processingTimeMs,
+                transcriptPath: metadata.transcriptPath,
+                title: metadata.title
+            )
             let sql = """
             INSERT OR REPLACE INTO recordings (id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -239,25 +251,25 @@ public final class StatsDatabase {
                 let dateFormatter = DateFormatter()
                 dateFormatter.locale = Locale(identifier: "en_US_POSIX")
                 dateFormatter.dateFormat = "yyyy-MM-dd"
-                let dateString = dateFormatter.string(from: metadata.date)
+                let dateString = dateFormatter.string(from: storedMetadata.date)
 
                 let timeFormatter = DateFormatter()
                 timeFormatter.locale = Locale(identifier: "en_US_POSIX")
                 timeFormatter.dateFormat = "HH:mm:ss"
-                let timeString = timeFormatter.string(from: metadata.date)
+                let timeString = timeFormatter.string(from: storedMetadata.date)
 
                 let isoFormatter = ISO8601DateFormatter()
-                let createdAt = isoFormatter.string(from: metadata.date)
+                let createdAt = isoFormatter.string(from: storedMetadata.date)
 
-                sqlite3_bind_text(statement, 1, (metadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 1, (storedMetadata.id as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 2, (dateString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 3, (timeString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int(statement, 4, Int32(metadata.durationSeconds))
-                sqlite3_bind_int(statement, 5, Int32(metadata.wordCount))
-                sqlite3_bind_int(statement, 6, Int32(metadata.speakerCount))
-                sqlite3_bind_int(statement, 7, Int32(metadata.processingTimeMs))
-                sqlite3_bind_text(statement, 8, ((metadata.transcriptPath ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 9, ((metadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int(statement, 4, Int32(storedMetadata.durationSeconds))
+                sqlite3_bind_int(statement, 5, Int32(storedMetadata.wordCount))
+                sqlite3_bind_int(statement, 6, Int32(storedMetadata.speakerCount))
+                sqlite3_bind_int(statement, 7, Int32(storedMetadata.processingTimeMs))
+                sqlite3_bind_text(statement, 8, ((storedMetadata.transcriptPath ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(statement, 9, ((storedMetadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
                 if sqlite3_step(statement) != SQLITE_DONE {
@@ -270,8 +282,54 @@ public final class StatsDatabase {
             sqlite3_finalize(statement)
 
             // Update daily activity (inside same transaction)
-            updateDailyActivityImpl(for: metadata.date, durationDelta: metadata.durationSeconds)
+            updateDailyActivityForSessionChange(from: existing, to: storedMetadata)
         }
+    }
+
+    private func recordingMetadataImpl(id: String) -> RecordingMetadata? {
+        let sql = """
+        SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
+        FROM recordings
+        WHERE id = ?
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            AppLogger.stats.error("Failed to prepare recording lookup", ["sqlite_error": dbErrorMessage()])
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, (id as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return recordingMetadataFromRow(statement)
+    }
+
+    private func recordingMetadataImpl(transcriptPath: String?) -> RecordingMetadata? {
+        guard let transcriptPath, !transcriptPath.isEmpty else {
+            return nil
+        }
+
+        let sql = """
+        SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
+        FROM recordings
+        WHERE transcript_path = ?
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            AppLogger.stats.error("Failed to prepare recording path lookup", ["sqlite_error": dbErrorMessage()])
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+        return recordingMetadataFromRow(statement)
     }
 
     /// Get all recordings (thread-safe, sync)
@@ -367,7 +425,42 @@ public final class StatsDatabase {
 
     // MARK: - Daily Activity Update
 
-    func updateDailyActivityImpl(for date: Date, durationDelta: Int) {
+    private func updateDailyActivityForSessionChange(
+        from existing: RecordingMetadata?,
+        to metadata: RecordingMetadata
+    ) {
+        guard let existing else {
+            updateDailyActivityImpl(
+                for: metadata.date,
+                recordingCountDelta: 1,
+                durationDelta: metadata.durationSeconds
+            )
+            return
+        }
+
+        if dailyActivityDateString(for: existing.date) == dailyActivityDateString(for: metadata.date) {
+            updateDailyActivityImpl(
+                for: metadata.date,
+                recordingCountDelta: 0,
+                durationDelta: metadata.durationSeconds - existing.durationSeconds
+            )
+        } else {
+            updateDailyActivityImpl(
+                for: existing.date,
+                recordingCountDelta: -1,
+                durationDelta: -existing.durationSeconds
+            )
+            updateDailyActivityImpl(
+                for: metadata.date,
+                recordingCountDelta: 1,
+                durationDelta: metadata.durationSeconds
+            )
+        }
+    }
+
+    func updateDailyActivityImpl(for date: Date, recordingCountDelta: Int, durationDelta: Int) {
+        guard recordingCountDelta != 0 || durationDelta != 0 else { return }
+
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateStr = dateFormatter.string(from: date)
@@ -375,10 +468,10 @@ public final class StatsDatabase {
         // Upsert: insert new or increment existing daily activity
         let updateSQL = """
         INSERT INTO daily_activity (date, recording_count, total_duration_seconds, action_items_count, updated_at)
-        VALUES (?, 1, ?, 0, datetime('now'))
+        VALUES (?, MAX(?, 0), MAX(?, 0), 0, datetime('now'))
         ON CONFLICT(date) DO UPDATE SET
-            recording_count = recording_count + 1,
-            total_duration_seconds = total_duration_seconds + ?,
+            recording_count = MAX(recording_count + ?, 0),
+            total_duration_seconds = MAX(total_duration_seconds + ?, 0),
             updated_at = datetime('now');
         """
 
@@ -386,8 +479,10 @@ public final class StatsDatabase {
 
         if sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK {
             sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int(statement, 2, Int32(durationDelta))
+            sqlite3_bind_int(statement, 2, Int32(recordingCountDelta))
             sqlite3_bind_int(statement, 3, Int32(durationDelta))
+            sqlite3_bind_int(statement, 4, Int32(recordingCountDelta))
+            sqlite3_bind_int(statement, 5, Int32(durationDelta))
 
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.stats.error("Failed to update daily activity", ["sqlite_error": dbErrorMessage()])
@@ -397,6 +492,12 @@ public final class StatsDatabase {
         }
 
         sqlite3_finalize(statement)
+    }
+
+    private func dailyActivityDateString(for date: Date) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        return dateFormatter.string(from: date)
     }
 }
 

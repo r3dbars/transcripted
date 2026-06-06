@@ -57,7 +57,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 
 ## Directory Map
 
-- `.agents/` — machine-readable agent maps, currently the path-to-verification matrix
+- `.agents/` — machine-readable agent maps for path verification and QA gates
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
@@ -108,12 +108,14 @@ Use these docs for these jobs:
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, corpus, corpus-compare, live, artifact, and synthetic audio passes
+- `docs/test-automation-strategy.md` — agent-first QA coverage map, gate strategy, and automation roadmap
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow
 - `docs/sparkle-updates.md` — Sparkle update contract
 - `docs/qa-parakeet-start-failure-smoke.md` — historical BET-88 validation checklist for the closed Parakeet start-failure recovery gate
 - `Tests/README.md` — verification surfaces and fast-test runner behavior
 - `.agents/test-matrix.yml` — quick path-to-verification map for agents
+- `.agents/qa-gates.yml` — product-risk-to-proof gate map for agents
 - `Sources/*/CLAUDE.md` — subsystem-local ownership and verification notes
 
 ## Historical Zones

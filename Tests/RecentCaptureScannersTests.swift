@@ -139,6 +139,27 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingSpeakerReviewActionPolicy stays scoped to the row transcript") {
+        let pendingURL = URL(fileURLWithPath: "/tmp/Pending_Call.md")
+        let reviewedURL = URL(fileURLWithPath: "/tmp/Reviewed_Call.md")
+        let pendingReviewTranscriptPaths: Set<String> = [pendingURL.standardizedFileURL.path]
+
+        assertFalse(
+            RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+                speakerStatus: .needsReview(1),
+                hasSpeakerReviewWork: pendingReviewTranscriptPaths.contains(reviewedURL.standardizedFileURL.path)
+            ),
+            "A stale generic row should not show Review speakers just because another meeting has pending review work"
+        )
+        assertTrue(
+            RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
+                speakerStatus: .needsReview(1),
+                hasSpeakerReviewWork: pendingReviewTranscriptPaths.contains(pendingURL.standardizedFileURL.path)
+            ),
+            "The meeting that actually has pending speaker-review work should still show Review speakers"
+        )
+    }
+
     runSuite("RecentMeetingRetranscriptionActionPolicy shows saved-audio speaker ID fallback") {
         assertTrue(
             RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(

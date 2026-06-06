@@ -54,6 +54,66 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(items.count, 0, "named profiles should not keep stale db_pending rows in the queue")
     }
 
+    runSuite("SpeakerReviewQueueScanner clears Home review status after deferred speaker naming") {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory
+            .appendingPathComponent("SpeakerReviewQueueScannerTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Reviewed_Call.md")
+        let speakerId = UUID()
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+
+        try? deferredMarkdown(
+            speakerId: speakerId,
+            title: "Reviewed Call",
+            speakerName: "Speaker 1",
+            sampleText: "This row should be renamed."
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let before = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: directory,
+            profiles: [makeReviewQueueProfile(id: speakerId, name: nil)],
+            clipURLsByProfileID: [:]
+        )
+        assertEqual(before.count, 1, "fixture should start with one pending speaker-review row")
+
+        let completedMarkdown = """
+        ---
+        title: "Reviewed Call"
+        date: 2026-05-20
+        time: 09:30:00
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Maya"
+            confidence: confirmed
+            source: user_manual
+        ---
+
+        # Reviewed Call
+
+        ## Transcript
+
+        **00:01** [System/Maya]
+        This row should be renamed.
+        """
+        try? completedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let updatedMarkdown = (try? String(contentsOf: transcriptURL, encoding: .utf8)) ?? ""
+        let after = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: directory,
+            profiles: [makeReviewQueueProfile(id: speakerId, name: "Maya")],
+            clipURLsByProfileID: [:]
+        )
+
+        assertEqual(after.count, 0, "completed speaker review should leave no pending queue item")
+        assertEqual(
+            RecentMeetingSpeakerStatus.detect(in: updatedMarkdown),
+            .ready,
+            "Home row speaker status should be ready after the saved label is named"
+        )
+    }
+
     runSuite("SpeakerReviewQueueScanner treats missing channel as legacy system audio") {
         let speakerId = UUID()
         let transcriptURL = URL(fileURLWithPath: "/tmp/Legacy_Deferred.md")

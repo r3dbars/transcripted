@@ -1467,6 +1467,133 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
     }
 
+    func testSavedAudioRetranscriptionCanReplaceOriginalTranscriptWithoutDuplicateRow() async throws {
+        let originalRecordingDate = localDate(
+            year: 2026,
+            month: 6,
+            day: 5,
+            hour: 18,
+            minute: 39,
+            second: 20
+        )
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
+        let diarization = MetadataStubDiarizationEngine(segments: [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: 2,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ])
+        let originalTranscriptId = UUID()
+        let statsStore = MetadataCapturingStatsStore()
+        let transcriptsDirectory = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        let retainedAudioDirectory = transcriptsDirectory.appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: diarization,
+            retainedAudioDirectory: retainedAudioDirectory,
+            statsStore: statsStore
+        )
+        try FileManager.default.createDirectory(at: transcriptsDirectory, withIntermediateDirectories: true)
+
+        let originalTranscriptURL = transcriptsDirectory.appendingPathComponent("Reviewed_Call.md")
+        try """
+        ---
+        capture_id: "\(originalTranscriptId.uuidString)"
+        transcript_id: "\(originalTranscriptId.uuidString)"
+        capture_type: meeting
+        title: "Reviewed Call"
+        date: 2026-06-05
+        time: 18:39:20
+        duration: "00:02"
+        total_word_count: 1
+        mic_utterances: 1
+        system_utterances: 1
+        ---
+
+        # Reviewed Call
+
+        ## Transcript
+
+        **00:01** [System/Speaker 1]
+        Old synthetic line.
+        """.write(to: originalTranscriptURL, atomically: true, encoding: .utf8)
+
+        let savedAudioDirectory = retainedAudioDirectory
+            .appendingPathComponent("Reviewed_Call_audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let micURL = savedAudioDirectory.appendingPathComponent("microphone.wav")
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        var committedReplacementURLs: [URL] = []
+
+        manager.startSavedAudioRetranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: transcriptsDirectory,
+            meetingTitle: "Reviewed Call",
+            splitLocalSpeakers: true,
+            replacementTranscriptURL: originalTranscriptURL,
+            recordingDate: originalRecordingDate,
+            onReplacementTranscriptCommitted: { url in
+                committedReplacementURLs.append(url)
+            }
+        )
+
+        try await waitUntil {
+            manager.speakerNamingRequest != nil && manager.activeTasks.isEmpty
+        }
+
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: originalTranscriptURL, encoding: .utf8)
+        let markdownFiles = try FileManager.default.contentsOfDirectory(
+            at: transcriptsDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "md" }
+        let retainedAudioFiles = try FileManager.default.contentsOfDirectory(
+            at: savedAudioDirectory,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent).sorted()
+
+        XCTAssertEqual(transcriptURL, originalTranscriptURL, "replacement retranscription should publish the original row URL")
+        XCTAssertEqual(request.transcriptURL, originalTranscriptURL, "speaker review should continue against the original transcript")
+        XCTAssertEqual(markdownFiles.count, 1, "replacement retranscription should not create a duplicate meeting Markdown row")
+        XCTAssertEqual(
+            markdownFiles.first?.standardizedFileURL.path,
+            originalTranscriptURL.standardizedFileURL.path,
+            "the remaining meeting Markdown row should still be the original transcript"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ndate: \(frontmatterDateString(originalRecordingDate))\n"),
+            "replacement transcript should keep the original meeting date in frontmatter"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ntime: \(frontmatterTimeString(originalRecordingDate))\n"),
+            "replacement transcript should keep the original meeting time in frontmatter"
+        )
+        XCTAssertEqual(
+            retainedAudioFiles,
+            ["microphone.wav", "system_audio.wav"],
+            "replacement retranscription should reuse retained audio instead of copying duplicate files into the same archive"
+        )
+        XCTAssertEqual(
+            statsStore.recordedSessions.map(\.id),
+            [originalTranscriptId.uuidString],
+            "replacement retranscription should update stats for the existing transcript ID instead of creating a second history row"
+        )
+        XCTAssertEqual(
+            committedReplacementURLs,
+            [originalTranscriptURL],
+            "replacement retranscription should notify the app only after the selected transcript is committed"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+    }
+
     func testSavedAudioRetranscriptionRejectsTooShortAudioWithoutDeletingSource() throws {
         let manager = makeManager()
         let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
