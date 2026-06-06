@@ -394,6 +394,13 @@ run_route_automation_proxy_suite() {
     "real mic plus System Audio Recording capture still needs live smoke or manual TCC proof."
 
   record_route_automation_proxy \
+    "synthetic-mic-output-mismatch-diagnostics" \
+    "mic/output mismatch diagnostics" \
+    "captured-input scalar classification, built-in mic to Bluetooth output route shape, system-output ducking flags" \
+    "bash run-tests.sh" \
+    "real mismatched mic/output routes still need user-perceived volume and saved-transcript manual proof."
+
+  record_route_automation_proxy \
     "synthetic-webrtc-zoom-contention-proxy" \
     "WebRTC/Zoom route proxy" \
     "quiet-mic attenuation classification, software AGC recovery, output-ducking diagnostics" \
@@ -420,6 +427,7 @@ run_route_automation_proxy_suite() {
     echo
     echo "- Safari Meet, Firefox Meet, Chrome Meet, and Zoom with real app audio"
     echo "- AirPods/Bluetooth and any available USB route"
+    echo "- mismatched mic/output routes such as built-in mic with Bluetooth output"
     echo "- user-perceived meeting volume before/during/after capture"
     echo "- saved transcript proof that uses the processed mic path"
   } >> "${REPORT}"
