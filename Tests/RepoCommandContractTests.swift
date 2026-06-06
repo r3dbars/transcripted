@@ -2400,6 +2400,30 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
+        let deletionContents = readRepoTextFile("Sources/UI/Settings/HomeMeetingDeletion.swift")
+        let duplicateBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "private static func isAppOwnedMeetingTranscript"
+        )
+        let preScanBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "let meetingsDirectory"
+        )
+
+        assertFalse(
+            preScanBlock.contains("audioSignature(for: selectedAudio)"),
+            "Home delete should not hash selected retained audio before checking app-owned same-title candidates"
+        )
+        assertTrue(
+            duplicateBlock.contains("var candidates: [(URL, MeetingAudioAttachment)]")
+                && duplicateBlock.contains("guard !candidates.isEmpty,\n              let selectedSignature = audioSignature(for: selectedAudio)"),
+            "Home delete should collect cheap metadata candidates before hashing retained audio"
+        )
+    }
+
     runSuite("Repo command contract - Agent setup details has an explicit toggle") {
         let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
 

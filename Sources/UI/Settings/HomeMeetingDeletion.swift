@@ -53,8 +53,7 @@ enum HomeMeetingDeletion {
         fileManager: FileManager
     ) -> [(transcriptURL: URL, audio: MeetingAudioAttachment)] {
         guard let selectedValues = appOwnedMeetingTranscriptValues(selectedTranscriptURL),
-              let selectedTitle = normalizedTitle(selectedValues["title"]),
-              let selectedSignature = audioSignature(for: selectedAudio) else {
+              let selectedTitle = normalizedTitle(selectedValues["title"]) else {
             return []
         }
 
@@ -69,7 +68,7 @@ enum HomeMeetingDeletion {
         }
 
         let selectedPath = canonicalPath(selectedTranscriptURL)
-        var duplicates: [(URL, MeetingAudioAttachment)] = []
+        var candidates: [(URL, MeetingAudioAttachment)] = []
         for url in urls.sorted(by: { $0.path < $1.path }) {
             guard url.pathExtension == "md",
                   !url.deletingPathExtension().lastPathComponent.hasSuffix(".summary"),
@@ -77,13 +76,20 @@ enum HomeMeetingDeletion {
                   isRegularFile(url, fileManager: fileManager),
                   let values = appOwnedMeetingTranscriptValues(url),
                   normalizedTitle(values["title"]) == selectedTitle,
-                  let audio = MeetingAudioArchiveResolver.attachment(forTranscript: url, fileManager: fileManager),
-                  audioSignature(for: audio) == selectedSignature else {
+                  let audio = MeetingAudioArchiveResolver.attachment(forTranscript: url, fileManager: fileManager) else {
                 continue
             }
-            duplicates.append((url, audio))
+            candidates.append((url, audio))
         }
-        return duplicates
+
+        guard !candidates.isEmpty,
+              let selectedSignature = audioSignature(for: selectedAudio) else {
+            return []
+        }
+
+        return candidates.filter { _, audio in
+            audioSignature(for: audio) == selectedSignature
+        }
     }
 
     private static func isAppOwnedMeetingTranscript(_ url: URL) -> Bool {
