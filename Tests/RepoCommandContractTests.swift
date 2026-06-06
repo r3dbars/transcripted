@@ -2065,17 +2065,34 @@ func testRepoCommandContract() {
             "saved-audio replacement should overwrite the selected transcript without archiving duplicate retained audio"
         )
         assertTrue(
-            runnerContents.contains("let deleteSavedTranscriptOnCancellation = targetTranscriptURL == nil"),
-            "replacement retranscription cancellation should not delete the selected original transcript"
+            runnerContents.contains("let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)")
+                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()"),
+            "replacement retranscription should snapshot the selected transcript and reuse its existing ID"
         )
         assertTrue(
-            runnerContents.contains("deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation"),
-            "replacement retranscription cancellation policy should be threaded through side-effect checks"
+            runnerContents.contains("replacementTranscriptRollback: replacementTranscriptRollback")
+                && runnerContents.contains("replacementTranscriptRollback.restore()"),
+            "replacement retranscription cancellation should restore the selected original transcript"
         )
         assertTrue(
             runnerContents.contains("if deleteSavedTranscript {")
                 && runnerContents.contains("try? FileManager.default.removeItem(at: savedURL)"),
             "new cancelled transcripts should still be removed when they are not replacing an existing file"
+        )
+    }
+
+    runSuite("Repo command contract - replacement stats do not double-count existing recordings") {
+        let statsContents = readRepoTextFile("Sources/TranscriptedCore/Stats/StatsDatabase.swift")
+
+        assertTrue(
+            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)")
+                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: metadata)"),
+            "stats recording should detect same-ID replacements before updating daily totals"
+        )
+        assertTrue(
+            statsContents.contains("recordingCountDelta: 0")
+                && statsContents.contains("durationDelta: metadata.durationSeconds - existing.durationSeconds"),
+            "same-day replacement stats should adjust duration without incrementing recording count"
         )
     }
 

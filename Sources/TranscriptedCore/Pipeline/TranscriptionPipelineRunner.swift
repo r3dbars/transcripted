@@ -269,7 +269,8 @@ extension TranscriptionTaskManager {
             }
         }
 
-        let transcriptId = UUID()
+        let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)
+        let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()
         try Task.checkCancellation()
         // Phase 2: Save transcript with speaker names
         let notifier: TranscriptNotifier? = await MainActor.run {
@@ -300,10 +301,11 @@ extension TranscriptionTaskManager {
         ) else {
             throw PipelineError.saveFailed(detail: "Could not write transcript to \(outputFolder.lastPathComponent)")
         }
-        let deleteSavedTranscriptOnCancellation = targetTranscriptURL == nil
+        let deleteSavedTranscriptOnCancellation = replacementTranscriptRollback == nil
         try await checkCancellationAfterTranscriptSideEffects(
             savedURL: savedURL,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
         )
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
@@ -323,7 +325,8 @@ extension TranscriptionTaskManager {
             savedURL: savedURL,
             retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
             retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
         )
         let shouldRemoveScratchAudio = archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive
 
@@ -433,7 +436,8 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
                 retainedAudioURLs: archiveOutcome.retainedAudioURLs,
                 speakerClipURLs: capturedEntries.map(\.clipURL),
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
             await MainActor.run {
                 self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
@@ -466,7 +470,8 @@ extension TranscriptionTaskManager {
                 retainedAudioURLs: archiveOutcome.retainedAudioURLs,
                 speakerClipURLs: capturedEntries.map(\.clipURL),
                 queuedSpeakerRequestTranscriptId: transcriptId,
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
             try await commitSavedTranscriptSideEffectsUnlessCancelled(
                 taskId: taskId,
@@ -480,7 +485,8 @@ extension TranscriptionTaskManager {
                 retainedAudioURLs: archiveOutcome.retainedAudioURLs,
                 speakerClipURLs: capturedEntries.map(\.clipURL),
                 queuedSpeakerRequestTranscriptId: transcriptId,
-                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
 
             AppLogger.pipeline.info("Speaker naming requested", [
@@ -501,7 +507,8 @@ extension TranscriptionTaskManager {
             notifier: notifier,
             retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
             retainedAudioURLs: archiveOutcome.retainedAudioURLs,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
         )
 
         // No naming needed — clean up scratch audio after the saved outcome has
@@ -519,6 +526,54 @@ extension TranscriptionTaskManager {
         let didArchiveRecordingAudio: Bool
         let retainedAudioDirectory: URL?
         let retainedAudioURLs: [URL]
+    }
+
+    private struct ReplacementTranscriptRollback: Sendable {
+        let url: URL
+        let originalData: Data
+        let transcriptId: UUID?
+
+        static func capture(for targetURL: URL?) throws -> ReplacementTranscriptRollback? {
+            guard let targetURL else { return nil }
+
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: targetURL.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                return nil
+            }
+
+            let originalData = try Data(contentsOf: targetURL)
+            let values = try? TranscriptFrontmatter.readValues(from: targetURL)
+            let transcriptId = replacementTranscriptId(from: values)
+            return ReplacementTranscriptRollback(
+                url: targetURL,
+                originalData: originalData,
+                transcriptId: transcriptId
+            )
+        }
+
+        func restore() {
+            do {
+                try originalData.write(to: url, options: .atomic)
+                FileManager.default.restrictToOwnerOnly(atPath: url.path)
+            } catch {
+                AppLogger.pipeline.error("Failed to restore cancelled replacement transcript", [
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+
+        private static func replacementTranscriptId(from values: [String: String]?) -> UUID? {
+            if let transcriptId = values?["transcript_id"],
+               let uuid = UUID(uuidString: transcriptId) {
+                return uuid
+            }
+            if let captureId = values?["capture_id"],
+               let uuid = UUID(uuidString: captureId) {
+                return uuid
+            }
+            return nil
+        }
     }
 
     nonisolated private func archiveRecordingAudioIfConfigured(
@@ -601,7 +656,8 @@ extension TranscriptionTaskManager {
         retainedAudioURLs: [URL] = [],
         speakerClipURLs: [URL] = [],
         queuedSpeakerRequestTranscriptId: UUID? = nil,
-        deleteSavedTranscriptOnCancellation: Bool = true
+        deleteSavedTranscriptOnCancellation: Bool = true,
+        replacementTranscriptRollback: ReplacementTranscriptRollback? = nil
     ) async throws {
         try await checkCancellationAfterTranscriptSideEffects(
             savedURL: savedURL,
@@ -609,7 +665,8 @@ extension TranscriptionTaskManager {
             retainedAudioURLs: retainedAudioURLs,
             speakerClipURLs: speakerClipURLs,
             queuedSpeakerRequestTranscriptId: queuedSpeakerRequestTranscriptId,
-            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
         )
 
         let didCommit = await MainActor.run {
@@ -638,7 +695,8 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: retainedAudioDirectory,
                 retainedAudioURLs: retainedAudioURLs,
                 speakerClipURLs: speakerClipURLs,
-                deleteSavedTranscript: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscript: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
             throw CancellationError()
         }
@@ -650,7 +708,8 @@ extension TranscriptionTaskManager {
         retainedAudioURLs: [URL] = [],
         speakerClipURLs: [URL] = [],
         queuedSpeakerRequestTranscriptId: UUID? = nil,
-        deleteSavedTranscriptOnCancellation: Bool = true
+        deleteSavedTranscriptOnCancellation: Bool = true,
+        replacementTranscriptRollback: ReplacementTranscriptRollback? = nil
     ) async throws {
         do {
             try Task.checkCancellation()
@@ -665,7 +724,8 @@ extension TranscriptionTaskManager {
                 retainedAudioDirectory: retainedAudioDirectory,
                 retainedAudioURLs: retainedAudioURLs,
                 speakerClipURLs: speakerClipURLs,
-                deleteSavedTranscript: deleteSavedTranscriptOnCancellation
+                deleteSavedTranscript: deleteSavedTranscriptOnCancellation,
+                replacementTranscriptRollback: replacementTranscriptRollback
             )
             throw error
         }
@@ -676,9 +736,12 @@ extension TranscriptionTaskManager {
         retainedAudioDirectory: URL?,
         retainedAudioURLs: [URL],
         speakerClipURLs: [URL],
-        deleteSavedTranscript: Bool
+        deleteSavedTranscript: Bool,
+        replacementTranscriptRollback: ReplacementTranscriptRollback?
     ) {
-        if deleteSavedTranscript {
+        if let replacementTranscriptRollback {
+            replacementTranscriptRollback.restore()
+        } else if deleteSavedTranscript {
             try? FileManager.default.removeItem(at: savedURL)
         }
         for retainedAudioURL in retainedAudioURLs {

@@ -1486,18 +1486,23 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                 qualityScore: 0.95
             )
         ])
+        let originalTranscriptId = UUID()
+        let statsStore = MetadataCapturingStatsStore()
         let transcriptsDirectory = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
         let retainedAudioDirectory = transcriptsDirectory.appendingPathComponent("audio", isDirectory: true)
         let manager = makeManager(
             speechToText: speech,
             diarization: diarization,
-            retainedAudioDirectory: retainedAudioDirectory
+            retainedAudioDirectory: retainedAudioDirectory,
+            statsStore: statsStore
         )
         try FileManager.default.createDirectory(at: transcriptsDirectory, withIntermediateDirectories: true)
 
         let originalTranscriptURL = transcriptsDirectory.appendingPathComponent("Reviewed_Call.md")
         try """
         ---
+        capture_id: "\(originalTranscriptId.uuidString)"
+        transcript_id: "\(originalTranscriptId.uuidString)"
         capture_type: meeting
         title: "Reviewed Call"
         date: 2026-06-05
@@ -1570,6 +1575,11 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             retainedAudioFiles,
             ["microphone.wav", "system_audio.wav"],
             "replacement retranscription should reuse retained audio instead of copying duplicate files into the same archive"
+        )
+        XCTAssertEqual(
+            statsStore.recordedSessions.map(\.id),
+            [originalTranscriptId.uuidString],
+            "replacement retranscription should update stats for the existing transcript ID instead of creating a second history row"
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
