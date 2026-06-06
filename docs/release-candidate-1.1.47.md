@@ -1,23 +1,22 @@
 # Transcripted 1.1.47 Release Candidate Notes
 
-Status: draft candidate prep only. Do not publish from this file alone.
+Status: draft candidate notes only. Merging this file does not make the `1.1.47`
+release gate green or authorize publishing.
 
 Current shipped version remains `1.1.46`. `Info.plist`, `docs/appcast.xml`,
 `Casks/transcripted.rb`, and the live download website should stay on `1.1.46`
 until a real `1.1.47` release artifact is approved, built, published, and
 verified.
 
-Freshness note from the June 4, 2026 review: this branch was cut before the
-latest `main` merge wave. Keep merged follow-up work in the final release read
-after the branch is refreshed, including failed-audio promotion tests,
-paste-back fallback timing, live sidecar preview smoke coverage, no-speech copy
-timing, and CEO brief first-value reporting.
+Freshness note from the June 6, 2026 review: this branch has been refreshed
+through the latest `main` merge wave. Refresh it again before publishing if
+additional follow-up PRs merge before the release artifact is built.
 
 ## Candidate Summary
 
 This candidate would focus on meeting-audio reliability, recovery, and speaker
 identity trust after `1.1.46`, especially quiet-mic/attenuation handling,
-long-meeting retry visibility, and the Grigory-style speaker-collapse fix.
+long-meeting retry visibility, and the reported speaker-collapse fix.
 
 ## User-Visible Changes
 
@@ -49,12 +48,12 @@ long-meeting retry visibility, and the Grigory-style speaker-collapse fix.
 - `1.1.46` is still a recent release, published on June 3, 2026.
 - The issue 500 fixes need real route coverage after shipping, especially USB
   and Bluetooth output routes.
-- The speaker-collapse fix is in this candidate, but Grigory should not be told
-  it shipped until a signed `1.1.47` artifact has passed release validation and
-  is actually available to install.
+- The speaker-collapse fix is in this candidate, but support should not tell
+  affected users it shipped until a signed `1.1.47` artifact has passed release
+  validation and is actually available to install.
 - Open issues #500 and #825 remain open until the fixes are validated in use.
-- Open PRs #967, #968, #969, #970, #971, #972, #973, #974, and #975 are not part
-  of this candidate unless they merge before the release artifact is built.
+- Any still-open follow-up PRs are not part of this candidate unless they merge
+  before the release artifact is built and this file is refreshed again.
 - This file does not update Sparkle or Homebrew. Existing installs will not see a
   `1.1.47` update until a real release artifact exists and the appcast is updated.
 
