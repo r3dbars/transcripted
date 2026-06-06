@@ -20,7 +20,7 @@ enum HomeMeetingDeletion {
         var audioDirectoryURLs = OrderedURLSet()
 
         transcriptURLs.insert(item.transcriptURL)
-        summaryURLs.insert(LocalMeetingSummaryStore.summaryURL(for: item.transcriptURL))
+        insertOwnedSummary(for: item.transcriptURL, into: &summaryURLs, fileManager: fileManager)
         if let audio = item.audio {
             audioDirectoryURLs.insert(audio.directoryURL)
             if isAppOwnedMeetingTranscript(item.transcriptURL) {
@@ -30,7 +30,7 @@ enum HomeMeetingDeletion {
                     fileManager: fileManager
                 ) {
                     transcriptURLs.insert(duplicate.transcriptURL)
-                    summaryURLs.insert(LocalMeetingSummaryStore.summaryURL(for: duplicate.transcriptURL))
+                    insertOwnedSummary(for: duplicate.transcriptURL, into: &summaryURLs, fileManager: fileManager)
                     audioDirectoryURLs.insert(duplicate.audio.directoryURL)
                 }
             }
@@ -90,6 +90,32 @@ enum HomeMeetingDeletion {
         return candidates.filter { _, audio in
             audioSignature(for: audio) == selectedSignature
         }
+    }
+
+    private static func insertOwnedSummary(
+        for transcriptURL: URL,
+        into summaryURLs: inout OrderedURLSet,
+        fileManager: FileManager
+    ) {
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+        guard isOwnedSummary(summaryURL, for: transcriptURL, fileManager: fileManager) else {
+            return
+        }
+        summaryURLs.insert(summaryURL)
+    }
+
+    private static func isOwnedSummary(
+        _ summaryURL: URL,
+        for transcriptURL: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        guard fileManager.fileExists(atPath: summaryURL.path),
+              let values = try? TranscriptFrontmatter.readValues(from: summaryURL),
+              values["capture_type"] == "meeting_summary",
+              values["source_transcript"] == transcriptURL.lastPathComponent else {
+            return false
+        }
+        return true
     }
 
     private static func isAppOwnedMeetingTranscript(_ url: URL) -> Bool {

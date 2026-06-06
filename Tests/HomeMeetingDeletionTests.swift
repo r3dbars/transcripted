@@ -31,6 +31,34 @@ func testHomeMeetingDeletion() {
         }
     }
 
+    runSuite("HomeMeetingDeletion leaves unrelated summary siblings alone") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Quick notes.md")
+            let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            try writeDeletionMeeting(title: "Quick notes", transcriptURL: transcriptURL)
+            try writeDeletionSummary(summaryURL, sourceTranscript: "Other.md")
+            try writeDeletionAudio(
+                for: transcriptURL,
+                systemBytes: "system one",
+                micBytes: "mic one"
+            )
+            guard let item = deletionMeetingItem(transcriptURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+
+            do {
+                let result = try HomeMeetingDeletion.delete(item)
+
+                assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "transcript should be deleted")
+                assertTrue(FileManager.default.fileExists(atPath: summaryURL.path), "summary for a different source transcript should stay")
+                assertTrue(result.removedSummaryURLs.isEmpty, "result should not report unrelated summaries")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
+
     runSuite("HomeMeetingDeletion removes duplicate app-owned retranscriptions with matching retained audio") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let firstURL = meetingsRoot.appendingPathComponent("Quick notes.md")
@@ -215,11 +243,12 @@ private func writeDeletionAudio(
     return audioDirectory
 }
 
-private func writeDeletionSummary(_ url: URL) throws {
+private func writeDeletionSummary(_ url: URL, sourceTranscript: String? = nil) throws {
+    let sourceTranscript = sourceTranscript ?? "\(url.deletingPathExtension().deletingPathExtension().lastPathComponent).md"
     let markdown = """
     ---
     capture_type: meeting_summary
-    source_transcript: "\(url.deletingPathExtension().deletingPathExtension().lastPathComponent).md"
+    source_transcript: "\(sourceTranscript)"
     ---
 
     # Summary
