@@ -178,6 +178,10 @@ struct TranscriptedSettingsView: View {
                 speakerPeopleModel.refresh()
             }
         }
+        .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
+            refreshRecentCaptures(force: true)
+            speakerPeopleModel.refresh()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures(force: true)
         }

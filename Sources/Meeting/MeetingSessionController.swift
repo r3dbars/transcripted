@@ -152,6 +152,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var displayStatus: DisplayStatus = .idle
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
+    @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
@@ -1284,10 +1285,15 @@ final class MeetingSessionController: ObservableObject {
             replacementTranscriptURL: transcriptURL,
             recordingDate: recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
-                self?.clearGeneratedSummaryAfterReplacementRetranscription(for: committedTranscriptURL)
+                self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
             }
         )
         return true
+    }
+
+    private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
+        clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
+        savedMeetingReplacementCommitCount &+= 1
     }
 
     private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {

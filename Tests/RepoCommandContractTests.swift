@@ -2103,6 +2103,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - replacement retranscription clears stale local summaries") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let summaryContents = readRepoTextFile("Sources/Meeting/LocalMeetingSummarizer.swift")
 
         assertTrue(
@@ -2112,8 +2113,14 @@ func testRepoCommandContract() {
         )
         assertTrue(
             controllerContents.contains("onReplacementTranscriptCommitted:")
-                && controllerContents.contains("clearGeneratedSummaryAfterReplacementRetranscription"),
-            "saved-meeting replacement should clear stale local summary sidecars after commit"
+                && controllerContents.contains("handleReplacementTranscriptCommitted")
+                && controllerContents.contains("savedMeetingReplacementCommitCount &+= 1"),
+            "saved-meeting replacement should clear stale local summary sidecars and emit a same-URL refresh signal after commit"
+        )
+        assertTrue(
+            settingsContents.contains(".onChange(of: meetingSession.savedMeetingReplacementCommitCount)")
+                && settingsContents.contains("speakerPeopleModel.refresh()"),
+            "Settings Home should refresh meeting rows and speaker review state after same-URL replacement retranscription"
         )
         assertTrue(
             summaryContents.contains("static func removeGeneratedSummary")
