@@ -147,12 +147,20 @@ enum HomeMeetingDeletion {
     }
 
     private static func audioSignature(for audio: MeetingAudioAttachment) -> AudioSignature? {
-        let digests = audio.retranscriptionURLs.compactMap(audioFileDigest)
-        guard digests.count == audio.retranscriptionURLs.count,
-              !digests.isEmpty else {
+        let parts = audio.retranscriptionURLs.compactMap { url -> AudioSignature.Part? in
+            guard let digest = audioFileDigest(url) else { return nil }
+            return AudioSignature.Part(
+                role: url.deletingPathExtension().lastPathComponent,
+                digest: digest
+            )
+        }
+        guard parts.count == audio.retranscriptionURLs.count,
+              !parts.isEmpty else {
             return nil
         }
-        return AudioSignature(digests: digests.sorted())
+        return AudioSignature(parts: parts.sorted { lhs, rhs in
+            lhs.role.localizedStandardCompare(rhs.role) == .orderedAscending
+        })
     }
 
     private static func audioFileDigest(_ url: URL) -> String? {
@@ -201,7 +209,12 @@ enum HomeMeetingDeletion {
 }
 
 private struct AudioSignature: Equatable {
-    let digests: [String]
+    struct Part: Equatable {
+        let role: String
+        let digest: String
+    }
+
+    let parts: [Part]
 }
 
 private struct OrderedURLSet {

@@ -175,6 +175,32 @@ func testHomeMeetingDeletion() {
             }
         }
     }
+
+    runSuite("HomeMeetingDeletion preserves split-audio roles when matching duplicates") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let selectedURL = meetingsRoot.appendingPathComponent("Quick notes.md")
+            let swappedURL = meetingsRoot.appendingPathComponent("Quick notes swapped.md")
+            try writeDeletionMeeting(title: "Quick notes", transcriptURL: selectedURL)
+            try writeDeletionMeeting(title: "Quick notes", transcriptURL: swappedURL)
+            try writeDeletionAudio(for: selectedURL, systemBytes: "system stream", micBytes: "mic stream")
+            let swappedAudio = try writeDeletionAudio(for: swappedURL, systemBytes: "mic stream", micBytes: "system stream")
+            guard let item = deletionMeetingItem(selectedURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+
+            do {
+                let result = try HomeMeetingDeletion.delete(item)
+
+                assertFalse(FileManager.default.fileExists(atPath: selectedURL.path), "selected transcript should be deleted")
+                assertTrue(FileManager.default.fileExists(atPath: swappedURL.path), "same bytes in swapped audio roles should stay")
+                assertTrue(FileManager.default.fileExists(atPath: swappedAudio.path), "swapped-role audio directory should stay")
+                assertEqual(result.removedTranscriptURLs.map(\.lastPathComponent), ["Quick notes.md"], "result should only include the selected transcript")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
 }
 
 private func withTemporaryHomeMeetingDeletionLibrary(_ body: (URL) throws -> Void) {
