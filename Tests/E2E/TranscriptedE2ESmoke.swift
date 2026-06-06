@@ -60,6 +60,7 @@ private final class TranscriptedE2ESmokeHarness {
 
         try await verifyAppFacingDiscovery(fixtures: fixtures)
         try verifyHomePreview(fixtures: fixtures)
+        try verifyLocalSummaryArtifact(fixtures: fixtures)
         try verifyMCPFacingDiscovery(fixtures: fixtures, captureLibrary: captureLibrary)
         try verifyFailedMeetingArtifact(fixtures: fixtures)
         try verifySupportDiagnosticsPrivacy(fixtures: fixtures, logsDir: logsDir)
@@ -111,6 +112,39 @@ private final class TranscriptedE2ESmokeHarness {
         After that, we can send the customer note.
         """
         try meetingMarkdown.write(to: meetingURL, atomically: true, encoding: .utf8)
+
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: meetingURL)
+        let summaryMarkdown = """
+        ---
+        capture_type: meeting_summary
+        source_transcript: "\(meetingURL.lastPathComponent)"
+        summary_title: "Launch Action Review"
+        generated_at: "2026-05-18T14:08:00Z"
+        model: "synthetic-gemma-fixture"
+        ---
+
+        # Title
+        Launch Action Review
+
+        # Summary
+        The launch review stayed focused on release verification and customer follow-up.
+
+        # Decisions
+        Keep Sparkle and Homebrew verification before the customer note.
+
+        # Action Items
+        Jordan will confirm both release surfaces.
+
+        # Open Questions
+        None found.
+
+        # Risks or Follow-ups
+        The customer note should wait until install paths agree.
+
+        # Accuracy Notes
+        Synthetic E2E fixture only.
+        """
+        try summaryMarkdown.write(to: summaryURL, atomically: true, encoding: .utf8)
 
         let dictationURL = dictationsDir.appendingPathComponent("Dictations_2026-05-18.md", isDirectory: false)
         let dictationMarkdown = """
@@ -187,17 +221,23 @@ private final class TranscriptedE2ESmokeHarness {
                 ofItemAtPath: url.path
             )
         }
+        try fileManager.setAttributes(
+            [.creationDate: fixtureDate.addingTimeInterval(180), .modificationDate: fixtureDate.addingTimeInterval(180)],
+            ofItemAtPath: summaryURL.path
+        )
 
         return SmokeFixtures(
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
             meetingURL: meetingURL,
+            summaryURL: summaryURL,
             dictationURL: dictationURL,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             failedQueueURL: failedQueueURL,
             eventLogURL: eventLogURL,
             meetingMarkdown: meetingMarkdown,
+            summaryMarkdown: summaryMarkdown,
             dictationMarkdown: dictationMarkdown
         )
     }
@@ -216,7 +256,9 @@ private final class TranscriptedE2ESmokeHarness {
 
         let meeting = try unwrap(snapshot.meetings.first, "Recent meeting should be present")
         try expect(meeting.title == "Customer Launch Sync", "Recent meeting title should come from frontmatter")
+        try expect(meeting.displayTitle == "Launch Action Review", "Recent meeting display title should come from its attached summary")
         try expect(meeting.transcriptURL.standardizedFileURL == fixtures.meetingURL.standardizedFileURL, "Recent meeting should point at the saved markdown")
+        try expect(meeting.summaryPreview?.url.standardizedFileURL == fixtures.summaryURL.standardizedFileURL, "Recent meeting summary preview should point at the matching summary artifact")
         try expect(meeting.speakerStatus == .ready, "Named meeting speakers should be ready")
         try expect(meeting.audio?.urls.count == 2, "Recent meeting should attach retained mic and system audio")
 
@@ -234,6 +276,27 @@ private final class TranscriptedE2ESmokeHarness {
             "Home preview should include readable transcript text"
         )
         try expect(!preview.fallbackText.contains("transcript_id:"), "Home preview should not surface YAML-only metadata")
+    }
+
+    private func verifyLocalSummaryArtifact(fixtures: SmokeFixtures) throws {
+        try expect(fileManager.fileExists(atPath: fixtures.summaryURL.path), "Local summary artifact should be saved beside the meeting transcript")
+        try expect(
+            fixtures.summaryURL.lastPathComponent == "Customer Launch Sync.summary.md",
+            "Local summary artifact should use the canonical transcript basename"
+        )
+
+        let frontmatter = try unwrap(
+            TranscriptFrontmatter.document(in: fixtures.summaryMarkdown),
+            "Local summary artifact should have frontmatter"
+        )
+        try expect(frontmatter.values["capture_type"] == "meeting_summary", "Local summary artifact should not masquerade as a meeting transcript")
+        try expect(frontmatter.values["source_transcript"] == fixtures.meetingURL.lastPathComponent, "Local summary artifact should point at the canonical source transcript")
+
+        let meetings = RecentMeetingsScanner.loadRecent(limit: 5, directory: fixtures.meetingsDir)
+        try expect(meetings.count == 1, "Local summary artifacts should not create duplicate Home meeting rows")
+        let meeting = try unwrap(meetings.first, "Recent meeting should remain visible with a summary")
+        try expect(meeting.transcriptURL.standardizedFileURL == fixtures.meetingURL.standardizedFileURL, "Home row should still point at the canonical saved meeting markdown")
+        try expect(meeting.summaryPreview?.summary.contains("release verification") == true, "Home row should expose the matching local summary preview")
     }
 
     private func verifyMCPFacingDiscovery(fixtures: SmokeFixtures, captureLibrary: URL) throws {
@@ -436,12 +499,14 @@ private struct SmokeFixtures {
     let meetingsDir: URL
     let dictationsDir: URL
     let meetingURL: URL
+    let summaryURL: URL
     let dictationURL: URL
     let micAudioURL: URL
     let systemAudioURL: URL
     let failedQueueURL: URL
     let eventLogURL: URL
     let meetingMarkdown: String
+    let summaryMarkdown: String
     let dictationMarkdown: String
 }
 
