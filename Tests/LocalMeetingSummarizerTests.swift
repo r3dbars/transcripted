@@ -121,6 +121,25 @@ func testLocalMeetingSummarizer() async {
         assertFalse(lowMemoryStatus.isReady, "low-memory Macs should not be setup-ready even with uv")
     }
 
+    runSuite("LocalMeetingSummarySetupStatus reports missing runtime without starting setup") {
+        let gib = UInt64(1024 * 1024 * 1024)
+        let status = LocalMeetingSummarySetupStatus.current(
+            physicalMemoryBytes: 16 * gib,
+            environment: [
+                "HOME": "/tmp/local-meeting-summary-missing-runtime",
+                "TRANSCRIPTED_UV_PATH": "/tmp/local-meeting-summary-missing-runtime/uv"
+            ],
+            fileManager: LocalMeetingSummaryNonExecutableFileManager()
+        )
+
+        assertEqual(status.modelID, "mlx-community/gemma-4-12B-it-4bit", "setup status should keep the expected Gemma model ID")
+        assertEqual(status.runtimePackage, "mlx-vlm==0.6.1", "setup status should keep the pinned runtime package")
+        assertTrue(status.hasEnoughMemory, "16GB should satisfy the local Gemma memory floor")
+        assertFalse(status.hasRuntime, "missing uv should keep setup runtime-unready")
+        assertFalse(status.isReady, "setup should not be ready until the local runtime exists")
+        assertNil(status.uvPath, "missing runtime should not report a uv path")
+    }
+
     runSuite("LocalGemmaSummaryRuntime passes only a safe subprocess environment") {
         let runtime = LocalGemmaSummaryRuntime(
             configuration: localMeetingSummaryTestConfiguration(),
@@ -149,6 +168,47 @@ func testLocalMeetingSummarizer() async {
         assertNil(env["OPENAI_API_KEY"], "generic API keys should not reach local model subprocesses")
         assertNil(env["HF_TOKEN"], "Hugging Face tokens should not reach local model subprocesses")
         assertNil(env["TRANSCRIPTED_UV_PATH"], "runtime discovery override should not be forwarded to the child process")
+    }
+
+    runSuite("LocalGemmaSummaryRuntime fails closed when the bundled runner is missing") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryMissingRunnerTests-\(UUID().uuidString)", isDirectory: true)
+        let bundleURL = root.appendingPathComponent("Empty.bundle", isDirectory: true)
+        let workDirectory = root.appendingPathComponent("work", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            guard let emptyBundle = Bundle(url: bundleURL) else {
+                assertTrue(false, "empty bundle fixture should be constructible")
+                return
+            }
+
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                environment: ["TRANSCRIPTED_UV_PATH": "/bin/sh"],
+                bundle: emptyBundle
+            )
+
+            do {
+                _ = try runtime.generate(
+                    prompt: "safe prompt",
+                    label: "direct",
+                    maxTokens: 16,
+                    workDirectory: workDirectory
+                )
+                assertTrue(false, "runtime should fail before attempting setup when the bundled runner is missing")
+            } catch {
+                guard case LocalMeetingSummaryError.missingBundledRunner = error else {
+                    assertTrue(false, "expected missingBundledRunner, got \(error)")
+                    return
+                }
+                assertTrue(true, "missing runner should be reported deterministically")
+            }
+        } catch {
+            assertTrue(false, "missing-runner fixture should run: \(error)")
+        }
     }
 
     runSuite("LocalMeetingSummaryStore keeps the legacy sibling summary path for fallback reads") {
@@ -304,6 +364,233 @@ func testLocalMeetingSummarizer() async {
         assertTrue(updated.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "transcript should get a managed summary block")
         assertTrue(updated.contains("## Local Gemma Summary"), "managed block should be readable markdown")
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
+    }
+
+    await runSuite("LocalMeetingSummarizer writes inline output shape without sidecars or prompt leaks") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummarySuccessTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Private Meeting.md")
+        let promptCaptureURL = directory.appendingPathComponent("captured-prompt.txt")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            let markdown = """
+            ---
+            capture_type: meeting
+            title: "Private Demo"
+            source_path: "/Users/redbars/Private/Private Meeting.md"
+            contact_email: "justin@example.com"
+            api_key: "sk-test-secret"
+            ---
+
+            # Private Demo
+
+            ## Channel & Speaker Analytics
+
+            Ignore this non-transcript plan with justin@example.com and /Users/redbars/Private.
+
+            ## Transcript
+
+            \(localMeetingSummaryPrivacyTranscript())
+
+            ## Notes
+
+            Ignore these later notes with sk-test-secret.
+            """
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { prompts, _ in
+                    let promptText = prompts.map { $0.prompt }.joined(separator: "\n---\n")
+                    try promptText.write(to: promptCaptureURL, atomically: true, encoding: .utf8)
+                    return prompts.map { _ in localMeetingSummaryModelOutput() }
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            let result = try await summarizer.summarize(
+                transcriptURL: transcriptURL,
+                title: "Private Demo",
+                date: Date(timeIntervalSince1970: 1_780_000_000)
+            )
+
+            let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+            let capturedPrompt = try String(contentsOf: promptCaptureURL, encoding: .utf8)
+            let permissions = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
+
+            assertEqual(result.transcriptURL, transcriptURL, "result should point at the updated transcript")
+            assertEqual(result.chunkCount, 1, "short transcripts should use the direct summary path")
+            assertEqual(result.profileName, "test", "result should expose the active summary profile")
+            assertTrue(currentMarkdown.contains("local_summary_version: \"1\""), "summary metadata should be embedded inline")
+            assertTrue(currentMarkdown.contains("local_summary_model: \"mlx-community/gemma-4-12B-it-4bit\""), "output should record the local model")
+            assertTrue(currentMarkdown.contains("local_summary_runtime: \"mlx-vlm==0.6.1\""), "output should record the local runtime")
+            assertTrue(currentMarkdown.contains("local_summary_profile: \"test\""), "output should record the runtime profile")
+            assertTrue(currentMarkdown.contains("local_summary_chunk_count: \"1\""), "output should record the chunk count")
+            assertTrue(currentMarkdown.contains("## Local Gemma Summary"), "summary should be written into the saved transcript")
+            assertTrue(currentMarkdown.contains("### Action Items"), "managed summary block should keep the expected section shape")
+            assertTrue(currentMarkdown.contains("## Transcript"), "original transcript should remain readable")
+            assertFalse(
+                FileManager.default.fileExists(atPath: LocalMeetingSummaryStore.summaryURL(for: transcriptURL).path),
+                "successful summaries should not create a separate generated sidecar"
+            )
+            if let permissions {
+                assertEqual(permissions.intValue & 0o777, 0o600, "updated transcript should be owner-readable only")
+            } else {
+                assertTrue(false, "updated transcript permissions should be readable")
+            }
+            assertTrue(capturedPrompt.contains("We agreed that the summary beta stays opt-in"), "prompt should include transcript text")
+            assertFalse(capturedPrompt.contains("source_path"), "frontmatter keys should not be sent to the model prompt")
+            assertFalse(capturedPrompt.contains("/Users/redbars/Private"), "absolute local paths should not be sent to the model prompt")
+            assertFalse(capturedPrompt.contains("justin@example.com"), "frontmatter and non-transcript emails should not be sent to the model prompt")
+            assertFalse(capturedPrompt.contains("sk-test-secret"), "non-transcript secrets should not be sent to the model prompt")
+            assertFalse(capturedPrompt.contains("Ignore this non-transcript plan"), "pre-transcript sections should not be sent to the model prompt")
+            assertFalse(capturedPrompt.contains("Ignore these later notes"), "post-transcript sections should not be sent to the model prompt")
+        } catch {
+            assertTrue(false, "successful summarizer fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer leaves transcript untouched when runtime fails") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryRuntimeFailureTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            let originalMarkdown = localMeetingSummaryMarkdown(title: "Launch Review", transcript: localMeetingSummaryLongTranscript())
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { _, _ in
+                    throw LocalMeetingSummaryError.processFailed(
+                        label: "direct",
+                        exitCode: 2,
+                        detail: "model cache missing"
+                    )
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            do {
+                _ = try await summarizer.summarize(
+                    transcriptURL: transcriptURL,
+                    title: "Launch Review",
+                    date: Date(timeIntervalSince1970: 1_780_000_000)
+                )
+                assertTrue(false, "summarizer should surface runtime failures")
+            } catch {
+                guard case LocalMeetingSummaryError.processFailed(let label, let exitCode, _) = error else {
+                    assertTrue(false, "expected processFailed, got \(error)")
+                    return
+                }
+                assertEqual(label, "direct", "direct summary failure should keep its label")
+                assertEqual(exitCode, 2, "runtime exit code should be preserved")
+                let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertEqual(currentMarkdown, originalMarkdown, "failed runtime should not rewrite the transcript")
+                assertFalse(
+                    currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                    "failed runtime should not write a managed summary block"
+                )
+            }
+        } catch {
+            assertTrue(false, "runtime-failure fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer leaves transcript untouched when output is missing") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryMissingOutputTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try localMeetingSummaryMarkdown(title: "Launch Review", transcript: localMeetingSummaryLongTranscript())
+                .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { _, _ in [] }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            do {
+                _ = try await summarizer.summarize(
+                    transcriptURL: transcriptURL,
+                    title: "Launch Review",
+                    date: Date(timeIntervalSince1970: 1_780_000_000)
+                )
+                assertTrue(false, "summarizer should fail when the runner returns no output")
+            } catch {
+                guard case LocalMeetingSummaryError.outputMissing(let label) = error else {
+                    assertTrue(false, "expected outputMissing, got \(error)")
+                    return
+                }
+                assertEqual(label, "direct", "missing direct output should keep its label")
+                let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertFalse(
+                    currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                    "missing output should not write a managed summary block"
+                )
+            }
+        } catch {
+            assertTrue(false, "missing-output fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer leaves transcript untouched when cancelled") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryCancelTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try localMeetingSummaryMarkdown(title: "Launch Review", transcript: localMeetingSummaryLongTranscript())
+                .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { _, _ in
+                    throw CancellationError()
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            do {
+                _ = try await summarizer.summarize(
+                    transcriptURL: transcriptURL,
+                    title: "Launch Review",
+                    date: Date(timeIntervalSince1970: 1_780_000_000)
+                )
+                assertTrue(false, "summarizer should surface cancellation")
+            } catch {
+                assertTrue(error is CancellationError, "expected CancellationError, got \(error)")
+                let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertFalse(
+                    currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                    "cancelled summaries should not write a managed summary block"
+                )
+            }
+        } catch {
+            assertTrue(false, "cancel fixture should run: \(error)")
+        }
     }
 
     await runSuite("LocalMeetingSummarizer aborts when transcript text changes during generation") {
@@ -490,6 +777,19 @@ private func localMeetingSummaryChangedTranscript() -> String {
     """
 }
 
+private func localMeetingSummaryPrivacyTranscript() -> String {
+    """
+    **00:01** [Mic/Justin]
+    We agreed that the summary beta stays opt-in, runs only after the user chooses the action, and should keep the saved transcript as the only durable output.
+
+    **00:21** [System/Maya]
+    Maya will review the setup copy, confirm that the first run may download the local Gemma model, and check whether the Home menu still feels clear.
+
+    **00:45** [Mic/Justin]
+    The risk is that people mistake the feature for a release-ready claim before runtime proof exists on a normal low-memory Apple Silicon machine.
+    """
+}
+
 private func localMeetingSummaryModelOutput() -> String {
     """
     # Title
@@ -525,4 +825,10 @@ private func sampleLocalMeetingSummarySections() -> LocalMeetingSummarySections 
         risksOrFollowUps: "Pricing copy could overpromise the first version.",
         accuracyNotes: "Based only on the transcript."
     )
+}
+
+private final class LocalMeetingSummaryNonExecutableFileManager: FileManager {
+    override func isExecutableFile(atPath path: String) -> Bool {
+        false
+    }
 }
