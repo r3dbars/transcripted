@@ -131,6 +131,43 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.paste — accessibility missing copies text and prompts once") {
+            let pasteboard = FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic accessibility fallback dictation"
+            var promptCount = 0
+            var dispatchCount = 0
+
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { false },
+                requestAccessibilityTrust: {
+                    promptCount += 1
+                },
+                pasteDispatcher: {
+                    dispatchCount += 1
+                    return true
+                }
+            )
+
+            assertEqual(
+                outcome,
+                .copied(
+                    "Couldn't paste automatically. Accessibility is off, so the text was copied.",
+                    reason: .accessibilityMissing
+                ),
+                "missing Accessibility permission should report a copied fallback with the right reason"
+            )
+            assertEqual(promptCount, 1, "missing Accessibility permission should request trust exactly once")
+            assertEqual(dispatchCount, 0, "missing Accessibility permission should not post Cmd+V")
+            assertEqual(
+                pasteboard.string(forType: .string),
+                dictationText,
+                "missing Accessibility permission should leave the dictation text copied"
+            )
+        }
+
         runSuite("DictationPasteTarget — accepts only the captured foreground app") {
             let target = DictationPasteTarget(
                 processIdentifier: 42,
@@ -559,6 +596,42 @@ func testClipboardRestoringTextPaster() async {
             "failed paste dispatch should not later restore over the copied fallback text"
         )
     }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — failed copy fallback reports failure") {
+        let existingClipboard = "synthetic existing clipboard"
+        let pasteText = "synthetic paste fallback failure"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(
+                initialString: existingClipboard,
+                setStringResults: [true, false]
+            )
+        }
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            paster.paste(
+                pasteText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { false },
+                fallbackRestoreDelay: 5_000_000
+            )
+        }
+        await paster.waitForPendingClipboardRestore()
+
+        assertEqual(
+            outcome,
+            .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run."),
+            "paste dispatch fallback should report failure when the copied fallback cannot be written"
+        )
+        let clipboardAfterFailure = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertNil(clipboardAfterFailure, "failed copied fallback should not restore stale clipboard content")
+    }
 }
 
 private func readClipboardPasterSource() -> String {
@@ -573,6 +646,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
     var clearContentsClears: Bool
     var setStringSucceeds: Bool
     var writePasteboardItemsSucceeds: Bool
+    private var setStringResults: [Bool]?
     private var storedString: String?
     private var storedItems: [NSPasteboardItem]?
 
@@ -580,12 +654,14 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
         initialString: String?,
         clearContentsClears: Bool = true,
         setStringSucceeds: Bool = true,
-        writePasteboardItemsSucceeds: Bool = true
+        writePasteboardItemsSucceeds: Bool = true,
+        setStringResults: [Bool]? = nil
     ) {
         self.storedString = initialString
         self.clearContentsClears = clearContentsClears
         self.setStringSucceeds = setStringSucceeds
         self.writePasteboardItemsSucceeds = writePasteboardItemsSucceeds
+        self.setStringResults = setStringResults
     }
 
     var pasteboardItems: [NSPasteboardItem]? {
@@ -610,7 +686,15 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
 
     @discardableResult
     func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
-        guard setStringSucceeds, dataType == .string else { return false }
+        if var setStringResults,
+           !setStringResults.isEmpty {
+            let nextResult = setStringResults.removeFirst()
+            self.setStringResults = setStringResults
+            guard nextResult else { return false }
+        } else {
+            guard setStringSucceeds else { return false }
+        }
+        guard dataType == .string else { return false }
         storedString = string
         storedItems = nil
         changeCount += 1
