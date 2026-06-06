@@ -124,17 +124,23 @@ final class ClipboardRestoringTextPaster {
     typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
 
     private var clipboardRestoreTask: Task<Void, Never>?
+    private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
+    private var clipboardAutoEnterReadyGeneration: Int?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
     private var pasteGeneration = 0
 
     deinit {
         clipboardRestoreTask?.cancel()
+        clipboardAutoEnterReadinessTask?.cancel()
     }
 
     func cancelPendingClipboardRestore() {
         pasteGeneration += 1
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
+        clipboardAutoEnterReadinessTask?.cancel()
+        clipboardAutoEnterReadinessTask = nil
+        clipboardAutoEnterReadyGeneration = nil
         temporaryPasteboardDataProvider = nil
     }
 
@@ -142,6 +148,16 @@ final class ClipboardRestoringTextPaster {
         while let clipboardRestoreTask {
             await clipboardRestoreTask.value
         }
+    }
+
+    func waitForClipboardReadyForAutoEnter() async {
+        while let readinessTask = clipboardAutoEnterReadinessTask {
+            await readinessTask.value
+        }
+        if clipboardAutoEnterReadyGeneration == pasteGeneration {
+            return
+        }
+        await waitForPendingClipboardRestore()
     }
 
     func paste(
@@ -187,7 +203,7 @@ final class ClipboardRestoringTextPaster {
         pasteboard.clearContents()
         let wroteTemporaryString = writeTemporaryString(text, to: pasteboard) { [weak self] in
             Task { @MainActor [weak self] in
-                self?.scheduleClipboardRestore(
+                self?.scheduleClipboardRestoreAfterTemporaryRead(
                     savedItems,
                     temporaryString: text,
                     temporaryChangeCount: temporaryChangeCount,
@@ -230,6 +246,43 @@ final class ClipboardRestoringTextPaster {
         return .pasted
     }
 
+    private func scheduleClipboardRestoreAfterTemporaryRead(
+        _ savedItems: PasteboardSnapshot,
+        temporaryString: String,
+        temporaryChangeCount: Int,
+        to pasteboard: any ClipboardPasteboard,
+        generation: Int,
+        delay: UInt64
+    ) {
+        // Pasteboard observers can read the provider before the target app consumes Cmd+V.
+        // Keep the longer fallback active unless no restore has been scheduled yet.
+        scheduleClipboardAutoEnterReadiness(generation: generation, delay: delay)
+        guard clipboardRestoreTask == nil else { return }
+        scheduleClipboardRestore(
+            savedItems,
+            temporaryString: temporaryString,
+            temporaryChangeCount: temporaryChangeCount,
+            to: pasteboard,
+            generation: generation,
+            delay: delay
+        )
+    }
+
+    private func scheduleClipboardAutoEnterReadiness(generation: Int, delay: UInt64) {
+        guard generation == pasteGeneration,
+              clipboardAutoEnterReadyGeneration != generation else { return }
+
+        clipboardAutoEnterReadinessTask?.cancel()
+        clipboardAutoEnterReadinessTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self,
+                  !Task.isCancelled,
+                  self.pasteGeneration == generation else { return }
+            self.clipboardAutoEnterReadyGeneration = generation
+            self.clipboardAutoEnterReadinessTask = nil
+        }
+    }
+
     private func scheduleClipboardRestore(
         _ savedItems: PasteboardSnapshot,
         temporaryString: String,
@@ -253,6 +306,9 @@ final class ClipboardRestoringTextPaster {
             )
             self.temporaryPasteboardDataProvider = nil
             self.clipboardRestoreTask = nil
+            self.clipboardAutoEnterReadinessTask?.cancel()
+            self.clipboardAutoEnterReadinessTask = nil
+            self.clipboardAutoEnterReadyGeneration = generation
             if self.pasteGeneration == generation {
                 self.pasteGeneration += 1
             }

@@ -1435,7 +1435,7 @@ class DictationSessionController: ObservableObject {
         try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
         guard !Task.isCancelled else { return .disabled }
         if delivery == .pasted {
-            await textPaster.waitForPendingClipboardRestore()
+            await textPaster.waitForClipboardReadyForAutoEnter()
         }
         guard !Task.isCancelled else { return .disabled }
         return autoSender.send(DictationAutoSendPreferences.sendKey())
