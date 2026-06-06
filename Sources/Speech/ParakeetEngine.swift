@@ -2330,6 +2330,8 @@ class ParakeetEngine: ObservableObject {
 
     func stopRecording() async {
         guard isRecording else {
+            // A zombie reset marks recording idle while it waits to retry. Treat a
+            // user stop in that window as cancellation of the pending restart.
             if zombieRecoveryRestartPending {
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
