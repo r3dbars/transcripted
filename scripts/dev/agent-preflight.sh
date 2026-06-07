@@ -163,6 +163,12 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json --write-report build/nightly-security-report.json"
         fi
 
+        if matches_any "$path" "scripts/ops/release-gate-report.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/release-gate-report.py"
+            add_command "python3 scripts/ops/release-gate-report.py --self-test"
+        fi
+
         if matches_any "$path" "scripts/ops/build-codex-memory-index.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/build-codex-memory-index.py"

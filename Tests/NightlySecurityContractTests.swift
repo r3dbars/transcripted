@@ -159,6 +159,7 @@ private struct ShellResult {
 private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
     let process = Process()
     let pipe = Pipe()
+    let outputBuffer = LockedDataBuffer()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["python3", "scripts/ops/nightly-security-check.py"] + arguments
     process.currentDirectoryURL = repoFixtureURL(".")
@@ -166,12 +167,41 @@ private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
     process.standardError = pipe
 
     do {
+        pipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                outputBuffer.append(data)
+            }
+        }
         try process.run()
         process.waitUntilExit()
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        pipe.fileHandleForReading.readabilityHandler = nil
+        outputBuffer.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        let output = String(data: outputBuffer.snapshot(), encoding: .utf8) ?? ""
         return ShellResult(status: process.terminationStatus, output: output)
     } catch {
+        pipe.fileHandleForReading.readabilityHandler = nil
         return ShellResult(status: -127, output: String(describing: error))
+    }
+}
+
+private final class LockedDataBuffer {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func snapshot() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
     }
 }
 

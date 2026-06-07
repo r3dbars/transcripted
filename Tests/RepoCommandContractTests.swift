@@ -244,6 +244,8 @@ func testRepoCommandContract() {
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
             "python3 scripts/ops/generate-nightly-digest.py --self-test",
             "python3 -m py_compile scripts/ops/nightly-security-check.py",
+            "python3 -m py_compile scripts/ops/release-gate-report.py",
+            "python3 scripts/ops/release-gate-report.py --self-test",
             "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
             "bash -n scripts/ops/nightly-transcripted-archive-miner.sh",
             "ruby -c scripts/ops/performance-budget.rb",
@@ -254,6 +256,49 @@ func testRepoCommandContract() {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
             assertTrue(preflight.contains(check), "agent preflight should include \(check)")
         }
+    }
+
+    runSuite("Repo command contract - release gate report composes QA, telemetry, release, and logs") {
+        let report = readRepoTextFile("scripts/ops/release-gate-report.py")
+        let docs = readRepoTextFile("docs/qa-test-bench.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+        let qaGates = readRepoTextFile(".agents/qa-gates.yml")
+
+        assertTrue(
+            report.contains("scripts/ops/transcripted-qa-bench.sh")
+                && report.contains("scripts/ops/health-probe.sh")
+                && report.contains("scripts/ops/nightly-security-check.py")
+                && report.contains("sweep_local_logs"),
+            "release gate report should compose QA bench, telemetry probes, release surfaces, and local log sweep"
+        )
+        assertTrue(
+            report.contains("SKIP sentry: missing SENTRY_AUTH_TOKEN")
+                && report.contains("Sentry credentials missing")
+                && report.contains("missing Sentry/PostHog credentials"),
+            "release gate report should keep missing telemetry tokens yellow/unknown rather than green"
+        )
+        assertTrue(
+            report.contains("BLOCKING_RELEASE_WATCH_IDS")
+                && report.contains("appcast-release-candidate")
+                && report.contains("release_watch_status")
+                && report.contains("Live release surfaces skipped"),
+            "release gate report should keep blocking release watch items red and skipped live checks yellow"
+        )
+        assertTrue(
+            report.contains("Automated Proof")
+                && report.contains("Regressions")
+                && report.contains("Telemetry")
+                && report.contains("Release Surfaces")
+                && report.contains("Local Log Warnings")
+                && report.contains("Manual QA Checklist"),
+            "release gate report should render the expected owner-facing sections"
+        )
+        assertTrue(
+            docs.contains("python3 scripts/ops/release-gate-report.py")
+                && scriptsReadme.contains("release-gate-report.py")
+                && qaGates.contains("release_gate_report"),
+            "release gate report should be discoverable in QA docs, scripts README, and QA gates"
+        )
     }
 
     runSuite("Repo command contract - integration smoke rejects stale Core deps") {

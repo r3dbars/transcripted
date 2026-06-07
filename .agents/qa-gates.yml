@@ -78,6 +78,7 @@ test_layers:
 
   release_health:
     commands:
+      release_gate_report: "python3 scripts/ops/release-gate-report.py"
       packaging_smoke: "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
       sparkle_verify: "bash scripts/release/verify-sparkle-release.sh <version>"
       sentry_register: "SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>"
@@ -114,6 +115,7 @@ recommended_gates:
 
   release_candidate:
     required:
+      - "python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts"
       - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
@@ -180,9 +182,9 @@ coverage_gaps:
     current_coverage:
       - "packaging docs and release scripts"
       - "nightly security/release drift checks"
+      - "single release-gate report that composes QA bench, Sentry/PostHog probes, release surfaces, and local log warnings"
       - "repo hygiene syntax checks"
     missing_automation:
-      - "single release-health report comparing Info.plist, latest GitHub release, appcast, cask, live download, and crawler-facing text"
       - "stored proof that Sentry release/dist and dSYM UUID match the shipped artifact"
 
   privacy:
