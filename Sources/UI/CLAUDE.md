@@ -151,6 +151,13 @@ bash build.sh --no-open
 bash run-tests.sh
 ```
 
+For menu bar, Home, Settings, or navigation automation changes, also run when
+local Accessibility permission is available:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
+```
+
 Manual checks:
 
 - dictation overlay starts, stops, and auto-pastes cleanly
@@ -185,3 +192,4 @@ Relevant direct coverage:
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
+- `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of menu bar, Home, Settings, and navigation

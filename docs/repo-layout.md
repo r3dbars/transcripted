@@ -29,10 +29,13 @@ bash build-beta.sh '' <user>
 bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-e2e-smoke.sh
+bash run-slow-pasteback-smoke.sh
 bash run-live-capture-smoke.sh
 bash run-daily-audio-reliability.sh
 python3 scripts/ops/release-gate-report.py
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
+bash scripts/ops/transcripted-qa-bench.sh --mode full
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 swift test
@@ -47,10 +50,11 @@ Command ownership:
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
 - `run-e2e-smoke.sh` — thin root wrapper for deterministic release-critical artifact smoke
+- `run-slow-pasteback-smoke.sh` — thin root wrapper for the deterministic fake slow Cmd+V pasteback target smoke
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
-- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven menu bar/Home/Settings smoke
 - `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
 - `scripts/ops/compare-meeting-corpus.py` — local-only Transcripted-vs-Zoom corpus comparator for Downloads fixtures
 - `swift test` — `TranscriptedCore` package seam tests

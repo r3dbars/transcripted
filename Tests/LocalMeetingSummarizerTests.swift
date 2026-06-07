@@ -431,7 +431,18 @@ func testLocalMeetingSummarizer() async {
             assertTrue(currentMarkdown.contains("local_summary_runtime: \"mlx-vlm==0.6.1\""), "output should record the local runtime")
             assertTrue(currentMarkdown.contains("local_summary_profile: \"test\""), "output should record the runtime profile")
             assertTrue(currentMarkdown.contains("local_summary_chunk_count: \"1\""), "output should record the chunk count")
+            assertTrue(currentMarkdown.contains("local_summary_title: \"Launch Summary Review\""), "output should record the generated title")
+            assertTrue(currentMarkdown.contains("local_summary: \"Team agreed to keep the beta launch small and private.\""), "output should record the generated summary body")
+            assertTrue(currentMarkdown.contains("local_summary_decisions: \"Ship the smaller launch first.\""), "output should record generated decisions")
             assertTrue(currentMarkdown.contains("## Local Gemma Summary"), "summary should be written into the saved transcript")
+            assertTrue(
+                currentMarkdown.contains("### Summary\nTeam agreed to keep the beta launch small and private."),
+                "managed summary block should include the generated summary text"
+            )
+            assertTrue(
+                currentMarkdown.contains("### Decisions\nShip the smaller launch first."),
+                "managed summary block should include generated decisions"
+            )
             assertTrue(currentMarkdown.contains("### Action Items"), "managed summary block should keep the expected section shape")
             assertTrue(currentMarkdown.contains("## Transcript"), "original transcript should remain readable")
             assertFalse(
@@ -452,6 +463,45 @@ func testLocalMeetingSummarizer() async {
             assertFalse(capturedPrompt.contains("Ignore these later notes"), "post-transcript sections should not be sent to the model prompt")
         } catch {
             assertTrue(false, "successful summarizer fixture should run: \(error)")
+        }
+    }
+
+    runSuite("LocalGemmaSummaryRuntime stops a hung runner at the configured timeout") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryTimeoutTests-\(UUID().uuidString)", isDirectory: true)
+        let workDirectory = root.appendingPathComponent("work", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+            let runtime = try localMeetingSummaryProcessRuntime(
+                root: root,
+                runnerSource: """
+                import time
+                time.sleep(5)
+                """,
+                timeout: 0.25
+            )
+
+            let startedAt = Date()
+            do {
+                _ = try runtime.generate(
+                    prompt: "safe prompt",
+                    label: "direct",
+                    maxTokens: 16,
+                    workDirectory: workDirectory
+                )
+                assertTrue(false, "hung runner should time out")
+            } catch {
+                guard case LocalMeetingSummaryError.processTimedOut(let label) = error else {
+                    assertTrue(false, "expected processTimedOut, got \(error)")
+                    return
+                }
+                assertEqual(label, "direct", "timeout should preserve the prompt label")
+                assertTrue(Date().timeIntervalSince(startedAt) < 3, "timeout fixture should not hang the fast suite")
+            }
+        } catch {
+            assertTrue(false, "timeout fixture should run: \(error)")
         }
     }
 
@@ -504,6 +554,62 @@ func testLocalMeetingSummarizer() async {
             }
         } catch {
             assertTrue(false, "runtime-failure fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer leaves transcript untouched when the model is missing") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryMissingModelTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Meeting.md")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            let originalMarkdown = localMeetingSummaryMarkdown(title: "Launch Review", transcript: localMeetingSummaryLongTranscript())
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let runtime = try localMeetingSummaryProcessRuntime(
+                root: root,
+                runnerSource: """
+                import sys
+                sys.stderr.write("model load failed: missing model cache for mlx-community/gemma-4-12B-it-4bit\\n")
+                sys.stderr.write("prompt_file=/tmp/private-direct-prompt.txt\\n")
+                sys.stderr.write("/tmp/private-jobs.json\\n")
+                sys.exit(7)
+                """
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: runtime.configuration,
+                runtime: runtime
+            )
+
+            do {
+                _ = try await summarizer.summarize(
+                    transcriptURL: transcriptURL,
+                    title: "Launch Review",
+                    date: Date(timeIntervalSince1970: 1_780_000_000)
+                )
+                assertTrue(false, "missing model should surface as a runtime failure")
+            } catch {
+                guard case LocalMeetingSummaryError.processFailed(let label, let exitCode, let detail) = error else {
+                    assertTrue(false, "expected processFailed, got \(error)")
+                    return
+                }
+                assertEqual(label, "direct", "missing-model failure should keep its prompt label")
+                assertEqual(exitCode, 7, "missing-model exit code should be preserved")
+                assertTrue(detail.contains("missing model cache"), "missing-model detail should be visible to the degraded state")
+                assertFalse(detail.contains("prompt_file"), "runtime detail should not leak prompt file keys")
+                assertFalse(detail.contains("jobs.json"), "runtime detail should not leak jobs file paths")
+                assertFalse(detail.contains("-prompt.txt"), "runtime detail should not leak prompt file paths")
+                let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+                assertEqual(currentMarkdown, originalMarkdown, "missing model should not rewrite the transcript")
+                assertFalse(
+                    currentMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker),
+                    "missing model should not write a managed summary block"
+                )
+            }
+        } catch {
+            assertTrue(false, "missing-model fixture should run: \(error)")
         }
     }
 
@@ -736,6 +842,56 @@ private func localMeetingSummaryTestConfiguration() -> LocalGemmaSummaryConfigur
         processNiceValue: 0,
         cpuThreadLimit: 1,
         interJobCooldownSeconds: 0
+    )
+}
+
+private func localMeetingSummaryProcessRuntime(
+    root: URL,
+    runnerSource: String,
+    timeout: TimeInterval = 2
+) throws -> LocalGemmaSummaryRuntime {
+    let runnerURL = root.appendingPathComponent("gemma4_mlx_prompt_runner.py")
+    let uvURL = root.appendingPathComponent("uv")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try runnerSource.write(to: runnerURL, atomically: true, encoding: .utf8)
+    try """
+    #!/bin/sh
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = "python" ]; then
+        shift
+        exec /usr/bin/python3 "$@"
+      fi
+      shift
+    done
+    echo "missing python runner" >&2
+    exit 127
+    """.write(to: uvURL, atomically: true, encoding: .utf8)
+    chmod(uvURL.path, 0o755)
+
+    let configuration = LocalGemmaSummaryConfiguration(
+        modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+        runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
+        profileName: "process-fixture",
+        minimumPhysicalMemoryBytes: 0,
+        chunkCharacterLimit: 100_000,
+        chunkMaxTokens: 64,
+        directMaxTokens: 64,
+        mergeMaxTokens: 64,
+        maxKVSize: 1_024,
+        processTimeoutSeconds: timeout,
+        processNiceValue: 0,
+        cpuThreadLimit: 1,
+        interJobCooldownSeconds: 0
+    )
+
+    return LocalGemmaSummaryRuntime(
+        configuration: configuration,
+        environment: [
+            "TRANSCRIPTED_UV_PATH": uvURL.path,
+            "PATH": "/usr/bin:/bin",
+            "HOME": root.path
+        ],
+        runnerURLOverride: runnerURL
     )
 }
 

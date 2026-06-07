@@ -168,6 +168,42 @@ final class ValidatorTests: XCTestCase {
         )
     }
 
+    func testUIAutomationSmokeReportExitCodesSeparateIncompleteFromFailure() {
+        var incompleteBuilder = UIAutomationSmokeReportBuilder(
+            runID: "fixture",
+            appBundlePath: "build/Transcripted.app",
+            reportPath: nil
+        )
+        incompleteBuilder.add(.pass("app-bundle", "Built app bundle exists", target: "build/Transcripted.app"))
+        incompleteBuilder.add(.incomplete(
+            "accessibility-permission",
+            "Automation runner has Accessibility access",
+            target: "macOS Accessibility",
+            detail: "blocked"
+        ))
+
+        let incompleteReport = incompleteBuilder.build(generatedAt: Date(timeIntervalSince1970: 1_777_777_777))
+        XCTAssertEqual(incompleteReport.status, .incomplete)
+        XCTAssertEqual(incompleteReport.exitCode, 3)
+
+        var failedBuilder = UIAutomationSmokeReportBuilder(
+            runID: "fixture",
+            appBundlePath: "build/Transcripted.app",
+            reportPath: nil
+        )
+        failedBuilder.add(.pass("app-bundle", "Built app bundle exists", target: "build/Transcripted.app"))
+        failedBuilder.add(.fail(
+            "menu-identifiers",
+            "Menu bar popover exposes core controls",
+            target: "menubar",
+            detail: "missing controls"
+        ))
+
+        let failedReport = failedBuilder.build(generatedAt: Date(timeIntervalSince1970: 1_777_777_777))
+        XCTAssertEqual(failedReport.status, .fail)
+        XCTAssertEqual(failedReport.exitCode, 1)
+    }
+
     func testValidationReportJSONIncludesAutomationSummaryAndFingerprints() throws {
         let generatedAt = Date(timeIntervalSince1970: 1_777_777_777)
         let report = ValidationReport(

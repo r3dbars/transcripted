@@ -186,6 +186,19 @@ def worst_status(items: list[ReportItem]) -> str:
     return max((item.status for item in items), key=lambda status: STATUS_ORDER[status])
 
 
+def sync_command_record_status(record: CommandRecord, items: list[ReportItem]) -> None:
+    if not items:
+        return
+    parsed_status = worst_status(items)
+    if STATUS_ORDER[parsed_status] <= STATUS_ORDER[record.status]:
+        return
+
+    record.status = parsed_status
+    first_non_green = next((item for item in items if item.status != "green"), None)
+    if first_non_green is not None:
+        record.detail = first_non_green.detail or first_non_green.title
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -369,6 +382,7 @@ def run_release_surfaces(args: argparse.Namespace, root: Path, out_dir: Path, co
                 record.log_path,
             )
         )
+    sync_command_record_status(record, items)
     return items
 
 
@@ -665,6 +679,24 @@ def parse_args() -> argparse.Namespace:
 def self_test() -> int:
     root = repo_root()
     generated_at = "2026-06-07T00:00:00Z"
+    release_record = CommandRecord(
+        title="Release surfaces",
+        status="green",
+        exit_code=0,
+        command="python3 scripts/ops/nightly-security-check.py",
+        log_path="/tmp/release-surfaces.log",
+        detail="Nightly security score: 100/100",
+    )
+    sync_command_record_status(
+        release_record,
+        [
+            ReportItem(
+                "appcast-release-candidate",
+                "red",
+                "Release candidate appcast metadata is newer than the shipped production release.",
+            )
+        ],
+    )
     report, payload = render_report(
         root=root,
         out_dir=Path("/tmp/transcripted-release-gate/self-test"),
@@ -678,7 +710,7 @@ def self_test() -> int:
         release_surfaces=[ReportItem("appcast", "green", "Fixture pass.")],
         local_logs=[ReportItem("events.jsonl", "yellow", "Fixture warning count.")],
         manual=[ReportItem("Meeting route proof", "yellow", "Fixture manual item.")],
-        commands=[],
+        commands=[release_record],
     )
     required = [
         "Automated Proof",
@@ -691,10 +723,12 @@ def self_test() -> int:
     ]
     missing = [marker for marker in required if marker not in report]
     blocking_watch_ok = release_watch_status({"check_id": "appcast-release-candidate"}) == "red"
-    if missing or payload["status"] != "yellow" or not blocking_watch_ok:
+    release_command_ok = release_record.status == "red"
+    if missing or payload["status"] != "yellow" or not blocking_watch_ok or not release_command_ok:
         print(
             f"release-gate-report self-test failed: missing={missing}, "
-            f"status={payload['status']}, blocking_watch_ok={blocking_watch_ok}",
+            f"status={payload['status']}, blocking_watch_ok={blocking_watch_ok}, "
+            f"release_command_ok={release_command_ok}",
             file=sys.stderr,
         )
         return 1

@@ -31,6 +31,13 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "Tests/E2E/SlowPastebackSmoke.swift"
+      - "run-slow-pasteback-smoke.sh"
+      - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
+    checks:
+      - "bash run-slow-pasteback-smoke.sh"
+
+  - paths:
       - "build-deps.sh"
       - "scripts/entrypoints/build-deps.sh"
     checks:
@@ -145,11 +152,16 @@ rules:
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/ops/run-local-summary-fixture.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
+      - "bash -n scripts/ops/transcripted-qa-bench.sh"
+      - "bash -n scripts/ops/run-local-summary-fixture.sh"
+      - "bash scripts/ops/run-local-summary-fixture.sh"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      - "swift test --package-path Tools/TranscriptedQA"
       - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
 
@@ -263,5 +275,7 @@ rules:
 notes:
   - "If a change matches multiple rules, run the union of checks."
   - "When in doubt, prefer the stricter AGENTS.md rule."
+  - "PR-level overlays still apply: meaningful code needs codex-review against the real PR base; broad or release-impacting work needs bash scripts/ops/transcripted-qa-bench.sh --mode full."
+  - "Tiny docs-only PRs intentionally stay on preflight/mapped docs checks unless they change release truth, QA gates, appcast/update flow, Homebrew, or public download truth."
   - "Live capture smoke requires local microphone and System Audio Recording permissions; document permission blockers explicitly."
   - "UI changes should include sanitized review visuals under .agent-review/visuals/."

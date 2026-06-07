@@ -185,7 +185,9 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
+            add_command "bash -n scripts/ops/transcripted-qa-bench.sh"
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+            add_command "swift test --package-path Tools/TranscriptedQA"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
         fi
