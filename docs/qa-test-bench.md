@@ -192,6 +192,34 @@ Transcripted output against the corpus.
 The corpus is private local test data, so it stays out of the required agent
 test matrix. Use the corpus mode only on machines that have the corpus.
 
+## Release Gate Report
+
+Use this when you want one pre-merge or release-candidate report instead of
+separate build, telemetry, release-surface, and log checks:
+
+```bash
+python3 scripts/ops/release-gate-report.py
+```
+
+The default command runs the quick QA bench, Sentry and PostHog health probes,
+live appcast/download/release-health checks, and a local aggregate log sweep.
+It writes:
+
+```text
+/tmp/transcripted-release-gate/<run-id>/release-gate-report.md
+/tmp/transcripted-release-gate/<run-id>/release-gate-report.json
+```
+
+For a deeper release-candidate pass:
+
+```bash
+python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
+```
+
+Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
+treated as green proof. Actual release-surface drift or required release-health
+failures are `RED`.
+
 ## Short Output
 
 Every bench report starts with a plain short answer:

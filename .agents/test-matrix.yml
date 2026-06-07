@@ -119,6 +119,13 @@ rules:
       - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json --write-report build/nightly-security-report.json"
 
   - paths:
+      - "scripts/ops/release-gate-report.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-gate-report.py"
+      - "python3 scripts/ops/release-gate-report.py --self-test"
+
+  - paths:
       - "scripts/ops/privacy-leak-sweep.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
