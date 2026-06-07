@@ -167,8 +167,8 @@ private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
 
     do {
         try process.run()
-        process.waitUntilExit()
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
         return ShellResult(status: process.terminationStatus, output: output)
     } catch {
         return ShellResult(status: -127, output: String(describing: error))
