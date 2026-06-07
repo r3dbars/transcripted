@@ -4,7 +4,7 @@
 # - test-matrix.yml maps changed paths to local verification commands.
 # - qa-gates.yml maps product risk and agent lanes to the gate that proves it.
 
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-07
 
 source_docs:
   - AGENTS.md
@@ -52,16 +52,37 @@ test_layers:
       quick: "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
+      ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
       corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
       corpus_compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
       live: "bash scripts/ops/transcripted-qa-bench.sh --mode live"
     proves:
-      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release health, Gemma summary planning, corpus, and live capture proof"
+      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release-health, optional Gemma planning, corpus, and live capture proof"
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
+      - "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof. Real connected AirPods/Bluetooth hardware remains manual proof."
+
+  permission_state:
+    command: "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use"
+    proves:
+      - "Codex/computer-use host permissions are ready before screenshots, clicks, or Apple Events are counted"
+      - "Transcripted app bundle identity matches the expected TCC bundle id"
+    agent_notes:
+      - "Permission blockers are INCOMPLETE, not green."
+      - "Use --mode live-capture before local mic/system-audio capture proof."
+
+  ui_automation_smoke:
+    command: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+    proves:
+      - "the built app can be launched and observed through macOS Accessibility"
+      - "menu bar, Home, Settings, and General controls expose stable visible/clickable AX identifiers"
+      - "the runner reports Accessibility/TCC blockers as INCOMPLETE instead of green"
+    agent_notes:
+      - "Requires Accessibility permission for the terminal or Codex runner."
+      - "Does not prove microphone, system audio, Bluetooth, sleep/wake, or subjective UI feel."
 
   live_capture_smoke:
     command: "bash run-live-capture-smoke.sh"
@@ -158,6 +179,7 @@ recommended_gates:
     required_for:
       - "real meeting-app volume behavior"
       - "mic and system-audio TCC behavior"
+      - "fresh TCC grant, deny, and revoke behavior"
       - "Bluetooth or input-device switching"
       - "sleep/wake during capture"
       - "pasteback feel in real apps"
@@ -174,17 +196,18 @@ coverage_gaps:
     current_coverage:
       - "fast policy tests for settings/menu/home state"
       - "build launch smoke with menu-bar JSON snapshot"
+      - "Accessibility-driven QA bench ui smoke for menu bar, Home, Settings, and General navigation"
     missing_automation:
-      - "stable UI automation identifiers across main menu/settings flows"
       - "sanitized screenshot or accessibility-tree review for first-value, meeting, dictation, speaker review, and agent-connect flows"
 
   audio:
     current_coverage:
       - "synthetic audio reliability matrix"
+      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, and stop/save artifact outcomes"
       - "live capture smoke for mic and system audio"
       - "fast/core tests for failure policy, recovery state, and archive handling"
     missing_automation:
-      - "repeatable route matrix for built-in mic, Bluetooth, quiet mic, system audio unavailable, and fast stop"
+      - "real-app route matrix for Chrome/Safari/Firefox Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof"
       - "trend report over local events for start latency, stop latency, recovery attempts, and route changes"
 
   storage:

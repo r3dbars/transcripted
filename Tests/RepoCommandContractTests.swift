@@ -8,6 +8,7 @@ func testRepoCommandContract() {
             "build.sh": "scripts/entrypoints/build.sh",
             "run-e2e-smoke.sh": "scripts/entrypoints/run-e2e-smoke.sh",
             "run-live-capture-smoke.sh": "scripts/entrypoints/run-live-capture-smoke.sh",
+            "run-slow-pasteback-smoke.sh": "scripts/entrypoints/run-slow-pasteback-smoke.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
         ]
@@ -100,6 +101,12 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - PostHog health probe keeps aggregate daily active-device trend") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
+        let workflowEvents = sourceSlice(
+            contents,
+            from: "workflow_events=",
+            to: "  onboarding_events="
+        )
 
         assertTrue(
             contents.contains("daily_query=")
@@ -118,6 +125,10 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("PostHog daily active device ids"),
             "PostHog probe should not print user or device identifiers"
+        )
+        assertTrue(
+            workflowEvents.contains("meeting_file_imported") && digest.contains("\"meeting_file_imported\""),
+            "aggregate active-device workflow sets should count imported audio activity"
         )
     }
 
@@ -160,6 +171,10 @@ func testRepoCommandContract() {
         assertTrue(
             probe.contains("first_value_events=") && probe.contains("first_value_events_7d"),
             "PostHog probe should keep the aggregate first-value event count"
+        )
+        assertFalse(
+            firstValueEvents.contains("meeting_file_imported"),
+            "imported audio should count as activity but not as first value"
         )
     }
 
@@ -240,13 +255,15 @@ func testRepoCommandContract() {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
-            qaBench.contains("quick|deep|full|artifact|audio-synthetic|corpus|corpus-compare|live")
+            qaBench.contains("quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
                 && qaBench.contains("run_full_tail")
                 && qaBench.contains("60-release-health")
                 && qaBench.contains("61-gemma-summary-plan")
+                && qaBench.contains("Local Gemma summary dry-run plan not applicable (no eligible local transcripts)")
                 && qaBench.contains("Operator Verdict")
-                && qaBench.contains("Release:"),
-            "QA bench should expose a full gate with release-health, Gemma planning, and operator verdict rows"
+                && qaBench.contains("Release:")
+                && qaBench.contains("HOLD - automated full gate is green, but manual proof is still required"),
+            "QA bench should expose a full gate with release-health, optional Gemma planning, and non-false-green operator verdict rows"
         )
         assertTrue(
             qaGates.contains("full: \"bash scripts/ops/transcripted-qa-bench.sh --mode full\"")
@@ -273,6 +290,7 @@ func testRepoCommandContract() {
                 && qaBenchDoc.contains("Needs human")
                 && qaBenchDoc.contains("Release GO/HOLD")
                 && testsReadme.contains("--mode full")
+                && testsReadme.contains("--mode ui")
                 && testsReadme.contains("not every-PR requirements"),
             "QA bench docs should explain full mode and keep tiny PRs out of mandatory release QA"
         )
@@ -1306,6 +1324,45 @@ func testRepoCommandContract() {
                 && contents.contains("\"stop_to_paste_bucket\"")
                 && contents.contains("\"stop_to_done_bucket\""),
             "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
+        )
+    }
+
+    runSuite("Repo command contract - dictation Auto Enter stays after paste readiness") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let saveBeforeAutoEnterBlock = sourceSlice(
+            contents,
+            from: "case .saveBeforeAutoEnter:",
+            to: "let wordCount = text.split"
+        )
+        let saveTaskRange = saveBeforeAutoEnterBlock.range(of: "let saveTask = self.startPersistingDictationTranscript")
+        let autoEnterRange = saveBeforeAutoEnterBlock.range(of: "autoSendOutcome = await self.performAutoEnterIfNeeded")
+        let finishSaveRange = saveBeforeAutoEnterBlock.range(of: "saveFailureMessage = await self.finishPersistingDictationTranscript")
+
+        assertTrue(
+            saveTaskRange != nil
+                && autoEnterRange != nil
+                && finishSaveRange != nil
+                && saveTaskRange!.lowerBound < autoEnterRange!.lowerBound
+                && autoEnterRange!.lowerBound < finishSaveRange!.lowerBound,
+            "default stop finalization should start saving, wait/send Auto Enter, then await the save result"
+        )
+
+        let autoEnterBlock = sourceSlice(
+            contents,
+            from: "private func performAutoEnterIfNeeded(",
+            to: "@discardableResult"
+        )
+        let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
+        let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
+
+        assertTrue(
+            delayRange != nil
+                && readinessRange != nil
+                && sendRange != nil
+                && delayRange!.lowerBound < readinessRange!.lowerBound
+                && readinessRange!.lowerBound < sendRange!.lowerBound,
+            "Auto Enter should sleep briefly, wait for clipboard read/readiness, then send the follow-up key"
         )
     }
 

@@ -65,6 +65,47 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — restores multi-item non-string snapshots") {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
+            let customData = Data([0xde, 0xad, 0xbe, 0xef])
+            let originalString = "original rich clipboard"
+            let temporary = "temporary dictation"
+
+            let stringItem = NSPasteboardItem()
+            stringItem.setString(originalString, forType: .string)
+            let customItem = NSPasteboardItem()
+            customItem.setData(customData, forType: customType)
+            pasteboard.clearContents()
+            pasteboard.writeObjects([stringItem, customItem])
+            let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
+
+            pasteboard.clearContents()
+            pasteboard.setString(temporary, forType: .string)
+            let temporaryChangeCount = pasteboard.changeCount
+
+            paster.restorePasteboardItems(
+                snapshot,
+                temporaryString: temporary,
+                temporaryChangeCount: temporaryChangeCount,
+                to: pasteboard
+            )
+
+            let restoredItems = pasteboard.pasteboardItems ?? []
+            assertEqual(restoredItems.count, 2, "restore should preserve the original item count")
+            assertEqual(
+                restoredItems.first?.string(forType: .string),
+                originalString,
+                "restore should preserve string data from the original snapshot"
+            )
+            assertEqual(
+                restoredItems.dropFirst().first?.data(forType: customType),
+                customData,
+                "restore should preserve non-string data from the original snapshot"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.paste — dispatches after dictation text is on the pasteboard") {
             let pasteboard = FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
             let paster = ClipboardRestoringTextPaster()
@@ -418,6 +459,7 @@ func testClipboardRestoringTextPaster() async {
     await runSuite("ClipboardRestoringTextPaster.waitForClipboardReadyForAutoEnter — waits when no pasteboard read occurs") {
         let existingClipboard = "synthetic existing clipboard"
         let pasteText = "synthetic unread paste text"
+        let fallbackRestoreDelay: UInt64 = 40_000_000
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
@@ -432,18 +474,28 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
-                fallbackRestoreDelay: 20_000_000
+                fallbackRestoreDelay: fallbackRestoreDelay
             )
         }
 
         assertEqual(outcome, .pasted, "valid pasteback should report automatic paste")
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        let borrowedClipboardBeforeFallback = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            borrowedClipboardBeforeFallback,
+            pasteText,
+            "without a pasteboard read, borrowed dictation should remain available before fallback restore"
+        )
+
         let started = Date()
         let readyTask = Task { @MainActor in
             await paster.waitForClipboardReadyForAutoEnter()
         }
         await readyTask.value
         let elapsed = Date().timeIntervalSince(started)
-        assertTrue(elapsed >= 0.01, "without a pasteboard read, auto-enter should still wait for fallback restore")
+        assertTrue(elapsed >= 0.025, "without a pasteboard read, auto-enter should still wait for fallback restore")
         let restoredClipboard = await MainActor.run {
             pasteboard.string(forType: .string)
         }

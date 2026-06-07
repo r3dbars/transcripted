@@ -112,6 +112,50 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingItem.hasGeneratedTitle detects distinct generated summary titles") {
+        let item = sampleRecentMeetingTitleItem(
+            title: "Original Capture",
+            summaryPreview: sampleRecentMeetingSummaryPreview(title: "Generated Summary")
+        )
+
+        assertEqual(item.displayTitle, "Generated Summary", "generated summary title should drive Home display")
+        assertTrue(item.hasGeneratedTitle, "distinct generated titles should be marked as generated")
+    }
+
+    runSuite("RecentMeetingItem.hasGeneratedTitle stays false without a summary preview") {
+        let item = sampleRecentMeetingTitleItem(
+            title: "Original Capture",
+            summaryPreview: nil
+        )
+
+        assertEqual(item.displayTitle, "Original Capture", "meetings without summaries should keep the original title")
+        assertFalse(item.hasGeneratedTitle, "missing summary previews should not look generated")
+    }
+
+    runSuite("RecentMeetingItem.hasGeneratedTitle stays false when the summary title is nil") {
+        let item = sampleRecentMeetingTitleItem(
+            title: "Original Capture",
+            summaryPreview: sampleRecentMeetingSummaryPreview(title: nil)
+        )
+
+        assertEqual(item.displayTitle, "Original Capture", "summaries without generated titles should keep the original title")
+        assertFalse(item.hasGeneratedTitle, "nil generated titles should not show generated-title treatment")
+    }
+
+    runSuite("RecentMeetingItem.hasGeneratedTitle ignores case and diacritic-only differences") {
+        let caseOnly = sampleRecentMeetingTitleItem(
+            title: "Planning Review",
+            summaryPreview: sampleRecentMeetingSummaryPreview(title: "planning review")
+        )
+        let diacriticOnly = sampleRecentMeetingTitleItem(
+            title: "Resume Review",
+            summaryPreview: sampleRecentMeetingSummaryPreview(title: "Résumé Review")
+        )
+
+        assertFalse(caseOnly.hasGeneratedTitle, "case-only title differences should not show generated-title treatment")
+        assertFalse(diacriticOnly.hasGeneratedTitle, "diacritic-only title differences should not show generated-title treatment")
+    }
+
     runSuite("RecentMeetingSpeakerReviewActionPolicy hides stale meeting review buttons when people queue is clean") {
         assertFalse(
             RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
@@ -1694,6 +1738,31 @@ func testRecentCaptureLoader() async {
             assertEqual(meetings.map(\.title), ["Valid Meeting E", "Valid Meeting F"], "unreadable newer markdown should fail closed without starving valid meeting rows")
         }
     }
+}
+
+private func sampleRecentMeetingTitleItem(
+    title: String,
+    summaryPreview: RecentMeetingSummaryPreview?
+) -> RecentMeetingItem {
+    RecentMeetingItem(
+        title: title,
+        date: Date(timeIntervalSinceReferenceDate: 10),
+        startDate: nil,
+        endDate: nil,
+        transcriptURL: FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-meeting.md"),
+        audio: nil,
+        speakerStatus: .ready,
+        summaryPreview: summaryPreview
+    )
+}
+
+private func sampleRecentMeetingSummaryPreview(title: String?) -> RecentMeetingSummaryPreview {
+    RecentMeetingSummaryPreview(
+        title: title,
+        summary: "Synthetic summary.",
+        sections: [],
+        url: FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-summary.md")
+    )
 }
 
 private func withTemporaryRecentCaptureLibrary(

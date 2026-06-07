@@ -12,10 +12,10 @@ time. Use it with `.agents/test-matrix.yml` and `.agents/qa-gates.yml`.
 As of 2026-06-06, the repo has these automated layers:
 
 - `bash run-tests.sh`: manifest-driven fast runner for app-facing logic. The
-  root `Tests/` set has 101 Swift test files and must stay aligned with
+  root `Tests/` set has 105 Swift test files and must stay aligned with
   `Tests/FastTests.manifest`.
 - `bash build.sh --no-open`: authoritative menubar app build.
-- `swift test`: Swift Package tests for `TranscriptedCore`; currently 32 core
+- `swift test`: Swift Package tests for `TranscriptedCore`; currently 33 core
   test files under `Tests/TranscriptedCoreTests/`.
 - `bash run-integration-smoke.sh`: app/core linkage, wake recovery, and selected
   core smoke coverage from `Tests/Integration/`.
@@ -23,9 +23,13 @@ As of 2026-06-06, the repo has these automated layers:
   dictation, meeting, MCP, retained-audio, and diagnostics contracts.
 - `bash run-live-capture-smoke.sh`: local mic plus system-audio smoke. This is a
   local hardware/TCC gate, not default CI.
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state`:
+  no-prompt Codex/computer-use permission preflight for Accessibility, event
+  posting, input monitoring, screen capture, Automation, microphone state, and
+  Transcripted app identity.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `full`, `artifact`, `audio-synthetic`, `corpus`,
-  `corpus-compare`, and `live`.
+  reports for `quick`, `deep`, `full`, `ui`, `artifact`, `audio-synthetic`,
+  `corpus`, `corpus-compare`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
 - BET-88 GitHub workflows: historical label-gated fixtures for the closed QA
@@ -33,17 +37,20 @@ As of 2026-06-06, the repo has these automated layers:
 
 ## Main Gaps
 
-- UI: there are good policy tests, but not enough stable UI automation
-  identifiers, accessibility-tree checks, or sanitized screenshots for the core
-  user flows.
-- Audio: synthetic and live smoke exist, but there is not yet a repeated route
-  matrix over built-in mic, Bluetooth, quiet mic, missing system audio, wake, and
-  fast stop.
+- UI: there are good policy tests, plus `--mode ui` now drives the built app
+  through Accessibility for menu bar, Home, Settings, and General navigation.
+  Codex/computer-use also needs permission-state proof before click results
+  count. Deeper sheets, media controls, and sanitized screenshots still need
+  coverage.
+- Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
+  mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
+  Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.
-- Release: fixture release-health now runs inside the full QA bench, while live
-  release surfaces still need network and credential-backed verification.
+- Release: release docs and scripts exist, but agents need one release-health
+  report that compares source truth with GitHub release, appcast, cask, live
+  download, crawler text, and Sentry metadata.
 - Privacy: sanitizer tests exist, but QA bench reports, generated PR text, local
   logs, and release notes need a single leakage sweep.
 - Summaries: summary preferences and local summarizer behavior have tests, but
@@ -58,8 +65,13 @@ Pre-merge should stay path-based:
 
 - Run `scripts/dev/agent-preflight.sh`.
 - Run the union from `.agents/test-matrix.yml`.
+- Add `bash scripts/ops/transcripted-qa-bench.sh --mode quick` when the diff is
+  broad, cross-module, or user-visible.
+- Add `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when the diff
+  changes menu bar, Home, Settings, or navigation and Accessibility permission
+  is available locally.
 - Add `bash scripts/ops/transcripted-qa-bench.sh --mode full` when the diff is
-  broad, cross-module, risky, or release-impacting.
+  release-impacting or needs a broad owner-style automated gate.
 - Do not mark green if a required check was skipped without a blocker reason.
 
 Nightly should produce a report, not just raw logs:
@@ -80,6 +92,10 @@ Release-candidate should prove the shipped path:
 - Run `bash run-e2e-smoke.sh`.
 - Run `swift test`.
 - Run `bash scripts/ops/transcripted-qa-bench.sh --mode full`.
+- Run `bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts`.
+- Run `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when Accessibility
+  permission is available and the release confidence call needs visible UI
+  proof.
 - Run `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging
   smoke, or the full notarized path for a real release.
 - If users should receive the build, also verify Sparkle, Homebrew, live
@@ -89,6 +105,7 @@ Manual proof is still required for:
 
 - real meeting-app volume behavior
 - microphone and System Audio Recording permission behavior
+- fresh TCC grant/deny/revoke behavior for Codex and Transcripted
 - Bluetooth or input-device switching
 - sleep/wake during capture
 - pasteback feel in real apps
@@ -113,12 +130,13 @@ into PRs, issues, or agent reports.
 
 ## Next High-Value Automations
 
-1. Add UI automation surface IDs and a sanitized UI snapshot gate for first
-   value, meeting, dictation, speaker review, and agent connect.
-2. Add an audio route matrix that can run synthetic in CI-like automation and
-   live on Justin's Mac.
-3. Add a live release-health report that compares source, GitHub, appcast,
-   cask, live download, crawler text, and Sentry metadata.
+1. Add UI automation surface IDs, permission-state gating, and a sanitized UI
+   snapshot gate for first value, meeting, dictation, speaker review, and agent
+   connect.
+2. Add a real-app route trend report for Justin's Mac: Chrome/Safari/Firefox
+   Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof.
+3. Add a release-health report that compares source, GitHub, appcast, cask,
+   live download, crawler text, and Sentry metadata.
 4. Add storage invariants for relocated capture libraries, retained-audio
    cleanup, compression, and fallback paths.
 5. Add a support bug seed registry so future agents know which bugs have an
