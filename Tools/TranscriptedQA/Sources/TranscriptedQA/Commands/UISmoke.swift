@@ -103,20 +103,25 @@ private final class UIAutomationSmokeRunner {
         }
         builder.add(.pass("app-bundle", "Built app bundle exists", target: appBundleURL.path))
 
-        if !allowExistingInstance {
-            let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.justinbetker.draft")
-                .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-            if !existing.isEmpty {
-                builder.add(.incomplete(
-                    "existing-instance",
-                    "No existing Transcripted process is running",
-                    target: "com.justinbetker.draft",
-                    detail: "Quit Transcripted first, or pass --allow-existing-instance. Duplicate menu bar items make AX targeting ambiguous."
-                ))
-                return builder.build()
-            }
+        let existing = existingTranscriptedInstances()
+        if !existing.isEmpty && !allowExistingInstance {
+            builder.add(.incomplete(
+                "existing-instance",
+                "No existing Transcripted process is running",
+                target: "com.justinbetker.draft",
+                detail: "Quit Transcripted first, or pass --allow-existing-instance. Duplicate menu bar items make AX targeting ambiguous."
+            ))
+            return builder.build()
         }
-        builder.add(.pass("existing-instance", "No existing Transcripted process is running", target: "com.justinbetker.draft"))
+        if existing.isEmpty {
+            builder.add(.pass("existing-instance", "No existing Transcripted process is running", target: "com.justinbetker.draft"))
+        } else {
+            builder.add(.pass(
+                "existing-instance",
+                "Existing Transcripted processes were explicitly allowed",
+                target: "\(existing.count) existing process(es)"
+            ))
+        }
 
         guard isAccessibilityTrusted(prompt: promptForAccessibility) else {
             builder.add(.incomplete(
@@ -184,23 +189,10 @@ private final class UIAutomationSmokeRunner {
         }
         builder.add(.pass("launch-app", "Transcripted launches from built app", target: executableURL.path))
 
-        guard let systemUIServerAX = systemUIServerElement() else {
-            builder.add(.incomplete(
-                "system-ui-server",
-                "SystemUIServer AX tree is readable",
-                target: "SystemUIServer",
-                detail: "Could not find SystemUIServer. This blocks status item automation."
-            ))
-            return builder.build()
-        }
-
-        let systemInspector = AXInspector(root: systemUIServerAX)
-        guard let statusItem = waitForNode(timeout: timeout, inspector: systemInspector, description: "Transcripted status item", match: { node in
+        let appInspector = AXInspector(root: appAX)
+        guard let statusItem = waitForNode(timeout: timeout, inspector: appInspector, description: "Transcripted status item", match: { node in
             node.observed.identifier == "transcripted.status-item.button"
-                || node.observed.title == "Transcripted"
-                || node.observed.help == "Transcripted"
-                || node.observed.description == "Transcripted"
-        }) else {
+        }) ?? systemUIServerStatusItem() else {
             builder.add(.fail(
                 "status-item",
                 "Transcripted status item is visible to AX",
@@ -226,7 +218,6 @@ private final class UIAutomationSmokeRunner {
             return builder.build()
         }
 
-        let appInspector = AXInspector(root: appAX)
         let menuRequiredIDs = [
             "transcripted.menubar.primary.home",
             "transcripted.menubar.primary.start-dictation",
@@ -323,8 +314,7 @@ private final class UIAutomationSmokeRunner {
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
-        guard let generalSidebar = appInspector.first(identifier: "transcripted.settings.sidebar.general"),
-              AXInspector.performPress(generalSidebar.element) else {
+        guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.general") else {
             builder.add(.fail(
                 "settings-navigation",
                 "Settings sidebar navigates to General",
@@ -374,6 +364,11 @@ private final class UIAutomationSmokeRunner {
     private func isAccessibilityTrusted(prompt: Bool) -> Bool {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         return AXIsProcessTrustedWithOptions([promptKey: prompt] as CFDictionary)
+    }
+
+    private func existingTranscriptedInstances() -> [NSRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.justinbetker.draft")
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
     }
 
     private func prepareIsolatedHome() throws -> URL {
@@ -436,6 +431,16 @@ private final class UIAutomationSmokeRunner {
         return element
     }
 
+    private func systemUIServerStatusItem() -> AXNode? {
+        guard let systemUIServerAX = systemUIServerElement() else { return nil }
+        return waitForNode(timeout: timeout, inspector: AXInspector(root: systemUIServerAX), description: "Transcripted status item fallback", match: { node in
+            node.observed.identifier == "transcripted.status-item.button"
+                || node.observed.title == "Transcripted"
+                || node.observed.help == "Transcripted"
+                || node.observed.description == "Transcripted"
+        })
+    }
+
     private func observedElements(for identifiers: [String], inspector: AXInspector) -> [AXObservedElement] {
         let nodes = inspector.snapshotNodes(maxDepth: 12)
         return identifiers.map { identifier in
@@ -489,6 +494,46 @@ private struct AXInspector {
         snapshotNodes(maxDepth: 12).first { $0.observed.identifier == identifier }
     }
 
+    func performPress(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> Bool {
+        var queue: [(element: AXUIElement, depth: Int, ancestors: [AXUIElement])] = [(root, 0, [])]
+        var visited = Set<CFHashCode>()
+        var visitedCount = 0
+
+        while !queue.isEmpty, visitedCount < maxNodes {
+            let (element, depth, ancestors) = queue.removeFirst()
+            let key = CFHash(element)
+            if visited.contains(key) { continue }
+            visited.insert(key)
+            visitedCount += 1
+
+            if observedElement(for: element).identifier == identifier {
+                for candidate in [element] + ancestors.reversed() {
+                    if Self.performPress(candidate) {
+                        return true
+                    }
+                }
+                return false
+            }
+
+            guard depth < maxDepth else { continue }
+            for child in children(of: element) {
+                queue.append((child, depth + 1, ancestors + [element]))
+            }
+        }
+
+        return false
+    }
+
+    func performPressOrClick(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> Bool {
+        if performPress(identifier: identifier, maxDepth: maxDepth, maxNodes: maxNodes) {
+            return true
+        }
+        guard let frame = first(identifier: identifier)?.observed.frame else {
+            return false
+        }
+        return Self.performClick(frame: frame)
+    }
+
     func snapshot(maxDepth: Int = 10, maxNodes: Int = 2_000) -> [AXObservedElement] {
         snapshotNodes(maxDepth: maxDepth, maxNodes: maxNodes).map(\.observed)
     }
@@ -525,12 +570,25 @@ private struct AXInspector {
         return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
     }
 
+    static func performClick(frame: AXFrame) -> Bool {
+        let point = CGPoint(x: frame.x + frame.width / 2, y: frame.y + frame.height / 2)
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+            return false
+        }
+        down.post(tap: .cghidEventTap)
+        usleep(40_000)
+        up.post(tap: .cghidEventTap)
+        return true
+    }
+
     private func children(of element: AXUIElement) -> [AXUIElement] {
         let attributes = [
             kAXWindowsAttribute as String,
             kAXChildrenAttribute as String,
             kAXVisibleChildrenAttribute as String,
             kAXMenuBarAttribute as String,
+            "AXChildrenInNavigationOrder",
             "AXExtrasMenuBar",
             "AXContents",
         ]
