@@ -60,8 +60,9 @@ This adds:
 
 The synthetic audio step also reports an audio route automation proxy matrix so
 the bench names what is automated for dictation, meeting mic/system audio,
-WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
-does not replace live or manual route proof.
+WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security.
+Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof.
 
 Deep inherits the deterministic local summary fixture from quick. That fixture
 is shape and hang-guard proof only; real Gemma summary quality still needs
