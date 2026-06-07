@@ -125,6 +125,7 @@ struct TranscriptedQA: ParsableCommand {
             GenerateFixtures.self,
             RoundTrip.self,
             StressTest.self,
+            UISmoke.self,
         ],
         defaultSubcommand: ValidateAll.self
     )

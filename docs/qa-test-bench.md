@@ -26,6 +26,27 @@ This runs:
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
 artifact discovery still works without microphone or TCC prompts.
 
+## UI Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
+```
+
+This builds the app, then runs:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app
+```
+
+The smoke launches the built app with an isolated home directory, opens the real
+menu bar popover through Accessibility, opens Home/Settings, navigates to
+General, and validates stable `transcripted.*` controls are visible and enabled.
+It writes local JSON evidence under the QA run's `raw/` folder.
+
+This requires Accessibility permission for the terminal or Codex runner. If
+macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
+`3`. Do not treat that as product proof.
+
 ## Deep Run
 
 ```bash

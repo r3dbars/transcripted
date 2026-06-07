@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 24 Swift files total: `Package.swift`, 22 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 25 Swift files total: `Package.swift`, 23 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -24,6 +24,7 @@ The current package is intentionally small:
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
+| `UISmoke.swift` | Launch a built app and validate menu bar, Home, Settings, and General navigation through macOS Accessibility |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
 | `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
@@ -85,6 +86,9 @@ swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
 
+# UI automation smoke, local Accessibility permission required
+swift run transcripted-qa ui-smoke --app ../../build/Transcripted.app
+
 # Override nonstandard locations when captures are relocated
 swift run transcripted-qa validate-all --path /path/to/meetings --state-dir /path/to/state --log-path /path/to/app.jsonl
 
@@ -119,6 +123,7 @@ For agent and automation use, the JSON form also includes:
 - **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing
 - **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
+- **UI smoke**: `ui-smoke` checks stable AX identifiers and exits `3` for Accessibility/TCC blockers
 
 ## Gotchas
 

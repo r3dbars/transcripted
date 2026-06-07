@@ -29,7 +29,7 @@ CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|ui|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -37,6 +37,7 @@ Runs a local Transcripted QA bench and writes:
 Modes:
   quick            build, fast tests, deterministic E2E smoke
   deep             quick + integration, Core tests, QA CLI, synthetic audio
+  ui               build + Accessibility-driven menu bar/Home/Settings smoke
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
   corpus           validate a local private meeting corpus
@@ -171,7 +172,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|ui|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -495,6 +496,11 @@ run_live_tail() {
     "bash run-live-capture-smoke.sh --skip-build --duration $(shell_quote "${LIVE_DURATION}")"
 }
 
+run_ui_tail() {
+  run_step "04-ui-smoke" "UI automation smoke" "yes" \
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/ui-automation-smoke.json")"
+}
+
 run_corpus_tail() {
   local selected_ids="${1:-${CORPUS_IDS}}"
   local ids_arg=""
@@ -537,6 +543,15 @@ case "${MODE}" in
   deep)
     run_quick
     run_deep_tail
+    ;;
+  ui)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    if [[ "${SKIP_BUILD}" -eq 1 ]]; then
+      skip_step "01-build" "Build app"
+    else
+      run_step "01-build" "Build app" "yes" "bash build.sh --no-open"
+    fi
+    run_ui_tail
     ;;
   artifact)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"

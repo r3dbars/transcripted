@@ -39,6 +39,7 @@ final class MenuBarActionRowView: NSControl {
 
     override var isEnabled: Bool {
         didSet {
+            setAccessibilityEnabled(isEnabled)
             updateAppearance()
             window?.invalidateCursorRects(for: self)
         }
@@ -70,6 +71,8 @@ final class MenuBarActionRowView: NSControl {
         rowTone = tone
         rowSize = size
         self.isEnabled = isEnabled
+        setAccessibilityLabel(title)
+        setAccessibilityHelp(detail.isEmpty ? nil : detail)
 
         titleLabel.stringValue = title
         detailLabel.stringValue = detail
@@ -95,6 +98,10 @@ final class MenuBarActionRowView: NSControl {
     }
 
     private func setupViews() {
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityEnabled(isEnabled)
+
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.cardCornerRadius
 

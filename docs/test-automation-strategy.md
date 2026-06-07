@@ -24,7 +24,7 @@ As of 2026-06-06, the repo has these automated layers:
 - `bash run-live-capture-smoke.sh`: local mic plus system-audio smoke. This is a
   local hardware/TCC gate, not default CI.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `artifact`, `audio-synthetic`, `corpus`,
+  reports for `quick`, `deep`, `ui`, `artifact`, `audio-synthetic`, `corpus`,
   `corpus-compare`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
@@ -33,9 +33,9 @@ As of 2026-06-06, the repo has these automated layers:
 
 ## Main Gaps
 
-- UI: there are good policy tests, but not enough stable UI automation
-  identifiers, accessibility-tree checks, or sanitized screenshots for the core
-  user flows.
+- UI: there are good policy tests, plus `--mode ui` now drives the built app
+  through Accessibility for menu bar, Home, Settings, and General navigation.
+  Deeper sheets, media controls, and sanitized screenshots still need coverage.
 - Audio: synthetic and live smoke exist, but there is not yet a repeated route
   matrix over built-in mic, Bluetooth, quiet mic, missing system audio, wake, and
   fast stop.
@@ -61,6 +61,9 @@ Pre-merge should stay path-based:
 - Run the union from `.agents/test-matrix.yml`.
 - Add `bash scripts/ops/transcripted-qa-bench.sh --mode quick` when the diff is
   broad, cross-module, or user-visible.
+- Add `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when the diff
+  changes menu bar, Home, Settings, or navigation and Accessibility permission
+  is available locally.
 - Do not mark green if a required check was skipped without a blocker reason.
 
 Nightly should produce a report, not just raw logs:
@@ -81,6 +84,9 @@ Release-candidate should prove the shipped path:
 - Run `bash run-e2e-smoke.sh`.
 - Run `swift test`.
 - Run `bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts`.
+- Run `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when Accessibility
+  permission is available and the release confidence call needs visible UI
+  proof.
 - Run `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging
   smoke, or the full notarized path for a real release.
 - If users should receive the build, also verify Sparkle, Homebrew, live

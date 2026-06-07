@@ -2,6 +2,7 @@ import Foundation
 
 func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
+        let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
         let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
         let primarySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
         let utilitySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
@@ -9,9 +10,17 @@ func testUIAutomationSurfaceContract() {
         let smokeScript = readUIAutomationContractFile("scripts/entrypoints/build.sh")
 
         assertTrue(
+            appSource.contains("transcripted.status-item.button")
+                && appSource.contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
+            "the real menu bar status item should expose a stable AX identifier for external UI automation"
+        )
+
+        assertTrue(
             actionRowSource.contains("let automationIdentifier: String")
                 && actionRowSource.contains("setAutomationIdentifier(_ rawValue: String)")
                 && actionRowSource.contains("setAccessibilityIdentifier(rawValue)")
+                && actionRowSource.contains("setAccessibilityRole(.button)")
+                && actionRowSource.contains("setAccessibilityLabel(title)")
                 && actionRowSource.contains("accessibilityIdentifier()"),
             "menubar smoke snapshots should carry the same accessibility identifier AppKit automation sees"
         )
@@ -260,6 +269,39 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
+    }
+
+    runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
+        let qaEntrySource = readUIAutomationContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift")
+        let uiSmokeSource = readUIAutomationContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift")
+        let qaBenchSource = readUIAutomationContractFile("scripts/ops/transcripted-qa-bench.sh")
+
+        assertTrue(
+            qaEntrySource.contains("UISmoke.self")
+                && uiSmokeSource.contains("commandName: \"ui-smoke\""),
+            "TranscriptedQA should expose a ui-smoke command for repo-owned UI automation"
+        )
+
+        for requiredHarnessHook in [
+            "AXIsProcessTrustedWithOptions",
+            "UIAutomationSmokeStatus",
+            "case incomplete = \"INCOMPLETE\"",
+            "exitCode = 3",
+            "transcripted.status-item.button",
+            "transcripted.menubar.primary.home",
+            "transcripted.settings.sidebar.general",
+            "transcripted.home.mode.meetings",
+        ] {
+            assertTrue(uiSmokeSource.contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
+        }
+
+        assertTrue(
+            qaBenchSource.contains("quick|deep|ui|artifact")
+                && qaBenchSource.contains("run_ui_tail")
+                && qaBenchSource.contains("transcripted-qa ui-smoke")
+                && qaBenchSource.contains("ui-automation-smoke.json"),
+            "QA bench should keep a callable ui mode with local JSON evidence"
+        )
     }
 }
 
