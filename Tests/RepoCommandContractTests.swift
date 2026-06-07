@@ -101,6 +101,12 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - PostHog health probe keeps aggregate daily active-device trend") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
+        let workflowEvents = sourceSlice(
+            contents,
+            from: "workflow_events=",
+            to: "  onboarding_events="
+        )
 
         assertTrue(
             contents.contains("daily_query=")
@@ -119,6 +125,10 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("PostHog daily active device ids"),
             "PostHog probe should not print user or device identifiers"
+        )
+        assertTrue(
+            workflowEvents.contains("meeting_file_imported") && digest.contains("\"meeting_file_imported\""),
+            "aggregate active-device workflow sets should count imported audio activity"
         )
     }
 
@@ -161,6 +171,10 @@ func testRepoCommandContract() {
         assertTrue(
             probe.contains("first_value_events=") && probe.contains("first_value_events_7d"),
             "PostHog probe should keep the aggregate first-value event count"
+        )
+        assertFalse(
+            firstValueEvents.contains("meeting_file_imported"),
+            "imported audio should count as activity but not as first value"
         )
     }
 

@@ -464,6 +464,8 @@ run_quick() {
   run_step "02-fast-tests" "Fast tests" "yes" "bash run-tests.sh"
   run_step "03-e2e-smoke" "Deterministic E2E smoke" "yes" "bash run-e2e-smoke.sh"
   run_pasteback_synthetic
+  run_step "05-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
+    "bash scripts/ops/run-local-summary-fixture.sh"
 }
 
 run_pasteback_synthetic() {

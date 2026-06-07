@@ -145,10 +145,13 @@ rules:
 
   - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/ops/run-local-summary-fixture.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
+      - "bash -n scripts/ops/run-local-summary-fixture.sh"
+      - "bash scripts/ops/run-local-summary-fixture.sh"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"

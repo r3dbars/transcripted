@@ -23,10 +23,13 @@ This runs:
 - `bash run-tests.sh`
 - `bash run-e2e-smoke.sh`
 - `bash run-slow-pasteback-smoke.sh`
+- `bash scripts/ops/run-local-summary-fixture.sh`
 
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
 artifact discovery plus fake slow-target pasteback still work without microphone
-or TCC prompts.
+or TCC prompts. The local summary fixture also proves the Gemma summary app path
+can start, finish, and rewrite a saved synthetic meeting into the expected
+Markdown shape without private meeting content or a model download.
 
 ## Pasteback Synthetic Run
 
@@ -59,6 +62,10 @@ The synthetic audio step also reports an audio route automation proxy matrix so
 the bench names what is automated for dictation, meeting mic/system audio,
 WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
 does not replace live or manual route proof.
+
+Deep inherits the deterministic local summary fixture from quick. That fixture
+is shape and hang-guard proof only; real Gemma summary quality still needs
+manual or corpus review.
 
 Live artifact validation is non-blocking by default because a development Mac
 may not have saved meetings yet. To make it strict:
