@@ -1290,11 +1290,14 @@ class ParakeetEngine: ObservableObject {
             "default_input_class": defaultInputClass,
             "default_output_class": defaultOutputClass,
             "format_ready": "\(recoveryState.inputFormatReady)",
-            "hfp_suspected": "\(isLikelyBluetoothHandsFreeProfile(inputClass: selectedClass, outputDeviceClass: defaultOutputClass, inputRate: inputRate, outputRate: outputRate))",
+            "hfp_suspected": "\(ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(inputClass: selectedClass, outputDeviceClass: defaultOutputClass, inputRate: inputRate, outputRate: outputRate))",
             "input_device_class": selectedClass,
             "output_device_class": defaultOutputClass,
             "recovering": "\(recoveryState.isRecovering)",
-            "route_shape": "\(selectedClass)_input_to_\(defaultOutputClass)_output",
+            "route_shape": ParakeetRouteDiagnosticsPolicy.routeShape(
+                selectedInputClass: selectedClass,
+                outputDeviceClass: defaultOutputClass
+            ),
             "sample_flow_started": "\(didReceiveAudioSamples)",
             "selection_overrode_default": "\(selection?.didOverrideDefault ?? false)",
             "selection_reason": selection?.reason.rawValue ?? "unknown",
@@ -1316,22 +1319,6 @@ class ParakeetEngine: ObservableObject {
         }
 
         return context
-    }
-
-    private func isLikelyBluetoothHandsFreeProfile(
-        inputClass: String,
-        outputDeviceClass: String,
-        inputRate: Double?,
-        outputRate: Double?
-    ) -> Bool {
-        guard let inputRate, let outputRate else { return false }
-        if inputClass == "bluetooth" {
-            return inputRate <= 24_000 && outputRate >= 44_100
-        }
-        if outputDeviceClass == "bluetooth" {
-            return outputRate <= 24_000 && inputRate >= 44_100
-        }
-        return false
     }
 
     private func audioInputSnapshot(

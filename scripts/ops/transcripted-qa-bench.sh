@@ -297,6 +297,9 @@ Routes:
 - AirPods or Bluetooth
 - USB mic if available
 
+Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof.
+
 Stop immediately if the user's meeting gets quieter.
 
 ## Speaker Names
@@ -398,6 +401,11 @@ write_report() {
     echo "- Failed: ${fail_count}"
     echo "- Warnings: ${warn_count}"
     echo "- Skipped: ${skip_count}"
+    echo
+    echo "## Proof Boundary"
+    echo
+    echo "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof."
+    echo "Real connected AirPods/Bluetooth hardware remains manual proof."
     echo
     echo "Raw logs stay local. Do not upload user audio, transcript text, speaker names, tokens, absolute paths, or device names."
     echo

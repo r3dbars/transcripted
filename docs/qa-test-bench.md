@@ -44,8 +44,9 @@ This adds:
 
 The synthetic audio step also reports an audio route automation proxy matrix so
 the bench names what is automated for dictation, meeting mic/system audio,
-WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
-does not replace live or manual route proof.
+WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security.
+Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof.
 
 Live artifact validation is non-blocking by default because a development Mac
 may not have saved meetings yet. To make it strict:
