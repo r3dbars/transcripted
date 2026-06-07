@@ -562,11 +562,20 @@ def render_report(
     manual: list[ReportItem],
     commands: list[CommandRecord],
 ) -> tuple[str, dict[str, Any]]:
+    process_items = automated + telemetry + release_surfaces + local_logs
     all_items = automated + telemetry + release_surfaces + local_logs + manual
     regressions = [item for item in all_items if item.status == "red"]
     needs_human = [item for item in all_items if item.status == "yellow"]
     working = [item for item in all_items if item.status == "green"]
+    process_status = worst_status(process_items)
+    manual_status = worst_status(manual)
     overall = worst_status(all_items)
+    release_status = "GO" if overall == "green" else "HOLD"
+    release_reason = (
+        "all automated and manual release proof is green"
+        if release_status == "GO"
+        else "manual proof or automated release evidence is still incomplete"
+    )
 
     lines: list[str] = [
         "# Transcripted Release Gate Report",
@@ -574,6 +583,8 @@ def render_report(
         "## Short Answer",
         "",
         f"{status_label(overall)}: working={len(working)}, regressed={len(regressions)}, needs_human_check={len(needs_human)}.",
+        f"Automated gate: {status_label(process_status)}.",
+        f"Release: {release_status} - {release_reason}.",
         "",
         f"- Run id: `{run_id}`",
         f"- Generated: `{generated_at}`",
@@ -636,6 +647,9 @@ def render_report(
         "commit": commit,
         "app_version": app_version,
         "artifacts": str(out_dir),
+        "process_status": process_status,
+        "release_status": release_status,
+        "manual_status": manual_status,
         "working_count": len(working),
         "regression_count": len(regressions),
         "needs_human_check_count": len(needs_human),
@@ -724,11 +738,28 @@ def self_test() -> int:
     missing = [marker for marker in required if marker not in report]
     blocking_watch_ok = release_watch_status({"check_id": "appcast-release-candidate"}) == "red"
     release_command_ok = release_record.status == "red"
-    if missing or payload["status"] != "yellow" or not blocking_watch_ok or not release_command_ok:
+
+    _, manual_payload = render_report(
+        root=root,
+        out_dir=Path("/tmp/transcripted-release-gate/self-test"),
+        run_id="self-test-manual-only",
+        generated_at=generated_at,
+        app_version="1.2.3",
+        branch="codex/self-test",
+        commit="abcdef0",
+        automated=[ReportItem("QA bench", "green", "Fixture pass.")],
+        telemetry=[ReportItem("Telemetry", "green", "Fixture pass.")],
+        release_surfaces=[ReportItem("Release surfaces", "green", "Fixture pass.")],
+        local_logs=[ReportItem("Local logs", "green", "Fixture pass.")],
+        manual=[ReportItem("Meeting route proof", "yellow", "Fixture manual item.")],
+        commands=[],
+    )
+    manual_boundary_ok = manual_payload["status"] == "yellow" and manual_payload["process_status"] == "green"
+    if missing or payload["status"] != "yellow" or not blocking_watch_ok or not release_command_ok or not manual_boundary_ok:
         print(
             f"release-gate-report self-test failed: missing={missing}, "
             f"status={payload['status']}, blocking_watch_ok={blocking_watch_ok}, "
-            f"release_command_ok={release_command_ok}",
+            f"release_command_ok={release_command_ok}, manual_boundary_ok={manual_boundary_ok}",
             file=sys.stderr,
         )
         return 1
@@ -784,7 +815,7 @@ def main() -> int:
     print(f"Release gate report: {report_path}")
     print(f"Release gate JSON: {json_path}")
     print(f"Verdict: {status_label(payload['status'])}")
-    return EXIT_CODES[payload["status"]]
+    return EXIT_CODES[payload["process_status"]]
 
 
 if __name__ == "__main__":

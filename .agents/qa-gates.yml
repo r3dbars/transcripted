@@ -157,8 +157,8 @@ recommended_gates:
 
   release_candidate:
     required:
-      - "python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts"
       - "bash build-deps.sh --force"
+      - "python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "bash run-integration-smoke.sh"
