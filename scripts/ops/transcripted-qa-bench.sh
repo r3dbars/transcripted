@@ -29,16 +29,18 @@ CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
 
 Modes:
-  quick            build, fast tests, deterministic E2E smoke
+  quick            build, fast tests, deterministic E2E smoke, slow pasteback smoke
   deep             quick + integration, Core tests, QA CLI, synthetic audio
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
+  pasteback-synthetic
+                   run only the fake slow Cmd+V pasteback target smoke
   corpus           validate a local private meeting corpus
   corpus-compare   validate corpus, then compare Transcripted Markdown to Zoom truth
   live             deep + live mic/system-audio smoke
@@ -171,7 +173,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -461,8 +463,14 @@ run_quick() {
 
   run_step "02-fast-tests" "Fast tests" "yes" "bash run-tests.sh"
   run_step "03-e2e-smoke" "Deterministic E2E smoke" "yes" "bash run-e2e-smoke.sh"
-  run_step "04-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
+  run_pasteback_synthetic
+  run_step "05-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
     "bash scripts/ops/run-local-summary-fixture.sh"
+}
+
+run_pasteback_synthetic() {
+  run_step "04-slow-pasteback-smoke" "Slow pasteback target smoke" "yes" \
+    "bash run-slow-pasteback-smoke.sh --json-out $(shell_quote "${RAW_DIR}/slow-pasteback-smoke.json") --markdown-out $(shell_quote "${OUT}/slow-pasteback-smoke.md")"
 }
 
 run_artifact_validation() {
@@ -547,6 +555,10 @@ case "${MODE}" in
   audio-synthetic)
     run_step "30-audio-synthetic" "Synthetic audio reliability matrix" "yes" \
       "bash run-daily-audio-reliability.sh --synthetic"
+    ;;
+  pasteback-synthetic)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    run_pasteback_synthetic
     ;;
   corpus)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"

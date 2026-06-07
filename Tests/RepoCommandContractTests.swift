@@ -8,6 +8,7 @@ func testRepoCommandContract() {
             "build.sh": "scripts/entrypoints/build.sh",
             "run-e2e-smoke.sh": "scripts/entrypoints/run-e2e-smoke.sh",
             "run-live-capture-smoke.sh": "scripts/entrypoints/run-live-capture-smoke.sh",
+            "run-slow-pasteback-smoke.sh": "scripts/entrypoints/run-slow-pasteback-smoke.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
         ]
@@ -1265,6 +1266,45 @@ func testRepoCommandContract() {
                 && contents.contains("\"stop_to_paste_bucket\"")
                 && contents.contains("\"stop_to_done_bucket\""),
             "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
+        )
+    }
+
+    runSuite("Repo command contract - dictation Auto Enter stays after paste readiness") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let saveBeforeAutoEnterBlock = sourceSlice(
+            contents,
+            from: "case .saveBeforeAutoEnter:",
+            to: "let wordCount = text.split"
+        )
+        let saveTaskRange = saveBeforeAutoEnterBlock.range(of: "let saveTask = self.startPersistingDictationTranscript")
+        let autoEnterRange = saveBeforeAutoEnterBlock.range(of: "autoSendOutcome = await self.performAutoEnterIfNeeded")
+        let finishSaveRange = saveBeforeAutoEnterBlock.range(of: "saveFailureMessage = await self.finishPersistingDictationTranscript")
+
+        assertTrue(
+            saveTaskRange != nil
+                && autoEnterRange != nil
+                && finishSaveRange != nil
+                && saveTaskRange!.lowerBound < autoEnterRange!.lowerBound
+                && autoEnterRange!.lowerBound < finishSaveRange!.lowerBound,
+            "default stop finalization should start saving, wait/send Auto Enter, then await the save result"
+        )
+
+        let autoEnterBlock = sourceSlice(
+            contents,
+            from: "private func performAutoEnterIfNeeded(",
+            to: "@discardableResult"
+        )
+        let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
+        let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
+
+        assertTrue(
+            delayRange != nil
+                && readinessRange != nil
+                && sendRange != nil
+                && delayRange!.lowerBound < readinessRange!.lowerBound
+                && readinessRange!.lowerBound < sendRange!.lowerBound,
+            "Auto Enter should sleep briefly, wait for clipboard read/readiness, then send the follow-up key"
         )
     }
 
