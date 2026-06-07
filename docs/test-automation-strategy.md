@@ -23,6 +23,10 @@ As of 2026-06-06, the repo has these automated layers:
   dictation, meeting, MCP, retained-audio, and diagnostics contracts.
 - `bash run-live-capture-smoke.sh`: local mic plus system-audio smoke. This is a
   local hardware/TCC gate, not default CI.
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state`:
+  no-prompt Codex/computer-use permission preflight for Accessibility, event
+  posting, input monitoring, screen capture, Automation, microphone state, and
+  Transcripted app identity.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
   reports for `quick`, `deep`, `artifact`, `audio-synthetic`, `corpus`,
   `corpus-compare`, and `live`.
@@ -35,7 +39,8 @@ As of 2026-06-06, the repo has these automated layers:
 
 - UI: there are good policy tests, but not enough stable UI automation
   identifiers, accessibility-tree checks, or sanitized screenshots for the core
-  user flows.
+  user flows. Codex/computer-use also needs permission-state proof before click
+  results count.
 - Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
   mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
   Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
@@ -90,6 +95,7 @@ Manual proof is still required for:
 
 - real meeting-app volume behavior
 - microphone and System Audio Recording permission behavior
+- fresh TCC grant/deny/revoke behavior for Codex and Transcripted
 - Bluetooth or input-device switching
 - sleep/wake during capture
 - pasteback feel in real apps
@@ -114,8 +120,9 @@ into PRs, issues, or agent reports.
 
 ## Next High-Value Automations
 
-1. Add UI automation surface IDs and a sanitized UI snapshot gate for first
-   value, meeting, dictation, speaker review, and agent connect.
+1. Add UI automation surface IDs, permission-state gating, and a sanitized UI
+   snapshot gate for first value, meeting, dictation, speaker review, and agent
+   connect.
 2. Add a real-app route trend report for Justin's Mac: Chrome/Safari/Firefox
    Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof.
 3. Add a release-health report that compares source, GitHub, appcast, cask,

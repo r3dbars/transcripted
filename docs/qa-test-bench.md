@@ -91,9 +91,16 @@ This adds the real mic + system-audio capture smoke:
 bash run-live-capture-smoke.sh --skip-build
 ```
 
-It requires local microphone permission and System Audio Recording permission.
-If macOS blocks it, report that as `INCOMPLETE` or `FAIL` with the permission
-reason. Do not treat a TCC blocker as product proof.
+Before that smoke, live mode runs:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode live-capture --format json
+```
+
+It requires local microphone permission, System Audio Recording proof, and the
+Codex/computer-use host permissions needed for screenshots and clicks. If macOS
+blocks the harness, report `INCOMPLETE: harness permission blocked` with the
+exact permission reason. Do not treat a TCC blocker as product proof.
 
 ## Audio Synthetic Run
 
@@ -228,6 +235,7 @@ Every run writes:
 
 Use it for the lanes that need a human:
 
+- Codex UI automation permission-state and state-change proof
 - actual meeting-app volume behavior
 - sleep/wake
 - Bluetooth and device switching
@@ -246,6 +254,24 @@ For the daily audio state-machine loop, use:
 ```text
 docs/audio-reliability-daily-check.md
 ```
+
+## Codex UI Automation Permissions
+
+Run this before any Codex computer-use, screenshot, or click-flow proof:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use
+```
+
+Pass bar:
+
+- Accessibility, Event Posting, Input Monitoring, Screen Recording, and Automation are ready for the app that runs Codex or the terminal host
+- Transcripted app bundle identity matches the expected bundle id
+- every automated click proves a visible state change after the event
+
+If the command warns, stop the UI lane and report `INCOMPLETE: harness
+permission blocked`. Actual TCC grant, deny, revoke, fresh-user prompt behavior,
+real mic/system-audio capture, and "does this feel stuck?" judgment stay manual.
 
 ## Pass Bar
 

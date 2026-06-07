@@ -259,6 +259,7 @@ run_step() {
 
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
+  return "${exit_code}"
 }
 
 skip_step() {
@@ -273,6 +274,22 @@ write_manual_scenarios() {
 # Transcripted Manual QA Scenarios
 
 Keep this local. Use synthetic speech only.
+
+## Codex UI Automation Permissions
+
+Run before any Codex computer-use, screenshot, or click-flow proof:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use
+```
+
+Pass bar:
+- Accessibility, Event Posting, Input Monitoring, Screen Recording, and Automation are ready for the app that runs Codex or the terminal host.
+- Transcripted app bundle identity matches the expected bundle id.
+- Every automated click proves a visible state change after the event.
+
+If this command warns, report `INCOMPLETE: harness permission blocked`.
+Do not call it a Transcripted app failure.
 
 ## Meeting Capture
 
@@ -425,6 +442,12 @@ write_report() {
     echo
     echo "Use \`${MANUAL}\` for the human proof lanes that require GUI, TCC, hardware, meeting apps, or feel checks."
     echo
+    echo "## Codex UI Automation Permission Gate"
+    echo
+    echo "Live mode runs \`transcripted-qa permission-state --mode live-capture\` before live capture. A permission warning means the run is \`INCOMPLETE\`, not green product proof."
+    echo
+    echo "For click-only Computer Use runs, use \`transcripted-qa permission-state --mode computer-use\` and prove a visible state change after each click."
+    echo
     echo "## Evidence Index"
     echo
     awk -F '\t' '$6 != "" { print "- `" $6 "`" }' "${RESULTS}"
@@ -487,6 +510,11 @@ run_artifact_validation() {
     "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
   run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "${blocking}" \
     "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
+}
+
+run_permission_state() {
+  run_step "39-permission-state" "Codex permission-state preflight" "yes" \
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode live-capture --format json"
 }
 
 run_deep_tail() {
@@ -581,7 +609,11 @@ case "${MODE}" in
   live)
     run_quick
     run_deep_tail
-    run_live_tail
+    if run_permission_state; then
+      run_live_tail
+    else
+      skip_step "40-live-capture" "Live mic and system-audio capture smoke skipped after permission-state preflight"
+    fi
     ;;
 esac
 

@@ -122,6 +122,7 @@ struct TranscriptedQA: ParsableCommand {
             ValidateArtifacts.self,
             ValidateIndex.self,
             CheckHealth.self,
+            PermissionState.self,
             GenerateFixtures.self,
             RoundTrip.self,
             StressTest.self,
