@@ -10,7 +10,12 @@ func testAudioAutomationCoverageContract() {
             "synthetic-mic-output-mismatch-diagnostics",
             "synthetic-webrtc-zoom-contention-proxy",
             "synthetic-bluetooth-airpods-route-settling-proxy",
-            "synthetic-audio-privacy-security"
+            "synthetic-audio-privacy-security",
+            "synthetic-webrtc-shared-mic-system-present",
+            "synthetic-webrtc-quiet-mic-recovered",
+            "synthetic-zoom-system-audio-missing-after-start",
+            "synthetic-zoom-output-ducking-route-change-stop-timeout",
+            "synthetic-webrtc-quiet-mic-unrecovered"
         ]
 
         for row in expectedSyntheticRows {
@@ -19,6 +24,9 @@ func testAudioAutomationCoverageContract() {
 
         assertTrue(
             script.contains("Audio Route Automation Proxy Matrix")
+                && script.contains("Deterministic Meeting Route Fixtures")
+                && script.contains("synthetic_route_fixture=true")
+                && script.contains("simulated_not_real_zoom_webrtc=true")
                 && script.contains("manual_boundary_documented=true"),
             "synthetic audio reports should separate automated proxies from manual route proof"
         )

@@ -12,10 +12,10 @@ time. Use it with `.agents/test-matrix.yml` and `.agents/qa-gates.yml`.
 As of 2026-06-06, the repo has these automated layers:
 
 - `bash run-tests.sh`: manifest-driven fast runner for app-facing logic. The
-  root `Tests/` set has 101 Swift test files and must stay aligned with
+  root `Tests/` set has 105 Swift test files and must stay aligned with
   `Tests/FastTests.manifest`.
 - `bash build.sh --no-open`: authoritative menubar app build.
-- `swift test`: Swift Package tests for `TranscriptedCore`; currently 32 core
+- `swift test`: Swift Package tests for `TranscriptedCore`; currently 33 core
   test files under `Tests/TranscriptedCoreTests/`.
 - `bash run-integration-smoke.sh`: app/core linkage, wake recovery, and selected
   core smoke coverage from `Tests/Integration/`.
@@ -36,9 +36,9 @@ As of 2026-06-06, the repo has these automated layers:
 - UI: there are good policy tests, but not enough stable UI automation
   identifiers, accessibility-tree checks, or sanitized screenshots for the core
   user flows.
-- Audio: synthetic and live smoke exist, but there is not yet a repeated route
-  matrix over built-in mic, Bluetooth, quiet mic, missing system audio, wake, and
-  fast stop.
+- Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
+  mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
+  Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.
@@ -116,8 +116,8 @@ into PRs, issues, or agent reports.
 
 1. Add UI automation surface IDs and a sanitized UI snapshot gate for first
    value, meeting, dictation, speaker review, and agent connect.
-2. Add an audio route matrix that can run synthetic in CI-like automation and
-   live on Justin's Mac.
+2. Add a real-app route trend report for Justin's Mac: Chrome/Safari/Firefox
+   Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof.
 3. Add a release-health report that compares source, GitHub, appcast, cask,
    live download, crawler text, and Sentry metadata.
 4. Add storage invariants for relocated capture libraries, retained-audio

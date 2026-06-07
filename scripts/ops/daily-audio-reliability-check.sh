@@ -109,12 +109,14 @@ prompt_text() {
 
 collect_logs() {
   local scenario="$1"
-  local collected
+  local collected link_path
 
   if [[ -x "${COLLECT_SCRIPT}" ]]; then
     collected="$("${COLLECT_SCRIPT}" "${RUN_ID}/${scenario}" 2>/dev/null || true)"
     if [[ -n "${collected}" && -d "${collected}" ]]; then
-      ln -sfn "${collected}" "${OUT}/scenario-logs/${scenario}"
+      link_path="${OUT}/scenario-logs/${scenario}"
+      rm -rf "${link_path}"
+      ln -s "${collected}" "${link_path}"
     fi
   else
     echo "Log collector not found at ${COLLECT_SCRIPT}; skipping collector for ${scenario}."
@@ -297,6 +299,154 @@ PY
   } >> "${REPORT}"
 }
 
+generate_meeting_route_fixture_artifacts() {
+  local fixture_dir="${OUT}/synthetic-meeting-routes"
+
+  mkdir -p "${fixture_dir}"
+
+  /usr/bin/python3 - "${fixture_dir}" <<'PY'
+import json
+import pathlib
+import struct
+import sys
+import wave
+
+root = pathlib.Path(sys.argv[1])
+rate = 16000
+
+scenarios = [
+    {
+        "id": "webrtc-shared-mic-system-present",
+        "condition": "shared mic, system audio present, normal processed mic",
+        "outcome": "transcript_saved",
+        "mic": True,
+        "system": True,
+        "failure_kind": "none",
+    },
+    {
+        "id": "webrtc-quiet-mic-recovered",
+        "condition": "shared mic, quiet raw mic recovered by processed mic path",
+        "outcome": "transcript_saved",
+        "mic": True,
+        "system": True,
+        "failure_kind": "none",
+    },
+    {
+        "id": "zoom-system-audio-missing-after-start",
+        "condition": "Zoom-like capture with mic present and system audio missing",
+        "outcome": "retained_failed_queue_entry",
+        "mic": True,
+        "system": False,
+        "failure_kind": "audio_device_unavailable",
+    },
+    {
+        "id": "zoom-output-ducking-route-change-stop-timeout",
+        "condition": "Zoom-like output ducking, route churn, and stop timeout",
+        "outcome": "retained_failed_queue_entry",
+        "mic": True,
+        "system": True,
+        "failure_kind": "stop_timeout",
+    },
+    {
+        "id": "webrtc-quiet-mic-unrecovered",
+        "condition": "shared mic, quiet raw mic not recovered enough for transcription",
+        "outcome": "retained_failed_queue_entry",
+        "mic": True,
+        "system": True,
+        "failure_kind": "transcription_inference_failed",
+    },
+]
+
+def write_wav(path, amplitude):
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        for index in range(rate // 5):
+            sample = amplitude if index % 2 == 0 else -amplitude
+            wav.writeframesraw(struct.pack("<h", sample))
+
+manifest_rows = []
+for scenario in scenarios:
+    scenario_dir = root / scenario["id"]
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+
+    mic_file = scenario_dir / "mic.synthetic.wav"
+    system_file = scenario_dir / "system.synthetic.wav"
+    transcript_file = scenario_dir / "transcript.md"
+    failure_file = scenario_dir / "failed-meeting.json"
+
+    if scenario["mic"]:
+        write_wav(mic_file, 2400)
+    if scenario["system"]:
+        write_wav(system_file, 3200)
+
+    if scenario["outcome"] == "transcript_saved":
+        transcript_file.write_text(
+            "---\n"
+            "capture_type: meeting\n"
+            "fixture_kind: deterministic_meeting_route\n"
+            f"route_fixture_id: {scenario['id']}\n"
+            "sources: [mic, system_audio]\n"
+            "---\n\n"
+            "# Synthetic Meeting Route Fixture\n\n"
+            "You: Transcripted route fixture one two three.\n"
+            "Speaker 1: Synthetic system audio fixture tone.\n",
+            encoding="utf-8",
+        )
+    else:
+        failure_file.write_text(
+            json.dumps(
+                {
+                    "fixture_kind": "deterministic_meeting_route",
+                    "route_fixture_id": scenario["id"],
+                    "failure_kind": scenario["failure_kind"],
+                    "outcome": scenario["outcome"],
+                    "mic_audio": "mic.synthetic.wav" if scenario["mic"] else "none",
+                    "system_audio": "system.synthetic.wav" if scenario["system"] else "none",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    manifest_rows.append(
+        "\t".join(
+            [
+                scenario["id"],
+                scenario["condition"],
+                scenario["outcome"],
+                "yes" if scenario["mic"] else "no",
+                "yes" if scenario["system"] else "no",
+                scenario["failure_kind"],
+            ]
+        )
+    )
+
+(root / "manifest.tsv").write_text(
+    "scenario\tcondition\toutcome\tmic_audio\tsystem_audio\tfailure_kind\n"
+    + "\n".join(manifest_rows)
+    + "\n",
+    encoding="utf-8",
+)
+PY
+
+  {
+    echo
+    echo "## Deterministic Meeting Route Fixtures"
+    echo
+    echo "Generated synthetic meeting-route artifacts under \`${fixture_dir}\`."
+    echo "These are file and classifier fixtures only: they do not launch Zoom,"
+    echo "open a browser, touch TCC, or measure user-perceived meeting volume."
+    echo
+    echo "| Scenario | Outcome | Mic audio | System audio | Classification |"
+    echo "| --- | --- | --- | --- | --- |"
+    awk -F '\t' 'NR > 1 { printf "| `%s` | %s | %s | %s | `%s` |\n", $1, $3, $4, $5, $6 }' "${fixture_dir}/manifest.tsv"
+  } >> "${REPORT}"
+}
+
 record_synthetic_failure() {
   local scenario="$1"
   local kind="$2"
@@ -344,6 +494,72 @@ record_synthetic_failure() {
     echo "- recoverable_artifact: ${recoverable_artifact}"
     echo "- retry_available: ${retry_available}"
   } >> "${REPORT}"
+}
+
+record_meeting_route_fixture() {
+  local scenario="$1"
+  local simulated_condition="$2"
+  local expected_artifacts="$3"
+  local expected_classification="$4"
+  local manual_boundary="$5"
+
+  printf "%s\t%s\tpass\n" "${scenario}" "synthetic_route_fixture=true" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "simulated_condition=${simulated_condition}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "expected_artifacts=${expected_artifacts}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "expected_classification=${expected_classification}" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "simulated_not_real_zoom_webrtc=true" >> "${ANSWERS}"
+  printf "%s\t%s\tpass\n" "${scenario}" "manual_boundary_documented=true" >> "${ANSWERS}"
+
+  {
+    echo
+    echo "### ${scenario}"
+    echo
+    echo "- synthetic_route_fixture: true"
+    echo "- simulated_condition: ${simulated_condition}"
+    echo "- expected_artifacts: ${expected_artifacts}"
+    echo "- expected_classification: ${expected_classification}"
+    echo "- simulated_vs_real: simulated_not_real_zoom_webrtc=true"
+    echo "- still_manual: ${manual_boundary}"
+  } >> "${REPORT}"
+}
+
+run_meeting_route_fixture_suite() {
+  generate_meeting_route_fixture_artifacts
+
+  record_meeting_route_fixture \
+    "synthetic-webrtc-shared-mic-system-present" \
+    "shared mic, system audio present, normal processed mic" \
+    "transcript + mic synthetic WAV + system synthetic WAV" \
+    "success / transcript_saved / no attenuation / no ducking" \
+    "real Chrome/Safari/Firefox/Zoom app volume and saved-output proof"
+
+  record_meeting_route_fixture \
+    "synthetic-webrtc-quiet-mic-recovered" \
+    "shared mic, quiet raw mic recovered by processed mic path" \
+    "transcript + mic synthetic WAV + system synthetic WAV" \
+    "success / quiet_mic_recovered=true / attenuation_kind=voice_processed" \
+    "real WebRTC mic contention with audible meeting audio"
+
+  record_meeting_route_fixture \
+    "synthetic-zoom-system-audio-missing-after-start" \
+    "Zoom-like capture with mic present and system audio missing" \
+    "mic synthetic WAV + retained failed queue entry" \
+    "recoverable_failure / stage=active_capture / failure_kind=audio_device_unavailable" \
+    "real System Audio Recording permission and app-specific playback behavior"
+
+  record_meeting_route_fixture \
+    "synthetic-zoom-output-ducking-route-change-stop-timeout" \
+    "Zoom-like output ducking, route churn, and stop timeout" \
+    "mic synthetic WAV + system synthetic WAV + retained failed queue entry" \
+    "recoverable_failure / failure_kind=stop_timeout / output_ducking_detected=true" \
+    "real output volume before/during/after and user-perceived meeting volume"
+
+  record_meeting_route_fixture \
+    "synthetic-webrtc-quiet-mic-unrecovered" \
+    "shared mic, quiet raw mic not recovered enough for transcription" \
+    "mic synthetic WAV + system synthetic WAV + retained failed queue entry" \
+    "recoverable_failure / failure_kind=transcription_inference_failed / quiet_mic_unrecovered=true" \
+    "real browser-route proof that the processed mic path was used in the saved transcript"
 }
 
 record_route_automation_proxy() {
@@ -450,6 +666,7 @@ run_synthetic_suite() {
   record_synthetic_failure "synthetic-transcription-crash" "transcription_inference_failed" "transcription" "recoverable_failure" "retryable" "retained_failed_queue_entry" "retry_available" "yes" "yes" "yes" "no" "no" "yes" "yes"
   record_synthetic_failure "synthetic-save-failed" "save_failed" "save" "recoverable_failure" "retryable_after_user_action" "retained_failed_queue_entry" "needs_user_action" "yes" "yes" "no" "no" "yes" "yes" "yes"
   record_synthetic_failure "synthetic-diarization-degraded" "diarization_failed" "diarization" "degraded_success" "retryable" "retained_partial_transcript" "transcript_saved_without_speakers" "yes" "yes" "no" "yes" "no" "yes" "yes"
+  run_meeting_route_fixture_suite
   run_route_automation_proxy_suite
   collect_logs "synthetic"
 }

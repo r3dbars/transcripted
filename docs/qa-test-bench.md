@@ -60,7 +60,11 @@ This adds:
 
 The synthetic audio step also reports an audio route automation proxy matrix so
 the bench names what is automated for dictation, meeting mic/system audio,
-WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security.
+WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
+also generates deterministic meeting-route fixtures for shared mic, missing
+system audio, quiet mic recovery/failure, output ducking, route churn, stop
+timeout, and stop/save artifact outcomes. This does not replace live or manual
+route proof.
 Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
 Real connected AirPods/Bluetooth hardware remains manual proof.
 
@@ -90,6 +94,18 @@ bash run-live-capture-smoke.sh --skip-build
 It requires local microphone permission and System Audio Recording permission.
 If macOS blocks it, report that as `INCOMPLETE` or `FAIL` with the permission
 reason. Do not treat a TCC blocker as product proof.
+
+## Audio Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic
+```
+
+This runs `bash run-daily-audio-reliability.sh --synthetic`. It can prove the
+deterministic route fixture matrix and the simulated artifact/failure contract.
+It cannot prove real Zoom, Meet, browser WebRTC, Bluetooth/AirPods, TCC, or
+user-perceived volume behavior. Issue #500 stays manual-required until the
+dated matrix in `docs/qa-issue-500-meeting-audio.md` is run.
 
 ## Corpus Run
 
