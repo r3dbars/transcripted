@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has seven distinct verification layers:
+This repo has eight distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -10,13 +10,15 @@ This repo has seven distinct verification layers:
    App-to-core linkage smoke test
 3. `bash run-e2e-smoke.sh`
    Deterministic release-critical artifact smoke without microphone/TCC
-4. `swift test`
+4. `bash run-slow-pasteback-smoke.sh`
+   Deterministic fake slow Cmd+V target for pasteback and clipboard restore
+5. `swift test`
    Swift Package tests for the standalone `TranscriptedCore` package surface
-5. `bash build.sh --no-open`
+6. `bash build.sh --no-open`
    Authoritative app build for the menubar target
-6. `bash run-live-capture-smoke.sh`
+7. `bash run-live-capture-smoke.sh`
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
-7. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
+8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
    Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
 
 There is also an orchestrated QA bench for human-style passes:
@@ -25,6 +27,7 @@ There is also an orchestrated QA bench for human-style passes:
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
+bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 bash scripts/ops/transcripted-qa-bench.sh --mode live
@@ -108,6 +111,23 @@ It currently verifies:
 - the MCP directories manifest names the capture, meeting, and dictation roots
 - support diagnostics redact titles, paths, emails, raw URLs, and device names
 
+## Slow Pasteback Smoke
+
+`bash run-slow-pasteback-smoke.sh` compiles
+`Tests/E2E/SlowPastebackSmoke.swift` with the production
+`ClipboardRestoringTextPaster` and timing constants. It uses named synthetic
+pasteboards, not the real clipboard, and does not require dictation audio,
+Accessibility, ScreenCaptureKit, or app launch.
+
+It verifies:
+
+- a fake Cmd+V target that reads at `950ms` still inserts fresh dictation
+- a fake target near the `2.5s` fallback boundary still inserts fresh dictation
+- an old `900ms` fallback control is detected as stale instead of hidden
+- a reader beyond the current fallback is detected as stale
+- paste-dispatch failure leaves fresh dictation copied
+- clipboard restore does not overwrite a user copy made after pasteback
+
 ## Live Capture Smoke
 
 `bash run-live-capture-smoke.sh` first runs `bash build.sh --no-open`, which
@@ -136,3 +156,15 @@ bash run-live-capture-smoke.sh --skip-build
 Accessibility permission for the terminal or Codex runner so it can inspect AX
 identifiers and press controls. Missing permission exits `3` and is reported as
 `INCOMPLETE`, not green.
+
+## Codex UI Permission-State Smoke
+
+Before counting Codex computer-use screenshots or click flows as proof, run:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use
+```
+
+For live capture lanes, use `--mode live-capture`. A warning means
+`INCOMPLETE: harness permission blocked`, not a green UI result and not
+necessarily a Transcripted product failure.

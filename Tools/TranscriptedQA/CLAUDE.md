@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 25 Swift files total: `Package.swift`, 23 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 27 Swift files total: `Package.swift`, 24 files under `Sources/TranscriptedQA/`, and 2 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -16,12 +16,13 @@ The current package is intentionally small:
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (10 files)
+### Commands/ (11 files)
 
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
+| `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `UISmoke.swift` | Launch a built app and validate menu bar, Home, Settings, and General navigation through macOS Accessibility |
@@ -63,10 +64,11 @@ The current package is intentionally small:
 |------|---------|
 | `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
 
-### Tests/ (1 file)
+### Tests/ (2 files)
 
 | File | Purpose |
 |------|---------|
+| `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
@@ -85,6 +87,7 @@ swift run transcripted-qa validate-transcripts
 swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
+swift run transcripted-qa permission-state --mode computer-use
 
 # UI automation smoke, local Accessibility permission required
 swift run transcripted-qa ui-smoke --app ../../build/Transcripted.app

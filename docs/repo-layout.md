@@ -29,6 +29,7 @@ bash build-beta.sh '' <user>
 bash run-tests.sh
 bash run-integration-smoke.sh
 bash run-e2e-smoke.sh
+bash run-slow-pasteback-smoke.sh
 bash run-live-capture-smoke.sh
 bash run-daily-audio-reliability.sh
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
@@ -47,6 +48,7 @@ Command ownership:
 - `run-tests.sh` — thin root wrapper for curated fast tests
 - `run-integration-smoke.sh` — thin root wrapper for app/core smoke verification
 - `run-e2e-smoke.sh` — thin root wrapper for deterministic release-critical artifact smoke
+- `run-slow-pasteback-smoke.sh` — thin root wrapper for the deterministic fake slow Cmd+V pasteback target smoke
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven menu bar/Home/Settings smoke
