@@ -121,6 +121,12 @@ matrix for the state-machine contract:
 - user-visible state
 - the seven meeting-failure questions
 
+It also creates deterministic meeting-route fixture folders under the report
+directory. These simulate shared mic, system audio present/missing, quiet mic
+recovery, output ducking, route churn, stop timeout, and retained failed-queue
+states. The saved-artifact path is covered by fast/Core tests; the generated
+fixtures are synthetic proof, not real Zoom or browser proof.
+
 It also writes an audio route automation proxy matrix for dictation pasteback,
 meeting mic/system audio, mic/output mismatch diagnostics, WebRTC/Zoom
 contention, Bluetooth/AirPods settling, and privacy/security. Those rows
@@ -131,6 +137,7 @@ The same seven-field contract is covered by fast tests in:
 
 ```text
 Tests/MeetingFailureExplanationTests.swift
+Tests/MeetingRouteFixtureTests.swift
 Sources/Meeting/MeetingFailureExplanation.swift
 ```
 
