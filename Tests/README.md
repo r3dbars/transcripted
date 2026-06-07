@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has eight distinct verification layers:
+This repo has nine distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -20,12 +20,15 @@ This repo has eight distinct verification layers:
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
    Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
+9. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+   Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
 
 There is also an orchestrated QA bench for human-style passes:
 
 ```bash
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
+bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
@@ -36,6 +39,10 @@ bash scripts/ops/transcripted-qa-bench.sh --mode live
 It wraps the layers above, `Tools/TranscriptedQA`, synthetic audio reliability,
 the optional local meeting corpus, and redacted corpus comparison into one local report. See
 `docs/qa-test-bench.md`.
+
+These are layered proof tools, not every-PR requirements. Tiny docs-only PRs
+stay on preflight and mapped docs checks unless they change release truth, QA
+gates, appcast/update flow, Homebrew, or public download truth.
 
 ## Fast Test Runner
 

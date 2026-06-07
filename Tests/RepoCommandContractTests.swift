@@ -243,6 +243,64 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - QA bench full gate stays wired for review habit") {
+        let qaBench = readRepoTextFile("scripts/ops/transcripted-qa-bench.sh")
+        let qaGates = readRepoTextFile(".agents/qa-gates.yml")
+        let agents = readRepoTextFile("AGENTS.md")
+        let agentStart = readRepoTextFile("AGENT_START.md")
+        let onboarding = readRepoTextFile("docs/agent-onboarding.md")
+        let testsReadme = readRepoTextFile("Tests/README.md")
+        let qaBenchDoc = readRepoTextFile("docs/qa-test-bench.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+
+        assertTrue(
+            qaBench.contains("quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
+                && qaBench.contains("run_full_tail")
+                && qaBench.contains("60-release-health")
+                && qaBench.contains("61-gemma-summary-plan")
+                && qaBench.contains("Local Gemma summary dry-run plan not applicable (no eligible local transcripts)")
+                && qaBench.contains("Operator Verdict")
+                && qaBench.contains("Release:")
+                && qaBench.contains("HOLD - automated full gate is green, but manual proof is still required"),
+            "QA bench should expose a full gate with release-health, optional Gemma planning, and non-false-green operator verdict rows"
+        )
+        assertTrue(
+            qaGates.contains("full: \"bash scripts/ops/transcripted-qa-bench.sh --mode full\"")
+                && qaGates.contains("docs_only_tiny:")
+                && qaGates.contains("meaningful_code:")
+                && qaGates.contains("release_impacting:")
+                && qaGates.contains("codex-review against the real PR base"),
+            "qa-gates should define full QA plus PR review levels"
+        )
+        assertTrue(
+            agents.contains("PR QA levels:")
+                && agents.contains("Tiny docs-only")
+                && agents.contains("Meaningful code")
+                && agents.contains("release-impacting")
+                && agentStart.contains("Before merging, classify the PR level")
+                && onboarding.contains("before merging a meaningful code PR, run `codex-review`")
+                && matrix.contains("PR-level overlays still apply"),
+            "agent docs should make codex-review and full QA a PR-level overlay instead of a blanket every-PR gate"
+        )
+        assertTrue(
+            qaBenchDoc.contains("## Full Run")
+                && qaBenchDoc.contains("Working")
+                && qaBenchDoc.contains("Regressed")
+                && qaBenchDoc.contains("Needs human")
+                && qaBenchDoc.contains("Release GO/HOLD")
+                && testsReadme.contains("--mode full")
+                && testsReadme.contains("--mode ui")
+                && testsReadme.contains("not every-PR requirements"),
+            "QA bench docs should explain full mode and keep tiny PRs out of mandatory release QA"
+        )
+        assertTrue(
+            scriptsReadme.contains("Full usage: `bash scripts/ops/transcripted-qa-bench.sh --mode full`")
+                && scriptsReadme.contains("release-health fixture checks"),
+            "scripts README should list the full QA bench mode"
+        )
+    }
+
     runSuite("Repo command contract - script edits map to syntax and owned checks") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
         let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")

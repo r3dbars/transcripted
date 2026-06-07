@@ -308,7 +308,7 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            qaBenchSource.contains("quick|deep|ui|artifact")
+            qaBenchSource.contains("quick|deep|full|ui|artifact")
                 && qaBenchSource.contains("run_ui_tail")
                 && qaBenchSource.contains("transcripted-qa ui-smoke")
                 && qaBenchSource.contains("ui-automation-smoke.json"),

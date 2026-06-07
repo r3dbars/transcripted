@@ -106,6 +106,9 @@ full current map:
   Local hardware/TCC smoke for app launch plus production mic and system-audio capture.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   Orchestrated QA bench for broader local validation.
+- `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+  Broad automated QA gate with deep checks, release-health fixture proof, and
+  local Gemma summary planning when eligible transcripts exist.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
   Accessibility-driven smoke for menu bar, Home, Settings, buttons, and basic
   navigation. TCC blockers are `INCOMPLETE`, not green.
@@ -114,6 +117,8 @@ Rule of thumb:
 
 - run `scripts/dev/agent-preflight.sh` when starting or handing off a branch
 - follow the union of checks from `.agents/test-matrix.yml`
+- before merging a meaningful code PR, run `codex-review` against the real PR
+  base and keep the review result with the PR evidence
 - after Swift edits, run `bash build.sh --no-open` and `bash run-tests.sh`
 - if you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run
   `bash run-integration-smoke.sh`

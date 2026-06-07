@@ -84,6 +84,16 @@ these are the common minimums:
 3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
 
+PR QA levels:
+
+- Tiny docs-only: run `scripts/dev/agent-preflight.sh` and the mapped docs gate. Do not require full release QA for spelling, comments, or internal docs that do not change release truth.
+- Meaningful code: run `codex-review` against the real PR base, then run the union of `.agents/test-matrix.yml` checks for the changed paths.
+- Broad, risky, or release-impacting: run `codex-review`, the mapped checks, and `bash scripts/ops/transcripted-qa-bench.sh --mode full`.
+
+Treat release notes, appcast/update docs, Homebrew cask docs, QA-gate docs, and
+public download/release-truth docs as release-impacting even when the diff is
+Markdown-only.
+
 ## Releases, Sparkle, and Homebrew
 
 When the task is a user-facing release, package handoff, or update-path change,

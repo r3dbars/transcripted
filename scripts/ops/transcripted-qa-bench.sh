@@ -29,7 +29,7 @@ CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -37,6 +37,7 @@ Runs a local Transcripted QA bench and writes:
 Modes:
   quick            build, fast tests, deterministic E2E smoke, slow pasteback smoke
   deep             quick + integration, Core tests, QA CLI, synthetic audio
+  full             deep + release-health and local Gemma summary dry-run gates
   ui               build + Accessibility-driven menu bar/Home/Settings smoke
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
@@ -44,11 +45,11 @@ Modes:
                    run only the fake slow Cmd+V pasteback target smoke
   corpus           validate a local private meeting corpus
   corpus-compare   validate corpus, then compare Transcripted Markdown to Zoom truth
-  live             deep + live mic/system-audio smoke
+  live             full + live mic/system-audio smoke
 
 Options:
   --skip-build          Do not run build.sh in quick/deep/live modes.
-  --strict-artifacts    Make live artifact validation blocking in deep/live mode.
+  --strict-artifacts    Make live artifact validation blocking in deep/full/live mode.
   --duration seconds    Live capture duration. Default: 2.0
   --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
   --corpus-ids ids      Comma-separated meeting ids to validate.
@@ -174,7 +175,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -261,6 +262,20 @@ run_step() {
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
   return "${exit_code}"
+}
+
+run_step_when_present() {
+  local id="$1"
+  local title="$2"
+  local blocking="$3"
+  local relative_path="$4"
+  local command="$5"
+
+  if [[ -e "${REPO_ROOT}/${relative_path}" ]]; then
+    run_step "${id}" "${title}" "${blocking}" "${command}"
+  else
+    skip_step "${id}" "${title} (missing ${relative_path})"
+  fi
 }
 
 skip_step() {
@@ -352,6 +367,8 @@ MARKDOWN
 
 write_report() {
   local fail_count warn_count skip_count pass_count flag_count total_count verdict branch commit app_version started finished short_summary
+  local working_status regressed_status needs_human_status release_status
+  local ui_status artifact_status audio_status gemma_status release_health_status live_status
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
@@ -384,6 +401,35 @@ write_report() {
   else
     short_summary="INCOMPLETE: tested ${pass_count}/${total_count} checks. Not good yet: ${flag_count} flagged."
   fi
+
+  if [[ "${fail_count}" -gt 0 ]]; then
+    working_status="NO"
+    regressed_status="YES"
+  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+    working_status="PARTIAL"
+    regressed_status="NO automated regression, but proof is incomplete"
+  else
+    working_status="YES"
+    regressed_status="NO"
+  fi
+
+  needs_human_status="YES - slow pasteback feel, real Zoom/WebRTC meeting route, AirPods/Bluetooth route, and local Gemma summary beta workflow still need manual proof"
+  if [[ "${fail_count}" -gt 0 ]]; then
+    release_status="HOLD - automated regression found"
+  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+    release_status="HOLD - proof is incomplete"
+  elif [[ "${MODE}" != "full" && "${MODE}" != "live" ]]; then
+    release_status="HOLD - run the full Transcripted QA gate before release"
+  else
+    release_status="HOLD - automated full gate is green, but manual proof is still required"
+  fi
+
+  ui_status="$(result_status "04-ui-smoke")"
+  artifact_status="$(result_status "03-e2e-smoke")"
+  audio_status="$(result_status "30-audio-synthetic")"
+  gemma_status="$(result_status "61-gemma-summary-plan")"
+  release_health_status="$(result_status "60-release-health")"
+  live_status="$(result_status "40-live-capture")"
 
   if ! {
     echo "# Transcripted QA Bench Report"
@@ -421,6 +467,22 @@ write_report() {
     echo "- Failed: ${fail_count}"
     echo "- Warnings: ${warn_count}"
     echo "- Skipped: ${skip_count}"
+    echo
+    echo "## Operator Verdict"
+    echo
+    echo "- Working: ${working_status}"
+    echo "- Regressed: ${regressed_status}"
+    echo "- Needs human: ${needs_human_status}"
+    echo "- Release: ${release_status}"
+    echo
+    echo "## Proof Map"
+    echo
+    echo "- UI automation smoke: ${ui_status} via \`transcripted-qa ui-smoke\`"
+    echo "- Meeting and dictation artifact contract: ${artifact_status} via \`bash run-e2e-smoke.sh\`"
+    echo "- Meeting route and Bluetooth mock/proxy matrix: ${audio_status} via \`bash run-daily-audio-reliability.sh --synthetic\`"
+    echo "- Local Gemma summary dry-run plan: ${gemma_status} via \`scripts/ops/local-gemma-summary-autoeval.py\`"
+    echo "- Release-health fixture gate: ${release_health_status} via \`scripts/ops/nightly-security-check.py\`"
+    echo "- Live mic/system-audio smoke: ${live_status} via \`bash run-live-capture-smoke.sh\`"
     echo
     echo "## Proof Boundary"
     echo
@@ -484,6 +546,22 @@ write_report() {
   return 0
 }
 
+result_status() {
+  local id="$1"
+  awk -F '\t' -v wanted="${id}" '
+    $1 == wanted {
+      print $3
+      found = 1
+      exit
+    }
+    END {
+      if (!found) {
+        print "NOT RUN"
+      }
+    }
+  ' "${RESULTS}"
+}
+
 run_quick() {
   run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
 
@@ -535,6 +613,82 @@ run_deep_tail() {
 
   run_step "30-audio-synthetic" "Synthetic audio reliability matrix" "yes" \
     "bash run-daily-audio-reliability.sh --synthetic"
+}
+
+has_gemma_summary_candidates() {
+  if [[ ! -e "${REPO_ROOT}/scripts/ops/local-gemma-summary-autoeval.py" ]]; then
+    return 1
+  fi
+
+  python3 - "${REPO_ROOT}" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1])
+script = repo_root / "scripts/ops/local-gemma-summary-autoeval.py"
+spec = importlib.util.spec_from_file_location("local_gemma_summary_autoeval", script)
+if spec is None or spec.loader is None:
+    raise SystemExit(2)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+try:
+    spec.loader.exec_module(module)
+except Exception as error:
+    print(f"Gemma candidate preflight failed: {error}", file=sys.stderr)
+    raise SystemExit(2)
+
+class Args:
+    pass
+
+args = Args()
+args.input = []
+args.min_words = 40
+args.scan_limit = 2_000
+args.include_longest = 1
+args.sample_count = 0
+args.limit = 1
+args.seed = 17
+profile = dict(module.PROFILES[module.DEFAULT_PROFILE])
+args.chunk_character_limit = int(profile["chunk_character_limit"])
+try:
+    cases = module.select_cases(module.discover_cases(args, profile), args)
+except Exception as error:
+    print(f"Gemma candidate preflight failed: {error}", file=sys.stderr)
+    raise SystemExit(2)
+raise SystemExit(0 if cases else 1)
+PY
+}
+
+run_gemma_summary_plan() {
+  if [[ ! -e "${REPO_ROOT}/scripts/ops/local-gemma-summary-autoeval.py" ]]; then
+    skip_step "61-gemma-summary-plan" "Local Gemma summary dry-run plan (missing scripts/ops/local-gemma-summary-autoeval.py)"
+    return 0
+  fi
+
+  has_gemma_summary_candidates
+  local candidate_status=$?
+  if [[ "${candidate_status}" -eq 1 ]]; then
+    append_result "61-gemma-summary-plan" "Local Gemma summary dry-run plan not applicable (no eligible local transcripts)" "PASS" "0" "0" ""
+    echo "[qa] PASS Local Gemma summary dry-run plan not applicable (no eligible local transcripts)"
+    return 0
+  fi
+  if [[ "${candidate_status}" -ne 0 ]]; then
+    append_result "61-gemma-summary-plan" "Local Gemma summary dry-run candidate preflight" "FAIL" "${candidate_status}" "0" ""
+    echo "[qa] FAIL Local Gemma summary dry-run candidate preflight"
+    return "${candidate_status}"
+  fi
+
+  run_step "61-gemma-summary-plan" "Local Gemma summary dry-run plan" "no" \
+    "python3 scripts/ops/local-gemma-summary-autoeval.py --out-root $(shell_quote "${OUT}/local-gemma-summary") --run-id plan --limit 1 --include-longest 1 --sample-count 0 --repeats 1"
+}
+
+run_full_tail() {
+  run_step_when_present "60-release-health" "Deterministic release health gate" "yes" \
+    "scripts/ops/nightly-security-check.py" \
+    "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json --write-report $(shell_quote "${RAW_DIR}/release-health.json")"
+
+  run_gemma_summary_plan
 }
 
 run_live_tail() {
@@ -590,6 +744,11 @@ case "${MODE}" in
     run_quick
     run_deep_tail
     ;;
+  full)
+    run_quick
+    run_deep_tail
+    run_full_tail
+    ;;
   ui)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
     if [[ "${SKIP_BUILD}" -eq 1 ]]; then
@@ -624,6 +783,7 @@ case "${MODE}" in
   live)
     run_quick
     run_deep_tail
+    run_full_tail
     if run_permission_state; then
       run_live_tail
     else

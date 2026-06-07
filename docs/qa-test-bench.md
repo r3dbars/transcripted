@@ -100,13 +100,37 @@ may not have saved meetings yet. To make it strict:
 bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts
 ```
 
+## Full Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode full
+```
+
+Use this as the broad pre-merge gate for risky or release-impacting work. It
+runs `deep`, then adds:
+
+- deterministic release-health fixture checks
+- a local Gemma meeting-summary dry-run plan when eligible local transcripts are present
+
+The report includes a compact operator verdict:
+
+- Working
+- Regressed
+- Needs human
+- Release GO/HOLD
+
+`HOLD` is still expected when the automated full gate passes but manual proof is
+outstanding. Real meeting apps, TCC prompts, Bluetooth hardware, sleep/wake,
+local Gemma beta workflow, and pasteback feel still need the generated manual
+packet when those risks matter.
+
 ## Live Run
 
 ```bash
 bash scripts/ops/transcripted-qa-bench.sh --mode live
 ```
 
-This adds the real mic + system-audio capture smoke:
+This runs `full`, then adds the real mic + system-audio capture smoke:
 
 ```bash
 bash run-live-capture-smoke.sh --skip-build
