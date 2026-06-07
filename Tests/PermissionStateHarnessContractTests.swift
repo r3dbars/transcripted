@@ -32,6 +32,11 @@ func testPermissionStateHarnessContract() {
             "QA bench should run permission-state before live capture smoke"
         )
         assertTrue(
+            qaBench.contains("if run_permission_state; then")
+                && qaBench.contains("skipped after permission-state preflight"),
+            "QA bench should not run live capture smoke when permission-state warns or fails"
+        )
+        assertTrue(
             qaBench.contains("INCOMPLETE: harness permission blocked")
                 && qaBench.contains("prove a visible state change after each click"),
             "manual scenarios should stop false-green UI automation when macOS blocks events"

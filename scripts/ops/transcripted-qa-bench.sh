@@ -259,6 +259,7 @@ run_step() {
 
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
+  return "${exit_code}"
 }
 
 skip_step() {
@@ -608,8 +609,11 @@ case "${MODE}" in
   live)
     run_quick
     run_deep_tail
-    run_permission_state
-    run_live_tail
+    if run_permission_state; then
+      run_live_tail
+    else
+      skip_step "40-live-capture" "Live mic and system-audio capture smoke skipped after permission-state preflight"
+    fi
     ;;
 esac
 
