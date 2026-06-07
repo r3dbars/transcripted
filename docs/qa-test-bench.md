@@ -22,9 +22,25 @@ This runs:
 - `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-e2e-smoke.sh`
+- `bash run-slow-pasteback-smoke.sh`
+- `bash scripts/ops/run-local-summary-fixture.sh`
 
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
-artifact discovery still works without microphone or TCC prompts.
+artifact discovery plus fake slow-target pasteback still work without microphone
+or TCC prompts. The local summary fixture also proves the Gemma summary app path
+can start, finish, and rewrite a saved synthetic meeting into the expected
+Markdown shape without private meeting content or a model download.
+
+## Pasteback Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
+```
+
+This runs only the fake slow Cmd+V target smoke. It writes a markdown subreport
+beside the QA report and JSON under `raw/`. It proves the target-buffer result
+for synthetic slow readers without using real dictation audio or the real
+clipboard.
 
 ## Deep Run
 
@@ -45,7 +61,16 @@ This adds:
 The synthetic audio step also reports an audio route automation proxy matrix so
 the bench names what is automated for dictation, meeting mic/system audio,
 WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
-does not replace live or manual route proof.
+also generates deterministic meeting-route fixtures for shared mic, missing
+system audio, quiet mic recovery/failure, output ducking, route churn, stop
+timeout, and stop/save artifact outcomes. This does not replace live or manual
+route proof.
+Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof.
+
+Deep inherits the deterministic local summary fixture from quick. That fixture
+is shape and hang-guard proof only; real Gemma summary quality still needs
+manual or corpus review.
 
 Live artifact validation is non-blocking by default because a development Mac
 may not have saved meetings yet. To make it strict:
@@ -76,6 +101,18 @@ It requires local microphone permission, System Audio Recording proof, and the
 Codex/computer-use host permissions needed for screenshots and clicks. If macOS
 blocks the harness, report `INCOMPLETE: harness permission blocked` with the
 exact permission reason. Do not treat a TCC blocker as product proof.
+
+## Audio Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic
+```
+
+This runs `bash run-daily-audio-reliability.sh --synthetic`. It can prove the
+deterministic route fixture matrix and the simulated artifact/failure contract.
+It cannot prove real Zoom, Meet, browser WebRTC, Bluetooth/AirPods, TCC, or
+user-perceived volume behavior. Issue #500 stays manual-required until the
+dated matrix in `docs/qa-issue-500-meeting-audio.md` is run.
 
 ## Corpus Run
 

@@ -10,7 +10,12 @@ func testAudioAutomationCoverageContract() {
             "synthetic-mic-output-mismatch-diagnostics",
             "synthetic-webrtc-zoom-contention-proxy",
             "synthetic-bluetooth-airpods-route-settling-proxy",
-            "synthetic-audio-privacy-security"
+            "synthetic-audio-privacy-security",
+            "synthetic-webrtc-shared-mic-system-present",
+            "synthetic-webrtc-quiet-mic-recovered",
+            "synthetic-zoom-system-audio-missing-after-start",
+            "synthetic-zoom-output-ducking-route-change-stop-timeout",
+            "synthetic-webrtc-quiet-mic-unrecovered"
         ]
 
         for row in expectedSyntheticRows {
@@ -19,6 +24,9 @@ func testAudioAutomationCoverageContract() {
 
         assertTrue(
             script.contains("Audio Route Automation Proxy Matrix")
+                && script.contains("Deterministic Meeting Route Fixtures")
+                && script.contains("synthetic_route_fixture=true")
+                && script.contains("simulated_not_real_zoom_webrtc=true")
                 && script.contains("manual_boundary_documented=true"),
             "synthetic audio reports should separate automated proxies from manual route proof"
         )
@@ -39,6 +47,22 @@ func testAudioAutomationCoverageContract() {
                 && qaBench.contains("human proof lanes that require GUI, TCC, hardware, meeting apps, or feel checks"),
             "QA bench should keep route proof in the generated manual scenario packet"
         )
+    }
+
+    runSuite("Audio automation coverage contract - Bluetooth route tuple stays named") {
+        let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
+        let expectedBluetoothTokens = [
+            "built_in_input_to_bluetooth_output",
+            "preferredBuiltInForBluetoothHeadset",
+            "builtInFallbackSuppressedForRecoveryAttempt",
+            "routeNotSettled",
+            "audio_route_not_settled",
+            "hfp_suspected"
+        ]
+
+        for token in expectedBluetoothTokens {
+            assertTrue(script.contains(token), "Bluetooth/AirPods synthetic lane should name \(token)")
+        }
     }
 
     runSuite("Audio automation coverage contract - deterministic E2E smoke keeps saved-artifact source dependencies") {

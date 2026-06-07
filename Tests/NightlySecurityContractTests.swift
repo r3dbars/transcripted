@@ -158,27 +158,30 @@ private struct ShellResult {
 
 private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
     let process = Process()
-    let outputURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("transcripted-nightly-security-\(UUID().uuidString).log")
+    let outputURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("nightly-security-check-\(UUID().uuidString).log")
+    FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+    guard let outputHandle = try? FileHandle(forWritingTo: outputURL) else {
+        return ShellResult(status: -127, output: "Unable to create checker output file")
+    }
+    defer {
+        try? FileManager.default.removeItem(at: outputURL)
+    }
+
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["python3", "scripts/ops/nightly-security-check.py"] + arguments
     process.currentDirectoryURL = repoFixtureURL(".")
+    process.standardOutput = outputHandle
+    process.standardError = outputHandle
 
     do {
-        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
-        let outputHandle = try FileHandle(forWritingTo: outputURL)
-        defer {
-            try? outputHandle.close()
-            try? FileManager.default.removeItem(at: outputURL)
-        }
-
-        process.standardOutput = outputHandle
-        process.standardError = outputHandle
         try process.run()
         process.waitUntilExit()
-        let output = String(data: (try? Data(contentsOf: outputURL)) ?? Data(), encoding: .utf8) ?? ""
+        try? outputHandle.close()
+        let output = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
         return ShellResult(status: process.terminationStatus, output: output)
     } catch {
+        try? outputHandle.close()
         return ShellResult(status: -127, output: String(describing: error))
     }
 }

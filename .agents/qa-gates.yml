@@ -4,7 +4,7 @@
 # - test-matrix.yml maps changed paths to local verification commands.
 # - qa-gates.yml maps product risk and agent lanes to the gate that proves it.
 
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-07
 
 source_docs:
   - AGENTS.md
@@ -61,6 +61,7 @@ test_layers:
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
+      - "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof. Real connected AirPods/Bluetooth hardware remains manual proof."
 
   permission_state:
     command: "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use"
@@ -170,10 +171,11 @@ coverage_gaps:
   audio:
     current_coverage:
       - "synthetic audio reliability matrix"
+      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, and stop/save artifact outcomes"
       - "live capture smoke for mic and system audio"
       - "fast/core tests for failure policy, recovery state, and archive handling"
     missing_automation:
-      - "repeatable route matrix for built-in mic, Bluetooth, quiet mic, system audio unavailable, and fast stop"
+      - "real-app route matrix for Chrome/Safari/Firefox Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof"
       - "trend report over local events for start latency, stop latency, recovery attempts, and route changes"
 
   storage:
