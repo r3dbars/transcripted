@@ -383,7 +383,7 @@ run_route_automation_proxy_suite() {
     "synthetic-dictation-pasteback-lifecycle" \
     "dictation pasteback/audio lifecycle" \
     "clipboard restore, slow paste consumers, no-speech recovery, route-preserved buffered audio" \
-    "bash run-tests.sh" \
+    "bash run-tests.sh; bash run-slow-pasteback-smoke.sh" \
     "TextEdit, Notes, and browser text-area pasteback still need focused-app manual proof."
 
   record_route_automation_proxy \

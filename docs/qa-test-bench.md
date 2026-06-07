@@ -22,9 +22,22 @@ This runs:
 - `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-e2e-smoke.sh`
+- `bash run-slow-pasteback-smoke.sh`
 
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
-artifact discovery still works without microphone or TCC prompts.
+artifact discovery plus fake slow-target pasteback still work without microphone
+or TCC prompts.
+
+## Pasteback Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
+```
+
+This runs only the fake slow Cmd+V target smoke. It writes a markdown subreport
+beside the QA report and JSON under `raw/`. It proves the target-buffer result
+for synthetic slow readers without using real dictation audio or the real
+clipboard.
 
 ## Deep Run
 

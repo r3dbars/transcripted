@@ -31,6 +31,13 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "Tests/E2E/SlowPastebackSmoke.swift"
+      - "run-slow-pasteback-smoke.sh"
+      - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
+    checks:
+      - "bash run-slow-pasteback-smoke.sh"
+
+  - paths:
       - "build-deps.sh"
       - "scripts/entrypoints/build-deps.sh"
     checks:
