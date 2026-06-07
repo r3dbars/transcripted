@@ -386,6 +386,8 @@ private final class UIAutomationSmokeRunner {
         let plist: [String: Any] = [
             "permissionsOnboardingCompleted": true,
             "forcePermissionsOnboarding": false,
+            "observability-anonymous-analytics-enabled": false,
+            "observability-crash-reporting-enabled": false,
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: preferencesURL, options: .atomic)
@@ -400,16 +402,20 @@ private final class UIAutomationSmokeRunner {
         let process = Process()
         process.executableURL = executableURL
 
+        let logsDirectory = isolatedHome.appendingPathComponent("Library/Application Support/Transcripted/logs", isDirectory: true)
+        try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = isolatedHome.path
         environment["CFFIXED_USER_HOME"] = isolatedHome.path
         environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
         environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
         environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
+        environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] = logsDirectory
+            .appendingPathComponent("launch-ui-smoke.json", isDirectory: false)
+            .path
         process.environment = environment
 
-        let logsDirectory = isolatedHome.appendingPathComponent("Library/Application Support/Transcripted/logs", isDirectory: true)
-        try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
         let logURL = logsDirectory.appendingPathComponent("ui-smoke-app.log", isDirectory: false)
         fileManager.createFile(atPath: logURL.path, contents: nil)
         if let handle = try? FileHandle(forWritingTo: logURL) {
