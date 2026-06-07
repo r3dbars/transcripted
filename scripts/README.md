@@ -96,6 +96,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
+  - UI usage: `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
   - Corpus usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus`
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`

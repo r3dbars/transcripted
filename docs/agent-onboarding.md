@@ -106,6 +106,9 @@ full current map:
   Local hardware/TCC smoke for app launch plus production mic and system-audio capture.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   Orchestrated QA bench for broader local validation.
+- `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
+  Accessibility-driven smoke for menu bar, Home, Settings, buttons, and basic
+  navigation. TCC blockers are `INCOMPLETE`, not green.
 
 Rule of thumb:
 

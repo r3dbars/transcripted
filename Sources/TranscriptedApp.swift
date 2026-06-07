@@ -418,6 +418,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.image = image
         button.imagePosition = .imageOnly
         button.toolTip = "Transcripted"
+        button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
+        button.setAccessibilityIdentifier("transcripted.status-item.button")
+        button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
 

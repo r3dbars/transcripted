@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has seven distinct verification layers:
+This repo has eight distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -18,12 +18,15 @@ This repo has seven distinct verification layers:
    Authoritative app build for the menubar target
 7. `bash run-live-capture-smoke.sh`
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
+8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
+   Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
 
 There is also an orchestrated QA bench for human-style passes:
 
 ```bash
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
@@ -145,6 +148,14 @@ For a faster rerun after a fresh build:
 ```bash
 bash run-live-capture-smoke.sh --skip-build
 ```
+
+## UI Automation Smoke
+
+`bash scripts/ops/transcripted-qa-bench.sh --mode ui` runs
+`transcripted-qa ui-smoke` against `build/Transcripted.app`. It needs
+Accessibility permission for the terminal or Codex runner so it can inspect AX
+identifiers and press controls. Missing permission exits `3` and is reported as
+`INCOMPLETE`, not green.
 
 ## Codex UI Permission-State Smoke
 

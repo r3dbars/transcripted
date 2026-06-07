@@ -51,6 +51,7 @@ test_layers:
     commands:
       quick: "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
+      ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
       corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
@@ -71,6 +72,16 @@ test_layers:
     agent_notes:
       - "Permission blockers are INCOMPLETE, not green."
       - "Use --mode live-capture before local mic/system-audio capture proof."
+
+  ui_automation_smoke:
+    command: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+    proves:
+      - "the built app can be launched and observed through macOS Accessibility"
+      - "menu bar, Home, Settings, and General controls expose stable visible/clickable AX identifiers"
+      - "the runner reports Accessibility/TCC blockers as INCOMPLETE instead of green"
+    agent_notes:
+      - "Requires Accessibility permission for the terminal or Codex runner."
+      - "Does not prove microphone, system audio, Bluetooth, sleep/wake, or subjective UI feel."
 
   live_capture_smoke:
     command: "bash run-live-capture-smoke.sh"
@@ -164,8 +175,8 @@ coverage_gaps:
     current_coverage:
       - "fast policy tests for settings/menu/home state"
       - "build launch smoke with menu-bar JSON snapshot"
+      - "Accessibility-driven QA bench ui smoke for menu bar, Home, Settings, and General navigation"
     missing_automation:
-      - "stable UI automation identifiers across main menu/settings flows"
       - "sanitized screenshot or accessibility-tree review for first-value, meeting, dictation, speaker review, and agent-connect flows"
 
   audio:

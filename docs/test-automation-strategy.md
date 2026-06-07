@@ -28,7 +28,7 @@ As of 2026-06-06, the repo has these automated layers:
   posting, input monitoring, screen capture, Automation, microphone state, and
   Transcripted app identity.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `artifact`, `audio-synthetic`, `corpus`,
+  reports for `quick`, `deep`, `ui`, `artifact`, `audio-synthetic`, `corpus`,
   `corpus-compare`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
@@ -37,10 +37,11 @@ As of 2026-06-06, the repo has these automated layers:
 
 ## Main Gaps
 
-- UI: there are good policy tests, but not enough stable UI automation
-  identifiers, accessibility-tree checks, or sanitized screenshots for the core
-  user flows. Codex/computer-use also needs permission-state proof before click
-  results count.
+- UI: there are good policy tests, plus `--mode ui` now drives the built app
+  through Accessibility for menu bar, Home, Settings, and General navigation.
+  Codex/computer-use also needs permission-state proof before click results
+  count. Deeper sheets, media controls, and sanitized screenshots still need
+  coverage.
 - Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
   mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
   Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
@@ -66,6 +67,9 @@ Pre-merge should stay path-based:
 - Run the union from `.agents/test-matrix.yml`.
 - Add `bash scripts/ops/transcripted-qa-bench.sh --mode quick` when the diff is
   broad, cross-module, or user-visible.
+- Add `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when the diff
+  changes menu bar, Home, Settings, or navigation and Accessibility permission
+  is available locally.
 - Do not mark green if a required check was skipped without a blocker reason.
 
 Nightly should produce a report, not just raw logs:
@@ -86,6 +90,9 @@ Release-candidate should prove the shipped path:
 - Run `bash run-e2e-smoke.sh`.
 - Run `swift test`.
 - Run `bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts`.
+- Run `bash scripts/ops/transcripted-qa-bench.sh --mode ui` when Accessibility
+  permission is available and the release confidence call needs visible UI
+  proof.
 - Run `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging
   smoke, or the full notarized path for a real release.
 - If users should receive the build, also verify Sparkle, Homebrew, live
