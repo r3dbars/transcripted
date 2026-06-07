@@ -125,3 +125,15 @@ For a faster rerun after a fresh build:
 ```bash
 bash run-live-capture-smoke.sh --skip-build
 ```
+
+## Codex UI Permission-State Smoke
+
+Before counting Codex computer-use screenshots or click flows as proof, run:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use
+```
+
+For live capture lanes, use `--mode live-capture`. A warning means
+`INCOMPLETE: harness permission blocked`, not a green UI result and not
+necessarily a Transcripted product failure.

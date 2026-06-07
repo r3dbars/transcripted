@@ -62,6 +62,15 @@ test_layers:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
 
+  permission_state:
+    command: "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use"
+    proves:
+      - "Codex/computer-use host permissions are ready before screenshots, clicks, or Apple Events are counted"
+      - "Transcripted app bundle identity matches the expected TCC bundle id"
+    agent_notes:
+      - "Permission blockers are INCOMPLETE, not green."
+      - "Use --mode live-capture before local mic/system-audio capture proof."
+
   live_capture_smoke:
     command: "bash run-live-capture-smoke.sh"
     proves:
@@ -137,6 +146,7 @@ recommended_gates:
     required_for:
       - "real meeting-app volume behavior"
       - "mic and system-audio TCC behavior"
+      - "fresh TCC grant, deny, and revoke behavior"
       - "Bluetooth or input-device switching"
       - "sleep/wake during capture"
       - "pasteback feel in real apps"

@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 24 Swift files total: `Package.swift`, 22 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 26 Swift files total: `Package.swift`, 23 files under `Sources/TranscriptedQA/`, and 2 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -16,12 +16,13 @@ The current package is intentionally small:
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (10 files)
+### Commands/ (11 files)
 
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
+| `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
@@ -62,10 +63,11 @@ The current package is intentionally small:
 |------|---------|
 | `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
 
-### Tests/ (1 file)
+### Tests/ (2 files)
 
 | File | Purpose |
 |------|---------|
+| `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
@@ -84,6 +86,7 @@ swift run transcripted-qa validate-transcripts
 swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
+swift run transcripted-qa permission-state --mode computer-use
 
 # Override nonstandard locations when captures are relocated
 swift run transcripted-qa validate-all --path /path/to/meetings --state-dir /path/to/state --log-path /path/to/app.jsonl

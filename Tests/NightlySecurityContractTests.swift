@@ -158,17 +158,25 @@ private struct ShellResult {
 
 private func runNightlySecurityChecker(arguments: [String]) -> ShellResult {
     let process = Process()
-    let pipe = Pipe()
+    let outputURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("transcripted-nightly-security-\(UUID().uuidString).log")
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["python3", "scripts/ops/nightly-security-check.py"] + arguments
     process.currentDirectoryURL = repoFixtureURL(".")
-    process.standardOutput = pipe
-    process.standardError = pipe
 
     do {
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        let outputHandle = try FileHandle(forWritingTo: outputURL)
+        defer {
+            try? outputHandle.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        process.standardOutput = outputHandle
+        process.standardError = outputHandle
         try process.run()
         process.waitUntilExit()
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let output = String(data: (try? Data(contentsOf: outputURL)) ?? Data(), encoding: .utf8) ?? ""
         return ShellResult(status: process.terminationStatus, output: output)
     } catch {
         return ShellResult(status: -127, output: String(describing: error))
