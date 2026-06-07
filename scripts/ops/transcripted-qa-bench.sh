@@ -29,7 +29,7 @@ CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|artifact|audio-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -37,15 +37,16 @@ Runs a local Transcripted QA bench and writes:
 Modes:
   quick            build, fast tests, deterministic E2E smoke
   deep             quick + integration, Core tests, QA CLI, synthetic audio
+  full             deep + release-health and local Gemma summary dry-run gates
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
   corpus           validate a local private meeting corpus
   corpus-compare   validate corpus, then compare Transcripted Markdown to Zoom truth
-  live             deep + live mic/system-audio smoke
+  live             full + live mic/system-audio smoke
 
 Options:
   --skip-build          Do not run build.sh in quick/deep/live modes.
-  --strict-artifacts    Make live artifact validation blocking in deep/live mode.
+  --strict-artifacts    Make live artifact validation blocking in deep/full/live mode.
   --duration seconds    Live capture duration. Default: 2.0
   --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
   --corpus-ids ids      Comma-separated meeting ids to validate.
@@ -171,7 +172,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|full|artifact|audio-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -259,6 +260,20 @@ run_step() {
   echo "[qa] ${status} ${title} (${duration}s)"
 }
 
+run_step_when_present() {
+  local id="$1"
+  local title="$2"
+  local blocking="$3"
+  local relative_path="$4"
+  local command="$5"
+
+  if [[ -e "${REPO_ROOT}/${relative_path}" ]]; then
+    run_step "${id}" "${title}" "${blocking}" "${command}"
+  else
+    skip_step "${id}" "${title} (missing ${relative_path})"
+  fi
+}
+
 skip_step() {
   local id="$1"
   local title="$2"
@@ -329,6 +344,8 @@ MARKDOWN
 
 write_report() {
   local fail_count warn_count skip_count pass_count flag_count total_count verdict branch commit app_version started finished short_summary
+  local working_status regressed_status needs_human_status release_status
+  local ui_status artifact_status audio_status gemma_status release_health_status live_status
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
@@ -361,6 +378,35 @@ write_report() {
   else
     short_summary="INCOMPLETE: tested ${pass_count}/${total_count} checks. Not good yet: ${flag_count} flagged."
   fi
+
+  if [[ "${fail_count}" -gt 0 ]]; then
+    working_status="NO"
+    regressed_status="YES"
+  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+    working_status="PARTIAL"
+    regressed_status="NO automated regression, but proof is incomplete"
+  else
+    working_status="YES"
+    regressed_status="NO"
+  fi
+
+  needs_human_status="YES - GUI, TCC, hardware, meeting-app volume, sleep/wake, and pasteback feel still need the manual packet"
+  if [[ "${fail_count}" -gt 0 ]]; then
+    release_status="HOLD - automated regression found"
+  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+    release_status="HOLD - proof is incomplete"
+  elif [[ "${MODE}" != "full" && "${MODE}" != "live" ]]; then
+    release_status="HOLD - run the full Transcripted QA gate before release"
+  else
+    release_status="GO - automated full gate is green; finish any required human proof before shipping"
+  fi
+
+  ui_status="$(result_status "02-fast-tests")"
+  artifact_status="$(result_status "03-e2e-smoke")"
+  audio_status="$(result_status "30-audio-synthetic")"
+  gemma_status="$(result_status "61-gemma-summary-plan")"
+  release_health_status="$(result_status "60-release-health")"
+  live_status="$(result_status "40-live-capture")"
 
   if ! {
     echo "# Transcripted QA Bench Report"
@@ -398,6 +444,22 @@ write_report() {
     echo "- Failed: ${fail_count}"
     echo "- Warnings: ${warn_count}"
     echo "- Skipped: ${skip_count}"
+    echo
+    echo "## Operator Verdict"
+    echo
+    echo "- Working: ${working_status}"
+    echo "- Regressed: ${regressed_status}"
+    echo "- Needs human: ${needs_human_status}"
+    echo "- Release: ${release_status}"
+    echo
+    echo "## Proof Map"
+    echo
+    echo "- UI, pasteback, and permission-state contracts: ${ui_status} via \`bash run-tests.sh\`"
+    echo "- Meeting and dictation artifact contract: ${artifact_status} via \`bash run-e2e-smoke.sh\`"
+    echo "- Meeting route and Bluetooth mock/proxy matrix: ${audio_status} via \`bash run-daily-audio-reliability.sh --synthetic\`"
+    echo "- Local Gemma summary dry-run plan: ${gemma_status} via \`scripts/ops/local-gemma-summary-autoeval.py\`"
+    echo "- Release-health fixture gate: ${release_health_status} via \`scripts/ops/nightly-security-check.py\`"
+    echo "- Live mic/system-audio smoke: ${live_status} via \`bash run-live-capture-smoke.sh\`"
     echo
     echo "Raw logs stay local. Do not upload user audio, transcript text, speaker names, tokens, absolute paths, or device names."
     echo
@@ -450,6 +512,22 @@ write_report() {
   return 0
 }
 
+result_status() {
+  local id="$1"
+  awk -F '\t' -v wanted="${id}" '
+    $1 == wanted {
+      print $3
+      found = 1
+      exit
+    }
+    END {
+      if (!found) {
+        print "NOT RUN"
+      }
+    }
+  ' "${RESULTS}"
+}
+
 run_quick() {
   run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
 
@@ -488,6 +566,16 @@ run_deep_tail() {
 
   run_step "30-audio-synthetic" "Synthetic audio reliability matrix" "yes" \
     "bash run-daily-audio-reliability.sh --synthetic"
+}
+
+run_full_tail() {
+  run_step_when_present "60-release-health" "Deterministic release health gate" "yes" \
+    "scripts/ops/nightly-security-check.py" \
+    "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json --write-report $(shell_quote "${RAW_DIR}/release-health.json")"
+
+  run_step_when_present "61-gemma-summary-plan" "Local Gemma summary dry-run plan" "no" \
+    "scripts/ops/local-gemma-summary-autoeval.py" \
+    "python3 scripts/ops/local-gemma-summary-autoeval.py --out-root $(shell_quote "${OUT}/local-gemma-summary") --run-id plan --limit 1 --include-longest 1 --sample-count 0 --repeats 1"
 }
 
 run_live_tail() {
@@ -538,6 +626,11 @@ case "${MODE}" in
     run_quick
     run_deep_tail
     ;;
+  full)
+    run_quick
+    run_deep_tail
+    run_full_tail
+    ;;
   artifact)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
     run_artifact_validation "yes"
@@ -559,6 +652,7 @@ case "${MODE}" in
   live)
     run_quick
     run_deep_tail
+    run_full_tail
     run_live_tail
     ;;
 esac

@@ -22,13 +22,16 @@ There is also an orchestrated QA bench for human-style passes:
 ```bash
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
+bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 bash scripts/ops/transcripted-qa-bench.sh --mode live
 ```
 
 It wraps the layers above, `Tools/TranscriptedQA`, synthetic audio reliability,
-the optional local meeting corpus, and redacted corpus comparison into one local report. See
+release-health fixture checks, optional local Gemma summary planning, the
+optional local meeting corpus, and redacted corpus comparison into one local
+report. These are verification layers, not every-PR requirements. See
 `docs/qa-test-bench.md`.
 
 ## Fast Test Runner

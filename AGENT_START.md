@@ -71,6 +71,12 @@ Default rules:
 - `Package.swift` or public core seam: also `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`
 - release/update path: read `docs/release-packaging.md` and `docs/sparkle-updates.md`
 
+Before merging, classify the PR level:
+
+- tiny docs-only: preflight and mapped docs checks are enough
+- meaningful code: add `codex-review` against the real PR base
+- release-impacting: add `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+
 ## Handoff
 
 For worker-lane closeout, use the exact `AGENTS.md` coordinator closeout line:

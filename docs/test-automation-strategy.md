@@ -24,7 +24,7 @@ As of 2026-06-06, the repo has these automated layers:
 - `bash run-live-capture-smoke.sh`: local mic plus system-audio smoke. This is a
   local hardware/TCC gate, not default CI.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `artifact`, `audio-synthetic`, `corpus`,
+  reports for `quick`, `deep`, `full`, `artifact`, `audio-synthetic`, `corpus`,
   `corpus-compare`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
@@ -42,9 +42,8 @@ As of 2026-06-06, the repo has these automated layers:
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.
-- Release: release docs and scripts exist, but agents need one release-health
-  report that compares source truth with GitHub release, appcast, cask, live
-  download, crawler text, and Sentry metadata.
+- Release: fixture release-health now runs inside the full QA bench, while live
+  release surfaces still need network and credential-backed verification.
 - Privacy: sanitizer tests exist, but QA bench reports, generated PR text, local
   logs, and release notes need a single leakage sweep.
 - Summaries: summary preferences and local summarizer behavior have tests, but
@@ -59,8 +58,8 @@ Pre-merge should stay path-based:
 
 - Run `scripts/dev/agent-preflight.sh`.
 - Run the union from `.agents/test-matrix.yml`.
-- Add `bash scripts/ops/transcripted-qa-bench.sh --mode quick` when the diff is
-  broad, cross-module, or user-visible.
+- Add `bash scripts/ops/transcripted-qa-bench.sh --mode full` when the diff is
+  broad, cross-module, risky, or release-impacting.
 - Do not mark green if a required check was skipped without a blocker reason.
 
 Nightly should produce a report, not just raw logs:
@@ -80,7 +79,7 @@ Release-candidate should prove the shipped path:
 - Run `bash run-integration-smoke.sh`.
 - Run `bash run-e2e-smoke.sh`.
 - Run `swift test`.
-- Run `bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts`.
+- Run `bash scripts/ops/transcripted-qa-bench.sh --mode full`.
 - Run `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging
   smoke, or the full notarized path for a real release.
 - If users should receive the build, also verify Sparkle, Homebrew, live
@@ -118,8 +117,8 @@ into PRs, issues, or agent reports.
    value, meeting, dictation, speaker review, and agent connect.
 2. Add an audio route matrix that can run synthetic in CI-like automation and
    live on Justin's Mac.
-3. Add a release-health report that compares source, GitHub, appcast, cask,
-   live download, crawler text, and Sentry metadata.
+3. Add a live release-health report that compares source, GitHub, appcast,
+   cask, live download, crawler text, and Sentry metadata.
 4. Add storage invariants for relocated capture libraries, retained-audio
    cleanup, compression, and fallback paths.
 5. Add a support bug seed registry so future agents know which bugs have an

@@ -106,6 +106,9 @@ full current map:
   Local hardware/TCC smoke for app launch plus production mic and system-audio capture.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   Orchestrated QA bench for broader local validation.
+- `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+  Broad automated QA gate with deep checks, release-health fixture proof, and
+  local Gemma summary dry-run planning.
 
 Rule of thumb:
 
@@ -116,6 +119,11 @@ Rule of thumb:
   `bash run-integration-smoke.sh`
 - if you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public
   core package seam, also run `swift test`
+- before merging a meaningful code PR, run `codex-review` against the real PR base
+- before merging broad, risky, or release-impacting work, run
+  `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+- for tiny docs-only PRs, do not require full release QA unless the docs change
+  release truth, QA gates, appcast/update flow, Homebrew, or public download truth
 
 ## Choose The Lane
 

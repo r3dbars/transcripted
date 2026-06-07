@@ -32,6 +32,7 @@ bash run-e2e-smoke.sh
 bash run-live-capture-smoke.sh
 bash run-daily-audio-reliability.sh
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
+bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 swift test

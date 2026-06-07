@@ -256,5 +256,7 @@ rules:
 notes:
   - "If a change matches multiple rules, run the union of checks."
   - "When in doubt, prefer the stricter AGENTS.md rule."
+  - "PR-level overlays still apply: meaningful code needs codex-review against the real PR base; broad or release-impacting work needs bash scripts/ops/transcripted-qa-bench.sh --mode full."
+  - "Tiny docs-only PRs intentionally stay on preflight/mapped docs checks unless they change release truth, QA gates, appcast/update flow, Homebrew, or public download truth."
   - "Live capture smoke requires local microphone and System Audio Recording permissions; document permission blockers explicitly."
   - "UI changes should include sanitized review visuals under .agent-review/visuals/."

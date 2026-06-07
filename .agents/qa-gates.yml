@@ -51,13 +51,14 @@ test_layers:
     commands:
       quick: "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
+      full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
       corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
       corpus_compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
       live: "bash scripts/ops/transcripted-qa-bench.sh --mode live"
     proves:
-      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, corpus, and live capture proof"
+      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release health, Gemma summary planning, corpus, and live capture proof"
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
@@ -90,8 +91,28 @@ recommended_gates:
     default:
       - "scripts/dev/agent-preflight.sh"
       - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+    pr_levels:
+      docs_only_tiny:
+        required:
+          - "scripts/dev/agent-preflight.sh"
+          - "Run the mapped docs checks only."
+        excludes:
+          - "release notes"
+          - "appcast or update flow docs"
+          - "Homebrew cask docs"
+          - "QA gate docs"
+          - "public download or release-truth docs"
+      meaningful_code:
+        required:
+          - "codex-review against the real PR base"
+          - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+      release_impacting:
+        required:
+          - "codex-review against the real PR base"
+          - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+          - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
     add_when_broad_or_risky:
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
     cannot_be_green_if:
       - "required path-mapped checks were skipped without a clear blocker"
       - "new root fast tests are missing from Tests/FastTests.manifest"
@@ -120,7 +141,7 @@ recommended_gates:
       - "bash run-integration-smoke.sh"
       - "bash run-e2e-smoke.sh"
       - "swift test"
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
     add_when_shipping_to_users:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
