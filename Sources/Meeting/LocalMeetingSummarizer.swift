@@ -335,6 +335,7 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     var environment: [String: String] = ProcessInfo.processInfo.environment
     var bundle: Bundle = .main
     var fileManager: FileManager = .default
+    var runnerURLOverride: URL?
     var generateBatchOverride: (@Sendable ([LocalGemmaSummaryPrompt], URL) throws -> [String])?
 
     func generate(prompt: String, label: String, maxTokens: Int, workDirectory: URL) throws -> String {
@@ -465,7 +466,10 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     }
 
     private func runnerURL() -> URL? {
-        bundle.url(
+        if let runnerURLOverride {
+            return runnerURLOverride
+        }
+        return bundle.url(
             forResource: "gemma4_mlx_prompt_runner",
             withExtension: "py",
             subdirectory: "LocalSummarizer"

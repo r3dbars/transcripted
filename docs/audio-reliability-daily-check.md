@@ -130,8 +130,8 @@ fixtures are synthetic proof, not real Zoom or browser proof.
 It also writes an audio route automation proxy matrix for dictation pasteback,
 meeting mic/system audio, mic/output mismatch diagnostics, WebRTC/Zoom
 contention, Bluetooth/AirPods settling, and privacy/security. Those rows
-document deterministic coverage only; real Zoom/Meet/AirPods volume proof still
-uses `docs/qa-issue-500-meeting-audio.md`.
+document deterministic coverage only. Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof. Real Zoom/Meet/AirPods volume proof still uses `docs/qa-issue-500-meeting-audio.md`.
 
 The same seven-field contract is covered by fast tests in:
 

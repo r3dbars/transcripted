@@ -4,7 +4,7 @@
 # - test-matrix.yml maps changed paths to local verification commands.
 # - qa-gates.yml maps product risk and agent lanes to the gate that proves it.
 
-last_reviewed: 2026-06-06
+last_reviewed: 2026-06-07
 
 source_docs:
   - AGENTS.md
@@ -61,6 +61,7 @@ test_layers:
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
+      - "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof. Real connected AirPods/Bluetooth hardware remains manual proof."
 
   live_capture_smoke:
     command: "bash run-live-capture-smoke.sh"

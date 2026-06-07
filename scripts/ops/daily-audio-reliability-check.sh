@@ -599,7 +599,7 @@ run_route_automation_proxy_suite() {
     "synthetic-dictation-pasteback-lifecycle" \
     "dictation pasteback/audio lifecycle" \
     "clipboard restore, slow paste consumers, no-speech recovery, route-preserved buffered audio" \
-    "bash run-tests.sh" \
+    "bash run-tests.sh; bash run-slow-pasteback-smoke.sh" \
     "TextEdit, Notes, and browser text-area pasteback still need focused-app manual proof."
 
   record_route_automation_proxy \
@@ -626,7 +626,7 @@ run_route_automation_proxy_suite() {
   record_route_automation_proxy \
     "synthetic-bluetooth-airpods-route-settling-proxy" \
     "Bluetooth/AirPods route settling" \
-    "Bluetooth headset fallback policy, stale-route readiness, zombie-recovery state transitions" \
+    "Bluetooth headset fallback policy, built_in_input_to_bluetooth_output route shape, preferredBuiltInForBluetoothHeadset, builtInFallbackSuppressedForRecoveryAttempt, routeNotSettled, audio_route_not_settled, hfp_suspected, stale-route readiness, zombie-recovery state transitions" \
     "bash run-tests.sh" \
     "connected AirPods/Bluetooth hardware routes still need Justin-run manual proof."
 

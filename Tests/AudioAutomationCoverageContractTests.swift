@@ -49,6 +49,22 @@ func testAudioAutomationCoverageContract() {
         )
     }
 
+    runSuite("Audio automation coverage contract - Bluetooth route tuple stays named") {
+        let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
+        let expectedBluetoothTokens = [
+            "built_in_input_to_bluetooth_output",
+            "preferredBuiltInForBluetoothHeadset",
+            "builtInFallbackSuppressedForRecoveryAttempt",
+            "routeNotSettled",
+            "audio_route_not_settled",
+            "hfp_suspected"
+        ]
+
+        for token in expectedBluetoothTokens {
+            assertTrue(script.contains(token), "Bluetooth/AirPods synthetic lane should name \(token)")
+        }
+    }
+
     runSuite("Audio automation coverage contract - deterministic E2E smoke keeps saved-artifact source dependencies") {
         let e2e = readAudioAutomationContractFile("scripts/entrypoints/run-e2e-smoke.sh")
 

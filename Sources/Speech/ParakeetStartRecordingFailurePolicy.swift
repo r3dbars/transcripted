@@ -214,6 +214,31 @@ enum ParakeetTapSampleRatePolicy {
     }
 }
 
+enum ParakeetRouteDiagnosticsPolicy {
+    static func routeShape(
+        selectedInputClass: String,
+        outputDeviceClass: String
+    ) -> String {
+        "\(selectedInputClass)_input_to_\(outputDeviceClass)_output"
+    }
+
+    static func isLikelyBluetoothHandsFreeProfile(
+        inputClass: String,
+        outputDeviceClass: String,
+        inputRate: Double?,
+        outputRate: Double?
+    ) -> Bool {
+        guard let inputRate, let outputRate else { return false }
+        if inputClass == "bluetooth" {
+            return inputRate <= 24_000 && outputRate >= 44_100
+        }
+        if outputDeviceClass == "bluetooth" {
+            return outputRate <= 24_000 && inputRate >= 44_100
+        }
+        return false
+    }
+}
+
 struct ParakeetAudioFormatSummary: Equatable {
     let sampleRate: Double
     let channelCount: UInt32
