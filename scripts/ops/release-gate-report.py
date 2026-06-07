@@ -272,6 +272,20 @@ def release_watch_status(watch: dict[str, Any]) -> str:
     return "red" if str(watch.get("check_id", "")) in BLOCKING_RELEASE_WATCH_IDS else "yellow"
 
 
+def successful_release_surface_title(args: argparse.Namespace) -> str:
+    if not args.skip_live_release_surfaces:
+        return "Appcast, download, cask, GitHub, and Sentry release checks"
+
+    subjects = ["Local appcast", "cask", "Sentry"]
+    if args.github_release_json:
+        subjects.insert(2, "GitHub")
+    if len(subjects) == 3:
+        joined = f"{subjects[0]}, {subjects[1]}, and {subjects[2]}"
+    else:
+        joined = f"{subjects[0]}, {subjects[1]}, {subjects[2]}, and {subjects[3]}"
+    return f"{joined} release checks"
+
+
 def run_release_surfaces(args: argparse.Namespace, root: Path, out_dir: Path, commands: list[CommandRecord]) -> list[ReportItem]:
     json_report = out_dir / "raw" / "nightly-security-report.json"
     command = [
@@ -360,14 +374,9 @@ def run_release_surfaces(args: argparse.Namespace, root: Path, out_dir: Path, co
             )
         )
     elif not has_nightly_items:
-        title = (
-            "Local appcast, cask, GitHub, and Sentry release checks"
-            if args.skip_live_release_surfaces
-            else "Appcast, download, cask, GitHub, and Sentry release checks"
-        )
         items.append(
             ReportItem(
-                title,
+                successful_release_surface_title(args),
                 "green",
                 f"nightly-security-check.py score {report.get('score', 'unknown')}/100 with no findings.",
                 str(json_report),
@@ -399,8 +408,10 @@ def run_telemetry(args: argparse.Namespace, root: Path, out_dir: Path, commands:
         if health_probe_has_unknowns(output):
             record.status = "yellow"
             record.detail = first_signal_line(output) or record.detail
+        lane_items = classify_health_probe(lane, record, output)
+        sync_command_record_status(record, lane_items)
         commands.append(record)
-        items.extend(classify_health_probe(lane, record, output))
+        items.extend(lane_items)
     return items or [ReportItem("Telemetry probes", "yellow", "No telemetry probe output was available.")]
 
 
@@ -711,6 +722,18 @@ def self_test() -> int:
             )
         ],
     )
+    telemetry_record = CommandRecord(
+        title="Sentry health probe",
+        status="green",
+        exit_code=0,
+        command="bash scripts/ops/health-probe.sh sentry",
+        log_path="/tmp/sentry.log",
+        detail="Sentry unresolved issues: 2",
+    )
+    sync_command_record_status(
+        telemetry_record,
+        [ReportItem("Sentry unresolved issues need review", "yellow", "Sentry unresolved issues: 2")],
+    )
     report, payload = render_report(
         root=root,
         out_dir=Path("/tmp/transcripted-release-gate/self-test"),
@@ -738,6 +761,7 @@ def self_test() -> int:
     missing = [marker for marker in required if marker not in report]
     blocking_watch_ok = release_watch_status({"check_id": "appcast-release-candidate"}) == "red"
     release_command_ok = release_record.status == "red"
+    telemetry_command_ok = telemetry_record.status == "yellow"
 
     _, manual_payload = render_report(
         root=root,
@@ -755,11 +779,28 @@ def self_test() -> int:
         commands=[],
     )
     manual_boundary_ok = manual_payload["status"] == "yellow" and manual_payload["process_status"] == "green"
-    if missing or payload["status"] != "yellow" or not blocking_watch_ok or not release_command_ok or not manual_boundary_ok:
+    skipped_title_ok = "GitHub" not in successful_release_surface_title(
+        argparse.Namespace(skip_live_release_surfaces=True, github_release_json=None)
+    )
+    fixture_title_ok = "GitHub" in successful_release_surface_title(
+        argparse.Namespace(skip_live_release_surfaces=True, github_release_json="fixture.json")
+    )
+    if (
+        missing
+        or payload["status"] != "yellow"
+        or not blocking_watch_ok
+        or not release_command_ok
+        or not telemetry_command_ok
+        or not manual_boundary_ok
+        or not skipped_title_ok
+        or not fixture_title_ok
+    ):
         print(
             f"release-gate-report self-test failed: missing={missing}, "
             f"status={payload['status']}, blocking_watch_ok={blocking_watch_ok}, "
-            f"release_command_ok={release_command_ok}, manual_boundary_ok={manual_boundary_ok}",
+            f"release_command_ok={release_command_ok}, telemetry_command_ok={telemetry_command_ok}, "
+            f"manual_boundary_ok={manual_boundary_ok}, "
+            f"skipped_title_ok={skipped_title_ok}, fixture_title_ok={fixture_title_ok}",
             file=sys.stderr,
         )
         return 1
