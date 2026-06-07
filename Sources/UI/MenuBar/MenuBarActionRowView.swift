@@ -284,6 +284,12 @@ final class MenuBarActionRowView: NSControl {
         onPress?()
     }
 
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        onPress?()
+        return true
+    }
+
     var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
         MenuBarActionRowSmokeSnapshot(
             title: titleLabel.stringValue,

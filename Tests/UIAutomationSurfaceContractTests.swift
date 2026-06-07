@@ -21,8 +21,10 @@ func testUIAutomationSurfaceContract() {
                 && actionRowSource.contains("setAccessibilityIdentifier(rawValue)")
                 && actionRowSource.contains("setAccessibilityRole(.button)")
                 && actionRowSource.contains("setAccessibilityLabel(title)")
+                && actionRowSource.contains("override func accessibilityPerformPress()")
+                && actionRowSource.contains("guard isEnabled else { return false }")
                 && actionRowSource.contains("accessibilityIdentifier()"),
-            "menubar smoke snapshots should carry the same accessibility identifier AppKit automation sees"
+            "menubar smoke snapshots should carry the same accessibility identifier and AXPress path AppKit automation sees"
         )
 
         for identifier in [
