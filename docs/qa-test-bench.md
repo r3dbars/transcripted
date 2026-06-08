@@ -220,6 +220,15 @@ Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
 treated as green proof. Actual release-surface drift or required release-health
 failures are `RED`.
 
+The command exit code follows the overall report color: `0` for `GREEN`, `3`
+for `YELLOW`, and `1` for `RED`. That means missing credentials or missing
+manual proof keep automation yellow instead of silently looking green.
+
+Manual-proof rows say `UNKNOWN` until a real local run artifact exists. The
+expected manual lanes are live mic/system-audio capture, meeting-app volume and
+route behavior, sleep/wake and device switching, pasteback feel, speaker
+review/rename feel, and existing-install update behavior.
+
 ## Short Output
 
 Every bench report starts with a plain short answer:

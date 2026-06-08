@@ -66,6 +66,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Usage: `python3 scripts/ops/release-gate-report.py`
   - Deep RC usage: `python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts`
   - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
+  - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
   - Missing Sentry/PostHog credentials are reported as yellow/unknown, not green
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
