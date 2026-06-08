@@ -4,7 +4,7 @@
 # - test-matrix.yml maps changed paths to local verification commands.
 # - qa-gates.yml maps product risk and agent lanes to the gate that proves it.
 
-last_reviewed: 2026-06-07
+last_reviewed: 2026-06-08
 
 source_docs:
   - AGENTS.md
@@ -53,7 +53,7 @@ test_layers:
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
       ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
-      package: "bash scripts/ops/transcripted-qa-bench.sh --mode package"
+      packaged: "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
       corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
@@ -170,7 +170,7 @@ recommended_gates:
       - "bash run-e2e-smoke.sh"
       - "swift test"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
-      - "bash scripts/ops/transcripted-qa-bench.sh --mode package"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
     add_when_shipping_to_users:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
       - "full notarized build-beta.sh"
