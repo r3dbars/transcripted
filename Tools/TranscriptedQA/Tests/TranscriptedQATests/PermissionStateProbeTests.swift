@@ -148,7 +148,8 @@ final class PermissionStateProbeTests: XCTestCase {
             screenCaptureTrustedProvider: { screenCaptureTrusted },
             microphoneStatusProvider: { microphoneStatus },
             automationStatusProvider: { _ in automationStatus },
-            defaultsProvider: { _ in defaults }
+            defaultsProvider: { _ in defaults },
+            runningApplicationsProvider: { _ in [] }
         )
     }
 

@@ -70,7 +70,9 @@ test_layers:
     proves:
       - "Codex/computer-use host permissions are ready before screenshots, clicks, or Apple Events are counted"
       - "Transcripted app bundle identity matches the expected TCC bundle id"
+      - "Duplicate or wrong running Transcripted app instances are caught before UI targeting is trusted"
     agent_notes:
+      - "The command prints the expected manual grant state for computer-use and live-capture modes."
       - "Permission blockers are INCOMPLETE, not green."
       - "Use --mode live-capture before local mic/system-audio capture proof."
 

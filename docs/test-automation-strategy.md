@@ -26,7 +26,9 @@ As of 2026-06-06, the repo has these automated layers:
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state`:
   no-prompt Codex/computer-use permission preflight for Accessibility, event
   posting, input monitoring, screen capture, Automation, microphone state, and
-  Transcripted app identity.
+  Transcripted app identity. It also prints the expected manual grant state and
+  warns when duplicate or wrong running Transcripted app instances make UI
+  targeting ambiguous.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
   reports for `quick`, `deep`, `full`, `ui`, `artifact`, `audio-synthetic`,
   `corpus`, `corpus-compare`, and `live`.
