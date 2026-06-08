@@ -255,7 +255,7 @@ func testRepoCommandContract() {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
-            qaBench.contains("quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
+            qaBench.contains("quick|deep|full|ui|package|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
                 && qaBench.contains("run_full_tail")
                 && qaBench.contains("60-release-health")
                 && qaBench.contains("61-gemma-summary-plan")
@@ -695,6 +695,53 @@ func testRepoCommandContract() {
                 "docs/sparkle-updates.md should document the committed Sparkle public key"
             )
         }
+    }
+
+    runSuite("Repo command contract - packaged app smoke is wired into release QA") {
+        let smoke = readRepoTextFile("scripts/ops/packaged-app-smoke.py")
+        let qaBench = readRepoTextFile("scripts/ops/transcripted-qa-bench.sh")
+        let releaseGate = readRepoTextFile("scripts/ops/release-gate-report.py")
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+        let qaDocs = readRepoTextFile("docs/qa-test-bench.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+        let testsReadme = readRepoTextFile("Tests/README.md")
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let gates = readRepoTextFile(".agents/qa-gates.yml")
+
+        for requiredFragment in [
+            "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT",
+            "SUPublicEDKey",
+            "SUFeedURL",
+            "Sparkle.framework",
+            "codesign",
+            "dwarfdump",
+            "--require-dsym",
+            "launch-log-privacy",
+            "Packaged app smoke"
+        ] {
+            assertTrue(smoke.contains(requiredFragment), "packaged app smoke should keep \(requiredFragment) coverage")
+        }
+
+        assertTrue(
+            qaBench.contains("quick|deep|full|ui|package")
+                && qaBench.contains("run_package_tail")
+                && qaBench.contains("06-packaged-app-smoke")
+                && qaBench.contains("packaged-app-smoke.py"),
+            "QA bench should expose a package mode that runs packaged-app-smoke.py"
+        )
+        assertTrue(
+            releaseGate.contains("--include-packaged-app-smoke")
+                && releaseGate.contains("--require-packaged-app-dmg")
+                && releaseGate.contains("run_packaged_app_smoke")
+                && releaseGate.contains("scripts/ops/packaged-app-smoke.py"),
+            "release-gate-report should optionally compose packaged-app-smoke.py"
+        )
+        assertTrue(releaseDocs.contains("packaged-app-smoke.py"), "release packaging docs should route package proof through packaged-app-smoke.py")
+        assertTrue(qaDocs.contains("--mode package"), "QA bench docs should mention package mode")
+        assertTrue(scriptsReadme.contains("packaged-app-smoke.py"), "scripts README should list packaged-app-smoke.py")
+        assertTrue(testsReadme.contains("--mode package"), "Tests README should list package mode")
+        assertTrue(matrix.contains("packaged-app-smoke.py --self-test"), "test matrix should compile and self-test packaged-app-smoke.py")
+        assertTrue(gates.contains("packaged_app_smoke"), "QA gates should name packaged app smoke separately from build-beta.sh")
     }
 
     runSuite("Repo command contract - update check timeout marks the cycle failed") {

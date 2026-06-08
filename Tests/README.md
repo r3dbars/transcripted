@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has nine distinct verification layers:
+This repo has ten distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -22,6 +22,8 @@ This repo has nine distinct verification layers:
    Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
 9. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
    Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
+10. `bash scripts/ops/transcripted-qa-bench.sh --mode package`
+   Packaged-app smoke after `build-beta.sh`: bundle metadata, DMG, Sparkle config, signing, dSYM, and isolated launch/menu proof
 
 There is also an orchestrated QA bench for human-style passes:
 
@@ -30,6 +32,7 @@ bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
+bash scripts/ops/transcripted-qa-bench.sh --mode package
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
@@ -163,6 +166,21 @@ bash run-live-capture-smoke.sh --skip-build
 Accessibility permission for the terminal or Codex runner so it can inspect AX
 identifiers and press controls. Missing permission exits `3` and is reported as
 `INCOMPLETE`, not green.
+
+## Packaged App Smoke
+
+After `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` or a full
+notarized package build, run:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode package
+```
+
+This wraps `python3 scripts/ops/packaged-app-smoke.py` and checks the packaged
+app bundle, versioned DMG, Sparkle feed URL/public key, appcast metadata,
+signing/entitlements, dSYM UUID evidence, isolated launch/menu report, and
+launch-smoke log privacy. Yellow means a pre-publish or manual gap remains;
+red means the package smoke found real breakage.
 
 ## Codex UI Permission-State Smoke
 

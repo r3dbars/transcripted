@@ -63,6 +63,36 @@ This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
 `3`. Do not treat that as product proof.
 
+## Package Run
+
+Run this after `build-beta.sh` succeeds and before appcast generation, upload,
+Sentry registration, or cask update:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode package
+```
+
+This wraps:
+
+```bash
+python3 scripts/ops/packaged-app-smoke.py
+```
+
+It checks the packaged `build/Transcripted.app`, the versioned DMG, Sparkle
+feed URL and public key, appcast coherence, signing and entitlements, matching
+dSYM UUIDs when present, and an isolated launch/menu smoke using
+`TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT`.
+
+The command exits `3` for expected pre-publish gaps, such as skipped
+notarization, missing appcast update for a new version, missing dSYM when it is
+not required, or launch smoke skipped by flag. It exits `1` for real package
+breakage.
+
+In Codex sandboxed runs, `codesign`, `hdiutil`, and launching the packaged app
+can report false failures. Use an approved unsandboxed run for real package
+proof, and treat sandbox-only package failures as harness-incomplete until
+rechecked outside the sandbox.
+
 ## Deep Run
 
 ```bash
@@ -214,6 +244,12 @@ For a deeper release-candidate pass:
 
 ```bash
 python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
+```
+
+After a packaging build, include packaged-app proof in the same report:
+
+```bash
+python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
 ```
 
 Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
