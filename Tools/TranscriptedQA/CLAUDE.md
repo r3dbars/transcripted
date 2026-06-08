@@ -131,6 +131,7 @@ For agent and automation use, the JSON form also includes:
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
 - **UI smoke**: `ui-smoke` checks stable AX identifiers and exits `3` for Accessibility/TCC blockers
 - **Packaged app smoke**: `packaged-app-smoke` validates a no-publish `build-beta.sh` artifact, including version/config parity, Sparkle keys, signing, dSYM UUIDs, DMG readability, optional menu bar UI, and local log privacy
+- **Permission state**: `permission-state` prints the expected manual grant state, checks Codex host Accessibility/Event Posting/Input Monitoring/Screen Recording/Automation, verifies the Transcripted app bundle id, and warns on duplicate or wrong running Transcripted app instances
 
 ## Gotchas
 

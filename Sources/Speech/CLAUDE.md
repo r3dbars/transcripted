@@ -61,6 +61,7 @@ Relevant direct coverage:
 - `Tests/DictationAudioRecoveryTests.swift`
 - `Tests/DictationInputDeviceSelectionPolicyTests.swift`
 - `Tests/DictationReadinessWaitPolicyTests.swift`
+- `Tests/BluetoothRouteContractTests.swift`
 - `Tests/ParakeetModelInitDiagnosticsTests.swift`
 - `Tests/ParakeetPrewarmPolicyTests.swift`
 - `Tests/ParakeetRecoveryStateTests.swift`

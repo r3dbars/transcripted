@@ -15,6 +15,7 @@ func testAudioAutomationCoverageContract() {
             "synthetic-webrtc-quiet-mic-recovered",
             "synthetic-zoom-system-audio-missing-after-start",
             "synthetic-zoom-output-ducking-route-change-stop-timeout",
+            "synthetic-webrtc-route-switch-stop-restart-recovered",
             "synthetic-webrtc-quiet-mic-unrecovered"
         ]
 
@@ -29,6 +30,13 @@ func testAudioAutomationCoverageContract() {
                 && script.contains("simulated_not_real_zoom_webrtc=true")
                 && script.contains("manual_boundary_documented=true"),
             "synthetic audio reports should separate automated proxies from manual route proof"
+        )
+
+        assertTrue(
+            script.contains("restart_artifacts")
+                && script.contains("restart_attempted=true")
+                && script.contains("restart_succeeded=true"),
+            "synthetic route fixtures should include deterministic stop/restart artifacts"
         )
     }
 
@@ -52,7 +60,11 @@ func testAudioAutomationCoverageContract() {
     runSuite("Audio automation coverage contract - Bluetooth route tuple stays named") {
         let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
         let expectedBluetoothTokens = [
+            "mocked connect/disconnect",
+            "output-only Bluetooth",
             "built_in_input_to_bluetooth_output",
+            "sample-rate settling",
+            "route readiness",
             "preferredBuiltInForBluetoothHeadset",
             "builtInFallbackSuppressedForRecoveryAttempt",
             "routeNotSettled",
