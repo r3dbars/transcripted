@@ -134,9 +134,17 @@ final class UIAutomationSmokeRunner {
         }
         builder.add(.pass("accessibility-permission", "Automation runner has Accessibility access", target: "macOS Accessibility"))
 
+        guard runOnboardingSmoke(executableURL: executableURL, builder: &builder) else {
+            return builder.build()
+        }
+
         let isolatedHome: URL
         do {
-            isolatedHome = try prepareIsolatedHome()
+            isolatedHome = try prepareIsolatedHome(
+                suffix: "main",
+                onboardingCompleted: true,
+                forceOnboarding: false
+            )
         } catch {
             builder.add(.fail(
                 "isolated-home",
@@ -151,7 +159,14 @@ final class UIAutomationSmokeRunner {
 
         var launchedProcess: Process?
         do {
-            launchedProcess = try launchApp(executableURL: executableURL, isolatedHome: isolatedHome, builder: &builder)
+            let launched = try launchApp(
+                executableURL: executableURL,
+                isolatedHome: isolatedHome,
+                logFileName: "ui-smoke-app.log",
+                launchReportFileName: "launch-ui-smoke.json"
+            )
+            launchedProcess = launched.process
+            builder.appLogPath = launched.logURL.path
         } catch {
             builder.add(.fail(
                 "launch-app",
@@ -361,6 +376,233 @@ final class UIAutomationSmokeRunner {
         return builder.build()
     }
 
+    private func runOnboardingSmoke(
+        executableURL: URL,
+        builder: inout UIAutomationSmokeReportBuilder
+    ) -> Bool {
+        let onboardingHome: URL
+        do {
+            onboardingHome = try prepareIsolatedHome(
+                suffix: "onboarding",
+                onboardingCompleted: false,
+                forceOnboarding: true
+            )
+        } catch {
+            builder.add(.fail(
+                "onboarding-isolated-home",
+                "First-run onboarding home is writable",
+                target: fileManager.temporaryDirectory.path,
+                detail: error.localizedDescription
+            ))
+            return false
+        }
+        builder.onboardingIsolatedHomePath = onboardingHome.path
+        builder.add(.pass("onboarding-isolated-home", "First-run onboarding home is writable", target: onboardingHome.path))
+
+        let launched: LaunchedApp
+        do {
+            launched = try launchApp(
+                executableURL: executableURL,
+                isolatedHome: onboardingHome,
+                logFileName: "ui-smoke-onboarding-app.log",
+                launchReportFileName: "launch-ui-smoke-onboarding.json"
+            )
+            builder.onboardingAppLogPath = launched.logURL.path
+        } catch {
+            builder.add(.fail(
+                "onboarding-launch",
+                "First-run onboarding launches from built app",
+                target: executableURL.path,
+                detail: error.localizedDescription
+            ))
+            return false
+        }
+
+        defer {
+            terminate(process: launched.process)
+        }
+
+        let appAX = AXUIElementCreateApplication(launched.process.processIdentifier)
+        AXUIElementSetMessagingTimeout(appAX, 2)
+        let appInspector = AXInspector(root: appAX)
+
+        guard waitUntil(timeout: timeout, description: "onboarding AX tree", condition: {
+            launched.process.isRunning && !appInspector.snapshot(maxDepth: 4, maxNodes: 40).isEmpty
+        }) else {
+            builder.add(.fail(
+                "onboarding-launch",
+                "First-run onboarding launches from built app",
+                target: executableURL.path,
+                detail: launched.process.isRunning ? "App launched, but the first-run AX tree was not readable before timeout." : "App exited before onboarding was readable."
+            ))
+            return false
+        }
+
+        let navPrimaryID = "transcripted.onboarding.nav.primary"
+        guard let welcomeObserved = waitForObservedElements([navPrimaryID], inspector: appInspector) else {
+            builder.add(.fail(
+                "onboarding-window",
+                "First-run onboarding window is visible",
+                target: navPrimaryID,
+                detail: "The first-run onboarding primary button was not found.",
+                observed: observedElements(for: [navPrimaryID], inspector: appInspector)
+            ))
+            return false
+        }
+        builder.add(.pass(
+            "onboarding-window",
+            "First-run onboarding window is visible",
+            target: "Transcripted onboarding",
+            observed: welcomeObserved
+        ))
+
+        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+            builder.add(.fail(
+                "onboarding-navigation",
+                "Onboarding primary navigation advances to use-case choice",
+                target: navPrimaryID,
+                detail: "Could not press the onboarding primary button on the welcome step."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+            builder.add(.fail(
+                "onboarding-navigation",
+                "Onboarding primary navigation advances to use-case choice",
+                target: navPrimaryID,
+                detail: "Could not press the onboarding primary button on the privacy step."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        let useCaseIDs = [
+            "transcripted.onboarding.use-case.meetings",
+            "transcripted.onboarding.use-case.dictation",
+            navPrimaryID,
+            "transcripted.onboarding.nav.back",
+        ]
+        guard let useCaseObserved = waitForObservedElements(useCaseIDs, inspector: appInspector) else {
+            builder.add(.fail(
+                "onboarding-use-case",
+                "Onboarding exposes meeting and dictation use-case choices",
+                target: "Transcripted onboarding",
+                detail: "The use-case step did not expose the expected automation identifiers.",
+                observed: observedElements(for: useCaseIDs, inspector: appInspector)
+            ))
+            return false
+        }
+        builder.add(.pass(
+            "onboarding-use-case",
+            "Onboarding exposes meeting and dictation use-case choices",
+            target: "Transcripted onboarding",
+            observed: useCaseObserved
+        ))
+
+        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.dictation") else {
+            builder.add(.fail(
+                "onboarding-dictation-path",
+                "Onboarding can choose the dictation setup path",
+                target: "transcripted.onboarding.use-case.dictation",
+                detail: "Could not select the dictation use-case card."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+            builder.add(.fail(
+                "onboarding-dictation-path",
+                "Onboarding can choose the dictation setup path",
+                target: navPrimaryID,
+                detail: "Could not continue from dictation use-case choice to permissions."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        let dictationPermissionIDs = [
+            "transcripted.onboarding.permissions.microphone",
+            "transcripted.onboarding.permissions.accessibility",
+        ]
+        guard let dictationObserved = waitForObservedElements(dictationPermissionIDs, inspector: appInspector) else {
+            builder.add(.fail(
+                "onboarding-dictation-permissions",
+                "Dictation onboarding exposes required permission actions",
+                target: "Transcripted onboarding",
+                detail: "The dictation permission step did not expose microphone and accessibility actions.",
+                observed: observedElements(for: dictationPermissionIDs, inspector: appInspector)
+            ))
+            return false
+        }
+        builder.add(.pass(
+            "onboarding-dictation-permissions",
+            "Dictation onboarding exposes required permission actions",
+            target: "Transcripted onboarding",
+            observed: dictationObserved
+        ))
+
+        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.nav.back") else {
+            builder.add(.fail(
+                "onboarding-meeting-path",
+                "Onboarding can return and choose the meetings setup path",
+                target: "transcripted.onboarding.nav.back",
+                detail: "Could not navigate back to the use-case choices."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        guard waitForObservedElements(useCaseIDs, inspector: appInspector) != nil,
+              appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.meetings") else {
+            builder.add(.fail(
+                "onboarding-meeting-path",
+                "Onboarding can return and choose the meetings setup path",
+                target: "transcripted.onboarding.use-case.meetings",
+                detail: "Could not select the meetings use-case card."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+            builder.add(.fail(
+                "onboarding-meeting-path",
+                "Onboarding can return and choose the meetings setup path",
+                target: navPrimaryID,
+                detail: "Could not continue from meetings use-case choice to permissions."
+            ))
+            return false
+        }
+        pauseForUITransition()
+
+        let meetingPermissionIDs = [
+            "transcripted.onboarding.permissions.microphone",
+            "transcripted.onboarding.permissions.system-audio",
+            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
+        ]
+        guard let meetingObserved = waitForObservedElements(meetingPermissionIDs, inspector: appInspector) else {
+            builder.add(.fail(
+                "onboarding-meeting-permissions",
+                "Meeting onboarding exposes required permission actions",
+                target: "Transcripted onboarding",
+                detail: "The meeting permission step did not expose microphone, system audio, and shortcut preference actions.",
+                observed: observedElements(for: meetingPermissionIDs, inspector: appInspector)
+            ))
+            return false
+        }
+        builder.add(.pass(
+            "onboarding-meeting-permissions",
+            "Meeting onboarding exposes required permission actions",
+            target: "Transcripted onboarding",
+            observed: meetingObserved
+        ))
+
+        return true
+    }
+
     private func isAccessibilityTrusted(prompt: Bool) -> Bool {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         return AXIsProcessTrustedWithOptions([promptKey: prompt] as CFDictionary)
@@ -371,16 +613,20 @@ final class UIAutomationSmokeRunner {
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
     }
 
-    private func prepareIsolatedHome() throws -> URL {
+    private func prepareIsolatedHome(
+        suffix: String,
+        onboardingCompleted: Bool,
+        forceOnboarding: Bool
+    ) throws -> URL {
         let home = fileManager.temporaryDirectory
-            .appendingPathComponent("transcripted-ui-smoke-\(runID)", isDirectory: true)
+            .appendingPathComponent("transcripted-ui-smoke-\(runID)-\(suffix)", isDirectory: true)
         let preferencesDirectory = home.appendingPathComponent("Library/Preferences", isDirectory: true)
         try fileManager.createDirectory(at: preferencesDirectory, withIntermediateDirectories: true)
 
         let preferencesURL = preferencesDirectory.appendingPathComponent("com.justinbetker.draft.plist", isDirectory: false)
         let plist: [String: Any] = [
-            "permissionsOnboardingCompleted": true,
-            "forcePermissionsOnboarding": false,
+            "permissionsOnboardingCompleted": onboardingCompleted,
+            "forcePermissionsOnboarding": forceOnboarding,
             "observability-anonymous-analytics-enabled": false,
             "observability-crash-reporting-enabled": false,
         ]
@@ -392,8 +638,9 @@ final class UIAutomationSmokeRunner {
     private func launchApp(
         executableURL: URL,
         isolatedHome: URL,
-        builder: inout UIAutomationSmokeReportBuilder
-    ) throws -> Process {
+        logFileName: String,
+        launchReportFileName: String
+    ) throws -> LaunchedApp {
         let process = Process()
         process.executableURL = executableURL
 
@@ -407,20 +654,19 @@ final class UIAutomationSmokeRunner {
         environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
         environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
         environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] = logsDirectory
-            .appendingPathComponent("launch-ui-smoke.json", isDirectory: false)
+            .appendingPathComponent(launchReportFileName, isDirectory: false)
             .path
         process.environment = environment
 
-        let logURL = logsDirectory.appendingPathComponent("ui-smoke-app.log", isDirectory: false)
+        let logURL = logsDirectory.appendingPathComponent(logFileName, isDirectory: false)
         fileManager.createFile(atPath: logURL.path, contents: nil)
         if let handle = try? FileHandle(forWritingTo: logURL) {
             process.standardOutput = handle
             process.standardError = handle
         }
-        builder.appLogPath = logURL.path
 
         try process.run()
-        return process
+        return LaunchedApp(process: process, logURL: logURL)
     }
 
     private func systemUIServerElement() -> AXUIElement? {
@@ -465,6 +711,25 @@ final class UIAutomationSmokeRunner {
         return nil
     }
 
+    private func waitForObservedElements(
+        _ identifiers: [String],
+        inspector: AXInspector,
+        maxDepth: Int = 12
+    ) -> [AXObservedElement]? {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let nodes = inspector.snapshotNodes(maxDepth: maxDepth)
+            let observed = identifiers.compactMap { identifier in
+                nodes.first { $0.observed.identifier == identifier }?.observed
+            }
+            if observed.count == identifiers.count {
+                return observed
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        } while Date() < deadline
+        return nil
+    }
+
     private func waitUntil(timeout: TimeInterval, description: String, condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
@@ -472,6 +737,10 @@ final class UIAutomationSmokeRunner {
             Thread.sleep(forTimeInterval: 0.2)
         } while Date() < deadline
         return false
+    }
+
+    private func pauseForUITransition() {
+        Thread.sleep(forTimeInterval: 0.35)
     }
 
     private func terminate(process: Process) {
@@ -485,6 +754,11 @@ final class UIAutomationSmokeRunner {
             Darwin.kill(process.processIdentifier, SIGKILL)
         }
     }
+}
+
+private struct LaunchedApp {
+    let process: Process
+    let logURL: URL
 }
 
 private struct AXInspector {
@@ -719,7 +993,9 @@ struct UIAutomationSmokeReport: Codable, Equatable {
     let generatedAt: String
     let appBundlePath: String
     let isolatedHomePath: String?
+    let onboardingIsolatedHomePath: String?
     let appLogPath: String?
+    let onboardingAppLogPath: String?
     let reportPath: String?
     let checks: [UIAutomationSmokeCheck]
 
@@ -728,7 +1004,7 @@ struct UIAutomationSmokeReport: Codable, Equatable {
         let flagged = checks.count - passed
         switch status {
         case .pass:
-            print("PASS: tested \(passed)/\(checks.count) UI checks. Menu bar, Home, Settings, and navigation are scriptable.")
+            print("PASS: tested \(passed)/\(checks.count) UI checks. Onboarding, menu bar, Home, Settings, and navigation are scriptable.")
         case .fail:
             print("FAIL: tested \(passed)/\(checks.count) UI checks. \(flagged) flagged.")
         case .incomplete:
@@ -743,6 +1019,9 @@ struct UIAutomationSmokeReport: Codable, Equatable {
         }
         if let appLogPath {
             print("App log: \(appLogPath)")
+        }
+        if let onboardingAppLogPath {
+            print("Onboarding app log: \(onboardingAppLogPath)")
         }
     }
 
@@ -762,7 +1041,9 @@ struct UIAutomationSmokeReportBuilder {
     let appBundlePath: String
     let reportPath: String?
     var isolatedHomePath: String?
+    var onboardingIsolatedHomePath: String?
     var appLogPath: String?
+    var onboardingAppLogPath: String?
     private var checks: [UIAutomationSmokeCheck] = []
 
     init(runID: String, appBundlePath: String, reportPath: String?) {
@@ -802,7 +1083,9 @@ struct UIAutomationSmokeReportBuilder {
             generatedAt: ISO8601DateFormatter().string(from: generatedAt),
             appBundlePath: appBundlePath,
             isolatedHomePath: isolatedHomePath,
+            onboardingIsolatedHomePath: onboardingIsolatedHomePath,
             appLogPath: appLogPath,
+            onboardingAppLogPath: onboardingAppLogPath,
             reportPath: reportPath,
             checks: checks
         )

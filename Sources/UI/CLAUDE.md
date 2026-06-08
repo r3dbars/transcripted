@@ -192,4 +192,4 @@ Relevant direct coverage:
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
-- `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of menu bar, Home, Settings, and navigation
+- `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation
