@@ -40,7 +40,8 @@ bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 This runs only the fake slow Cmd+V target smoke. It writes a markdown subreport
 beside the QA report and JSON under `raw/`. It proves the target-buffer result
 for synthetic slow readers without using real dictation audio or the real
-clipboard.
+clipboard. It also covers a retry before fallback restore, so a second
+pasteback cannot snapshot the first borrowed dictation as the user's clipboard.
 
 ## UI Run
 
@@ -63,35 +64,28 @@ This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
 `3`. Do not treat that as product proof.
 
-## Package Run
-
-Run this after `build-beta.sh` succeeds and before appcast generation, upload,
-Sentry registration, or cask update:
+## Packaged Run
 
 ```bash
-bash scripts/ops/transcripted-qa-bench.sh --mode package
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
 ```
 
-This wraps:
+This runs a no-publish package smoke:
 
-```bash
-python3 scripts/ops/packaged-app-smoke.py
-```
+- `bash scripts/dev/agent-preflight.sh`
+- `SKIP_NOTARIZATION=1 ... bash build-beta.sh '' <user-name>`
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke`
 
-It checks the packaged `build/Transcripted.app`, the versioned DMG, Sparkle
-feed URL and public key, appcast coherence, signing and entitlements, matching
-dSYM UUIDs when present, and an isolated launch/menu smoke using
-`TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT`.
+The build step uses explicit thin-smoke model opt-outs so the lane can run on a
+dev Mac without pretending it is a full model-bundled release artifact. The
+smoke validates the built app version/config, Sparkle feed URL/public key and
+automatic update flags, HTTPS observability endpoints, bundled Sparkle and MCP
+helper payloads, code signing, matching app/dSYM UUIDs, the versioned DMG,
+optional menu bar UI, and local log privacy patterns.
 
-The command exits `3` for expected pre-publish gaps, such as skipped
-notarization, missing appcast update for a new version, missing dSYM when it is
-not required, or launch smoke skipped by flag. It exits `1` for real package
-breakage.
-
-In Codex sandboxed runs, `codesign`, `hdiutil`, and launching the packaged app
-can report false failures. Use an approved unsandboxed run for real package
-proof, and treat sandbox-only package failures as harness-incomplete until
-rechecked outside the sandbox.
+This mode does not notarize, publish GitHub releases, register Sentry releases,
+update `docs/appcast.xml`, or update the Homebrew cask. Accessibility blockers
+from the optional UI/menu proof are `INCOMPLETE`/exit `3`, not green.
 
 ## Deep Run
 
@@ -114,8 +108,8 @@ the bench names what is automated for dictation, meeting mic/system audio,
 WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
 also generates deterministic meeting-route fixtures for shared mic, missing
 system audio, quiet mic recovery/failure, output ducking, route churn, stop
-timeout, and stop/save artifact outcomes. This does not replace live or manual
-route proof.
+timeout, stop/restart after a route switch, and stop/save artifact outcomes.
+This does not replace live or manual route proof.
 Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
 Real connected AirPods/Bluetooth hardware remains manual proof.
 
@@ -173,9 +167,12 @@ TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA
 ```
 
 It requires local microphone permission, System Audio Recording proof, and the
-Codex/computer-use host permissions needed for screenshots and clicks. If macOS
-blocks the harness, report `INCOMPLETE: harness permission blocked` with the
-exact permission reason. Do not treat a TCC blocker as product proof.
+Codex/computer-use host permissions needed for screenshots and clicks. It also
+checks that the intended Transcripted app bundle identity is being tested and
+that duplicate or wrong running Transcripted apps are not making UI targeting
+ambiguous. If macOS blocks the harness, report
+`INCOMPLETE: harness permission blocked` with the exact permission reason. Do
+not treat a TCC blocker as product proof.
 
 ## Audio Synthetic Run
 
@@ -246,15 +243,27 @@ For a deeper release-candidate pass:
 python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
 ```
 
-After a packaging build, include packaged-app proof in the same report:
+For the one-command release gate report, use the full QA bench:
 
 ```bash
-python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
+python3 scripts/ops/release-gate-report.py --release-candidate
 ```
 
+That preset expands to `--qa-mode full --strict-artifacts`.
+
 Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
-treated as green proof. Actual release-surface drift or required release-health
-failures are `RED`.
+treated as green proof. Missing manual proof is also `YELLOW`. The command exits
+`0` for `GREEN`, `3` for `YELLOW`, and `1` for `RED`. Actual release-surface
+drift or required release-health failures are `RED`.
+
+The command exit code follows the overall report color: `0` for `GREEN`, `3`
+for `YELLOW`, and `1` for `RED`. That means missing credentials or missing
+manual proof keep automation yellow instead of silently looking green.
+
+Manual-proof rows say `UNKNOWN` until a real local run artifact exists. The
+expected manual lanes are live mic/system-audio capture, meeting-app volume and
+route behavior, sleep/wake and device switching, pasteback feel, speaker
+review/rename feel, and existing-install update behavior.
 
 ## Short Output
 

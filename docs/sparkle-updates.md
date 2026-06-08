@@ -50,26 +50,35 @@ Future agents should treat this as a release requirement:
 ## Release flow
 
 1. Build a signed/notarized Transcripted archive, typically with `build-beta.sh`.
-2. Put the release archive in a local updates folder.
-3. Run:
+2. Before publishing, run the local packaged app smoke:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
+```
+
+This checks the built app's Sparkle feed URL, public key, automatic update
+flags, dSYM, DMG, optional menu bar launch, and local log privacy without
+uploading or modifying `docs/appcast.xml`.
+3. Put the release archive in a local updates folder.
+4. Run:
 
 ```bash
 bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
-4. The script keeps the current feed history, takes the newest generated item,
+5. The script keeps the current feed history, takes the newest generated item,
    rewrites its enclosure URL to the matching GitHub release asset, aligns the
    minimum macOS version with `Info.plist`, and then writes the merged result
    back to `docs/appcast.xml`.
-5. Upload the release archive to GitHub Releases.
-6. Verify the published update path:
+6. Upload the release archive to GitHub Releases.
+7. Verify the published update path:
 
 ```bash
 bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
-7. Commit and push the updated `docs/appcast.xml`.
-8. After the final appcast push and any expected Homebrew/Sentry release
+8. Commit and push the updated `docs/appcast.xml`.
+9. After the final appcast push and any expected Homebrew/Sentry release
    surfaces are live, run the strict live-surface gate:
 
 ```bash

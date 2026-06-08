@@ -123,9 +123,10 @@ matrix for the state-machine contract:
 
 It also creates deterministic meeting-route fixture folders under the report
 directory. These simulate shared mic, system audio present/missing, quiet mic
-recovery, output ducking, route churn, stop timeout, and retained failed-queue
-states. The saved-artifact path is covered by fast/Core tests; the generated
-fixtures are synthetic proof, not real Zoom or browser proof.
+recovery, output ducking, route churn, stop timeout, stop/restart after a route
+switch, and retained failed-queue states. The saved-artifact path is covered by
+fast/Core tests; the generated fixtures are synthetic proof, not real Zoom or
+browser proof.
 
 It also writes an audio route automation proxy matrix for dictation pasteback,
 meeting mic/system audio, mic/output mismatch diagnostics, WebRTC/Zoom

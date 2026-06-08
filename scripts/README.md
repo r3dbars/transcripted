@@ -65,13 +65,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/release-gate-report.py` — single pre-merge/release gate report that runs the QA bench, Sentry/PostHog probes, appcast/download/release-health checks, and a local log sweep
   - Usage: `python3 scripts/ops/release-gate-report.py`
   - Deep RC usage: `python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts`
-  - Packaged RC usage after `build-beta.sh`: `python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files`
+  - Full one-command release gate: `python3 scripts/ops/release-gate-report.py --release-candidate`
   - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
-  - Missing Sentry/PostHog credentials are reported as yellow/unknown, not green
-- `scripts/ops/packaged-app-smoke.py` — pre-publish packaged app smoke for `build/Transcripted.app`, the versioned DMG, Sparkle settings, signing/entitlements, dSYM UUID evidence, isolated launch/menu report, and launch-log privacy
-  - Usage after packaging: `python3 scripts/ops/packaged-app-smoke.py`
-  - Strict symbol usage: `python3 scripts/ops/packaged-app-smoke.py --require-dsym`
-  - Writes local JSON and Markdown under `/tmp/transcripted-packaged-app-smoke/<run-id>/` by default
+  - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
+  - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
@@ -108,7 +105,6 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
   - Full usage: `bash scripts/ops/transcripted-qa-bench.sh --mode full`
   - UI usage: `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
-  - Package usage after `build-beta.sh`: `bash scripts/ops/transcripted-qa-bench.sh --mode package`
   - Corpus usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus`
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`

@@ -46,7 +46,7 @@ struct UISmoke: ParsableCommand {
     }
 }
 
-private final class UIAutomationSmokeRunner {
+final class UIAutomationSmokeRunner {
     private let appBundleURL: URL
     private let reportPath: String?
     private let timeout: TimeInterval

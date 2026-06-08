@@ -20,10 +20,10 @@ This repo has ten distinct verification layers:
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
    Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
-9. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+9. `bash scripts/ops/transcripted-qa-bench.sh --mode packaged`
+   No-publish `build-beta.sh` package smoke plus built app version, Sparkle, signing, dSYM, DMG, optional menu bar, and local log privacy checks
+10. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
    Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
-10. `bash scripts/ops/transcripted-qa-bench.sh --mode package`
-   Packaged-app smoke after `build-beta.sh`: bundle metadata, DMG, Sparkle config, signing, dSYM, and isolated launch/menu proof
 
 There is also an orchestrated QA bench for human-style passes:
 
@@ -32,7 +32,7 @@ bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
-bash scripts/ops/transcripted-qa-bench.sh --mode package
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
@@ -133,6 +133,7 @@ It verifies:
 
 - a fake Cmd+V target that reads at `950ms` still inserts fresh dictation
 - a fake target near the `2.5s` fallback boundary still inserts fresh dictation
+- a retry before fallback restore lets both fake Cmd+V targets insert fresh dictation, then restores the original clipboard
 - an old `900ms` fallback control is detected as stale instead of hidden
 - a reader beyond the current fallback is detected as stale
 - paste-dispatch failure leaves fresh dictation copied
@@ -169,18 +170,19 @@ identifiers and press controls. Missing permission exits `3` and is reported as
 
 ## Packaged App Smoke
 
-After `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` or a full
-notarized package build, run:
+`bash scripts/ops/transcripted-qa-bench.sh --mode packaged` runs a no-publish
+package smoke with `SKIP_NOTARIZATION=1`, then runs:
 
 ```bash
-bash scripts/ops/transcripted-qa-bench.sh --mode package
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
 ```
 
-This wraps `python3 scripts/ops/packaged-app-smoke.py` and checks the packaged
-app bundle, versioned DMG, Sparkle feed URL/public key, appcast metadata,
-signing/entitlements, dSYM UUID evidence, isolated launch/menu report, and
-launch-smoke log privacy. Yellow means a pre-publish or manual gap remains;
-red means the package smoke found real breakage.
+It validates the built app version/config against source `Info.plist`, Sparkle
+feed URL/public key/update flags, HTTPS observability endpoints, code signing,
+the bundled Sparkle framework and MCP helper, matching app/dSYM UUIDs, the
+versioned DMG, optional menu bar UI, and local log privacy patterns. UI/TCC
+blockers exit `3` as `INCOMPLETE`, not green proof. Notarization and publishing
+remain manual release steps.
 
 ## Codex UI Permission-State Smoke
 

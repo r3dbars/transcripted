@@ -26,10 +26,11 @@ fi
 CORPUS_CANDIDATE_MAP="${TRANSCRIPTED_QA_CORPUS_CANDIDATE_MAP:-}"
 CORPUS_MIN_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_RECALL:-0.45}"
 CORPUS_MIN_CONTENT_RECALL="${TRANSCRIPTED_QA_CORPUS_MIN_CONTENT_RECALL:-0.35}"
+PACKAGED_USER_NAME="${TRANSCRIPTED_QA_PACKAGED_USER_NAME:-${USER:-codex}}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|package|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -39,8 +40,7 @@ Modes:
   deep             quick + integration, Core tests, QA CLI, synthetic audio
   full             deep + release-health and local Gemma summary dry-run gates
   ui               build + Accessibility-driven menu bar/Home/Settings smoke
-  package          packaged app smoke after build-beta.sh; checks app bundle,
-                   DMG, Sparkle config, signing, dSYM, and isolated launch/menu
+  packaged         no-publish build-beta smoke + packaged app/version/Sparkle/dSYM/log checks
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
   pasteback-synthetic
@@ -177,7 +177,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|full|ui|package|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -263,10 +263,7 @@ run_step() {
 
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
-  if [[ "${status}" == "FAIL" ]]; then
-    return "${exit_code}"
-  fi
-  return 0
+  return "${exit_code}"
 }
 
 run_step_when_present() {
@@ -307,6 +304,7 @@ TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA
 Pass bar:
 - Accessibility, Event Posting, Input Monitoring, Screen Recording, and Automation are ready for the app that runs Codex or the terminal host.
 - Transcripted app bundle identity matches the expected bundle id.
+- No duplicate or wrong running Transcripted app instance makes UI targeting ambiguous.
 - Every automated click proves a visible state change after the event.
 
 If this command warns, report `INCOMPLETE: harness permission blocked`.
@@ -373,7 +371,7 @@ MARKDOWN
 write_report() {
   local fail_count warn_count skip_count pass_count flag_count total_count verdict branch commit app_version started finished short_summary
   local working_status regressed_status needs_human_status release_status
-  local ui_status package_status artifact_status audio_status gemma_status release_health_status live_status
+  local ui_status artifact_status packaged_status audio_status gemma_status release_health_status live_status
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
@@ -430,8 +428,8 @@ write_report() {
   fi
 
   ui_status="$(result_status "04-ui-smoke")"
-  package_status="$(result_status "06-packaged-app-smoke")"
   artifact_status="$(result_status "03-e2e-smoke")"
+  packaged_status="$(result_status "70-packaged-app-smoke")"
   audio_status="$(result_status "30-audio-synthetic")"
   gemma_status="$(result_status "61-gemma-summary-plan")"
   release_health_status="$(result_status "60-release-health")"
@@ -484,7 +482,7 @@ write_report() {
     echo "## Proof Map"
     echo
     echo "- UI automation smoke: ${ui_status} via \`transcripted-qa ui-smoke\`"
-    echo "- Packaged app smoke: ${package_status} via \`scripts/ops/packaged-app-smoke.py\`"
+    echo "- Packaged app smoke: ${packaged_status} via \`transcripted-qa packaged-app-smoke\`"
     echo "- Meeting and dictation artifact contract: ${artifact_status} via \`bash run-e2e-smoke.sh\`"
     echo "- Meeting route and Bluetooth mock/proxy matrix: ${audio_status} via \`bash run-daily-audio-reliability.sh --synthetic\`"
     echo "- Local Gemma summary dry-run plan: ${gemma_status} via \`scripts/ops/local-gemma-summary-autoeval.py\`"
@@ -708,9 +706,16 @@ run_ui_tail() {
     "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/ui-automation-smoke.json")"
 }
 
-run_package_tail() {
-  run_step "06-packaged-app-smoke" "Packaged app smoke" "yes" \
-    "python3 scripts/ops/packaged-app-smoke.py --require-dmg --require-dsym --out-dir $(shell_quote "${OUT}/packaged-app-smoke") --write-report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --markdown-out $(shell_quote "${OUT}/packaged-app-smoke.md")"
+run_packaged_tail() {
+  if [[ "${SKIP_BUILD}" -eq 1 ]]; then
+    skip_step "69-build-beta-smoke" "No-publish build-beta package smoke"
+  else
+    run_step "69-build-beta-smoke" "No-publish build-beta package smoke" "yes" \
+      "SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh '' $(shell_quote "${PACKAGED_USER_NAME}")"
+  fi
+
+  run_step "70-packaged-app-smoke" "Packaged app smoke" "yes" \
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke --report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --ui-report $(shell_quote "${RAW_DIR}/packaged-app-ui-smoke.json")"
 }
 
 run_corpus_tail() {
@@ -770,9 +775,9 @@ case "${MODE}" in
     fi
     run_ui_tail
     ;;
-  package)
+  packaged)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
-    run_package_tail
+    run_packaged_tail
     ;;
   artifact)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"

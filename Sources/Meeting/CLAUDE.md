@@ -124,6 +124,7 @@ Relevant direct coverage:
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
+- `Tests/MeetingRouteFixtureTests.swift`
 - `Tests/LiveMeetingCodexSessionTests.swift`
 - `Tests/LiveMeetingPreviewServerTests.swift`
 - `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
