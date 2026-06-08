@@ -1580,7 +1580,7 @@ struct HomeMeetingRow: View {
                             .controlSize(.mini)
                             .frame(width: 12, height: 12)
 
-                        Text("Generating AI summary...")
+                        Text("Running local AI summary...")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(Color.accentColor)
                             .lineLimit(1)

@@ -942,14 +942,23 @@ struct TranscriptedSettingsView: View {
         var items: [HomeRowMenuItem] = []
         let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
+        let isPreparingLocalGemma = isLocalSummaryModelPreparing
         let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
+        let summaryActionTitle: String
+        if isSummarizing {
+            summaryActionTitle = "Running AI summary..."
+        } else if hasSummary {
+            summaryActionTitle = "Open enhanced transcript"
+        } else if isPreparingLocalGemma {
+            summaryActionTitle = "Preparing Gemma..."
+        } else {
+            summaryActionTitle = "Run AI summary"
+        }
 
         if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled) {
             items.append(
                 HomeRowMenuItem(
-                    title: isSummarizing
-                        ? "Running AI summary..."
-                        : (hasSummary ? "Open enhanced transcript" : "Run AI summary"),
+                    title: summaryActionTitle,
                     symbolName: hasSummary ? "doc.text" : "sparkles",
                     isEnabled: !isSummarizing && (hasSummary || canGenerateSummary)
                 ) {
@@ -979,7 +988,9 @@ struct TranscriptedSettingsView: View {
            hasSummary {
             items.append(
                 HomeRowMenuItem(
-                    title: isSummarizing ? "Regenerating AI summary..." : "Regenerate AI summary",
+                    title: isSummarizing
+                        ? "Regenerating AI summary..."
+                        : (isPreparingLocalGemma ? "Preparing Gemma..." : "Regenerate AI summary"),
                     symbolName: "arrow.clockwise",
                     isEnabled: !isSummarizing && canGenerateSummary
                 ) {
@@ -1317,6 +1328,7 @@ struct TranscriptedSettingsView: View {
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,
+            isPreparingLocalSummaryModel: isLocalSummaryModelPreparing,
             hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
             isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
         )
@@ -2523,14 +2535,20 @@ struct TranscriptedSettingsView: View {
 
                 if localMeetingSummariesEnabled, localSummarySetupStatus.isReady {
                     SettingsInlineActionButton(
-                        title: isLocalSummaryModelPreparing ? "Preparing Gemma..." : "Prepare Gemma",
-                        symbolName: "tray.and.arrow.down",
+                        title: isLocalSummaryModelPreparing ? "Cancel setup" : "Prepare Gemma",
+                        symbolName: isLocalSummaryModelPreparing ? "xmark.circle" : "tray.and.arrow.down",
+                        tone: isLocalSummaryModelPreparing ? .warning : .neutral,
                         automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
                     ) {
-                        trackSettingsAction("prepare_local_summary_model", page: .beta)
-                        prepareLocalSummaryModelFromBeta()
+                        if isLocalSummaryModelPreparing {
+                            trackSettingsAction("cancel_local_summary_model_prepare", page: .beta)
+                            cancelLocalSummaryModelPreparation()
+                            localSummaryModelPreparationStatus = "Gemma setup cancelled. You can try Prepare Gemma again when this Mac is idle."
+                        } else {
+                            trackSettingsAction("prepare_local_summary_model", page: .beta)
+                            prepareLocalSummaryModelFromBeta()
+                        }
                     }
-                    .disabled(isLocalSummaryModelPreparing)
                 }
             }
 
@@ -2690,7 +2708,7 @@ struct TranscriptedSettingsView: View {
         }
 
         isLocalSummaryModelPreparing = true
-        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. First run may download several GB from Hugging Face."
+        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. First run may download several GB from Hugging Face and can take several minutes on M1 Macs."
         recordLocalSummaryEvent(
             event: "local_meeting_summary_model_prepare_started",
             message: "Local Gemma model preparation started",
@@ -2817,26 +2835,35 @@ struct TranscriptedSettingsView: View {
     }
 
     private var localSummarySetupStatusTitle: String {
+        if isLocalSummaryModelPreparing {
+            return "Preparing Gemma locally"
+        }
         if !localSummarySetupStatus.hasEnoughMemory {
             return "Not supported on this Mac"
         }
         if !localSummarySetupStatus.hasRuntime {
             return "Setup needed"
         }
-        return "Ready for first summary"
+        return "Runtime ready"
     }
 
     private var localSummarySetupStatusDetail: String {
+        if isLocalSummaryModelPreparing {
+            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time."
+        }
         if !localSummarySetupStatus.hasEnoughMemory {
             return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
         }
         if !localSummarySetupStatus.hasRuntime {
             return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
         }
-        return "uv is installed. The first summary may download a large local Gemma model; after that, summaries reuse the local cache."
+        return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
     }
 
     private var localSummarySetupStatusSymbol: String {
+        if isLocalSummaryModelPreparing {
+            return "arrow.triangle.2.circlepath"
+        }
         if localSummarySetupStatus.isReady {
             return "checkmark.circle.fill"
         }
@@ -2844,6 +2871,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private var localSummarySetupStatusColor: Color {
+        if isLocalSummaryModelPreparing {
+            return Color.accentColor
+        }
         if localSummarySetupStatus.isReady {
             return .green
         }
