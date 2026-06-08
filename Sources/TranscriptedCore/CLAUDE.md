@@ -85,12 +85,14 @@ Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/AudioDiagnosticsSnapshotTests.swift`
+- `Tests/TranscriptedCoreTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
 - `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
 - `Tests/TranscriptedCoreTests/FailedTranscriptionManagerTests.swift`
 - `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
+- `Tests/TranscriptedCoreTests/MeetingRouteArtifactFixtureTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
 - `Tests/TranscriptedCoreTests/RealtimeAGCTests.swift`

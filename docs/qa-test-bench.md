@@ -84,8 +84,8 @@ the bench names what is automated for dictation, meeting mic/system audio,
 WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
 also generates deterministic meeting-route fixtures for shared mic, missing
 system audio, quiet mic recovery/failure, output ducking, route churn, stop
-timeout, and stop/save artifact outcomes. This does not replace live or manual
-route proof.
+timeout, stop/restart after a route switch, and stop/save artifact outcomes.
+This does not replace live or manual route proof.
 Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
 Real connected AirPods/Bluetooth hardware remains manual proof.
 
@@ -143,9 +143,12 @@ TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA
 ```
 
 It requires local microphone permission, System Audio Recording proof, and the
-Codex/computer-use host permissions needed for screenshots and clicks. If macOS
-blocks the harness, report `INCOMPLETE: harness permission blocked` with the
-exact permission reason. Do not treat a TCC blocker as product proof.
+Codex/computer-use host permissions needed for screenshots and clicks. It also
+checks that the intended Transcripted app bundle identity is being tested and
+that duplicate or wrong running Transcripted apps are not making UI targeting
+ambiguous. If macOS blocks the harness, report
+`INCOMPLETE: harness permission blocked` with the exact permission reason. Do
+not treat a TCC blocker as product proof.
 
 ## Audio Synthetic Run
 
@@ -228,6 +231,15 @@ Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
 treated as green proof. Missing manual proof is also `YELLOW`. The command exits
 `0` for `GREEN`, `3` for `YELLOW`, and `1` for `RED`. Actual release-surface
 drift or required release-health failures are `RED`.
+
+The command exit code follows the overall report color: `0` for `GREEN`, `3`
+for `YELLOW`, and `1` for `RED`. That means missing credentials or missing
+manual proof keep automation yellow instead of silently looking green.
+
+Manual-proof rows say `UNKNOWN` until a real local run artifact exists. The
+expected manual lanes are live mic/system-audio capture, meeting-app volume and
+route behavior, sleep/wake and device switching, pasteback feel, speaker
+review/rename feel, and existing-install update behavior.
 
 ## Short Output
 

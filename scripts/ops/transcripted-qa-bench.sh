@@ -302,6 +302,7 @@ TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA
 Pass bar:
 - Accessibility, Event Posting, Input Monitoring, Screen Recording, and Automation are ready for the app that runs Codex or the terminal host.
 - Transcripted app bundle identity matches the expected bundle id.
+- No duplicate or wrong running Transcripted app instance makes UI targeting ambiguous.
 - Every automated click proves a visible state change after the event.
 
 If this command warns, report `INCOMPLETE: harness permission blocked`.

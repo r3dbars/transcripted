@@ -70,7 +70,9 @@ test_layers:
     proves:
       - "Codex/computer-use host permissions are ready before screenshots, clicks, or Apple Events are counted"
       - "Transcripted app bundle identity matches the expected TCC bundle id"
+      - "Duplicate or wrong running Transcripted app instances are caught before UI targeting is trusted"
     agent_notes:
+      - "The command prints the expected manual grant state for computer-use and live-capture modes."
       - "Permission blockers are INCOMPLETE, not green."
       - "Use --mode live-capture before local mic/system-audio capture proof."
 
@@ -205,7 +207,7 @@ coverage_gaps:
   audio:
     current_coverage:
       - "synthetic audio reliability matrix"
-      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, and stop/save artifact outcomes"
+      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, stop/restart after route switch, and stop/save artifact outcomes"
       - "live capture smoke for mic and system audio"
       - "fast/core tests for failure policy, recovery state, and archive handling"
     missing_automation:

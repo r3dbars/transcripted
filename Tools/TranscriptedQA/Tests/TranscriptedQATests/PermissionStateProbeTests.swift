@@ -64,6 +64,21 @@ final class PermissionStateProbeTests: XCTestCase {
         XCTAssertWarning(results, check: "permissions/app-bundle")
     }
 
+    func testMismatchedAppBundleIdentifierIsIncompleteInsteadOfGreen() {
+        let probe = makeProbe(
+            mode: .computerUse,
+            transcriptedBundleID: "com.example.transcripted",
+            appBundleIdentifier: "com.example.other"
+        )
+
+        let results = probe.validate()
+        let result = results.first { $0.check == "permissions/app-bundle" }
+
+        XCTAssertWarning(results, check: "permissions/app-bundle")
+        XCTAssertTrue(result?.detail?.contains("com.example.other") == true)
+        XCTAssertTrue(result?.detail?.contains("com.example.transcripted") == true)
+    }
+
     func testAutomationStatusMappingNamesUndecidedAndDeniedStates() {
         let undecided = makeProbe(mode: .computerUse, automationStatus: .notDetermined).validate()
         XCTAssertWarning(undecided, check: "permissions/codex/automation")
@@ -78,6 +93,35 @@ final class PermissionStateProbeTests: XCTestCase {
         )
     }
 
+    func testAutomationUnavailableStatusStaysIncompleteWithDiagnosticCode() {
+        let results = makeProbe(mode: .computerUse, automationStatus: .unavailable(-1743)).validate()
+        let result = results.first { $0.check == "permissions/codex/automation" }
+
+        XCTAssertWarning(results, check: "permissions/codex/automation")
+        XCTAssertTrue(result?.detail?.contains("OSStatus -1743") == true)
+    }
+
+    func testLiveCaptureModeWarnsWhenTranscriptedDefaultsDomainCannotOpen() {
+        let results = makeProbe(mode: .liveCapture, defaults: nil).validate()
+        let result = results.first { $0.check == "permissions/app/system-audio-cache" }
+
+        XCTAssertWarning(results, check: "permissions/app/system-audio-cache")
+        XCTAssertTrue(result?.detail?.contains("Could not open") == true)
+    }
+
+    func testReadyLiveCaptureModeHasNoPermissionWarnings() {
+        let probe = makeProbe(
+            mode: .liveCapture,
+            microphoneStatus: .authorized,
+            defaults: StubPermissionDefaults(known: true, granted: true)
+        )
+
+        let report = ValidationReport(results: probe.validate())
+
+        XCTAssertEqual(report.summary.failed, 0)
+        XCTAssertEqual(report.summary.warnings, 0)
+    }
+
     private func makeProbe(
         mode: PermissionStateMode,
         accessibilityTrusted: Bool = true,
@@ -86,13 +130,14 @@ final class PermissionStateProbeTests: XCTestCase {
         screenCaptureTrusted: Bool = true,
         microphoneStatus: AVAuthorizationStatus = .authorized,
         automationStatus: PermissionStateProbe.AutomationStatus = .allowed,
+        transcriptedBundleID: String = "com.justinbetker.draft",
         appBundleIdentifier: String? = "com.justinbetker.draft",
         defaults: StubPermissionDefaults? = StubPermissionDefaults(known: true, granted: true)
     ) -> PermissionStateProbe {
         PermissionStateProbe(
             mode: mode,
             automationTargetBundleID: "com.apple.systemevents",
-            transcriptedBundleID: "com.justinbetker.draft",
+            transcriptedBundleID: transcriptedBundleID,
             appBundlePath: "build/Transcripted.app",
             transcriptedDefaultsDomain: "com.justinbetker.draft",
             processNameProvider: { "transcripted-qa-tests" },
@@ -103,7 +148,8 @@ final class PermissionStateProbeTests: XCTestCase {
             screenCaptureTrustedProvider: { screenCaptureTrusted },
             microphoneStatusProvider: { microphoneStatus },
             automationStatusProvider: { _ in automationStatus },
-            defaultsProvider: { _ in defaults }
+            defaultsProvider: { _ in defaults },
+            runningApplicationsProvider: { _ in [] }
         )
     }
 

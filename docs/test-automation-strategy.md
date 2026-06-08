@@ -26,7 +26,9 @@ As of 2026-06-06, the repo has these automated layers:
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state`:
   no-prompt Codex/computer-use permission preflight for Accessibility, event
   posting, input monitoring, screen capture, Automation, microphone state, and
-  Transcripted app identity.
+  Transcripted app identity. It also prints the expected manual grant state and
+  warns when duplicate or wrong running Transcripted app instances make UI
+  targeting ambiguous.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
   reports for `quick`, `deep`, `full`, `ui`, `artifact`, `audio-synthetic`,
   `corpus`, `corpus-compare`, and `live`.
@@ -43,8 +45,9 @@ As of 2026-06-06, the repo has these automated layers:
   count. Deeper sheets, media controls, and sanitized screenshots still need
   coverage.
 - Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
-  mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
-  Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
+  mic, output ducking, route churn, stop timeout, stop/restart after route
+  switch, and stop/save outcomes. Real Zoom/WebRTC/Bluetooth perceived-volume
+  proof is still manual.
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.

@@ -512,27 +512,48 @@ def summarize_counts(counts: Counter[str], prefix: str) -> str:
     return f"{prefix} ({parts})" if parts else prefix
 
 
-def manual_items(args: argparse.Namespace) -> list[ReportItem]:
+def evidence_list(paths: list[Path]) -> str:
+    return "; ".join(str(path) for path in paths)
+
+
+def manual_items(args: argparse.Namespace, root: Path, out_dir: Path) -> list[ReportItem]:
+    qa_manual_path = out_dir / "qa-bench" / args.run_id / "manual-scenarios.md"
     items = [
         ReportItem(
             "Meeting-app volume and route matrix",
             "yellow",
-            "Run docs/qa-issue-500-meeting-audio.md across Chrome Meet, Safari Meet, Firefox Meet, Zoom, and real routes.",
+            "UNKNOWN: run docs/qa-issue-500-meeting-audio.md across Chrome Meet, Safari Meet, Firefox Meet, Zoom, and real routes.",
+            evidence_list(
+                [
+                    root / "docs/qa-issue-500-meeting-audio.md",
+                    root / "docs/audio-reliability-daily-check.md",
+                    qa_manual_path,
+                ]
+            ),
+        ),
+        ReportItem(
+            "Sleep/wake and device switching",
+            "yellow",
+            "UNKNOWN: run the daily audio reliability loop for sleep/wake, input-device changes, and Bluetooth/AirPods route changes.",
+            evidence_list([qa_manual_path, root / "docs/audio-reliability-daily-check.md"]),
         ),
         ReportItem(
             "Pasteback feel in real apps",
             "yellow",
-            "Check TextEdit, Notes, and a browser text area with Auto Enter off/on.",
+            "UNKNOWN: check TextEdit, Notes, and a browser text area with Auto Enter off/on.",
+            evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
         ),
         ReportItem(
             "Speaker review and rename feel",
             "yellow",
-            "Verify unknown speakers stay unknown until a human names them, and Markdown keeps the chosen name.",
+            "UNKNOWN: verify unknown speakers stay unknown until a human names them, and Markdown keeps the chosen name.",
+            evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
         ),
         ReportItem(
             "Existing-install update path",
             "yellow",
-            "On a real installed app, verify Sparkle check/install behavior and Homebrew install/upgrade when publishing.",
+            "UNKNOWN: on a real installed app, verify Sparkle check/install behavior and Homebrew install/upgrade when publishing.",
+            evidence_list([root / "docs/sparkle-updates.md", root / "docs/release-packaging.md"]),
         ),
     ]
     if args.qa_mode != "live":
@@ -541,7 +562,8 @@ def manual_items(args: argparse.Namespace) -> list[ReportItem]:
             ReportItem(
                 "Live mic and system-audio capture",
                 "yellow",
-                "Run the live QA bench on this Mac when release claims depend on real audio/TCC proof.",
+                "UNKNOWN: run the live QA bench on this Mac when release claims depend on real audio/TCC proof.",
+                evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
             ),
         )
     return items
@@ -609,6 +631,7 @@ def render_report(
         "",
         "Raw logs, transcripts, audio, device names, tokens, and private paths stay local. This report only writes aggregate status.",
         "Missing Sentry/PostHog credentials are reported as yellow/unknown, not green proof.",
+        "The command exit code follows the overall report color, so manual-only unknowns still exit yellow.",
         "",
         "## Sidecar Boundary",
         "",
@@ -837,7 +860,7 @@ def main() -> int:
     release_surfaces = run_release_surfaces(args, root, out_dir, commands)
     telemetry = run_telemetry(args, root, out_dir, commands)
     local_logs = sweep_local_logs(args)
-    manual = manual_items(args)
+    manual = manual_items(args, root, out_dir)
 
     generated_at = utc_now()
     branch = git_value(root, ["branch", "--show-current"], "detached")
