@@ -44,6 +44,10 @@ final class HomeViewModel: ObservableObject {
         loadCurrentLimits(isInitialLoad: true)
     }
 
+    func reloadVisibleContent() {
+        loadCurrentLimits(isInitialLoad: false)
+    }
+
     func loadMoreDictations() {
         guard !isLoading, !isLoadingMore, canLoadMoreDictations else { return }
         dictationLimit += initialDictationLimit
@@ -1067,6 +1071,19 @@ struct HomeRowMenuItem: Identifiable {
         self.isEnabled = isEnabled
         self.isDestructive = isDestructive
         self.action = action
+    }
+}
+
+struct HomeLocalSummaryNotice: Identifiable, Equatable {
+    let id = UUID()
+    let transcriptURL: URL
+    let chunkCount: Int
+
+    var title: String { "AI summary saved" }
+    var status: String { "Ready" }
+    var detail: String {
+        let passText = chunkCount == 1 ? "one local Gemma pass" : "\(chunkCount) local Gemma passes"
+        return "The meeting Markdown was enhanced with a generated title and summary preview using \(passText)."
     }
 }
 

@@ -640,6 +640,26 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         )
     }
 
+    func prepareModelForFirstSummary() async throws -> String {
+        try configuration.validateHardware()
+        try Task.checkCancellation()
+
+        let workDirectory = try makeWorkDirectory()
+        defer { try? fileManager.removeItem(at: workDirectory) }
+
+        _ = try runtime.generate(
+            prompt: """
+            You are Transcripted's local meeting summarizer. Reply with exactly:
+            Ready.
+            """,
+            label: "setup",
+            maxTokens: 8,
+            workDirectory: workDirectory
+        )
+
+        return configuration.profileName
+    }
+
     private func makeWorkDirectory() throws -> URL {
         let root = FileManager.default.transcriptedTemporaryDir
             .appendingPathComponent("local-summaries", isDirectory: true)

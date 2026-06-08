@@ -78,11 +78,16 @@ struct TranscriptedSettingsView: View {
     @State private var homeLocalSummaryJobIDs: Set<String> = []
     @State private var homeLocalSummaryTasks: [String: Task<LocalMeetingSummaryResult, Error>] = [:]
     @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
+    @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
     @State private var betaFeatureStatus: String?
     @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
     @State private var showLocalSummarySetupDetails = false
+    @State private var localSummaryModelPreparationStatus: String?
+    @State private var localSummaryModelPreparationTask: Task<String, Error>?
+    @State private var localSummaryModelPreparationToken: UUID?
+    @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
 
     init(
@@ -211,6 +216,8 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
+            localSummaryModelPreparationTask?.cancel()
+            localSummaryModelPreparationTask = nil
             homeViewModel.cancel()
         }
     }
@@ -383,6 +390,23 @@ struct TranscriptedSettingsView: View {
                             )
                             NSWorkspace.shared.open(transcriptURL)
                         }
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if let notice = homeLocalSummaryNotice {
+                SettingsActivityCard(
+                    symbolName: "sparkles",
+                    title: notice.title,
+                    status: notice.status,
+                    detail: notice.detail,
+                    tone: .success,
+                    progress: 1.0,
+                    actionTitle: "Open enhanced transcript",
+                    action: {
+                        trackSettingsAction("open_local_meeting_summary_notice", page: .home)
+                        NSWorkspace.shared.open(notice.transcriptURL)
                     }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -712,6 +736,17 @@ struct TranscriptedSettingsView: View {
             return
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
+        recordLocalSummaryEvent(
+            event: "local_meeting_summary_started",
+            message: "Local Gemma meeting summary started",
+            context: [
+                "has_existing_summary": item.summaryPreview == nil ? "false" : "true",
+                "setup_ready": localSummarySetupStatus.isReady ? "true" : "false",
+                "setup_profile": localSummarySetupStatus.profileName,
+                "has_runtime": localSummarySetupStatus.hasRuntime ? "true" : "false",
+            ]
+        )
+        homeLocalSummaryNotice = nil
         homeLocalSummaryJobIDs.insert(item.id)
 
         let task = Task.detached(priority: .utility) {
@@ -734,13 +769,37 @@ struct TranscriptedSettingsView: View {
             }
 
             do {
-                _ = try await task.value
+                let result = try await task.value
                 guard localMeetingSummariesEnabled else { return }
-                refreshRecentCaptures(force: true)
+                homeLocalSummaryNotice = HomeLocalSummaryNotice(
+                    transcriptURL: result.transcriptURL,
+                    chunkCount: result.chunkCount
+                )
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_completed",
+                    message: "Local Gemma meeting summary saved",
+                    context: [
+                        "chunk_count": "\(result.chunkCount)",
+                        "profile": result.profileName,
+                    ]
+                )
+                refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_cancelled",
+                    message: "Local Gemma meeting summary cancelled"
+                )
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                recordLocalSummaryEvent(
+                    level: .error,
+                    event: "local_meeting_summary_failed",
+                    message: "Local Gemma meeting summary failed",
+                    context: [
+                        "error": error.localizedDescription,
+                    ]
+                )
                 homeDeleteFailure = HomeDeleteFailure(
                     title: "Could not summarize meeting",
                     message: error.localizedDescription
@@ -2397,10 +2456,7 @@ struct TranscriptedSettingsView: View {
                                 localMeetingSummariesEnabled = enabled
                                 LocalMeetingSummaryPreferences.setEnabled(enabled)
                                 trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
-                                refreshLocalSummarySetupStatus()
-                                if !enabled {
-                                    cancelLocalSummaryJobs()
-                                }
+                                handleLocalMeetingSummaryToggle(enabled)
                             }
                         ),
                         help: "Opt in to local meeting summaries on Home.",
@@ -2464,6 +2520,18 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("check_local_summary_setup", page: .beta)
                     refreshLocalSummarySetupStatus()
                 }
+
+                if localMeetingSummariesEnabled, localSummarySetupStatus.isReady {
+                    SettingsInlineActionButton(
+                        title: isLocalSummaryModelPreparing ? "Preparing Gemma..." : "Prepare Gemma",
+                        symbolName: "tray.and.arrow.down",
+                        automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
+                    ) {
+                        trackSettingsAction("prepare_local_summary_model", page: .beta)
+                        prepareLocalSummaryModelFromBeta()
+                    }
+                    .disabled(isLocalSummaryModelPreparing)
+                }
             }
 
             if !localSummarySetupStatus.hasRuntime {
@@ -2476,6 +2544,13 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("open_uv_install_guide", page: .beta)
                     openUVInstallGuide()
                 }
+            }
+
+            if let localSummaryModelPreparationStatus {
+                Text(localSummaryModelPreparationStatus)
+                    .font(.caption)
+                    .foregroundStyle(isLocalSummaryModelPreparing ? Color.accentColor : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
@@ -2589,6 +2664,99 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private func handleLocalMeetingSummaryToggle(_ enabled: Bool) {
+        refreshLocalSummarySetupStatus()
+        if enabled {
+            prepareLocalSummaryModelFromBeta()
+        } else {
+            cancelLocalSummaryJobs()
+            cancelLocalSummaryModelPreparation()
+            localSummaryModelPreparationStatus = nil
+        }
+    }
+
+    private func prepareLocalSummaryModelFromBeta() {
+        refreshLocalSummarySetupStatus()
+        localSummaryModelPreparationTask?.cancel()
+
+        guard localSummarySetupStatus.hasEnoughMemory else {
+            localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
+            return
+        }
+
+        guard localSummarySetupStatus.hasRuntime else {
+            localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
+            return
+        }
+
+        isLocalSummaryModelPreparing = true
+        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. First run may download several GB from Hugging Face."
+        recordLocalSummaryEvent(
+            event: "local_meeting_summary_model_prepare_started",
+            message: "Local Gemma model preparation started",
+            context: [
+                "setup_profile": localSummarySetupStatus.profileName,
+                "has_runtime": "true",
+            ]
+        )
+
+        let taskToken = UUID()
+        let task = Task.detached(priority: .utility) {
+            try await LocalMeetingSummarizer().prepareModelForFirstSummary()
+        }
+        localSummaryModelPreparationTask = task
+        localSummaryModelPreparationToken = taskToken
+
+        Task { @MainActor in
+            do {
+                let profile = try await task.value
+                guard !Task.isCancelled, localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                localSummaryModelPreparationStatus = "Gemma is ready. The first real summary should start without a surprise setup step."
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_model_prepare_completed",
+                    message: "Local Gemma model preparation completed",
+                    context: [
+                        "profile": profile,
+                    ]
+                )
+            } catch is CancellationError {
+                guard localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                localSummaryModelPreparationStatus = nil
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_model_prepare_cancelled",
+                    message: "Local Gemma model preparation cancelled"
+                )
+            } catch {
+                guard localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                localSummaryModelPreparationStatus = "Gemma setup failed: \(error.localizedDescription)"
+                recordLocalSummaryEvent(
+                    level: .error,
+                    event: "local_meeting_summary_model_prepare_failed",
+                    message: "Local Gemma model preparation failed",
+                    context: [
+                        "error": error.localizedDescription,
+                    ]
+                )
+            }
+        }
+    }
+
+    private func cancelLocalSummaryModelPreparation() {
+        localSummaryModelPreparationTask?.cancel()
+        localSummaryModelPreparationTask = nil
+        localSummaryModelPreparationToken = nil
+        isLocalSummaryModelPreparing = false
+    }
+
     private func prepareBetaLiveMeetingSidecarWorkspaceForUse() throws -> URL {
         let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
         if #available(macOS 14.0, *) {
@@ -2614,6 +2782,33 @@ struct TranscriptedSettingsView: View {
         homeLocalSummaryTasks.removeAll()
         homeLocalSummaryTaskTokens.removeAll()
         homeLocalSummaryJobIDs.removeAll()
+    }
+
+    private func refreshRecentCapturesAfterLocalSummary() {
+        guard navigation.selectedPage == .home else {
+            refreshRecentCaptures(force: true)
+            return
+        }
+        homeViewModel.reloadVisibleContent()
+        Task { @MainActor in
+            await statsService.refreshStats()
+        }
+    }
+
+    private func recordLocalSummaryEvent(
+        level: EventLevel = .info,
+        event: String,
+        message: String,
+        context: [String: String] = [:]
+    ) {
+        DiagnosticsTrail.record(
+            logger: appLogger,
+            level: level,
+            engine: "meeting",
+            event: event,
+            message: message,
+            context: context
+        )
     }
 
     private func openUVInstallGuide() {

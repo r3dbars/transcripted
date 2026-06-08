@@ -466,6 +466,42 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    await runSuite("LocalMeetingSummarizer prepares Gemma without transcript text") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryPrepareTests-\(UUID().uuidString)", isDirectory: true)
+        let promptCaptureURL = directory.appendingPathComponent("prepare-prompt.txt")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { prompts, _ in
+                    try prompts.map(\.prompt).joined(separator: "\n---\n").write(
+                        to: promptCaptureURL,
+                        atomically: true,
+                        encoding: .utf8
+                    )
+                    return prompts.map { _ in "Ready." }
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            let profile = try await summarizer.prepareModelForFirstSummary()
+            let capturedPrompt = try String(contentsOf: promptCaptureURL, encoding: .utf8)
+
+            assertEqual(profile, "test", "prepare should return the active profile")
+            assertTrue(capturedPrompt.contains("Reply with exactly"), "prepare should use a tiny setup prompt")
+            assertFalse(capturedPrompt.contains("## Transcript"), "prepare should not include meeting markdown")
+            assertFalse(capturedPrompt.contains("Action Items"), "prepare should not include summary prompt sections")
+        } catch {
+            assertTrue(false, "unexpected prepare failure: \(error)")
+        }
+    }
+
     runSuite("LocalGemmaSummaryRuntime stops a hung runner at the configured timeout") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalMeetingSummaryTimeoutTests-\(UUID().uuidString)", isDirectory: true)
