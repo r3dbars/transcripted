@@ -52,7 +52,11 @@ func testAudioAutomationCoverageContract() {
     runSuite("Audio automation coverage contract - Bluetooth route tuple stays named") {
         let script = readAudioAutomationContractFile("scripts/ops/daily-audio-reliability-check.sh")
         let expectedBluetoothTokens = [
+            "mocked connect/disconnect",
+            "output-only Bluetooth",
             "built_in_input_to_bluetooth_output",
+            "sample-rate settling",
+            "route readiness",
             "preferredBuiltInForBluetoothHeadset",
             "builtInFallbackSuppressedForRecoveryAttempt",
             "routeNotSettled",

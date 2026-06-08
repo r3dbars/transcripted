@@ -140,6 +140,113 @@ func testBluetoothRouteContract() {
         assertTrue(state.canStartRecording, "successful latest recovery should unblock dictation starts")
     }
 
+    runSuite("Bluetooth route contract - mocked device changes settle through connect and disconnect") {
+        let airPodsInput = bluetoothDevice(1, "Justin's AirPods Pro", inputChannels: 1)
+        let airPodsOutput = bluetoothDevice(2, "Justin's AirPods Pro", inputChannels: 0)
+        let macBookMic = bluetoothRouteBuiltInDevice(3, "MacBook Pro Microphone")
+        let macBookSpeakers = bluetoothRouteBuiltInDevice(4, "MacBook Pro Speakers", inputChannels: 0)
+        var recovery = ParakeetRecoveryState()
+
+        func routeShape(for selection: DictationInputDeviceSelection) -> String {
+            ParakeetRouteDiagnosticsPolicy.routeShape(
+                selectedInputClass: DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput),
+                outputDeviceClass: selection.defaultOutput.map(DictationInputDeviceSelectionPolicy.deviceClass(for:)) ?? "unknown"
+            )
+        }
+
+        func readiness(
+            for selection: DictationInputDeviceSelection,
+            outputSampleRate: Double,
+            inputSampleRate: Double
+        ) -> ParakeetAudioFormatReadiness {
+            ParakeetAudioFormatReadinessPolicy.readiness(
+                outputSampleRate: outputSampleRate,
+                outputChannelCount: 1,
+                inputSampleRate: inputSampleRate,
+                inputChannelCount: 1,
+                selectedInputClass: DictationInputDeviceSelectionPolicy.deviceClass(for: selection.selectedInput),
+                outputDeviceClass: selection.defaultOutput.map(DictationInputDeviceSelectionPolicy.deviceClass(for:)) ?? "unknown",
+                selectionOverrodeDefault: selection.didOverrideDefault,
+                selectionReason: selection.reason
+            )
+        }
+
+        let baseline = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macBookMic,
+            defaultOutput: macBookSpeakers,
+            availableInputs: [macBookMic]
+        )
+        assertEqual(baseline.reason, .defaultIsSafe, "built-in input/output should be the stable baseline")
+        assertEqual(routeShape(for: baseline), "built_in_input_to_built_in_output", "baseline route shape should be queryable")
+        assertEqual(
+            readiness(for: baseline, outputSampleRate: 48_000, inputSampleRate: 48_000),
+            .ready,
+            "baseline built-in route should be ready"
+        )
+
+        let outputOnlyGeneration = recovery.beginConfigChange()
+        let outputOnlyBluetooth = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macBookMic,
+            defaultOutput: airPodsOutput,
+            availableInputs: [macBookMic]
+        )
+        let outputOnlyReadiness = readiness(
+            for: outputOnlyBluetooth,
+            outputSampleRate: 48_000,
+            inputSampleRate: 48_000
+        )
+        assertEqual(outputOnlyBluetooth.reason, .defaultIsSafe, "output-only Bluetooth should not force an input override")
+        assertFalse(outputOnlyBluetooth.didOverrideDefault, "built-in mic should stay selected when only Bluetooth output changes")
+        assertEqual(routeShape(for: outputOnlyBluetooth), "built_in_input_to_bluetooth_output", "output-only Bluetooth route should stay visible")
+        assertEqual(outputOnlyReadiness, .ready, "output-only Bluetooth at a settled 48k route should be ready")
+        assertEqual(ParakeetDeviceRecoveryReadinessPolicy.action(for: outputOnlyReadiness), .finishRecovery, "ready output-only route should finish recovery")
+        assertTrue(recovery.finishRecovery(success: true, generation: outputOnlyGeneration), "output-only route connect should settle the current generation")
+
+        let headsetConnectGeneration = recovery.beginConfigChange()
+        let headsetConnect = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: [airPodsInput, macBookMic]
+        )
+        let lowRateReadiness = readiness(
+            for: headsetConnect,
+            outputSampleRate: 24_000,
+            inputSampleRate: 48_000
+        )
+        assertEqual(headsetConnect.selectedInput, macBookMic, "Bluetooth headset connect should prefer the built-in mic")
+        assertEqual(headsetConnect.reason, .preferredBuiltInForBluetoothHeadset, "built-in override should stay explicit")
+        assertEqual(lowRateReadiness, .routeNotSettled, "low-rate Bluetooth output should wait before dictation starts")
+        assertEqual(ParakeetDeviceRecoveryReadinessPolicy.action(for: lowRateReadiness), .keepWaiting, "unsettled mocked route should keep recovery active")
+        assertFalse(recovery.canStartRecording, "dictation should stay blocked while the mocked connect route is settling")
+
+        let settledReadiness = readiness(
+            for: headsetConnect,
+            outputSampleRate: 48_000,
+            inputSampleRate: 48_000
+        )
+        assertEqual(settledReadiness, .ready, "same connected route should become ready after the output sample rate settles")
+        assertEqual(ParakeetDeviceRecoveryReadinessPolicy.action(for: settledReadiness), .finishRecovery, "settled route should finish recovery")
+        assertTrue(recovery.finishRecovery(success: true, generation: headsetConnectGeneration), "settled headset connect should own the current generation")
+        assertTrue(recovery.canStartRecording, "dictation should start after the mocked connect route settles")
+
+        let disconnectGeneration = recovery.beginConfigChange()
+        let disconnected = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: macBookMic,
+            defaultOutput: macBookSpeakers,
+            availableInputs: [macBookMic]
+        )
+        let disconnectReadiness = readiness(
+            for: disconnected,
+            outputSampleRate: 48_000,
+            inputSampleRate: 48_000
+        )
+        assertEqual(disconnected.reason, .defaultIsSafe, "Bluetooth disconnect should return to the safe built-in route")
+        assertEqual(routeShape(for: disconnected), "built_in_input_to_built_in_output", "disconnect should expose the built-in route shape")
+        assertEqual(disconnectReadiness, .ready, "disconnect back to built-in should be ready")
+        assertTrue(recovery.finishRecovery(success: true, generation: disconnectGeneration), "disconnect should settle the newest generation")
+        assertTrue(recovery.canStartRecording, "dictation should be startable after Bluetooth disconnect settles")
+    }
+
     runSuite("Bluetooth route contract - tap buffer sample rate pins dictation timeline") {
         let effectiveSampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
             bufferSampleRate: 48_000,
@@ -232,12 +339,16 @@ private func bluetoothDevice(
     )
 }
 
-private func bluetoothRouteBuiltInDevice(_ id: UInt32, _ name: String) -> DictationAudioDevice {
+private func bluetoothRouteBuiltInDevice(
+    _ id: UInt32,
+    _ name: String,
+    inputChannels: UInt32 = 1
+) -> DictationAudioDevice {
     DictationAudioDevice(
         id: id,
         name: name,
         transport: .builtIn,
-        inputChannelCount: 1
+        inputChannelCount: inputChannels
     )
 }
 
