@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has nine distinct verification layers:
+This repo has ten distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -20,7 +20,9 @@ This repo has nine distinct verification layers:
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
    Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
-9. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+9. `bash scripts/ops/transcripted-qa-bench.sh --mode packaged`
+   No-publish `build-beta.sh` package smoke plus built app version, Sparkle, signing, dSYM, DMG, optional menu bar, and local log privacy checks
+10. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
    Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
 
 There is also an orchestrated QA bench for human-style passes:
@@ -30,6 +32,7 @@ bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
@@ -163,6 +166,22 @@ bash run-live-capture-smoke.sh --skip-build
 Accessibility permission for the terminal or Codex runner so it can inspect AX
 identifiers and press controls. Missing permission exits `3` and is reported as
 `INCOMPLETE`, not green.
+
+## Packaged App Smoke
+
+`bash scripts/ops/transcripted-qa-bench.sh --mode packaged` runs a no-publish
+package smoke with `SKIP_NOTARIZATION=1`, then runs:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
+```
+
+It validates the built app version/config against source `Info.plist`, Sparkle
+feed URL/public key/update flags, HTTPS observability endpoints, code signing,
+the bundled Sparkle framework and MCP helper, matching app/dSYM UUIDs, the
+versioned DMG, optional menu bar UI, and local log privacy patterns. UI/TCC
+blockers exit `3` as `INCOMPLETE`, not green proof. Notarization and publishing
+remain manual release steps.
 
 ## Codex UI Permission-State Smoke
 

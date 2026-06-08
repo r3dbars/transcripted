@@ -63,6 +63,29 @@ This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
 `3`. Do not treat that as product proof.
 
+## Packaged Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
+```
+
+This runs a no-publish package smoke:
+
+- `bash scripts/dev/agent-preflight.sh`
+- `SKIP_NOTARIZATION=1 ... bash build-beta.sh '' <user-name>`
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke`
+
+The build step uses explicit thin-smoke model opt-outs so the lane can run on a
+dev Mac without pretending it is a full model-bundled release artifact. The
+smoke validates the built app version/config, Sparkle feed URL/public key and
+automatic update flags, HTTPS observability endpoints, bundled Sparkle and MCP
+helper payloads, code signing, matching app/dSYM UUIDs, the versioned DMG,
+optional menu bar UI, and local log privacy patterns.
+
+This mode does not notarize, publish GitHub releases, register Sentry releases,
+update `docs/appcast.xml`, or update the Homebrew cask. Accessibility blockers
+from the optional UI/menu proof are `INCOMPLETE`/exit `3`, not green.
+
 ## Deep Run
 
 ```bash
