@@ -127,6 +127,48 @@ final class ValidatorTests: XCTestCase {
         })
     }
 
+    func testTranscriptValidatorIgnoresLocalSummarySidecars() throws {
+        try """
+        ---
+        capture_type: meeting_summary
+        source_transcript: "Call_2026-04-18_14-43-40.md"
+        summary_model: mlx-community/gemma-4-12B-it-4bit
+        ---
+        ## Summary
+        Local summary text.
+        """.write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.summary.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        title: "Call"
+        date: "2026-04-18"
+        time: "14:43:40"
+        duration: "600"
+        transcription_engine: "parakeet_local"
+        diarization_engine: "pyannote_offline"
+        sources: [mic, system_audio]
+        capture_quality: "excellent"
+        mic_utterances: "1"
+        system_utterances: "1"
+        total_word_count: "12"
+        ---
+        ## Transcript
+        Speaker 1: Hello.
+        """.write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+
+        XCTAssertFalse(results.contains { $0.target == "Call_2026-04-18_14-43-40.summary.md" })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+    }
+
     func testLogValidatorAcceptsStableJSONLFields() throws {
         let logURL = tempRoot.appendingPathComponent("app.jsonl")
         try """
