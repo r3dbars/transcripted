@@ -84,8 +84,8 @@ the bench names what is automated for dictation, meeting mic/system audio,
 WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
 also generates deterministic meeting-route fixtures for shared mic, missing
 system audio, quiet mic recovery/failure, output ducking, route churn, stop
-timeout, and stop/save artifact outcomes. This does not replace live or manual
-route proof.
+timeout, stop/restart after a route switch, and stop/save artifact outcomes.
+This does not replace live or manual route proof.
 Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
 Real connected AirPods/Bluetooth hardware remains manual proof.
 

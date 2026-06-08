@@ -30,6 +30,30 @@ func testMeetingRouteFixture() {
         }
     }
 
+    runSuite("Deterministic meeting route fixtures prove stop/restart after route switch") {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("transcripted-route-fixtures-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        guard let restartScenario = MeetingRouteFixtureScenario.issue500Scenarios.first(where: {
+            $0.id == "webrtc-route-switch-stop-restart-recovered"
+        }) else {
+            assertionFailure("fixture list should include a stop/restart route-switch scenario")
+            return
+        }
+
+        let result = restartScenario.run(in: root)
+
+        assertEqual(result.diagnostics["restart_attempted"], "true", "restart fixture should record a second capture attempt")
+        assertEqual(result.diagnostics["restart_succeeded"], "true", "restart fixture should record the second capture succeeding")
+        assertEqual(result.diagnostics["route_change_count"], "2", "restart fixture should preserve route-switch count")
+        assertEqual(result.explanation.outcomeKind, .success, "route-switch restart should still save successfully")
+        assertTrue(result.artifacts.restartTranscriptExists, "restart transcript artifact should exist")
+        assertTrue(result.artifacts.restartMicAudioExists, "restart mic artifact should exist")
+        assertTrue(result.artifacts.restartSystemAudioExists, "restart system artifact should exist")
+        assertTrue(result.isPrivacySafe, "restart fixture should keep synthetic content local-safe")
+    }
+
     runSuite("Deterministic meeting route fixtures prove saved transcript frontmatter") {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("transcripted-route-fixtures-\(UUID().uuidString)", isDirectory: true)
@@ -266,6 +290,54 @@ private struct MeetingRouteFixtureScenario {
             )
         ),
         MeetingRouteFixtureScenario(
+            id: "webrtc-route-switch-stop-restart-recovered",
+            displayName: "WebRTC route switch, clean stop, and successful restart",
+            baseContext: [
+                "input_device_class": "built_in",
+                "output_device_class": "built_in",
+                "system_output_device_class": "built_in",
+                "default_output_volume_before": "0.730",
+                "default_output_volume_during": "0.730",
+                "default_system_output_volume_before": "0.730",
+                "default_system_output_volume_during": "0.730",
+                "mic_raw_peak": "0.16000",
+                "mic_processed_peak": "0.28000",
+                "system_peak": "0.21000",
+                "system_stream_present": "true",
+                "route_change_count": "2",
+                "gap_count": "1",
+                "restart_attempted": "true",
+                "restart_succeeded": "true"
+            ],
+            afterStopContext: [
+                "default_output_volume_after": "0.730",
+                "default_system_output_volume_after": "0.730"
+            ],
+            failureKind: nil,
+            stage: .save,
+            isRetryable: false,
+            transcriptSaved: true,
+            failedQueueEntryRetained: false,
+            expectedDiagnostics: ExpectedRouteDiagnostics(
+                quietMicRecovered: "false",
+                quietMicUnrecovered: "false",
+                attenuationKind: "none",
+                outputDuckingDetected: "false",
+                systemStreamPresent: "true",
+                routeChangeCount: "2"
+            ),
+            expectedOutcome: .success,
+            expectedArtifactRetention: .retainedPartialTranscript,
+            expectedUserVisibleState: .transcriptSaved,
+            expectedRetryability: .permanent,
+            expectedArtifacts: ExpectedRouteArtifacts(
+                transcript: true,
+                micAudio: true,
+                systemAudio: true,
+                failedQueueEntry: false
+            )
+        ),
+        MeetingRouteFixtureScenario(
             id: "webrtc-quiet-mic-unrecovered",
             displayName: "WebRTC quiet mic not recovered",
             baseContext: [
@@ -318,6 +390,9 @@ private struct MeetingRouteFixtureScenario {
         let systemURL = scenarioRoot.appendingPathComponent("system.synthetic.wav")
         let transcriptURL = scenarioRoot.appendingPathComponent("transcript.md")
         let failureURL = scenarioRoot.appendingPathComponent("failed-meeting.json")
+        let restartMicURL = scenarioRoot.appendingPathComponent("restart-mic.synthetic.wav")
+        let restartSystemURL = scenarioRoot.appendingPathComponent("restart-system.synthetic.wav")
+        let restartTranscriptURL = scenarioRoot.appendingPathComponent("restart-transcript.md")
 
         if expectedArtifacts.micAudio {
             try? Self.syntheticWAV(amplitude: 2_400).write(to: micURL)
@@ -332,6 +407,12 @@ private struct MeetingRouteFixtureScenario {
         if failedQueueEntryRetained {
             try? failedQueueJSON(micURL: expectedArtifacts.micAudio ? micURL : nil, systemURL: expectedArtifacts.systemAudio ? systemURL : nil)
                 .write(to: failureURL, atomically: true, encoding: .utf8)
+        }
+        if baseContext["restart_attempted"] == "true", baseContext["restart_succeeded"] == "true" {
+            try? Self.syntheticWAV(amplitude: 2_600).write(to: restartMicURL)
+            try? Self.syntheticWAV(amplitude: 3_400).write(to: restartSystemURL)
+            try? transcriptMarkdown(micURL: restartMicURL, systemURL: restartSystemURL, phase: "restart")
+                .write(to: restartTranscriptURL, atomically: true, encoding: .utf8)
         }
 
         let diagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
@@ -350,10 +431,14 @@ private struct MeetingRouteFixtureScenario {
 
         let artifacts = MeetingRouteFixtureArtifacts(
             transcriptURL: transcriptSaved ? transcriptURL : nil,
+            restartTranscriptURL: FileManager.default.fileExists(atPath: restartTranscriptURL.path) ? restartTranscriptURL : nil,
             failedQueueEntryURL: failedQueueEntryRetained ? failureURL : nil,
             transcriptExists: FileManager.default.fileExists(atPath: transcriptURL.path),
             micAudioExists: FileManager.default.fileExists(atPath: micURL.path),
             systemAudioExists: FileManager.default.fileExists(atPath: systemURL.path),
+            restartTranscriptExists: FileManager.default.fileExists(atPath: restartTranscriptURL.path),
+            restartMicAudioExists: FileManager.default.fileExists(atPath: restartMicURL.path),
+            restartSystemAudioExists: FileManager.default.fileExists(atPath: restartSystemURL.path),
             failedQueueEntryExists: FileManager.default.fileExists(atPath: failureURL.path)
         )
 
@@ -365,13 +450,14 @@ private struct MeetingRouteFixtureScenario {
         )
     }
 
-    private func transcriptMarkdown(micURL: URL, systemURL: URL?) -> String {
+    private func transcriptMarkdown(micURL: URL, systemURL: URL?, phase: String = "initial") -> String {
         """
         ---
         capture_type: meeting
         fixture_kind: deterministic_meeting_route
         route_fixture_id: \(id)
         route_fixture_name: \(displayName)
+        route_fixture_phase: \(phase)
         mic_audio: \(micURL.lastPathComponent)
         system_audio: \(systemURL?.lastPathComponent ?? "unavailable")
         ---
@@ -396,7 +482,7 @@ private struct MeetingRouteFixtureScenario {
     }
 
     private func isPrivacySafe(artifacts: MeetingRouteFixtureArtifacts) -> Bool {
-        let textURLs = [artifacts.transcriptURL, artifacts.failedQueueEntryURL].compactMap { $0 }
+        let textURLs = [artifacts.transcriptURL, artifacts.restartTranscriptURL, artifacts.failedQueueEntryURL].compactMap { $0 }
         let forbiddenFragments = [
             "/Users/",
             "@",
@@ -471,10 +557,14 @@ private struct ExpectedRouteArtifacts {
 
 private struct MeetingRouteFixtureArtifacts {
     let transcriptURL: URL?
+    let restartTranscriptURL: URL?
     let failedQueueEntryURL: URL?
     let transcriptExists: Bool
     let micAudioExists: Bool
     let systemAudioExists: Bool
+    let restartTranscriptExists: Bool
+    let restartMicAudioExists: Bool
+    let restartSystemAudioExists: Bool
     let failedQueueEntryExists: Bool
 }
 

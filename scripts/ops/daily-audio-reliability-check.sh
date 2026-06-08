@@ -348,6 +348,15 @@ scenarios = [
         "failure_kind": "stop_timeout",
     },
     {
+        "id": "webrtc-route-switch-stop-restart-recovered",
+        "condition": "WebRTC-like route switch, clean stop, then successful restart",
+        "outcome": "transcript_saved_after_restart",
+        "mic": True,
+        "system": True,
+        "restart": True,
+        "failure_kind": "none",
+    },
+    {
         "id": "webrtc-quiet-mic-unrecovered",
         "condition": "shared mic, quiet raw mic not recovered enough for transcription",
         "outcome": "retained_failed_queue_entry",
@@ -375,18 +384,22 @@ for scenario in scenarios:
     system_file = scenario_dir / "system.synthetic.wav"
     transcript_file = scenario_dir / "transcript.md"
     failure_file = scenario_dir / "failed-meeting.json"
+    restart_mic_file = scenario_dir / "restart-mic.synthetic.wav"
+    restart_system_file = scenario_dir / "restart-system.synthetic.wav"
+    restart_transcript_file = scenario_dir / "restart-transcript.md"
 
     if scenario["mic"]:
         write_wav(mic_file, 2400)
     if scenario["system"]:
         write_wav(system_file, 3200)
 
-    if scenario["outcome"] == "transcript_saved":
+    if scenario["outcome"].startswith("transcript_saved"):
         transcript_file.write_text(
             "---\n"
             "capture_type: meeting\n"
             "fixture_kind: deterministic_meeting_route\n"
             f"route_fixture_id: {scenario['id']}\n"
+            "route_fixture_phase: initial\n"
             "sources: [mic, system_audio]\n"
             "---\n\n"
             "# Synthetic Meeting Route Fixture\n\n"
@@ -394,6 +407,24 @@ for scenario in scenarios:
             "Speaker 1: Synthetic system audio fixture tone.\n",
             encoding="utf-8",
         )
+        if scenario.get("restart"):
+            write_wav(restart_mic_file, 2600)
+            write_wav(restart_system_file, 3400)
+            restart_transcript_file.write_text(
+                "---\n"
+                "capture_type: meeting\n"
+                "fixture_kind: deterministic_meeting_route\n"
+                f"route_fixture_id: {scenario['id']}\n"
+                "route_fixture_phase: restart\n"
+                "restart_attempted: true\n"
+                "restart_succeeded: true\n"
+                "sources: [mic, system_audio]\n"
+                "---\n\n"
+                "# Synthetic Meeting Route Restart Fixture\n\n"
+                "You: Transcripted route fixture restart one two three.\n"
+                "Speaker 1: Synthetic restarted system audio fixture tone.\n",
+                encoding="utf-8",
+            )
     else:
         failure_file.write_text(
             json.dumps(
@@ -420,13 +451,14 @@ for scenario in scenarios:
                 scenario["outcome"],
                 "yes" if scenario["mic"] else "no",
                 "yes" if scenario["system"] else "no",
+                "yes" if scenario.get("restart") else "no",
                 scenario["failure_kind"],
             ]
         )
     )
 
 (root / "manifest.tsv").write_text(
-    "scenario\tcondition\toutcome\tmic_audio\tsystem_audio\tfailure_kind\n"
+    "scenario\tcondition\toutcome\tmic_audio\tsystem_audio\trestart_artifacts\tfailure_kind\n"
     + "\n".join(manifest_rows)
     + "\n",
     encoding="utf-8",
@@ -441,9 +473,9 @@ PY
     echo "These are file and classifier fixtures only: they do not launch Zoom,"
     echo "open a browser, touch TCC, or measure user-perceived meeting volume."
     echo
-    echo "| Scenario | Outcome | Mic audio | System audio | Classification |"
-    echo "| --- | --- | --- | --- | --- |"
-    awk -F '\t' 'NR > 1 { printf "| `%s` | %s | %s | %s | `%s` |\n", $1, $3, $4, $5, $6 }' "${fixture_dir}/manifest.tsv"
+    echo "| Scenario | Outcome | Mic audio | System audio | Restart artifacts | Classification |"
+    echo "| --- | --- | --- | --- | --- | --- |"
+    awk -F '\t' 'NR > 1 { printf "| `%s` | %s | %s | %s | %s | `%s` |\n", $1, $3, $4, $5, $6, $7 }' "${fixture_dir}/manifest.tsv"
   } >> "${REPORT}"
 }
 
@@ -553,6 +585,13 @@ run_meeting_route_fixture_suite() {
     "mic synthetic WAV + system synthetic WAV + retained failed queue entry" \
     "recoverable_failure / failure_kind=stop_timeout / output_ducking_detected=true" \
     "real output volume before/during/after and user-perceived meeting volume"
+
+  record_meeting_route_fixture \
+    "synthetic-webrtc-route-switch-stop-restart-recovered" \
+    "WebRTC-like route switch, clean stop, then successful restart" \
+    "initial transcript + restart transcript + mic/system synthetic WAVs" \
+    "success / restart_attempted=true / restart_succeeded=true / route_change_count=2" \
+    "real app stop/restart after route churn still needs live route proof"
 
   record_meeting_route_fixture \
     "synthetic-webrtc-quiet-mic-unrecovered" \
