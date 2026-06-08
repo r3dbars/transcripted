@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 29 Swift files total: `Package.swift`, 25 files under `Sources/TranscriptedQA/`, and 3 test files under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 30 Swift files total: `Package.swift`, 25 files under `Sources/TranscriptedQA/`, and 4 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -65,12 +65,13 @@ The current package is intentionally small:
 |------|---------|
 | `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
 
-### Tests/ (2 files)
+### Tests/ (4 files)
 
 | File | Purpose |
 |------|---------|
 | `PackagedAppSmokeTests.swift` | package-level coverage for packaged app metadata, Sparkle config, dSYM UUIDs, DMG, and log privacy checks |
 | `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
+| `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
