@@ -205,7 +205,7 @@ coverage_gaps:
   audio:
     current_coverage:
       - "synthetic audio reliability matrix"
-      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, and stop/save artifact outcomes"
+      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, stop/restart after route switch, and stop/save artifact outcomes"
       - "live capture smoke for mic and system audio"
       - "fast/core tests for failure policy, recovery state, and archive handling"
     missing_automation:

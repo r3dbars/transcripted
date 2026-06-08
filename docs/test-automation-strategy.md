@@ -43,8 +43,9 @@ As of 2026-06-06, the repo has these automated layers:
   count. Deeper sheets, media controls, and sanitized screenshots still need
   coverage.
 - Audio: synthetic fixtures now cover shared mic, missing system audio, quiet
-  mic, output ducking, route churn, stop timeout, and stop/save outcomes. Real
-  Zoom/WebRTC/Bluetooth perceived-volume proof is still manual.
+  mic, output ducking, route churn, stop timeout, stop/restart after route
+  switch, and stop/save outcomes. Real Zoom/WebRTC/Bluetooth perceived-volume
+  proof is still manual.
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.
