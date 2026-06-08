@@ -368,6 +368,13 @@ func testRepoCommandContract() {
             "release gate report should render the expected owner-facing sections"
         )
         assertTrue(
+            report.contains(#"--release-candidate"#)
+                && report.contains(#"choices=["quick", "deep", "full", "live"]"#)
+                && report.contains(#"EXIT_CODES[payload["status"]]"#)
+                && report.contains("Exit code follows the overall report status"),
+            "release gate report should support the full one-command QA mode and exit from the overall green/yellow/red verdict"
+        )
+        assertTrue(
             docs.contains("python3 scripts/ops/release-gate-report.py")
                 && scriptsReadme.contains("release-gate-report.py")
                 && qaGates.contains("release_gate_report"),

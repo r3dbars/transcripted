@@ -219,9 +219,18 @@ For a deeper release-candidate pass:
 python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
 ```
 
+For the one-command release gate report, use the full QA bench:
+
+```bash
+python3 scripts/ops/release-gate-report.py --release-candidate
+```
+
+That preset expands to `--qa-mode full --strict-artifacts`.
+
 Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
-treated as green proof. Actual release-surface drift or required release-health
-failures are `RED`.
+treated as green proof. Missing manual proof is also `YELLOW`. The command exits
+`0` for `GREEN`, `3` for `YELLOW`, and `1` for `RED`. Actual release-surface
+drift or required release-health failures are `RED`.
 
 The command exit code follows the overall report color: `0` for `GREEN`, `3`
 for `YELLOW`, and `1` for `RED`. That means missing credentials or missing
