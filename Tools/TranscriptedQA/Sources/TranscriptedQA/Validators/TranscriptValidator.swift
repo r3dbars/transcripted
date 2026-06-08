@@ -14,7 +14,11 @@ struct TranscriptValidator {
         let ignoredFilenames = Set(["AGENT.md", "CLAUDE.md", "README.md"])
 
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" && !ignoredFilenames.contains($0.lastPathComponent) }) else {
+            .filter({
+                $0.pathExtension == "md"
+                    && !ignoredFilenames.contains($0.lastPathComponent)
+                    && !isSummarySidecarFilename($0.lastPathComponent)
+            }) else {
             return [.fail("transcript/dir-readable", target: directory.path, detail: "Cannot read directory")]
         }
 
@@ -30,6 +34,10 @@ struct TranscriptValidator {
             }
 
             let yaml = YAMLParser(content: content)
+
+            if yaml.value(for: "capture_type") == "meeting_summary" {
+                continue
+            }
 
             // YAML present
             if yaml.hasFrontmatter {
@@ -130,5 +138,9 @@ struct TranscriptValidator {
         }
 
         return results
+    }
+
+    private func isSummarySidecarFilename(_ filename: String) -> Bool {
+        filename.hasSuffix(".summary.md")
     }
 }
