@@ -79,6 +79,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeLocalSummaryTasks: [String: Task<LocalMeetingSummaryResult, Error>] = [:]
     @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
     @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
+    @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
     @State private var betaFeatureStatus: String?
@@ -402,10 +403,11 @@ struct TranscriptedSettingsView: View {
                     status: notice.status,
                     detail: notice.detail,
                     tone: .success,
-                    progress: 1.0,
+                    progress: nil,
                     actionTitle: "Open enhanced transcript",
                     action: {
                         trackSettingsAction("open_local_meeting_summary_notice", page: .home)
+                        clearHomeLocalSummaryNotice(id: notice.id)
                         NSWorkspace.shared.open(notice.transcriptURL)
                     }
                 )
@@ -746,7 +748,7 @@ struct TranscriptedSettingsView: View {
                 "has_runtime": localSummarySetupStatus.hasRuntime ? "true" : "false",
             ]
         )
-        homeLocalSummaryNotice = nil
+        clearHomeLocalSummaryNotice()
         homeLocalSummaryJobIDs.insert(item.id)
 
         let task = Task.detached(priority: .utility) {
@@ -771,10 +773,10 @@ struct TranscriptedSettingsView: View {
             do {
                 let result = try await task.value
                 guard localMeetingSummariesEnabled else { return }
-                homeLocalSummaryNotice = HomeLocalSummaryNotice(
+                presentHomeLocalSummaryNotice(HomeLocalSummaryNotice(
                     transcriptURL: result.transcriptURL,
                     chunkCount: result.chunkCount
-                )
+                ))
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_completed",
                     message: "Local Gemma meeting summary saved",
@@ -2688,6 +2690,7 @@ struct TranscriptedSettingsView: View {
             prepareLocalSummaryModelFromBeta()
         } else {
             cancelLocalSummaryJobs()
+            clearHomeLocalSummaryNotice()
             cancelLocalSummaryModelPreparation()
             localSummaryModelPreparationStatus = nil
         }
@@ -2800,6 +2803,28 @@ struct TranscriptedSettingsView: View {
         homeLocalSummaryTasks.removeAll()
         homeLocalSummaryTaskTokens.removeAll()
         homeLocalSummaryJobIDs.removeAll()
+    }
+
+    private func presentHomeLocalSummaryNotice(_ notice: HomeLocalSummaryNotice) {
+        homeLocalSummaryNotice = notice
+        homeLocalSummaryNoticeDismissTask?.cancel()
+        homeLocalSummaryNoticeDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds)
+            guard !Task.isCancelled,
+                  HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
+                    current: homeLocalSummaryNotice,
+                    scheduledNoticeID: notice.id
+                  ) else { return }
+            homeLocalSummaryNotice = nil
+            homeLocalSummaryNoticeDismissTask = nil
+        }
+    }
+
+    private func clearHomeLocalSummaryNotice(id: UUID? = nil) {
+        if let id, homeLocalSummaryNotice?.id != id { return }
+        homeLocalSummaryNoticeDismissTask?.cancel()
+        homeLocalSummaryNoticeDismissTask = nil
+        homeLocalSummaryNotice = nil
     }
 
     private func refreshRecentCapturesAfterLocalSummary() {

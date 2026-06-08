@@ -33,3 +33,27 @@ enum HomeMeetingSummaryBetaPresentationPolicy {
         isEnabled
     }
 }
+
+struct HomeLocalSummaryNotice: Identifiable, Equatable {
+    let id = UUID()
+    let transcriptURL: URL
+    let chunkCount: Int
+
+    var title: String { "AI summary saved" }
+    var status: String { "Saved" }
+    var detail: String {
+        let passText = chunkCount == 1 ? "one local Gemma pass" : "\(chunkCount) local Gemma passes"
+        return "The meeting Markdown was enhanced with a generated title and summary preview using \(passText)."
+    }
+}
+
+enum HomeLocalSummaryNoticeDismissalPolicy {
+    static let autoDismissDelayNanoseconds: UInt64 = 6_000_000_000
+
+    static func shouldDismiss(
+        current: HomeLocalSummaryNotice?,
+        scheduledNoticeID: UUID
+    ) -> Bool {
+        current?.id == scheduledNoticeID
+    }
+}
