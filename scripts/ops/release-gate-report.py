@@ -596,6 +596,7 @@ def render_report(
         f"{status_label(overall)}: working={len(working)}, regressed={len(regressions)}, needs_human_check={len(needs_human)}.",
         f"Automated gate: {status_label(process_status)}.",
         f"Release: {release_status} - {release_reason}.",
+        "Exit code follows the overall report status: green=0, yellow=3, red=1.",
         "",
         f"- Run id: `{run_id}`",
         f"- Generated: `{generated_at}`",
@@ -660,6 +661,7 @@ def render_report(
         "artifacts": str(out_dir),
         "process_status": process_status,
         "release_status": release_status,
+        "exit_code": EXIT_CODES[overall],
         "manual_status": manual_status,
         "working_count": len(working),
         "regression_count": len(regressions),
@@ -686,7 +688,8 @@ def render_report(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Transcripted pre-merge/release gate checks and write one Markdown report.")
-    parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "live"], help="QA bench mode to run. Default: quick.")
+    parser.add_argument("--release-candidate", action="store_true", help="Preset for one-command release gate reporting: --qa-mode full --strict-artifacts.")
+    parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "full", "live"], help="QA bench mode to run. Default: quick.")
     parser.add_argument("--strict-artifacts", action="store_true", help="Forward --strict-artifacts to the QA bench.")
     parser.add_argument("--skip-qa", action="store_true", help="Skip the build/test QA bench and mark it unknown.")
     parser.add_argument("--skip-live-release-surfaces", action="store_true", help="Skip live appcast/download/crawler checks.")
@@ -698,7 +701,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-lines", type=int, default=400, help="Tail lines to inspect per local log file. Default: 400.")
     parser.add_argument("--dry-run", action="store_true", help="Write a yellow report without executing external commands.")
     parser.add_argument("--self-test", action="store_true", help="Run a tiny renderer/classifier self-test and exit.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.release_candidate:
+        args.qa_mode = "full"
+        args.strict_artifacts = True
+    return args
 
 
 def self_test() -> int:
@@ -778,7 +785,11 @@ def self_test() -> int:
         manual=[ReportItem("Meeting route proof", "yellow", "Fixture manual item.")],
         commands=[],
     )
-    manual_boundary_ok = manual_payload["status"] == "yellow" and manual_payload["process_status"] == "green"
+    manual_boundary_ok = (
+        manual_payload["status"] == "yellow"
+        and manual_payload["process_status"] == "green"
+        and manual_payload["exit_code"] == EXIT_CODES["yellow"]
+    )
     skipped_title_ok = "GitHub" not in successful_release_surface_title(
         argparse.Namespace(skip_live_release_surfaces=True, github_release_json=None)
     )
@@ -856,7 +867,7 @@ def main() -> int:
     print(f"Release gate report: {report_path}")
     print(f"Release gate JSON: {json_path}")
     print(f"Verdict: {status_label(payload['status'])}")
-    return EXIT_CODES[payload["process_status"]]
+    return EXIT_CODES[payload["status"]]
 
 
 if __name__ == "__main__":
