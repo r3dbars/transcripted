@@ -143,9 +143,12 @@ TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA
 ```
 
 It requires local microphone permission, System Audio Recording proof, and the
-Codex/computer-use host permissions needed for screenshots and clicks. If macOS
-blocks the harness, report `INCOMPLETE: harness permission blocked` with the
-exact permission reason. Do not treat a TCC blocker as product proof.
+Codex/computer-use host permissions needed for screenshots and clicks. It also
+checks that the intended Transcripted app bundle identity is being tested and
+that duplicate or wrong running Transcripted apps are not making UI targeting
+ambiguous. If macOS blocks the harness, report
+`INCOMPLETE: harness permission blocked` with the exact permission reason. Do
+not treat a TCC blocker as product proof.
 
 ## Audio Synthetic Run
 
