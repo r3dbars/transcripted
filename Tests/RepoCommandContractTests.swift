@@ -1221,6 +1221,24 @@ func testRepoCommandContract() {
             localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
             "local launch smoke should not create dirty-shutdown diagnostics markers"
         )
+        assertTrue(
+            localBuildScript.contains("/usr/bin/open -n -g -F -W")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report\"")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1\"")
+                && localBuildScript.contains("\"$APP_BUNDLE\""),
+            "local launch smoke should launch the app bundle through LaunchServices"
+        )
+        assertFalse(
+            localBuildScript.contains("\"$APP_BINARY\" >\"$smoke_log\""),
+            "local launch smoke should not run the app executable directly from sandboxed agent contexts"
+        )
+        let appSource = readRepoTextFile("Sources/TranscriptedApp.swift")
+        assertTrue(
+            appSource.contains("TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT")
+                && appSource.contains("scheduleLaunchUISmokeTerminationIfRequested")
+                && appSource.contains("Darwin.exit(0)"),
+            "launch smoke should let the app terminate itself instead of depending on process-listing in sandboxed agents"
+        )
 
         let runtimeDiagnostics = readRepoTextFile("Sources/Observability/RuntimeDiagnostics.swift")
         assertTrue(
