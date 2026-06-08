@@ -71,6 +71,7 @@ struct SlowPastebackSmoke {
         for scenario in scenarios {
             results.append(await runScenario(scenario))
         }
+        results.append(await runRetryBeforeRestoreScenario())
 
         let passed = results.filter(\.passed).count
         let failed = results.count - passed
@@ -167,6 +168,116 @@ struct SlowPastebackSmoke {
             freshDictation: freshDictation,
             userCopy: userCopy,
             autoEnterReadyAt: autoEnterReadyAt
+        )
+    }
+
+    @MainActor
+    private static func runRetryBeforeRestoreScenario() async -> SmokeResult {
+        let scenarioID = "production-retry-before-restore"
+        let title = "Retry before fallback restore keeps both fake Cmd+V targets fresh"
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-\(scenarioID)-\(UUID().uuidString)"))
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic retry old clipboard \(UUID().uuidString)"
+        let firstDictation = "synthetic first dictation \(UUID().uuidString)"
+        let retryDictation = "synthetic retry dictation \(UUID().uuidString)"
+        let firstReadDelay = SmokeDelay.milliseconds(180)
+        let retryStartDelay = SmokeDelay.milliseconds(320)
+        let retryReadDelay = SmokeDelay.milliseconds(950)
+        let fallbackDelay = SmokeDelay.nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay)
+        var firstReadTask: Task<String?, Never>?
+        var retryReadTask: Task<String?, Never>?
+
+        func category(for value: String?) -> String {
+            switch value {
+            case firstDictation:
+                return "first_dictation"
+            case retryDictation:
+                return "retry_dictation"
+            case originalClipboard:
+                return "old_clipboard"
+            case nil:
+                return "none"
+            default:
+                return "unexpected"
+            }
+        }
+
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        let firstOutcome = paster.paste(
+            firstDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                firstReadTask = Task {
+                    try? await Task.sleep(nanoseconds: firstReadDelay.nanoseconds)
+                    return await MainActor.run {
+                        pasteboard.string(forType: .string)
+                    }
+                }
+                return true
+            },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: fallbackDelay.nanoseconds
+        )
+
+        try? await Task.sleep(nanoseconds: retryStartDelay.nanoseconds)
+        let firstInserted = await firstReadTask?.value
+
+        let retryOutcome = paster.paste(
+            retryDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                retryReadTask = Task {
+                    try? await Task.sleep(nanoseconds: retryReadDelay.nanoseconds)
+                    return await MainActor.run {
+                        pasteboard.string(forType: .string)
+                    }
+                }
+                return true
+            },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: fallbackDelay.nanoseconds
+        )
+
+        let retryInserted = await retryReadTask?.value
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = pasteboard.string(forType: .string)
+
+        var failures: [String] = []
+        if firstOutcome != .pasted {
+            failures.append("first paste outcome was \(firstOutcome.diagnosticName)")
+        }
+        if retryOutcome != .pasted {
+            failures.append("retry paste outcome was \(retryOutcome.diagnosticName)")
+        }
+        if firstInserted != firstDictation {
+            failures.append("first target inserted \(category(for: firstInserted))")
+        }
+        if retryInserted != retryDictation {
+            failures.append("retry target inserted \(category(for: retryInserted))")
+        }
+        if finalClipboard != originalClipboard {
+            failures.append("final clipboard was \(category(for: finalClipboard))")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        let insertedCategory = firstInserted == firstDictation && retryInserted == retryDictation
+            ? "first_and_retry_fresh"
+            : "\(category(for: firstInserted))_then_\(category(for: retryInserted))"
+        return SmokeResult(
+            scenarioID: scenarioID,
+            status: status,
+            readDelayMS: retryReadDelay.milliseconds,
+            fallbackDelayMS: fallbackDelay.milliseconds,
+            insertedCategory: insertedCategory,
+            finalClipboardCategory: category(for: finalClipboard),
+            autoEnterReadyMS: nil,
+            detail: failures.isEmpty ? title : failures.joined(separator: "; ")
         )
     }
 

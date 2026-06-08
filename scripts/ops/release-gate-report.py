@@ -512,27 +512,48 @@ def summarize_counts(counts: Counter[str], prefix: str) -> str:
     return f"{prefix} ({parts})" if parts else prefix
 
 
-def manual_items(args: argparse.Namespace) -> list[ReportItem]:
+def evidence_list(paths: list[Path]) -> str:
+    return "; ".join(str(path) for path in paths)
+
+
+def manual_items(args: argparse.Namespace, root: Path, out_dir: Path) -> list[ReportItem]:
+    qa_manual_path = out_dir / "qa-bench" / args.run_id / "manual-scenarios.md"
     items = [
         ReportItem(
             "Meeting-app volume and route matrix",
             "yellow",
-            "Run docs/qa-issue-500-meeting-audio.md across Chrome Meet, Safari Meet, Firefox Meet, Zoom, and real routes.",
+            "UNKNOWN: run docs/qa-issue-500-meeting-audio.md across Chrome Meet, Safari Meet, Firefox Meet, Zoom, and real routes.",
+            evidence_list(
+                [
+                    root / "docs/qa-issue-500-meeting-audio.md",
+                    root / "docs/audio-reliability-daily-check.md",
+                    qa_manual_path,
+                ]
+            ),
+        ),
+        ReportItem(
+            "Sleep/wake and device switching",
+            "yellow",
+            "UNKNOWN: run the daily audio reliability loop for sleep/wake, input-device changes, and Bluetooth/AirPods route changes.",
+            evidence_list([qa_manual_path, root / "docs/audio-reliability-daily-check.md"]),
         ),
         ReportItem(
             "Pasteback feel in real apps",
             "yellow",
-            "Check TextEdit, Notes, and a browser text area with Auto Enter off/on.",
+            "UNKNOWN: check TextEdit, Notes, and a browser text area with Auto Enter off/on.",
+            evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
         ),
         ReportItem(
             "Speaker review and rename feel",
             "yellow",
-            "Verify unknown speakers stay unknown until a human names them, and Markdown keeps the chosen name.",
+            "UNKNOWN: verify unknown speakers stay unknown until a human names them, and Markdown keeps the chosen name.",
+            evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
         ),
         ReportItem(
             "Existing-install update path",
             "yellow",
-            "On a real installed app, verify Sparkle check/install behavior and Homebrew install/upgrade when publishing.",
+            "UNKNOWN: on a real installed app, verify Sparkle check/install behavior and Homebrew install/upgrade when publishing.",
+            evidence_list([root / "docs/sparkle-updates.md", root / "docs/release-packaging.md"]),
         ),
     ]
     if args.qa_mode != "live":
@@ -541,7 +562,8 @@ def manual_items(args: argparse.Namespace) -> list[ReportItem]:
             ReportItem(
                 "Live mic and system-audio capture",
                 "yellow",
-                "Run the live QA bench on this Mac when release claims depend on real audio/TCC proof.",
+                "UNKNOWN: run the live QA bench on this Mac when release claims depend on real audio/TCC proof.",
+                evidence_list([qa_manual_path, root / "docs/qa-test-bench.md"]),
             ),
         )
     return items
@@ -596,6 +618,7 @@ def render_report(
         f"{status_label(overall)}: working={len(working)}, regressed={len(regressions)}, needs_human_check={len(needs_human)}.",
         f"Automated gate: {status_label(process_status)}.",
         f"Release: {release_status} - {release_reason}.",
+        "Exit code follows the overall report status: green=0, yellow=3, red=1.",
         "",
         f"- Run id: `{run_id}`",
         f"- Generated: `{generated_at}`",
@@ -608,6 +631,7 @@ def render_report(
         "",
         "Raw logs, transcripts, audio, device names, tokens, and private paths stay local. This report only writes aggregate status.",
         "Missing Sentry/PostHog credentials are reported as yellow/unknown, not green proof.",
+        "The command exit code follows the overall report color, so manual-only unknowns still exit yellow.",
         "",
         "## Sidecar Boundary",
         "",
@@ -660,6 +684,7 @@ def render_report(
         "artifacts": str(out_dir),
         "process_status": process_status,
         "release_status": release_status,
+        "exit_code": EXIT_CODES[overall],
         "manual_status": manual_status,
         "working_count": len(working),
         "regression_count": len(regressions),
@@ -686,7 +711,8 @@ def render_report(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Transcripted pre-merge/release gate checks and write one Markdown report.")
-    parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "live"], help="QA bench mode to run. Default: quick.")
+    parser.add_argument("--release-candidate", action="store_true", help="Preset for one-command release gate reporting: --qa-mode full --strict-artifacts.")
+    parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "full", "live"], help="QA bench mode to run. Default: quick.")
     parser.add_argument("--strict-artifacts", action="store_true", help="Forward --strict-artifacts to the QA bench.")
     parser.add_argument("--skip-qa", action="store_true", help="Skip the build/test QA bench and mark it unknown.")
     parser.add_argument("--skip-live-release-surfaces", action="store_true", help="Skip live appcast/download/crawler checks.")
@@ -698,7 +724,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-lines", type=int, default=400, help="Tail lines to inspect per local log file. Default: 400.")
     parser.add_argument("--dry-run", action="store_true", help="Write a yellow report without executing external commands.")
     parser.add_argument("--self-test", action="store_true", help="Run a tiny renderer/classifier self-test and exit.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.release_candidate:
+        args.qa_mode = "full"
+        args.strict_artifacts = True
+    return args
 
 
 def self_test() -> int:
@@ -778,7 +808,11 @@ def self_test() -> int:
         manual=[ReportItem("Meeting route proof", "yellow", "Fixture manual item.")],
         commands=[],
     )
-    manual_boundary_ok = manual_payload["status"] == "yellow" and manual_payload["process_status"] == "green"
+    manual_boundary_ok = (
+        manual_payload["status"] == "yellow"
+        and manual_payload["process_status"] == "green"
+        and manual_payload["exit_code"] == EXIT_CODES["yellow"]
+    )
     skipped_title_ok = "GitHub" not in successful_release_surface_title(
         argparse.Namespace(skip_live_release_surfaces=True, github_release_json=None)
     )
@@ -826,7 +860,7 @@ def main() -> int:
     release_surfaces = run_release_surfaces(args, root, out_dir, commands)
     telemetry = run_telemetry(args, root, out_dir, commands)
     local_logs = sweep_local_logs(args)
-    manual = manual_items(args)
+    manual = manual_items(args, root, out_dir)
 
     generated_at = utc_now()
     branch = git_value(root, ["branch", "--show-current"], "detached")
@@ -856,7 +890,7 @@ def main() -> int:
     print(f"Release gate report: {report_path}")
     print(f"Release gate JSON: {json_path}")
     print(f"Verdict: {status_label(payload['status'])}")
-    return EXIT_CODES[payload["process_status"]]
+    return EXIT_CODES[payload["status"]]
 
 
 if __name__ == "__main__":

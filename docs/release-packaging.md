@@ -205,6 +205,27 @@ For a dry run that still validates the signed app and DMG assembly:
 SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
 ```
 
+After the dry-run package exists, run the packaged app smoke before any upload,
+appcast, cask, or Sentry release work:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
+```
+
+Or use the QA bench wrapper:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
+```
+
+That smoke checks local app/package evidence only: app version/config parity,
+Sparkle feed URL/public key/update flags, signing, bundled helper/framework
+presence, dSYM UUID match, versioned DMG readability, optional menu bar UI, and
+local log privacy patterns. It does not notarize, publish, register Sentry
+releases, update `docs/appcast.xml`, or update the Homebrew cask. If the UI
+portion is blocked by Accessibility/TCC, the result is incomplete/yellow rather
+than green.
+
 ## Expected Validation
 
 `build-beta.sh` should complete all of the following:

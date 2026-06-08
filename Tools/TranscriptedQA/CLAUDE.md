@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 27 Swift files total: `Package.swift`, 24 files under `Sources/TranscriptedQA/`, and 2 test files under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 29 Swift files total: `Package.swift`, 25 files under `Sources/TranscriptedQA/`, and 3 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -16,13 +16,14 @@ The current package is intentionally small:
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (11 files)
+### Commands/ (12 files)
 
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
+| `PackagedAppSmoke.swift` | Pre-publish packaged app smoke for app bundle metadata, Sparkle config, signing, dSYM, DMG, optional UI, and privacy-safe local logs |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
@@ -68,6 +69,7 @@ The current package is intentionally small:
 
 | File | Purpose |
 |------|---------|
+| `PackagedAppSmokeTests.swift` | package-level coverage for packaged app metadata, Sparkle config, dSYM UUIDs, DMG, and log privacy checks |
 | `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
@@ -88,6 +90,7 @@ swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
 swift run transcripted-qa permission-state --mode computer-use
+swift run transcripted-qa packaged-app-smoke --app ../../build/Transcripted.app --dsym ../../build/Transcripted.app.dSYM --run-ui-smoke
 
 # UI automation smoke, local Accessibility permission required
 swift run transcripted-qa ui-smoke --app ../../build/Transcripted.app
@@ -127,6 +130,8 @@ For agent and automation use, the JSON form also includes:
 - **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
 - **UI smoke**: `ui-smoke` checks stable AX identifiers across first-run onboarding, menu bar, Home, and Settings, and exits `3` for Accessibility/TCC blockers
+- **Packaged app smoke**: `packaged-app-smoke` validates a no-publish `build-beta.sh` artifact, including version/config parity, Sparkle keys, signing, dSYM UUIDs, DMG readability, optional menu bar UI, and local log privacy
+- **Permission state**: `permission-state` prints the expected manual grant state, checks Codex host Accessibility/Event Posting/Input Monitoring/Screen Recording/Automation, verifies the Transcripted app bundle id, and warns on duplicate or wrong running Transcripted app instances
 
 ## Gotchas
 
