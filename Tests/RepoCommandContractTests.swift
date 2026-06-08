@@ -255,7 +255,7 @@ func testRepoCommandContract() {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
-            qaBench.contains("quick|deep|full|ui|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
+            qaBench.contains("quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
                 && qaBench.contains("run_full_tail")
                 && qaBench.contains("60-release-health")
                 && qaBench.contains("61-gemma-summary-plan")
@@ -366,6 +366,13 @@ func testRepoCommandContract() {
                 && report.contains("Local Log Warnings")
                 && report.contains("Manual QA Checklist"),
             "release gate report should render the expected owner-facing sections"
+        )
+        assertTrue(
+            report.contains(#"--release-candidate"#)
+                && report.contains(#"choices=["quick", "deep", "full", "live"]"#)
+                && report.contains(#"EXIT_CODES[payload["status"]]"#)
+                && report.contains("Exit code follows the overall report status"),
+            "release gate report should support the full one-command QA mode and exit from the overall green/yellow/red verdict"
         )
         assertTrue(
             docs.contains("python3 scripts/ops/release-gate-report.py")

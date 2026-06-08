@@ -50,6 +50,7 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Logging/LogPrivacySanitizer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
+    "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"

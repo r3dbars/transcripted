@@ -120,10 +120,14 @@ func testSpeakerReviewQueueScanner() {
             clipURLsByProfileID: [:]
         )
         assertEqual(before.count, 1, "fixture should start with one pending speaker-review row")
+        let homeBefore = RecentMeetingsScanner.loadRecent(limit: 5, directory: directory)
+        assertEqual(homeBefore.count, 1, "pending speaker review should still surface one canonical Home row")
+        assertEqual(homeBefore.first?.speakerStatus, .needsReview(1), "pending speaker review should mark the canonical row")
 
         let completedMarkdown = """
         ---
         title: "Reviewed Call"
+        capture_type: meeting
         date: 2026-05-20
         time: 09:30:00
         speakers:
@@ -151,6 +155,9 @@ func testSpeakerReviewQueueScanner() {
         )
 
         assertEqual(after.count, 0, "completed speaker review should leave no pending queue item")
+        let homeAfter = RecentMeetingsScanner.loadRecent(limit: 5, directory: directory)
+        assertEqual(homeAfter.count, 1, "completed speaker review should not create duplicate Home rows")
+        assertEqual(homeAfter.first?.transcriptURL.standardizedFileURL, transcriptURL.standardizedFileURL, "completed speaker review should keep the original transcript row")
         assertEqual(
             RecentMeetingSpeakerStatus.detect(in: updatedMarkdown),
             .ready,
@@ -282,6 +289,7 @@ private func deferredMarkdown(
     """
     ---
     title: "\(title)"
+    capture_type: meeting
     date: \(date)
     time: \(time)
     speakers:

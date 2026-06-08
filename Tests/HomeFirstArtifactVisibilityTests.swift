@@ -14,6 +14,10 @@ func testHomeFirstArtifactVisibility() {
             contentsOf: repoFixtureURL("Sources/UI/Overlay/MeetingOverlayController.swift"),
             encoding: .utf8
         )) ?? ""
+        let onboardingSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/PermissionsOnboardingView.swift"),
+            encoding: .utf8
+        )) ?? ""
 
         assertTrue(
             homeSource.contains(#"return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)"#),
@@ -41,6 +45,11 @@ func testHomeFirstArtifactVisibility() {
             "the meeting saved overlay should name the Markdown artifact at the moment of first value"
         )
         assertTrue(
+            onboardingSource.contains(#"command: "Open Markdown""#)
+                && onboardingSource.contains(#"detail: "Your transcript is saved on this Mac.""#),
+            "meeting onboarding should make the saved local Markdown artifact the visible first-value step"
+        )
+        assertTrue(
             settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")
                 && settingsSource.contains(#"promptKind: .meetingBundle"#)
                 && settingsSource.contains(#"result: bundle == nil ? .fallbackCopied : .success"#),
@@ -50,7 +59,8 @@ func testHomeFirstArtifactVisibility() {
             homeSource.contains(#"HomeArtifactStatus(text: "Saved only""#)
                 || settingsSource.contains(#"HomeRowMenuItem(title: "Open saved file""#)
                 || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#)
-                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#),
+                || meetingOverlaySource.contains(#"titleLabel.stringValue = "Saved transcript""#)
+                || onboardingSource.contains(#"command: "Open Transcript""#),
             "old vague saved-file copy should not return"
         )
     }

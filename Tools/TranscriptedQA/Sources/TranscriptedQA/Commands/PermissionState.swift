@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import ArgumentParser
 import Carbon
 import CoreGraphics
@@ -68,6 +69,9 @@ struct PermissionStateProbe {
     var microphoneStatusProvider: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .audio) }
     var automationStatusProvider: (String) -> AutomationStatus = { determineAutomationStatus(targetBundleID: $0) }
     var defaultsProvider: DefaultsProvider = { UserDefaults(suiteName: $0) }
+    var runningApplicationsProvider: (String) -> [PermissionRunningApplication] = {
+        PermissionRunningApplication.runningApplications(bundleIdentifier: $0)
+    }
 
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
@@ -77,7 +81,9 @@ struct PermissionStateProbe {
             target: processNameProvider(),
             detail: "These checks apply to the process running this command. If Codex computer-use runs from a different app, grant that app too."
         ))
+        results.append(expectedManualGrantStateResult())
         results.append(appBundleIdentityResult())
+        results.append(runningAppInstancesResult())
 
         results.append(permissionResult(
             check: "permissions/codex/accessibility",
@@ -119,6 +125,32 @@ struct PermissionStateProbe {
         return results
     }
 
+    private func expectedManualGrantStateResult() -> ValidationResult {
+        let shared = [
+            "Accessibility",
+            "Event Posting",
+            "Input Monitoring",
+            "Screen Recording",
+            "Automation/System Events for \(automationTargetBundleID)",
+            "Transcripted app bundle id \(transcriptedBundleID)",
+            "no duplicate or wrong Transcripted app instance"
+        ].joined(separator: ", ")
+
+        let modeSpecific: String
+        switch mode {
+        case .computerUse:
+            modeSpecific = "Microphone and Transcripted System Audio Recording are not required for click-only computer-use QA."
+        case .liveCapture:
+            modeSpecific = "Live-capture QA also requires Microphone for the runner and Transcripted System Audio Recording to be known/granted."
+        }
+
+        return .permissionPass(
+            "permissions/expected-manual-grants",
+            target: mode.rawValue,
+            detail: "Expected manual grant state before counting this lane: \(shared). \(modeSpecific)"
+        )
+    }
+
     private func permissionResult(
         check: String,
         target: String,
@@ -152,6 +184,51 @@ struct PermissionStateProbe {
             "permissions/app-bundle",
             target: appBundlePath,
             detail: "Built app bundle id is \(bundleIdentifier), expected \(transcriptedBundleID). TCC grants may apply to a different app identity."
+        )
+    }
+
+    private func runningAppInstancesResult() -> ValidationResult {
+        let runningApps = runningApplicationsProvider(transcriptedBundleID)
+        let expectedPath = normalizedPath(appBundlePath)
+        let check = "permissions/app/running-instances"
+
+        guard !runningApps.isEmpty else {
+            return .permissionPass(
+                check,
+                target: transcriptedBundleID,
+                detail: "No running Transcripted app with this bundle id. OK before launch; launch the intended app before UI proof."
+            )
+        }
+
+        if runningApps.count > 1 {
+            return .warn(
+                check,
+                target: transcriptedBundleID,
+                detail: "Duplicate Transcripted apps are running: \(summarize(runningApps)). Quit duplicates before UI QA so Codex does not target the wrong status item."
+            )
+        }
+
+        let app = runningApps[0]
+        guard let runningPath = app.bundlePath, !runningPath.isEmpty else {
+            return .warn(
+                check,
+                target: transcriptedBundleID,
+                detail: "A Transcripted app is running but macOS did not expose its bundle path: \(app.summary). Confirm it is the intended app before UI QA."
+            )
+        }
+
+        if normalizedPath(runningPath) == expectedPath {
+            return .permissionPass(
+                check,
+                target: transcriptedBundleID,
+                detail: "One running Transcripted app matches \(expectedPath)."
+            )
+        }
+
+        return .warn(
+            check,
+            target: transcriptedBundleID,
+            detail: "A Transcripted app is already running from \(runningPath), but this run expects \(expectedPath). Quit it or pass --app-bundle for the app under test before UI QA."
         )
     }
 
@@ -308,6 +385,50 @@ struct PermissionStateProbe {
             return nil
         }
         return plist["CFBundleIdentifier"] as? String
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+    }
+
+    private func summarize(_ apps: [PermissionRunningApplication]) -> String {
+        let listed = apps.prefix(4).map(\.summary).joined(separator: "; ")
+        if apps.count > 4 {
+            return "\(listed); ... \(apps.count - 4) more"
+        }
+        return listed
+    }
+}
+
+struct PermissionRunningApplication: Equatable {
+    let processIdentifier: pid_t
+    let localizedName: String?
+    let bundleIdentifier: String?
+    let bundlePath: String?
+
+    var summary: String {
+        var parts = ["pid=\(processIdentifier)"]
+        if let localizedName, !localizedName.isEmpty {
+            parts.append("name=\(localizedName)")
+        }
+        if let bundlePath, !bundlePath.isEmpty {
+            parts.append("path=\(bundlePath)")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    static func runningApplications(bundleIdentifier: String) -> [PermissionRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+            .map {
+                PermissionRunningApplication(
+                    processIdentifier: $0.processIdentifier,
+                    localizedName: $0.localizedName,
+                    bundleIdentifier: $0.bundleIdentifier,
+                    bundlePath: $0.bundleURL?.standardizedFileURL.path
+                )
+            }
+            .sorted { $0.processIdentifier < $1.processIdentifier }
     }
 }
 

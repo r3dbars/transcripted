@@ -1613,6 +1613,56 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner prefers inline summaries over stale sidecars") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let transcriptURL = meetingsRoot.appendingPathComponent("inline-wins.md", isDirectory: false)
+            let recordedAt = recentLoaderDate("2026-05-24T14:00:00Z")
+            let baseMarkdown = """
+            ---
+            title: "Quick notes"
+            capture_type: meeting
+            date: "\(recentLoaderFormat(recordedAt, "yyyy-MM-dd"))"
+            time: "\(recentLoaderFormat(recordedAt, "HH:mm:ss"))"
+            duration: "10:00"
+            ---
+
+            # Quick notes
+
+            ## Transcript
+
+            **00:01** [Mic/Justin]
+            We should keep launch pricing simple.
+            """
+            let inlineMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sampleRecentCaptureLocalSummarySections(),
+                to: baseMarkdown,
+                configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+                generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+                chunkCount: 1
+            )
+
+            try? inlineMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            try? writeRecentLoaderSummary(
+                title: "Stale Sidecar Title",
+                summary: "This stale sidecar should not win.",
+                sourceTranscript: transcriptURL.lastPathComponent,
+                to: LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+            )
+            setRecentLoaderFileDate(recordedAt, at: transcriptURL)
+            setRecentLoaderFileDate(recordedAt.addingTimeInterval(120), at: LocalMeetingSummaryStore.summaryURL(for: transcriptURL))
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 3)
+            let meeting = meetings.first
+
+            assertEqual(meetings.count, 1, "inline plus sidecar summaries should still produce one canonical row")
+            assertEqual(meeting?.transcriptURL.standardizedFileURL, transcriptURL.standardizedFileURL, "summary conflicts should keep the transcript URL canonical")
+            assertEqual(meeting?.displayTitle, "Launch Pricing Review", "inline summary title should win over stale sidecar title")
+            assertEqual(meeting?.summaryPreview?.url.standardizedFileURL, transcriptURL.standardizedFileURL, "inline summary preview should point at the canonical transcript")
+            assertEqual(meeting?.summaryPreview?.summary, "Team agreed to keep launch pricing simple.", "inline summary text should win over stale sidecar text")
+        }
+    }
+
     await runSuite("RecentMeetingsScanner returns empty for non-positive limits") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)

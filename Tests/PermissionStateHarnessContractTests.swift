@@ -17,7 +17,8 @@ func testPermissionStateHarnessContract() {
                 && command.contains("CGPreflightListenEventAccess")
                 && command.contains("AXIsProcessTrusted")
                 && command.contains("AVCaptureDevice.authorizationStatus")
-                && command.contains("AEDeterminePermissionToAutomateTarget"),
+                && command.contains("AEDeterminePermissionToAutomateTarget")
+                && command.contains("PermissionRunningApplication"),
             "permission-state should keep the no-prompt Codex permission probe matrix intact"
         )
     }
@@ -40,6 +41,10 @@ func testPermissionStateHarnessContract() {
             qaBench.contains("INCOMPLETE: harness permission blocked")
                 && qaBench.contains("prove a visible state change after each click"),
             "manual scenarios should stop false-green UI automation when macOS blocks events"
+        )
+        assertTrue(
+            qaBench.contains("No duplicate or wrong running Transcripted app instance"),
+            "manual scenarios should make duplicate running apps incomplete instead of ambiguous UI proof"
         )
     }
 

@@ -65,8 +65,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/release-gate-report.py` — single pre-merge/release gate report that runs the QA bench, Sentry/PostHog probes, appcast/download/release-health checks, and a local log sweep
   - Usage: `python3 scripts/ops/release-gate-report.py`
   - Deep RC usage: `python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts`
+  - Full one-command release gate: `python3 scripts/ops/release-gate-report.py --release-candidate`
   - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
-  - Missing Sentry/PostHog credentials are reported as yellow/unknown, not green
+  - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
+  - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
