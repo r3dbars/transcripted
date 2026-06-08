@@ -39,8 +39,8 @@ bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 
 This runs only the fake slow Cmd+V target smoke. It writes a markdown subreport
 beside the QA report and JSON under `raw/`. It proves the target-buffer result
-for synthetic slow readers without using real dictation audio or the real
-clipboard.
+for synthetic slow readers, retry pasteback, cancellation cleanup, and Auto
+Enter readiness without using real dictation audio or the real clipboard.
 
 ## UI Run
 

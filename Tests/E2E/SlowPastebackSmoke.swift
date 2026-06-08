@@ -71,6 +71,8 @@ struct SlowPastebackSmoke {
         for scenario in scenarios {
             results.append(await runScenario(scenario))
         }
+        results.append(await runRetryWhileRestorePendingScenario())
+        results.append(await runCancelPendingRestoreScenario())
 
         let passed = results.filter(\.passed).count
         let failed = results.count - passed
@@ -167,6 +169,159 @@ struct SlowPastebackSmoke {
             freshDictation: freshDictation,
             userCopy: userCopy,
             autoEnterReadyAt: autoEnterReadyAt
+        )
+    }
+
+    @MainActor
+    private static func runRetryWhileRestorePendingScenario() async -> SmokeResult {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-retry-\(UUID().uuidString)"))
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
+        let firstDictation = "synthetic first dictation \(UUID().uuidString)"
+        let retryDictation = "synthetic retry dictation \(UUID().uuidString)"
+        let readDelay = SmokeDelay.milliseconds(300)
+        let retryFallbackDelay = SmokeDelay.milliseconds(800)
+
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        let firstOutcome = paster.paste(
+            firstDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: { true },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: SmokeDelay.milliseconds(1_000).nanoseconds
+        )
+        try? await Task.sleep(nanoseconds: SmokeDelay.milliseconds(50).nanoseconds)
+
+        let retryStartedAt = Date()
+        var retryReadTask: Task<String?, Never>?
+        var autoEnterTask: Task<TimeInterval, Never>?
+        let retryOutcome = paster.paste(
+            retryDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                retryReadTask = Task {
+                    try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
+                    return await MainActor.run {
+                        pasteboard.string(forType: .string)
+                    }
+                }
+                autoEnterTask = Task {
+                    try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
+                    await paster.waitForClipboardReadyForAutoEnter()
+                    return await MainActor.run {
+                        Date().timeIntervalSince(retryStartedAt)
+                    }
+                }
+                return true
+            },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: retryFallbackDelay.nanoseconds
+        )
+
+        let inserted = await retryReadTask?.value
+        let autoEnterReadyAt = await autoEnterTask?.value
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = pasteboard.string(forType: .string)
+
+        var failures: [String] = []
+        if firstOutcome != .pasted {
+            failures.append("first paste outcome was \(firstOutcome.diagnosticName)")
+        }
+        if retryOutcome != .pasted {
+            failures.append("retry paste outcome was \(retryOutcome.diagnosticName)")
+        }
+        if inserted != retryDictation {
+            failures.append("retry target inserted \(category(for: inserted, original: originalClipboard, fresh: retryDictation, userCopy: nil))")
+        }
+        if finalClipboard != originalClipboard {
+            failures.append("final clipboard was \(category(for: finalClipboard, original: originalClipboard, fresh: retryDictation, userCopy: nil))")
+        }
+        if let autoEnterReadyAt {
+            let readSeconds = Double(readDelay.nanoseconds) / 1_000_000_000
+            let fallbackSeconds = Double(retryFallbackDelay.nanoseconds) / 1_000_000_000
+            if autoEnterReadyAt + 0.05 < readSeconds {
+                failures.append("Auto Enter became ready before retry target read")
+            }
+            if autoEnterReadyAt > fallbackSeconds + 0.2 {
+                failures.append("Auto Enter waited past retry fallback readiness")
+            }
+        } else {
+            failures.append("Auto Enter readiness probe did not complete")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        return SmokeResult(
+            scenarioID: "retry-while-restore-pending",
+            status: status,
+            readDelayMS: readDelay.milliseconds,
+            fallbackDelayMS: retryFallbackDelay.milliseconds,
+            insertedCategory: category(for: inserted, original: originalClipboard, fresh: retryDictation, userCopy: nil),
+            finalClipboardCategory: category(for: finalClipboard, original: originalClipboard, fresh: retryDictation, userCopy: nil),
+            autoEnterReadyMS: autoEnterReadyAt.map { Int(($0 * 1000).rounded()) },
+            detail: failures.isEmpty
+                ? "Retry paste restores the user's original clipboard after the retry target reads fresh dictation"
+                : failures.joined(separator: "; ")
+        )
+    }
+
+    @MainActor
+    private static func runCancelPendingRestoreScenario() async -> SmokeResult {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-cancel-\(UUID().uuidString)"))
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
+        let freshDictation = "synthetic cancellation dictation \(UUID().uuidString)"
+        let fallbackDelay = SmokeDelay.milliseconds(400)
+
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        let outcome = paster.paste(
+            freshDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: { true },
+            restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
+            fallbackRestoreDelay: fallbackDelay.nanoseconds
+        )
+        try? await Task.sleep(nanoseconds: SmokeDelay.milliseconds(80).nanoseconds)
+        paster.cancelPendingClipboardRestore()
+
+        let waitStartedAt = Date()
+        await paster.waitForPendingClipboardRestore()
+        let waitMS = Int((Date().timeIntervalSince(waitStartedAt) * 1000).rounded())
+        try? await Task.sleep(nanoseconds: fallbackDelay.nanoseconds + SmokeDelay.milliseconds(120).nanoseconds)
+        let finalClipboard = pasteboard.string(forType: .string)
+
+        var failures: [String] = []
+        if outcome != .pasted {
+            failures.append("paste outcome was \(outcome.diagnosticName)")
+        }
+        if waitMS > 100 {
+            failures.append("cancelled restore still waited \(waitMS)ms")
+        }
+        if finalClipboard != freshDictation {
+            failures.append("cancelled restore left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil))")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        return SmokeResult(
+            scenarioID: "cancel-pending-restore-cleanup",
+            status: status,
+            readDelayMS: nil,
+            fallbackDelayMS: fallbackDelay.milliseconds,
+            insertedCategory: "none",
+            finalClipboardCategory: category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil),
+            autoEnterReadyMS: nil,
+            detail: failures.isEmpty
+                ? "Cancellation clears pending restore work and prevents a delayed stale restore"
+                : failures.joined(separator: "; ")
         )
     }
 
@@ -364,20 +519,22 @@ private struct SmokeScenario {
         )
     }
 
-    private func category(for value: String?, original: String, fresh: String, userCopy: String) -> String {
-        switch value {
-        case fresh:
-            return "fresh_dictation"
-        case original:
-            return "old_clipboard"
-        case userCopy:
-            return "user_copy"
-        case nil:
-            return "none"
-        default:
-            return "unexpected"
-        }
+}
+
+private func category(for value: String?, original: String, fresh: String, userCopy: String?) -> String {
+    if value == fresh {
+        return "fresh_dictation"
     }
+    if value == original {
+        return "old_clipboard"
+    }
+    if let userCopy, value == userCopy {
+        return "user_copy"
+    }
+    if value == nil {
+        return "none"
+    }
+    return "unexpected"
 }
 
 private struct SmokeDelay {

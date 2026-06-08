@@ -134,6 +134,8 @@ It verifies:
 - a reader beyond the current fallback is detected as stale
 - paste-dispatch failure leaves fresh dictation copied
 - clipboard restore does not overwrite a user copy made after pasteback
+- a retry paste while restore is pending restores the user's original clipboard
+- cancellation clears pending restore work without a delayed stale restore
 
 ## Live Capture Smoke
 
