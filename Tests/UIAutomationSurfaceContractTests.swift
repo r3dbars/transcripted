@@ -293,6 +293,9 @@ func testUIAutomationSurfaceContract() {
             "observability-crash-reporting-enabled",
             "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT",
             "Existing Transcripted processes were explicitly allowed",
+            "runOnboardingSmoke",
+            "onboarding-isolated-home",
+            "onboardingAppLogPath",
             "appInspector",
             "systemUIServerStatusItem",
             "performPress(identifier:",
@@ -303,6 +306,8 @@ func testUIAutomationSurfaceContract() {
             "transcripted.menubar.primary.home",
             "transcripted.settings.sidebar.general",
             "transcripted.home.mode.meetings",
+            "transcripted.onboarding.use-case.dictation",
+            "transcripted.onboarding.permissions.system-audio",
         ] {
             assertTrue(uiSmokeSource.contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
         }

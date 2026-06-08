@@ -25,7 +25,7 @@ The current package is intentionally small:
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
-| `UISmoke.swift` | Launch a built app and validate menu bar, Home, Settings, and General navigation through macOS Accessibility |
+| `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
 | `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
@@ -126,7 +126,7 @@ For agent and automation use, the JSON form also includes:
 - **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing
 - **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
-- **UI smoke**: `ui-smoke` checks stable AX identifiers and exits `3` for Accessibility/TCC blockers
+- **UI smoke**: `ui-smoke` checks stable AX identifiers across first-run onboarding, menu bar, Home, and Settings, and exits `3` for Accessibility/TCC blockers
 
 ## Gotchas
 

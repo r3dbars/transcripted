@@ -19,7 +19,7 @@ This repo has nine distinct verification layers:
 7. `bash run-live-capture-smoke.sh`
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
-   Accessibility-driven UI smoke for menu bar, Home, Settings, buttons, and basic navigation
+   Accessibility-driven UI smoke for first-run onboarding, menu bar, Home, Settings, buttons, and basic navigation
 9. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
    Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
 
@@ -159,7 +159,9 @@ bash run-live-capture-smoke.sh --skip-build
 ## UI Automation Smoke
 
 `bash scripts/ops/transcripted-qa-bench.sh --mode ui` runs
-`transcripted-qa ui-smoke` against `build/Transcripted.app`. It needs
+`transcripted-qa ui-smoke` against `build/Transcripted.app`. It checks a
+throwaway first-run onboarding launch, then the normal menu bar, Home, Settings,
+and General navigation path. It needs
 Accessibility permission for the terminal or Codex runner so it can inspect AX
 identifiers and press controls. Missing permission exits `3` and is reported as
 `INCOMPLETE`, not green.
