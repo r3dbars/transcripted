@@ -133,6 +133,7 @@ It verifies:
 
 - a fake Cmd+V target that reads at `950ms` still inserts fresh dictation
 - a fake target near the `2.5s` fallback boundary still inserts fresh dictation
+- a retry before fallback restore lets both fake Cmd+V targets insert fresh dictation, then restores the original clipboard
 - an old `900ms` fallback control is detected as stale instead of hidden
 - a reader beyond the current fallback is detected as stale
 - paste-dispatch failure leaves fresh dictation copied
