@@ -44,6 +44,10 @@ final class HomeViewModel: ObservableObject {
         loadCurrentLimits(isInitialLoad: true)
     }
 
+    func reloadVisibleContent() {
+        loadCurrentLimits(isInitialLoad: false)
+    }
+
     func loadMoreDictations() {
         guard !isLoading, !isLoadingMore, canLoadMoreDictations else { return }
         dictationLimit += initialDictationLimit
@@ -1070,6 +1074,19 @@ struct HomeRowMenuItem: Identifiable {
     }
 }
 
+struct HomeLocalSummaryNotice: Identifiable, Equatable {
+    let id = UUID()
+    let transcriptURL: URL
+    let chunkCount: Int
+
+    var title: String { "AI summary saved" }
+    var status: String { "Ready" }
+    var detail: String {
+        let passText = chunkCount == 1 ? "one local Gemma pass" : "\(chunkCount) local Gemma passes"
+        return "The meeting Markdown was enhanced with a generated title and summary preview using \(passText)."
+    }
+}
+
 struct HomeRowActionButtons: View {
     let isCopied: Bool
     let onCopy: () -> Void
@@ -1528,7 +1545,7 @@ struct HomeMeetingRow: View {
             showsLeadingTimeColumn: false,
             opensOnRowClick: false
         ) {
-            VStack(alignment: .leading, spacing: visibleSummaryPreview == nil ? 0 : 5) {
+            VStack(alignment: .leading, spacing: rowContentSpacing) {
                 Button(action: onOpen) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(timeRangeString)
@@ -1556,6 +1573,21 @@ struct HomeMeetingRow: View {
                 .buttonStyle(.plain)
                 .help("Preview meeting")
                 .accessibilityIdentifier("transcripted.home.meeting.preview")
+
+                if isSummarizingSummary {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 12, height: 12)
+
+                        Text("Generating AI summary...")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                    }
+                    .help("Transcripted is running the local Gemma summary for this meeting.")
+                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading")
+                }
 
                 if let summaryPreview = visibleSummaryPreview {
                     if isSummaryExpanded {
@@ -1615,6 +1647,11 @@ struct HomeMeetingRow: View {
         var id: String { title }
     }
 
+    private var rowContentSpacing: CGFloat {
+        if isSummarizingSummary { return 5 }
+        return visibleSummaryPreview == nil ? 0 : 5
+    }
+
     private var meetingAttentionAccessories: AnyView? {
         let accessories = [aiSummaryAccessory, reviewSpeakersAccessory].compactMap { $0 }
         guard !accessories.isEmpty else { return nil }
@@ -1633,13 +1670,19 @@ struct HomeMeetingRow: View {
             for: item,
             isEnabled: localMeetingSummariesEnabled
         ) else { return nil }
+        if isSummarizingSummary {
+            return AnyView(
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 18, height: 26)
+                    .help("AI summary is running")
+                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading-dot")
+            )
+        }
         return AnyView(
             attentionDot(
                 color: .blue,
-                help: isSummarizingSummary
-                    ? "AI summary is running"
-                    : "AI summary available from More options",
-                opacity: isSummarizingSummary ? 0.45 : 1
+                help: "AI summary available from More options"
             )
         )
     }
