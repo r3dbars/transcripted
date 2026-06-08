@@ -107,6 +107,29 @@ For a thin packaging smoke that also skips notarization, keep every opt-out visi
 SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
+After `build-beta.sh` succeeds, run the packaged-app smoke before publishing
+anything:
+
+```bash
+python3 scripts/ops/packaged-app-smoke.py
+```
+
+That smoke checks the packaged `build/Transcripted.app`, the versioned DMG,
+Sparkle feed URL and public key, appcast coherence, signing and entitlements,
+dSYM UUID evidence, an isolated launch/menu report, and generated launch-log
+privacy. For a stricter release-candidate report after packaging, compose it
+with:
+
+```bash
+python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
+```
+
+Yellow is expected when notarization is intentionally skipped or the appcast has
+not yet been updated for a new version. Red means the package itself is broken.
+When an agent runs this inside Codex's filesystem sandbox, `codesign`,
+`hdiutil`, and packaged-app launch checks may need an approved unsandboxed rerun
+before calling a package red.
+
 ## Release Flow
 
 ```bash
@@ -139,6 +162,10 @@ After a packaging build, add local dSYM verification:
 ```bash
 python3 scripts/ops/nightly-security-check.py --strict --require-release-debug-files
 ```
+
+The packaged-app smoke above also checks the same local app/dSYM UUID pair when
+`build/Transcripted.app.dSYM` is present. Use `--require-dsym` when missing
+symbols should fail the package smoke instead of marking the release yellow.
 
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the

@@ -255,6 +255,61 @@ def run_qa_bench(args: argparse.Namespace, root: Path, out_dir: Path, commands: 
     return ReportItem("Build and test QA bench", record.status, detail, evidence)
 
 
+def run_packaged_app_smoke(
+    args: argparse.Namespace,
+    root: Path,
+    out_dir: Path,
+    commands: list[CommandRecord],
+) -> ReportItem | None:
+    if not args.include_packaged_app_smoke:
+        return None
+
+    json_report = out_dir / "raw" / "packaged-app-smoke.json"
+    markdown_report = out_dir / "packaged-app-smoke.md"
+    command = [
+        "python3",
+        "scripts/ops/packaged-app-smoke.py",
+        "--out-dir",
+        str(out_dir / "packaged-app-smoke"),
+        "--write-report",
+        str(json_report),
+        "--markdown-out",
+        str(markdown_report),
+    ]
+    if args.require_release_debug_files:
+        command.append("--require-dsym")
+    if args.require_packaged_app_dmg:
+        command.append("--require-dmg")
+
+    record, _ = run_command(
+        title="Packaged app smoke",
+        command=command,
+        cwd=root,
+        log_path=out_dir / "logs" / "packaged-app-smoke.log",
+        dry_run=args.dry_run,
+    )
+    record.report_path = str(markdown_report if markdown_report.exists() else json_report)
+    commands.append(record)
+
+    if args.dry_run:
+        return ReportItem(
+            "Packaged app smoke not executed",
+            "yellow",
+            "Dry run only. App launch, DMG, Sparkle, dSYM, and packaged signing proof are unknown.",
+            record.log_path,
+        )
+
+    report = load_json(json_report)
+    if report:
+        detail = (
+            f"{report.get('passed_count', 0)}/{report.get('check_count', 0)} packaged checks passed; "
+            f"warnings={report.get('warning_count', 0)} failures={report.get('failure_count', 0)}."
+        )
+        return ReportItem("Packaged app smoke", record.status, detail, str(markdown_report))
+
+    return ReportItem("Packaged app smoke", record.status, record.detail, record.log_path)
+
+
 def release_finding_status(finding: dict[str, Any]) -> str:
     check_id = str(finding.get("check_id", ""))
     summary = str(finding.get("summary", ""))
@@ -715,6 +770,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--qa-mode", default="quick", choices=["quick", "deep", "full", "live"], help="QA bench mode to run. Default: quick.")
     parser.add_argument("--strict-artifacts", action="store_true", help="Forward --strict-artifacts to the QA bench.")
     parser.add_argument("--skip-qa", action="store_true", help="Skip the build/test QA bench and mark it unknown.")
+    parser.add_argument("--include-packaged-app-smoke", action="store_true", help="Run packaged app smoke against build/Transcripted.app and the versioned DMG.")
+    parser.add_argument("--require-packaged-app-dmg", action="store_true", help="When packaged smoke is enabled, fail if build/Transcripted-<version>.dmg is missing.")
     parser.add_argument("--skip-live-release-surfaces", action="store_true", help="Skip live appcast/download/crawler checks.")
     parser.add_argument("--require-sentry-release-health", action="store_true", help="Make missing Sentry release metadata a red release failure.")
     parser.add_argument("--require-release-debug-files", action="store_true", help="Require build/Transcripted.app.dSYM to match the built app binary.")
@@ -857,6 +914,9 @@ def main() -> int:
 
     commands: list[CommandRecord] = []
     automated = [run_qa_bench(args, root, out_dir, commands)]
+    packaged_smoke = run_packaged_app_smoke(args, root, out_dir, commands)
+    if packaged_smoke is not None:
+        automated.append(packaged_smoke)
     release_surfaces = run_release_surfaces(args, root, out_dir, commands)
     telemetry = run_telemetry(args, root, out_dir, commands)
     local_logs = sweep_local_logs(args)

@@ -53,13 +53,14 @@ test_layers:
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
       ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+      package: "bash scripts/ops/transcripted-qa-bench.sh --mode package"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
       corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
       corpus_compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
       live: "bash scripts/ops/transcripted-qa-bench.sh --mode live"
     proves:
-      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release-health, optional Gemma planning, corpus, and live capture proof"
+      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release-health, packaged-app, optional Gemma planning, corpus, and live capture proof"
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
@@ -105,6 +106,7 @@ test_layers:
       release_gate_report: "python3 scripts/ops/release-gate-report.py"
       release_candidate_report: "python3 scripts/ops/release-gate-report.py --release-candidate"
       packaging_smoke: "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
+      packaged_app_smoke: "bash scripts/ops/transcripted-qa-bench.sh --mode package"
       sparkle_verify: "bash scripts/release/verify-sparkle-release.sh <version>"
       sentry_register: "SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>"
       cask_update: "bash scripts/release/update-cask.sh <version>"
@@ -168,6 +170,7 @@ recommended_gates:
       - "bash run-e2e-smoke.sh"
       - "swift test"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode package"
     add_when_shipping_to_users:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
       - "full notarized build-beta.sh"
@@ -227,11 +230,12 @@ coverage_gaps:
   release:
     current_coverage:
       - "packaging docs and release scripts"
+      - "packaged-app smoke for app bundle, DMG, Sparkle config, dSYM, signing, launch/menu, and launch-log privacy"
       - "nightly security/release drift checks"
       - "single release-gate report that composes QA bench, Sentry/PostHog probes, release surfaces, and local log warnings"
       - "repo hygiene syntax checks"
     missing_automation:
-      - "stored proof that Sentry release/dist and dSYM UUID match the shipped artifact"
+      - "mounted DMG copy/install proof for a real installed app"
 
   privacy:
     current_coverage:

@@ -126,6 +126,13 @@ rules:
       - "python3 scripts/ops/release-gate-report.py --self-test"
 
   - paths:
+      - "scripts/ops/packaged-app-smoke.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/packaged-app-smoke.py"
+      - "python3 scripts/ops/packaged-app-smoke.py --self-test"
+
+  - paths:
       - "scripts/ops/privacy-leak-sweep.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
