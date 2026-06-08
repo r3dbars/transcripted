@@ -1,16 +1,10 @@
 # Transcripted 1.1.47 Release Candidate Notes
 
-Status: draft candidate notes only. Merging this file does not make the `1.1.47`
-release gate green or authorize publishing.
+Status: shipped. GitHub release `v1.1.47` is published, and source release
+metadata now points at `1.1.47`.
 
-Current shipped version remains `1.1.46`. `Info.plist`, `docs/appcast.xml`,
-`Casks/transcripted.rb`, and the live download website should stay on `1.1.46`
-until a real `1.1.47` release artifact is approved, built, published, and
-verified.
-
-Freshness note from the June 6, 2026 review: this branch has been refreshed
-through the latest `main` merge wave. Refresh it again before publishing if
-additional follow-up PRs merge before the release artifact is built.
+These notes are kept as the pre-release candidate record. Treat the published
+release metadata and `git` history as source of truth for what actually shipped.
 
 ## Candidate Summary
 
@@ -45,28 +39,24 @@ long-meeting retry visibility, and the reported speaker-collapse fix.
 
 ## Known Caveats
 
-- `1.1.46` is still a recent release, published on June 3, 2026.
+- `1.1.46` was the previous release, published on June 3, 2026.
 - The issue 500 fixes need real route coverage after shipping, especially USB
   and Bluetooth output routes.
 - The speaker-collapse fix is in this candidate, but support should not tell
-  affected users it shipped until a signed `1.1.47` artifact has passed release
-  validation and is actually available to install.
+  affected users it shipped unless the user is on `1.1.47` or newer.
 - Open issues #500 and #825 remain open until the fixes are validated in use.
-- Any still-open follow-up PRs are not part of this candidate unless they merge
-  before the release artifact is built and this file is refreshed again.
-- This file does not update Sparkle or Homebrew. Existing installs will not see a
-  `1.1.47` update until a real release artifact exists and the appcast is updated.
+- The `1.1.47` appcast entry and Homebrew cask metadata are now committed.
 
-## Suggested Verification Before Publish
+## Release Verification Reference
 
 - `bash build-deps.sh --force`
 - `bash build.sh --no-open`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-tests.sh`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 bash run-integration-smoke.sh`
 - `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test`
-- `bash scripts/release/verify-sparkle-release.sh 1.1.46`
+- `bash scripts/release/verify-sparkle-release.sh 1.1.47`
 - `python3 scripts/ops/nightly-security-check.py --write-report <path>`
 - Confirm Sentry has no unresolved production issues scoped to
-  `transcripted@1.1.46`.
+  `transcripted@1.1.47`.
 - Confirm PostHog latest-release meeting health snapshots do not show unrecovered
   quiet mic or output-ducking clusters.
