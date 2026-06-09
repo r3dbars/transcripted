@@ -20,7 +20,7 @@ enum FailedMeetingPresentation {
             timestamp: failed.timestamp,
             title: title(for: failed, fallback: copy.title),
             detail: copy.detail,
-            meta: meta(for: failed, hasAudioFiles: !availableAudioURLs.isEmpty, isRetrying: isRetrying),
+            meta: meta(for: failed, availableAudioURLs: availableAudioURLs, isRetrying: isRetrying),
             failureKind: failureKind,
             isRetryable: failed.isRetryable,
             isRetrying: isRetrying,
@@ -44,15 +44,18 @@ enum FailedMeetingPresentation {
             .filter { fileManager.fileExists(atPath: $0.path) }
     }
 
-    private static func meta(for failed: FailedTranscription, hasAudioFiles: Bool, isRetrying: Bool) -> String {
+    private static func meta(for failed: FailedTranscription, availableAudioURLs: [URL], isRetrying: Bool) -> String {
         var parts = [failed.formattedTimestamp]
 
-        if hasAudioFiles {
+        if !availableAudioURLs.isEmpty {
             let sizeText = failed.formattedFileSize
+            let hasRawAudio = availableAudioURLs.contains {
+                $0.pathExtension.localizedCaseInsensitiveCompare("wav") == .orderedSame
+            }
             if sizeText == "Unknown" {
-                parts.append("Audio kept")
+                parts.append(hasRawAudio ? "Raw audio kept" : "Audio kept")
             } else {
-                parts.append("\(sizeText) kept")
+                parts.append(hasRawAudio ? "\(sizeText) raw audio kept" : "\(sizeText) kept")
             }
         }
 

@@ -204,6 +204,8 @@ final class MeetingSessionController: ObservableObject {
     private var liveCodexFinalTranscriptNeedsQueuedJobID = false
     private var liveCodexAwaitedTranscriptionJobID: UUID?
     private var activeQueuedTranscriptionJobID: UUID?
+    private var failedAudioCompressionTask: Task<Void, Never>?
+    private var failedAudioCompressionNeedsReschedule = false
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -1184,6 +1186,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        failedAudioCompressionTask?.cancel()
         retryingFailedMeetingIDs.insert(id)
         activeTranscriptionTrigger = .unknown
         refreshFailedMeetings()
@@ -2621,6 +2624,61 @@ final class MeetingSessionController: ObservableObject {
                     isRetrying: retryingFailedMeetingIDs.contains(failed.id)
                 )
             }
+        scheduleFailedAudioCompression(for: failedTranscriptions)
+    }
+
+    private func scheduleFailedAudioCompression(for failedTranscriptions: [FailedTranscription]) {
+        guard failedAudioCompressionTask == nil else {
+            failedAudioCompressionNeedsReschedule = true
+            return
+        }
+
+        let candidates = failedTranscriptions.compactMap { failed -> FailedMeetingAudioCompressionCandidate? in
+            guard !retryingFailedMeetingIDs.contains(failed.id) else { return nil }
+            var urls = [failed.micAudioURL]
+            if let systemAudioURL = failed.systemAudioURL {
+                urls.append(systemAudioURL)
+            }
+            guard urls.contains(where: { $0.pathExtension.localizedCaseInsensitiveCompare("wav") == .orderedSame }) else {
+                return nil
+            }
+            return FailedMeetingAudioCompressionCandidate(
+                id: failed.id,
+                micAudioURL: failed.micAudioURL,
+                systemAudioURL: failed.systemAudioURL
+            )
+        }
+        guard !candidates.isEmpty else { return }
+
+        failedAudioCompressionNeedsReschedule = false
+        let audioArchiveRoot = MeetingStoragePaths.audioArchiveFolder
+        failedAudioCompressionTask = Task { [weak self] in
+            _ = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+                candidates: candidates,
+                audioArchiveRoot: audioArchiveRoot,
+                persistUpdate: { [weak self] update in
+                    await MainActor.run {
+                        guard let self,
+                              !self.retryingFailedMeetingIDs.contains(update.id) else {
+                            return false
+                        }
+                        return self.failedManager.updateFailedTranscriptionAudio(
+                            id: update.id,
+                            micAudioURL: update.micAudioURL,
+                            systemAudioURL: update.systemAudioURL
+                        )
+                    }
+                }
+            )
+            await MainActor.run { [weak self] in
+                let shouldReschedule = self?.failedAudioCompressionNeedsReschedule == true
+                self?.failedAudioCompressionTask = nil
+                self?.failedAudioCompressionNeedsReschedule = false
+                if shouldReschedule, let self {
+                    self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)
+                }
+            }
+        }
     }
 }
 

@@ -1922,6 +1922,38 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed audio compression reschedules queue changes") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let schedulerBlock = sourceSlice(
+            controllerContents,
+            from: "private func scheduleFailedAudioCompression(",
+            to: "private extension MeetingSessionController.State"
+        )
+        let retryBlock = sourceSlice(
+            controllerContents,
+            from: "func retryFailedMeeting(id: UUID) -> Bool",
+            to: "Task { [weak self] in"
+        )
+
+        assertTrue(
+            controllerContents.contains("failedAudioCompressionNeedsReschedule"),
+            "failed audio compression should track queue changes that arrive during an active pass"
+        )
+        assertTrue(
+            schedulerBlock.contains("failedAudioCompressionNeedsReschedule = true"),
+            "an active compression pass should mark that the failed queue needs another scan"
+        )
+        assertTrue(
+            schedulerBlock.contains("self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)"),
+            "compression completion should re-check the latest failed queue before going idle"
+        )
+        assertTrue(
+            retryBlock.contains("failedAudioCompressionTask?.cancel()")
+                && !retryBlock.contains("failedAudioCompressionTask = nil"),
+            "retry should cancel active failed-audio compression without allowing a concurrent rescan before cleanup finishes"
+        )
+    }
+
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let timeoutBlock = sourceSlice(

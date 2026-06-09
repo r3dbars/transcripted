@@ -435,6 +435,24 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
     let prunedDirectories: Int
 }
 
+struct FailedMeetingAudioCompressionCandidate: Equatable {
+    let id: UUID
+    let micAudioURL: URL
+    let systemAudioURL: URL?
+}
+
+struct FailedMeetingAudioCompressionUpdate: Equatable {
+    let id: UUID
+    let micAudioURL: URL
+    let systemAudioURL: URL?
+}
+
+struct FailedMeetingAudioCompressionResult: Equatable {
+    let scannedEntries: Int
+    let convertedFiles: Int
+    let updatedEntries: Int
+}
+
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
     private static let staleTemporaryAudioAge: TimeInterval = 6 * 60 * 60
@@ -709,6 +727,101 @@ enum MeetingAudioStorageManager {
     }
 
     @discardableResult
+    static func compressFailedTranscriptionAudio(
+        candidates: [FailedMeetingAudioCompressionCandidate],
+        audioArchiveRoot: URL,
+        now: Date = Date(),
+        fileManager: FileManager = .default,
+        converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
+        validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
+        persistUpdate: (FailedMeetingAudioCompressionUpdate) async -> Bool
+    ) async -> FailedMeetingAudioCompressionResult {
+        var scannedEntries = 0
+        var convertedFiles = 0
+        var updatedEntries = 0
+
+        for candidate in candidates {
+            guard !Task.isCancelled else { break }
+            guard failedAudioCandidateIsArchiveOwned(
+                candidate,
+                audioArchiveRoot: audioArchiveRoot,
+                fileManager: fileManager
+            ) else {
+                continue
+            }
+
+            scannedEntries += 1
+
+            let micResolution = await resolveCompressedFailedAudioURL(
+                candidate.micAudioURL,
+                now: now,
+                fileManager: fileManager,
+                converter: converter,
+                validator: validator
+            )
+            let systemResolution: FailedAudioCompressionResolution?
+            if let systemAudioURL = candidate.systemAudioURL {
+                systemResolution = await resolveCompressedFailedAudioURL(
+                    systemAudioURL,
+                    now: now,
+                    fileManager: fileManager,
+                    converter: converter,
+                    validator: validator
+                )
+            } else {
+                systemResolution = nil
+            }
+
+            let updatedMicURL = micResolution.updatedURL
+            let updatedSystemURL = systemResolution?.updatedURL
+            guard updatedMicURL != candidate.micAudioURL
+                || updatedSystemURL != candidate.systemAudioURL else {
+                continue
+            }
+
+            var promotedFiles = [FailedAudioPromotion]()
+            if let promotedFile = micResolution.promotedFile {
+                promotedFiles.append(promotedFile)
+            }
+            if let promotedFile = systemResolution?.promotedFile {
+                promotedFiles.append(promotedFile)
+            }
+            guard !Task.isCancelled else {
+                for promoted in promotedFiles where promoted.wasConverted {
+                    try? fileManager.removeItem(at: promoted.destinationURL)
+                }
+                break
+            }
+
+            let didPersist = await persistUpdate(FailedMeetingAudioCompressionUpdate(
+                id: candidate.id,
+                micAudioURL: updatedMicURL,
+                systemAudioURL: updatedSystemURL
+            ))
+
+            if didPersist {
+                for promoted in promotedFiles {
+                    try? fileManager.removeItem(at: promoted.sourceURL)
+                    if promoted.wasConverted {
+                        convertedFiles += 1
+                    }
+                }
+                updatedEntries += 1
+            } else {
+                for promoted in promotedFiles where promoted.wasConverted {
+                    try? fileManager.removeItem(at: promoted.destinationURL)
+                }
+            }
+        }
+
+        return FailedMeetingAudioCompressionResult(
+            scannedEntries: scannedEntries,
+            convertedFiles: convertedFiles,
+            updatedEntries: updatedEntries
+        )
+    }
+
+    @discardableResult
     static func removeStaleTemporaryAudioFiles(
         in audioDirectory: URL,
         now: Date = Date(),
@@ -899,6 +1012,122 @@ enum MeetingAudioStorageManager {
         }
     }
 
+    private struct FailedAudioPromotion {
+        let sourceURL: URL
+        let destinationURL: URL
+        let wasConverted: Bool
+    }
+
+    private struct FailedAudioCompressionResolution {
+        let updatedURL: URL
+        let promotedFile: FailedAudioPromotion?
+    }
+
+    private static func failedAudioCandidateIsArchiveOwned(
+        _ candidate: FailedMeetingAudioCompressionCandidate,
+        audioArchiveRoot: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        var urls = [candidate.micAudioURL]
+        if let systemAudioURL = candidate.systemAudioURL {
+            urls.append(systemAudioURL)
+        }
+        return urls.allSatisfy { url in
+            isManagedFailedAudioFile(url, audioArchiveRoot: audioArchiveRoot, fileManager: fileManager)
+        }
+    }
+
+    private static func resolveCompressedFailedAudioURL(
+        _ sourceURL: URL,
+        now: Date,
+        fileManager: FileManager,
+        converter: MeetingAudioFileConverting,
+        validator: MeetingAudioFileValidating
+    ) async -> FailedAudioCompressionResolution {
+        let audioDirectory = sourceURL.deletingLastPathComponent()
+        removeStaleTemporaryAudioFiles(in: audioDirectory, now: now, fileManager: fileManager)
+
+        guard isWAVFile(sourceURL, fileManager: fileManager) else {
+            if sourceURL.pathExtension.localizedCaseInsensitiveCompare("m4a") == .orderedSame,
+               isManagedFailedAudioPayloadFile(sourceURL, fileManager: fileManager) {
+                fileManager.restrictFileToOwnerOnly(at: sourceURL)
+            }
+            return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
+        }
+
+        let destinationURL = sourceURL.deletingPathExtension().appendingPathExtension("m4a")
+        if validator.isUsableAudioFile(at: destinationURL, fileManager: fileManager) {
+            fileManager.restrictFileToOwnerOnly(at: destinationURL)
+            return FailedAudioCompressionResolution(
+                updatedURL: destinationURL,
+                promotedFile: FailedAudioPromotion(
+                    sourceURL: sourceURL,
+                    destinationURL: destinationURL,
+                    wasConverted: false
+                )
+            )
+        }
+
+        let tempURL = audioDirectory
+            .appendingPathComponent(".\(sourceURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+
+        do {
+            try await converter.convertWAVToM4A(sourceURL: sourceURL, destinationURL: tempURL)
+            guard !Task.isCancelled else {
+                try? fileManager.removeItem(at: tempURL)
+                return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
+            }
+            guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
+                throw MeetingAudioStorageError.emptyConvertedFile
+            }
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+            fileManager.restrictFileToOwnerOnly(at: destinationURL)
+            return FailedAudioCompressionResolution(
+                updatedURL: destinationURL,
+                promotedFile: FailedAudioPromotion(
+                    sourceURL: sourceURL,
+                    destinationURL: destinationURL,
+                    wasConverted: true
+                )
+            )
+        } catch {
+            try? fileManager.removeItem(at: tempURL)
+            return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
+        }
+    }
+
+    private static func isManagedFailedAudioFile(
+        _ url: URL,
+        audioArchiveRoot: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        guard isManagedFailedAudioPayloadFile(url, fileManager: fileManager) else { return false }
+        let directory = url.deletingLastPathComponent()
+        guard directory.lastPathComponent.hasPrefix("Failed_"),
+              directory.lastPathComponent.hasSuffix("_audio"),
+              isSafeNonSymlinkDirectory(directory, fileManager: fileManager) else {
+            return false
+        }
+        return isFile(directory, containedIn: audioArchiveRoot)
+    }
+
+    private static func isManagedFailedAudioPayloadFile(_ url: URL, fileManager: FileManager) -> Bool {
+        if isManagedRetainedAudioFile(url, fileManager: fileManager) {
+            return true
+        }
+        guard ["wav", "m4a"].contains(where: { url.pathExtension.localizedCaseInsensitiveCompare($0) == .orderedSame }) else {
+            return false
+        }
+        guard !isSymbolicLink(url, fileManager: fileManager) else { return false }
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+        guard values?.isRegularFile == true else { return false }
+        return url.deletingPathExtension().lastPathComponent == "microphone_placeholder"
+    }
+
     private static func isStaleTemporaryAudioFile(
         _ url: URL,
         now: Date,
@@ -943,5 +1172,16 @@ enum MeetingAudioStorageManager {
 
         let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
         return values?.isSymbolicLink == true
+    }
+
+    private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
+        let filePath = canonicalURL(fileURL).path
+        let directoryPath = canonicalURL(directoryURL).path
+        let normalizedDirectoryPath = directoryPath.hasSuffix("/") ? directoryPath : directoryPath + "/"
+        return filePath == directoryPath || filePath.hasPrefix(normalizedDirectoryPath)
+    }
+
+    private static func canonicalURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
     }
 }
