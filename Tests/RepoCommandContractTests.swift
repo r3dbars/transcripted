@@ -1266,6 +1266,15 @@ func testRepoCommandContract() {
             localBuildScript.contains("\"$APP_BINARY\" >\"$smoke_log\""),
             "local launch smoke should not run the app executable directly from sandboxed agent contexts"
         )
+        assertTrue(
+            localBuildScript.contains("pre_launch_app_pids=\"$(snapshot_launch_smoke_app_pids)\"")
+                && localBuildScript.contains("terminate_launch_smoke_app()")
+                && localBuildScript.contains("pgrep -f \"$APP_BINARY\"")
+                && localBuildScript.contains("is_pre_launch_app_pid")
+                && localBuildScript.contains("kill -TERM \"$pid\"")
+                && localBuildScript.contains("kill -KILL \"$pid\""),
+            "local launch smoke timeout cleanup should terminate only app processes created by this smoke run"
+        )
         let appSource = readRepoTextFile("Sources/TranscriptedApp.swift")
         assertTrue(
             appSource.contains("TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT")
