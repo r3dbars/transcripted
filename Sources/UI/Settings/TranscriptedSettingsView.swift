@@ -2462,8 +2462,8 @@ struct TranscriptedSettingsView: View {
                     SettingsToggleRow(
                         title: "AI meeting summaries",
                         detail: localMeetingSummariesEnabled
-                            ? "On. Home shows summary previews, and summaries run only when you choose Run AI summary from a meeting."
-                            : "Create private meeting summaries on this Mac. Nothing runs until you choose a meeting.",
+                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
+                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
                         isOn: Binding(
                             get: { localMeetingSummariesEnabled },
                             set: { enabled in
@@ -2711,7 +2711,7 @@ struct TranscriptedSettingsView: View {
         }
 
         isLocalSummaryModelPreparing = true
-        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. First run may download several GB from Hugging Face and can take several minutes on M1 Macs."
+        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
         recordLocalSummaryEvent(
             event: "local_meeting_summary_model_prepare_started",
             message: "Local Gemma model preparation started",
@@ -2735,7 +2735,7 @@ struct TranscriptedSettingsView: View {
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
-                localSummaryModelPreparationStatus = "Gemma is ready. The first real summary should start without a surprise setup step."
+                localSummaryModelPreparationStatus = "Gemma cache is prepared. The first real summary should load from the local cache instead of starting with a surprise setup step."
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_completed",
                     message: "Local Gemma model preparation completed",
@@ -2874,7 +2874,7 @@ struct TranscriptedSettingsView: View {
 
     private var localSummarySetupStatusDetail: String {
         if isLocalSummaryModelPreparing {
-            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time."
+            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time; detailed download progress is not available yet."
         }
         if !localSummarySetupStatus.hasEnoughMemory {
             return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."

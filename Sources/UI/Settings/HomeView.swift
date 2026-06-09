@@ -1741,19 +1741,22 @@ struct HomeMeetingRow: View {
 
     private func expandedSections(for preview: RecentMeetingSummaryPreview) -> [ExpandedSummarySection] {
         let summary = sectionText("Summary", in: preview.sections) ?? preview.summary
-        let nextSteps = combinedSectionText(
-            titles: ["Action Items", "Risks or Follow-ups"],
-            in: preview.sections
-        )
+        let nextSteps = sectionText("Next Steps", in: preview.sections)
+            ?? combinedSectionText(
+                titles: ["Action Items", "Risks or Follow-ups"],
+                in: preview.sections
+            )
         let decisionsAndQuestions = combinedSectionText(
             titles: ["Decisions", "Open Questions"],
             in: preview.sections
         )
+        let participants = sectionText("Participants", in: preview.sections)
 
         return [
             ExpandedSummarySection(title: "Summary", text: summary),
             ExpandedSummarySection(title: "Next Steps", text: nextSteps),
-            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions)
+            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions),
+            ExpandedSummarySection(title: "Participants", text: participants ?? "")
         ].filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 

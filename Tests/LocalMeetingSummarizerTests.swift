@@ -279,6 +279,43 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    runSuite("LocalMeetingSummaryParticipantExtractor derives participants from transcript labels") {
+        let transcript = """
+        **00:01** [Mic/Justin]
+        Justin opened the meeting.
+
+        **00:04** [System/Maya]
+        Maya joined from Zoom.
+
+        [Abdulbaqi] 00:00:08
+        Abdulbaqi shared context.
+
+        [00:12] [System/Matthew]
+        Matthew asked about summaries.
+
+        **[00:16] [Mic/You]**
+        You shared the local summary plan.
+
+        **[00:20] [System/[[Alex]]]**
+        Alex shared linked-speaker notes.
+
+        **00:24** [System/Speaker 1]
+        Placeholder speaker labels should stay out of participants.
+
+        **00:28** [System/Remote]
+        Remote placeholder should stay out too.
+
+        **00:32** [Mic/Unknown speaker]
+        Unknown speaker placeholder should stay out too.
+        """
+
+        assertEqual(
+            LocalMeetingSummaryParticipantExtractor.participants(from: transcript),
+            "- Justin\n- Maya\n- Abdulbaqi\n- Matthew\n- You\n- Alex",
+            "participants should be pulled from common Transcripted and imported transcript labels"
+        )
+    }
+
     runSuite("LocalMeetingSummaryNormalizer extracts generated titles") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("""
         # Title
@@ -353,16 +390,24 @@ func testLocalMeetingSummarizer() async {
             to: markdown,
             configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
             generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
-            chunkCount: 2
+            chunkCount: 2,
+            sourceTranscriptFilename: "Quick notes.md"
         )
 
         assertTrue(updated.contains("capture_type: meeting"), "existing frontmatter should be preserved")
         assertTrue(updated.contains("  - \"Justin\""), "nested frontmatter lines should be preserved")
         assertTrue(updated.contains("local_summary_version: \"1\""), "summary metadata should live in frontmatter")
+        assertTrue(updated.contains("local_summary_source_transcript: \"Quick notes.md\""), "source transcript filename should live in frontmatter when provided")
+        assertTrue(updated.contains("local_summary_participants: \"- Justin | - Maya\""), "participants should live in searchable frontmatter")
+        assertTrue(updated.contains("local_summary_next_steps:"), "agent next steps should live in searchable frontmatter")
+        assertTrue(updated.contains("local_summary_commitments:"), "commitments should alias action items in frontmatter")
         assertTrue(updated.contains("local_summary_title: \"Launch Pricing Review\""), "generated title should live in frontmatter")
         assertTrue(updated.contains("local_summary_action_items:"), "action items should live in frontmatter")
         assertTrue(updated.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "transcript should get a managed summary block")
         assertTrue(updated.contains("## Local Gemma Summary"), "managed block should be readable markdown")
+        assertTrue(updated.contains("Source transcript: `Quick notes.md`"), "managed block should backlink the canonical source filename")
+        assertTrue(updated.contains("### Next Steps"), "managed block should expose next steps for agents")
+        assertTrue(updated.contains("### Participants\n- Justin\n- Maya"), "managed block should expose participants for agents")
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
     }
 
@@ -427,21 +472,34 @@ func testLocalMeetingSummarizer() async {
             assertEqual(result.chunkCount, 1, "short transcripts should use the direct summary path")
             assertEqual(result.profileName, "test", "result should expose the active summary profile")
             assertTrue(currentMarkdown.contains("local_summary_version: \"1\""), "summary metadata should be embedded inline")
+            assertTrue(currentMarkdown.contains("local_summary_source_transcript: \"Private Meeting.md\""), "output should backlink the canonical source transcript")
             assertTrue(currentMarkdown.contains("local_summary_model: \"mlx-community/gemma-4-12B-it-4bit\""), "output should record the local model")
             assertTrue(currentMarkdown.contains("local_summary_runtime: \"mlx-vlm==0.6.1\""), "output should record the local runtime")
             assertTrue(currentMarkdown.contains("local_summary_profile: \"test\""), "output should record the runtime profile")
             assertTrue(currentMarkdown.contains("local_summary_chunk_count: \"1\""), "output should record the chunk count")
+            assertTrue(currentMarkdown.contains("local_summary_participants: \"- Justin | - Maya\""), "output should record transcript participants")
             assertTrue(currentMarkdown.contains("local_summary_title: \"Launch Summary Review\""), "output should record the generated title")
             assertTrue(currentMarkdown.contains("local_summary: \"Team agreed to keep the beta launch small and private.\""), "output should record the generated summary body")
+            assertTrue(currentMarkdown.contains("local_summary_next_steps:"), "output should record agent-searchable next steps")
+            assertTrue(currentMarkdown.contains("local_summary_commitments:"), "output should record commitment aliases")
             assertTrue(currentMarkdown.contains("local_summary_decisions: \"Ship the smaller launch first.\""), "output should record generated decisions")
             assertTrue(currentMarkdown.contains("## Local Gemma Summary"), "summary should be written into the saved transcript")
+            assertTrue(currentMarkdown.contains("Source transcript: `Private Meeting.md`"), "summary should backlink the canonical transcript filename")
             assertTrue(
                 currentMarkdown.contains("### Summary\nTeam agreed to keep the beta launch small and private."),
                 "managed summary block should include the generated summary text"
             )
             assertTrue(
+                currentMarkdown.contains("### Next Steps\nMaya will check release notes before Friday.\nSetup wording could confuse beta users."),
+                "managed summary block should include generated next steps"
+            )
+            assertTrue(
                 currentMarkdown.contains("### Decisions\nShip the smaller launch first."),
                 "managed summary block should include generated decisions"
+            )
+            assertTrue(
+                currentMarkdown.contains("### Participants\n- Justin\n- Maya"),
+                "managed summary block should include transcript participants"
             )
             assertTrue(currentMarkdown.contains("### Action Items"), "managed summary block should keep the expected section shape")
             assertTrue(currentMarkdown.contains("## Transcript"), "original transcript should remain readable")
@@ -861,6 +919,77 @@ func testLocalMeetingSummarizer() async {
         assertFalse(firstPass.contains("Old summary"), "old managed summary text should be replaced")
         assertTrue(firstPass.contains("local_summary_title: \"Launch Pricing Review\""), "managed frontmatter should be refreshed")
     }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater recovers malformed managed summary blocks") {
+        let updated = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleLocalMeetingSummarySections(),
+            to: """
+            ---
+            capture_type: meeting
+            ---
+
+            ## Transcript
+
+            **00:01** [Mic/Justin]
+            We should keep the canonical transcript.
+
+            \(LocalMeetingSummaryMarkdownUpdater.startMarker)
+            ## Local Gemma Summary
+
+            ### Summary
+            Stale generated text without a closing marker.
+            """,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            chunkCount: 1,
+            sourceTranscriptFilename: "Meeting.md"
+        )
+
+        assertTrue(updated.contains("We should keep the canonical transcript."), "canonical transcript should be preserved")
+        assertFalse(updated.contains("Stale generated text without a closing marker."), "malformed generated blocks should be replaced")
+        assertEqual(
+            updated.components(separatedBy: LocalMeetingSummaryMarkdownUpdater.startMarker).count - 1,
+            1,
+            "recovery should still leave exactly one managed summary block"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater preserves unmarked user summary sections") {
+        let updated = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleLocalMeetingSummarySections(),
+            to: """
+            ---
+            capture_type: meeting
+            title: "User Notes"
+            ---
+
+            # User Notes
+
+            ## Transcript
+
+            **00:01** [Mic/Justin]
+            We should keep user-authored notes.
+
+            ## Local Gemma Summary
+
+            User-authored analysis with this heading should stay intact.
+            """,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            chunkCount: 1,
+            sourceTranscriptFilename: "User Notes.md"
+        )
+
+        assertTrue(
+            updated.contains("User-authored analysis with this heading should stay intact."),
+            "unmarked user-authored sections should not be deleted by the generated-summary rewrite"
+        )
+        assertEqual(
+            updated.components(separatedBy: LocalMeetingSummaryMarkdownUpdater.startMarker).count - 1,
+            1,
+            "generated summary should still add exactly one managed block"
+        )
+    }
 }
 
 private func localMeetingSummaryTestConfiguration() -> LocalGemmaSummaryConfiguration {
@@ -1010,6 +1139,7 @@ private func localMeetingSummaryModelOutput() -> String {
 private func sampleLocalMeetingSummarySections() -> LocalMeetingSummarySections {
     LocalMeetingSummarySections(
         title: "Launch Pricing Review",
+        participants: "- Justin\n- Maya",
         summary: "Team agreed to keep launch pricing simple.",
         decisions: "Ship the smaller launch version first.",
         actionItems: "Alex will check pricing language before Friday.",

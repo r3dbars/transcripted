@@ -485,8 +485,55 @@ func testRecentCaptureScanners() async {
         assertEqual(preview.summary, "Team agreed to keep launch pricing simple.", "summary should come from the managed transcript block")
         assertEqual(
             preview.sections.map(\.title),
-            ["Summary", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
+            ["Participants", "Summary", "Next Steps", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
             "embedded summaries should expose every managed section for Show more"
+        )
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser prefers marked generated summaries over unmarked sections") {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/launch.md")
+        let baseMarkdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        date: "2026-05-24"
+        time: "14:00:00"
+        duration: "10:00"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        We should keep the launch simple.
+
+        ## Local Gemma Summary
+
+        ### Summary
+        This old user-authored section should not become the generated preview.
+        """
+        let markdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleRecentCaptureLocalSummarySections(),
+            to: baseMarkdown,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+            chunkCount: 1,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
+        )
+
+        guard let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
+            from: markdown,
+            url: transcriptURL
+        ) else {
+            assertTrue(false, "embedded summary metadata should produce a Home preview")
+            return
+        }
+
+        assertEqual(
+            preview.summary,
+            "Team agreed to keep launch pricing simple.",
+            "Home preview should prefer the marked generated summary block"
         )
     }
 
@@ -1934,6 +1981,7 @@ private func writeRecentLoaderSummary(
 private func sampleRecentCaptureLocalSummarySections() -> LocalMeetingSummarySections {
     LocalMeetingSummarySections(
         title: "Launch Pricing Review",
+        participants: "- Justin\n- Maya",
         summary: "Team agreed to keep launch pricing simple.",
         decisions: "Keep the first version small.",
         actionItems: "Alex will check pricing language before Friday.",
