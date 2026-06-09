@@ -825,6 +825,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sparkle relaunch records installed-update confirmation") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let relaunchBlock = sourceSlice(
+            controller,
+            from: "func updaterWillRelaunchApplication",
+            to: "extension SparkleUpdaterController: SPUStandardUserDriverDelegate"
+        )
+        let confirmationBlock = sourceSlice(
+            controller,
+            from: "private func trackInstalledUpdateIfNeeded()",
+            to: "private func markUpdateReadyToInstall("
+        )
+
+        assertTrue(
+            relaunchBlock.contains("rememberPendingInstalledUpdate"),
+            "Sparkle relaunch should persist the expected installed version before quitting"
+        )
+        assertTrue(
+            confirmationBlock.contains("update_installed"),
+            "next launch should emit a narrow installed-update confirmation event"
+        )
+        assertTrue(
+            confirmationBlock.contains("removeObject(forKey: Self.pendingInstalledUpdateVersionKey)"),
+            "installed-update confirmation should clear the one-shot marker"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")

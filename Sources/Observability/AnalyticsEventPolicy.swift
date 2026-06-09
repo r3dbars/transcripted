@@ -383,6 +383,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "version",
             ]
         ),
+        "update_installed": .init(
+            name: "update_installed",
+            allowedProperties: [
+                "previous_version",
+                "version",
+            ]
+        ),
         "settings_opened": .init(
             name: "settings_opened",
             allowedProperties: [
