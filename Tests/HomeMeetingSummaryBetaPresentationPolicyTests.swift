@@ -68,6 +68,41 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
             "unsummarized meetings should not show the local-summary sparkle"
         )
     }
+
+    runSuite("HomeLocalSummaryNoticeDismissalPolicy clears only the scheduled notice") {
+        let firstNotice = HomeLocalSummaryNotice(
+            transcriptURL: URL(fileURLWithPath: "/tmp/first.md"),
+            chunkCount: 1
+        )
+        let newerNotice = HomeLocalSummaryNotice(
+            transcriptURL: URL(fileURLWithPath: "/tmp/newer.md"),
+            chunkCount: 2
+        )
+
+        assertEqual(firstNotice.status, "Saved", "completed summary notices should read as saved, not ongoing")
+        assertTrue(
+            HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds >= 4_000_000_000,
+            "success notice should stay visible long enough to scan"
+        )
+        assertTrue(
+            HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds <= 10_000_000_000,
+            "success notice should not linger like a stuck activity card"
+        )
+        assertTrue(
+            HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
+                current: firstNotice,
+                scheduledNoticeID: firstNotice.id
+            ),
+            "the scheduled notice should be dismissible"
+        )
+        assertFalse(
+            HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
+                current: newerNotice,
+                scheduledNoticeID: firstNotice.id
+            ),
+            "an old dismissal timer should not clear a newer summary notice"
+        )
+    }
 }
 
 private func sampleHomeMeetingSummaryBetaItem(

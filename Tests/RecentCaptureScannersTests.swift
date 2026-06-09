@@ -325,6 +325,19 @@ func testRecentCaptureScanners() async {
             "Preparing models...",
             "local meeting summaries should not start while model prep is in flight"
         )
+
+        assertEqual(
+            LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+                isDictationActive: false,
+                isMeetingRecording: false,
+                isPreparingModels: false,
+                isPreparingLocalSummaryModel: true,
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "Gemma is still preparing. Wait for setup to finish, or cancel setup from Beta settings before summarizing.",
+            "local Gemma setup should stay single-flight with Home summary generation on M1 Macs"
+        )
     }
 
     runSuite("LocalMeetingSummaryAvailabilityPolicy blocks during live work") {

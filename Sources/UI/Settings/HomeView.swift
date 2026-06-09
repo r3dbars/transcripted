@@ -1074,19 +1074,6 @@ struct HomeRowMenuItem: Identifiable {
     }
 }
 
-struct HomeLocalSummaryNotice: Identifiable, Equatable {
-    let id = UUID()
-    let transcriptURL: URL
-    let chunkCount: Int
-
-    var title: String { "AI summary saved" }
-    var status: String { "Ready" }
-    var detail: String {
-        let passText = chunkCount == 1 ? "one local Gemma pass" : "\(chunkCount) local Gemma passes"
-        return "The meeting Markdown was enhanced with a generated title and summary preview using \(passText)."
-    }
-}
-
 struct HomeRowActionButtons: View {
     let isCopied: Bool
     let onCopy: () -> Void
@@ -1580,7 +1567,7 @@ struct HomeMeetingRow: View {
                             .controlSize(.mini)
                             .frame(width: 12, height: 12)
 
-                        Text("Generating AI summary...")
+                        Text("Running local AI summary...")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(Color.accentColor)
                             .lineLimit(1)

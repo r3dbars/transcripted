@@ -196,6 +196,7 @@ enum LocalMeetingSummaryAvailabilityPolicy {
         isDictationActive: Bool,
         isMeetingRecording: Bool,
         isPreparingModels: Bool,
+        isPreparingLocalSummaryModel: Bool = false,
         hasMeetingWork: Bool,
         isSpeakerReviewPending: Bool
     ) -> String? {
@@ -207,6 +208,9 @@ enum LocalMeetingSummaryAvailabilityPolicy {
         }
         if isPreparingModels {
             return "Preparing models..."
+        }
+        if isPreparingLocalSummaryModel {
+            return "Gemma is still preparing. Wait for setup to finish, or cancel setup from Beta settings before summarizing."
         }
         if hasMeetingWork {
             return "Wait for the current meeting to finish saving or transcribing before summarizing."
