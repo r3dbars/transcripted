@@ -4,6 +4,7 @@ import Foundation
 public struct FailedTranscription: Identifiable, Codable, Equatable {
     public let id: UUID
     public let timestamp: Date
+    public let recordingDate: Date?
     public let micAudioURL: URL
     public let systemAudioURL: URL?
     public let errorMessage: String
@@ -14,6 +15,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     public init(
         id: UUID = UUID(),
         timestamp: Date = Date(),
+        recordingDate: Date? = nil,
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
@@ -23,6 +25,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     ) {
         self.id = id
         self.timestamp = timestamp
+        self.recordingDate = recordingDate
         self.micAudioURL = micAudioURL
         self.systemAudioURL = systemAudioURL
         self.errorMessage = errorMessage

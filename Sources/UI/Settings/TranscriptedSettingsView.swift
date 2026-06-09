@@ -695,6 +695,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
+        guard !hasSpeakerReviewWork(for: item) else {
+            openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
+            return
+        }
+
         guard let input = item.audio?.retranscriptionInput else {
             NSSound.beep()
             return
@@ -946,6 +951,7 @@ struct TranscriptedSettingsView: View {
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
         let isPreparingLocalGemma = isLocalSummaryModelPreparing
         let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
+        let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
         let summaryActionTitle: String
         if isSummarizing {
             summaryActionTitle = "Running AI summary..."
@@ -1007,7 +1013,10 @@ struct TranscriptedSettingsView: View {
                     HomeRowMenuItem(
                         title: "Re-transcribe with speaker ID",
                         symbolName: "person.2.fill",
-                        isEnabled: canRetranscribeSavedMeetings
+                        isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                            globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
+                            hasSpeakerReviewWork: hasPendingSpeakerReview
+                        )
                     ) {
                         handleRetranscribeMeeting(item)
                     }
@@ -1293,6 +1302,13 @@ struct TranscriptedSettingsView: View {
 
     private var canRetryFailedMeetings: Bool {
         failedMeetingRetryUnavailableReason == nil
+    }
+
+    private func hasSpeakerReviewWork(for meeting: RecentMeetingItem) -> Bool {
+        guard speakerPeopleModel.hasLoadedProfiles else {
+            return meeting.speakerStatus.needsReview
+        }
+        return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
     private var canRetranscribeSavedMeetings: Bool {
