@@ -162,10 +162,40 @@ verify_launch_smoke() {
     local smoke_home="$REPO_ROOT/$BUILD_DIR/launch-smoke-home"
     local ui_report="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
     local open_pid=""
+    local pre_launch_app_pids=""
     rm -f "$smoke_log"
     rm -rf "$smoke_home"
     rm -f "$ui_report"
     mkdir -p "$smoke_home"
+
+    snapshot_launch_smoke_app_pids() {
+        pgrep -f "$APP_BINARY" || true
+    }
+
+    is_pre_launch_app_pid() {
+        local candidate_pid="$1"
+        printf '%s\n' "$pre_launch_app_pids" | grep -qx "$candidate_pid"
+    }
+
+    terminate_launch_smoke_app() {
+        local app_pids
+        local pid
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+        sleep 0.5
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    }
+
+    pre_launch_app_pids="$(snapshot_launch_smoke_app_pids)"
 
     /usr/bin/open -n -g -F -W \
         --stdout "$smoke_log" \
@@ -202,6 +232,7 @@ verify_launch_smoke() {
         echo "Transcripted launch UI smoke report was not written."
         echo "Smoke log:"
         cat "$smoke_log"
+        terminate_launch_smoke_app
         kill "$open_pid" 2>/dev/null || true
         wait "$open_pid" 2>/dev/null || true
         exit 1
@@ -277,6 +308,7 @@ if errors:
     sys.exit(1)
 PY
     then
+        terminate_launch_smoke_app
         kill "$open_pid" 2>/dev/null || true
         wait "$open_pid" 2>/dev/null || true
         exit 1
