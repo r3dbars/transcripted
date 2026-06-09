@@ -2273,6 +2273,9 @@ struct HomeActivityTabsCard: View {
     }
 
     private func hasSpeakerReviewWork(for meeting: RecentMeetingItem) -> Bool {
+        guard speakerPeopleModel.hasLoadedProfiles else {
+            return meeting.speakerStatus.needsReview
+        }
         return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
