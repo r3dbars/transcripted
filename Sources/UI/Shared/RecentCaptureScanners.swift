@@ -47,7 +47,7 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
         case .ready:
             return "Speakers ready"
         case .needsReview(let count):
-            return count == 1 ? "1 speaker needs review" : "\(count) speakers need review"
+            return count == 1 ? "1 speaker label needs a name" : "\(count) speaker labels need names"
         }
     }
 

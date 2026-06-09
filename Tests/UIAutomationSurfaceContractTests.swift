@@ -186,6 +186,7 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
+        let speakerPeopleSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
 
         for identifier in [
@@ -251,6 +252,23 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(settingsSource.contains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
         }
+
+        assertTrue(
+            speakerPeopleSource.contains("transcripted.speakers.show-inbox")
+                && speakerPeopleSource.contains("transcripted.speakers.inbox")
+                && speakerPeopleSource.contains("onShowInbox?()")
+                && settingsSource.contains("proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"),
+            "Speaker Inbox should keep a stable Show Inbox action that scrolls to the pending-name rows"
+        )
+
+        assertTrue(
+            homeSource.contains("person.crop.circle.badge.questionmark")
+                && homeSource.contains(".accessibilityLabel(accessibilityLabel)")
+                && homeSource.contains(".accessibilityHint(help)")
+                && homeSource.contains("transcripted.home.meeting.review-speakers")
+                && homeSource.contains("transcripted.home.meeting.retranscribe-speakers"),
+            "Home speaker review affordances should explain the orange icon while keeping stable automation IDs"
+        )
 
         for identifier in [
             "transcripted.onboarding.nav.back",
