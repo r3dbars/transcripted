@@ -1,16 +1,16 @@
 import CoreGraphics
 
 func testSettingsContentLayoutPolicy() {
-    runSuite("SettingsContentLayoutPolicy protects collapsed-sidebar chrome") {
+    runSuite("SettingsContentLayoutPolicy protects Home from titlebar clipping") {
         assertEqual(
             SettingsContentLayoutPolicy.topPadding(for: .home, sidebarPresentation: .visible),
-            -34,
-            "Home should keep the elevated header when the sidebar owns the window controls"
+            14,
+            "Home should stay below the titlebar controls when the sidebar is visible"
         )
         assertEqual(
             SettingsContentLayoutPolicy.topPadding(for: .home, sidebarPresentation: .hidden),
             14,
-            "Home should drop below the titlebar controls when the sidebar is collapsed"
+            "Home should stay below the titlebar controls when the sidebar is hidden"
         )
         assertEqual(
             SettingsContentLayoutPolicy.topPadding(for: .general, sidebarPresentation: .visible),

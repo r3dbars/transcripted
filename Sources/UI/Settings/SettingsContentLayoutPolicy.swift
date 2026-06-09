@@ -11,6 +11,9 @@ enum SettingsContentLayoutPolicy {
         sidebarPresentation: SettingsSidebarPresentation
     ) -> CGFloat {
         guard page == .home else { return 14 }
-        return sidebarPresentation == .hidden ? 14 : -34
+        switch sidebarPresentation {
+        case .visible, .hidden:
+            return 14
+        }
     }
 }
