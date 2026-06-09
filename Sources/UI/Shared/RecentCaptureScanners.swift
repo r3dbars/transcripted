@@ -508,7 +508,8 @@ enum RecentMeetingSummaryPreviewParser {
     }
 
     private static func sectionsFromLocalSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
-        guard let localSummary = section("## Local Gemma Summary", in: body, headingLevel: "##")
+        guard let localSummary = section("## Local Apple Summary", in: body, headingLevel: "##")
+            ?? section("## Local Gemma Summary", in: body, headingLevel: "##")
             ?? section("## Local Summary", in: body, headingLevel: "##") else {
             return []
         }

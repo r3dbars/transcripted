@@ -359,11 +359,48 @@ func testLocalMeetingSummarizer() async {
         assertTrue(updated.contains("capture_type: meeting"), "existing frontmatter should be preserved")
         assertTrue(updated.contains("  - \"Justin\""), "nested frontmatter lines should be preserved")
         assertTrue(updated.contains("local_summary_version: \"1\""), "summary metadata should live in frontmatter")
+        assertTrue(updated.contains("local_summary_provider: \"gemmaMLX\""), "provider metadata should live in frontmatter")
         assertTrue(updated.contains("local_summary_title: \"Launch Pricing Review\""), "generated title should live in frontmatter")
         assertTrue(updated.contains("local_summary_action_items:"), "action items should live in frontmatter")
         assertTrue(updated.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "transcript should get a managed summary block")
         assertTrue(updated.contains("## Local Gemma Summary"), "managed block should be readable markdown")
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
+    }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater records Apple provider metadata") {
+        let markdown = """
+        ---
+        capture_type: meeting
+        title: "Apple notes"
+        ---
+
+        # Apple notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        Use Apple's on-device model when available.
+        """
+        let updated = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleLocalMeetingSummarySections(),
+            to: markdown,
+            metadata: LocalMeetingSummaryRunMetadata(
+                provider: .appleFoundation,
+                modelID: "com.apple.foundationmodels.system.default",
+                runtimePackage: "FoundationModels.framework",
+                profileName: "apple-foundation-context-4096",
+                heading: "Local Apple Summary"
+            ),
+            generatedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            chunkCount: 3
+        )
+
+        assertTrue(updated.contains("local_summary_provider: \"appleFoundation\""), "Apple provider should be recorded")
+        assertTrue(updated.contains("local_summary_model: \"com.apple.foundationmodels.system.default\""), "Apple model should be recorded")
+        assertTrue(updated.contains("local_summary_runtime: \"FoundationModels.framework\""), "Apple runtime should be recorded")
+        assertTrue(updated.contains("local_summary_profile: \"apple-foundation-context-4096\""), "Apple profile should be recorded")
+        assertTrue(updated.contains("local_summary_chunk_count: \"3\""), "Apple chunk count should be recorded")
+        assertTrue(updated.contains("## Local Apple Summary"), "Apple summary heading should be readable")
     }
 
     await runSuite("LocalMeetingSummarizer writes inline output shape without sidecars or prompt leaks") {
@@ -426,7 +463,9 @@ func testLocalMeetingSummarizer() async {
             assertEqual(result.transcriptURL, transcriptURL, "result should point at the updated transcript")
             assertEqual(result.chunkCount, 1, "short transcripts should use the direct summary path")
             assertEqual(result.profileName, "test", "result should expose the active summary profile")
+            assertEqual(result.provider, .gemmaMLX, "result should expose the active summary provider")
             assertTrue(currentMarkdown.contains("local_summary_version: \"1\""), "summary metadata should be embedded inline")
+            assertTrue(currentMarkdown.contains("local_summary_provider: \"gemmaMLX\""), "output should record the provider")
             assertTrue(currentMarkdown.contains("local_summary_model: \"mlx-community/gemma-4-12B-it-4bit\""), "output should record the local model")
             assertTrue(currentMarkdown.contains("local_summary_runtime: \"mlx-vlm==0.6.1\""), "output should record the local runtime")
             assertTrue(currentMarkdown.contains("local_summary_profile: \"test\""), "output should record the runtime profile")

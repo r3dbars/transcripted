@@ -455,6 +455,7 @@ swiftc \
     -framework MetalKit \
     -framework Accelerate \
     -framework Vision \
+    -framework FoundationModels \
     -framework MetalPerformanceShaders \
     -framework MetalPerformanceShadersGraph \
     -framework Network \
