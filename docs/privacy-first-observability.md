@@ -110,6 +110,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `update_download_finished`
 - `update_ready_to_install`
 - `update_relaunching`
+- `update_installed`
 - `settings_opened`
 - `settings_page_viewed`
 - `settings_action_clicked`

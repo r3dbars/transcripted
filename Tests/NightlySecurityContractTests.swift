@@ -117,15 +117,15 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
         assertTrue(checker.contains("first_value_sources"), "PostHog first-value event checks should inspect each probe source independently")
         assertTrue(checker.contains("posthog-first-value-schema-"), "PostHog first-value drift findings should identify the missing probe source")
-        assertTrue(preflight.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json"), "agent preflight should suggest a strict checker command with deterministic GitHub release metadata")
-        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.46.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(preflight.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.47.json"), "agent preflight should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.47.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
     }
 
     runSuite("Nightly security checker fails stale GitHub release asset metadata") {
         let passing = runNightlySecurityChecker(arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.46.json"
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.47.json"
         ])
         let staleCask = runNightlySecurityChecker(arguments: [
             "--strict",
