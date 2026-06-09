@@ -1403,8 +1403,6 @@ def first_screen_payload(
         "do_first": ceo_brief["do_now"],
         "current_dau": dau_status["current"],
         "gap_to_1000_dau": dau_status["gap"],
-        "first_value": dau_status["first_value"],
-        "first_value_note": dau_status["first_value_note"],
         "open_nightly_pr_count": open_pr_count,
         "human_action_count": human_action_count,
         "blocked": blocked_count > 0,
@@ -1832,6 +1830,15 @@ def render_html(payload: dict[str, Any]) -> str:
             f"<div class=\"role-chips\">{role_chips}</div>"
             "</div>"
         )
+    paused_role_names = [str(name) for name in payload.get("paused_lanes", [])]
+    if paused_role_names:
+        paused_chips = "".join(f"<span>{escape(name)}</span>" for name in paused_role_names)
+        role_sections.append(
+            "<div class=\"role-row\">"
+            "<h3>Paused</h3>"
+            f"<div class=\"role-chips\">{paused_chips}</div>"
+            "</div>"
+        )
     roles_included = "\n".join(role_sections)
 
     lane_sections: list[str] = []
@@ -2174,8 +2181,6 @@ a:hover {{ text-decoration: underline; }}
   <section class="summary-strip">
     <div class="wide"><span>Do first</span><strong>{escape(ceo['do_now'])}</strong></div>
     <div><span>DAU</span><strong>{escape(dau['current'])}</strong><small>{escape(dau_context)}</small></div>
-    <div><span>Launches</span><strong>{escape(dau.get('launches', 'Unknown'))}</strong><small>{escape(dau.get('launch_note', ''))}</small></div>
-    <div><span>First-value</span><strong>{escape(dau.get('first_value', 'Unknown'))}</strong><small>{escape(dau.get('first_value_note', ''))}</small></div>
     <div><span>Gap to 1,000 DAU</span><strong>{escape(dau['gap'])}</strong></div>
     <div><span>Open nightly PRs</span><strong>{escape(counts['open_nightly_prs'])}</strong></div>
     <div><span>Human actions</span><strong>{escape(counts['needs_human'])}</strong></div>
@@ -2238,7 +2243,7 @@ a:hover {{ text-decoration: underline; }}
       <section class="detail-section">
         <header>
           <h2>Roles included</h2>
-          <p>The morning brief plus every active nightly role feeding it.</p>
+          <p>The morning brief plus every known nightly role feeding it.</p>
         </header>
         <div class="role-matrix">{roles_included}</div>
       </section>
