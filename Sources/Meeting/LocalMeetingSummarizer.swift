@@ -743,15 +743,26 @@ struct AppleFoundationSummaryRuntime: Sendable {
                 If a field has no direct support, leave it empty.
                 """
             )
-            let response = try await session.respond(
-                to: prompt,
-                generating: AppleFoundationMeetingSummaryContent.self,
-                options: GenerationOptions(
-                    temperature: 0.0,
-                    maximumResponseTokens: maxTokens
+            do {
+                let response = try await session.respond(
+                    to: prompt,
+                    generating: AppleFoundationMeetingSummaryContent.self,
+                    options: GenerationOptions(
+                        temperature: 0.0,
+                        maximumResponseTokens: maxTokens
+                    )
                 )
-            )
-            return response.content.markdown
+                return response.content.markdown
+            } catch {
+                let fallbackResponse = try await session.respond(
+                    to: prompt,
+                    options: GenerationOptions(
+                        temperature: 0.0,
+                        maximumResponseTokens: maxTokens
+                    )
+                )
+                return fallbackResponse.content
+            }
         }
         #endif
 
@@ -1189,8 +1200,9 @@ enum LocalMeetingSummaryNormalizer {
 
     static func section(_ heading: String, in raw: String) -> String? {
         let lines = raw.components(separatedBy: .newlines)
+        let targetTitle = normalizedHeadingTitle(heading)
         guard let startIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
+            normalizedHeadingTitle($0) == targetTitle
         }) else {
             return nil
         }
@@ -1211,9 +1223,18 @@ enum LocalMeetingSummaryNormalizer {
     }
 
     private static func containsHeading(_ heading: String, in text: String) -> Bool {
-        text.components(separatedBy: .newlines).contains { line in
-            line.trimmingCharacters(in: .whitespacesAndNewlines) == heading
+        let targetTitle = normalizedHeadingTitle(heading)
+        return text.components(separatedBy: .newlines).contains { line in
+            normalizedHeadingTitle(line) == targetTitle
         }
+    }
+
+    private static func normalizedHeadingTitle(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("#") else { return nil }
+        let title = trimmed.drop { $0 == "#" }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
     }
 
     private static func firstGeneratedTitleHeading(in raw: String) -> String? {

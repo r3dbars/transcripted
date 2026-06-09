@@ -313,6 +313,30 @@ func testLocalMeetingSummarizer() async {
         )
     }
 
+    runSuite("LocalMeetingSummaryNormalizer accepts Apple heading levels") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        ## Apple Summary
+
+        ## Summary
+        Apple returned second-level headings.
+
+        ## Decisions
+        Keep parsing provider output.
+        """)
+        let sections = LocalMeetingSummaryNormalizer.sections(in: normalized)
+
+        assertEqual(
+            sections.summary,
+            "Apple returned second-level headings.",
+            "Apple ## Summary heading should parse"
+        )
+        assertEqual(
+            sections.decisions,
+            "Keep parsing provider output.",
+            "Apple ## Decisions heading should parse"
+        )
+    }
+
     runSuite("LocalMeetingSummaryNormalizer ignores structural chunk headings as titles") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("""
         # Chunk 1
