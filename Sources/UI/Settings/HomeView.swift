@@ -2168,7 +2168,6 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 struct HomeActivityTabsCard: View {
     let selectedTab: HomeActivityTab
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    let onShowSpeakerInbox: () -> Void
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<HomeMeetingListItem>]
     let isLoading: Bool
@@ -2268,7 +2267,7 @@ struct HomeActivityTabsCard: View {
                         }
                     }
                 case .speakers:
-                    HomeSpeakersTab(model: speakerPeopleModel, onShowInbox: onShowSpeakerInbox)
+                    HomeSpeakersTab(model: speakerPeopleModel)
                 }
             }
         }
@@ -2316,7 +2315,6 @@ struct HomeActivityTabsCard: View {
 
 struct HomeSpeakersTab: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    let onShowInbox: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -2324,13 +2322,13 @@ struct HomeSpeakersTab: View {
                 Text("Speakers")
                     .font(.headline)
 
-                Text("Fix names that need attention, then browse everyone by meeting count.")
+                Text("Everyone Transcripted has heard in your meetings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            SpeakerPeopleSettingsSection(model: model, onShowInbox: onShowInbox)
+            SpeakerPeopleSettingsSection(model: model)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

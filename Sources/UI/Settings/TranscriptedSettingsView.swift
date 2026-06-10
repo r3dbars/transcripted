@@ -91,6 +91,7 @@ struct TranscriptedSettingsView: View {
     @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
+    @State private var speakerInboxScrollAwaitingQueue = false
 
     init(
         appState: TranscriptedAppState,
@@ -156,12 +157,13 @@ struct TranscriptedSettingsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .onChange(of: speakerInboxScrollRequest) { _, _ in
-                        Task { @MainActor in
-                            await Task.yield()
-                            withAnimation(.snappy(duration: 0.22)) {
-                                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
-                            }
-                        }
+                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                        scrollToSpeakerInbox(using: proxy)
+                    }
+                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                        speakerInboxScrollAwaitingQueue = false
+                        scrollToSpeakerInbox(using: proxy)
                     }
                 }
             }
@@ -431,7 +433,6 @@ struct TranscriptedSettingsView: View {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
                     speakerPeopleModel: speakerPeopleModel,
-                    onShowSpeakerInbox: requestSpeakerInboxFocus,
                     dictationSections: homeViewModel.dictationDaySections,
                     meetingSections: meetingSections,
                     isLoading: homeViewModel.isLoading,
@@ -632,7 +633,6 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction(actionName, page: .home)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        speakerPeopleModel.profileFilter = .needsReview
         navigation.selectedPage = .home
         homeActivityTab = .speakers
         homeHeroMode = .speakers
@@ -641,6 +641,15 @@ struct TranscriptedSettingsView: View {
 
     private func requestSpeakerInboxFocus() {
         speakerInboxScrollRequest += 1
+    }
+
+    private func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.snappy(duration: 0.22)) {
+                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+            }
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -2242,13 +2251,10 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name speaker labels saved for later, play samples, and clean up duplicates."
+                summary: "Name new voices and manage the people in your meetings."
             )
 
-            SpeakerPeopleSettingsSection(
-                model: speakerPeopleModel,
-                onShowInbox: requestSpeakerInboxFocus
-            )
+            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
     }
 
