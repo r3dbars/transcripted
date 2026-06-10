@@ -675,27 +675,47 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         Summarize "\(title)" accurately. Do not invent decisions, tasks, dates, names, or facts. If something is unclear, write unclear.
 
-        Return markdown with exactly these sections:
+        Return markdown in exactly this shape:
         # Title
+        <plain 3-8 word title, no markdown marker>
+
         # Summary
+        - <2-4 bullets on what mattered, outcomes, and important context>
+
         # Decisions
+        - <only explicit choices or commitments>
+
         # Action Items
+        - <Owner if named: concrete unfinished follow-up>
+
         # Open Questions
+        - <unresolved questions>
+
         # Risks or Follow-ups
+        - <risks, blockers, or things to watch>
+
         # Accuracy Notes
+        - <only source-quality caveats that affect trust>
 
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the transcript.
+        - Do not make the meeting title itself a markdown heading. Always put it under # Title.
         - Title must be specific, plain, and 3 to 8 words.
-        - Keep it concise and useful.
+        - Keep the whole output short. Prefer fewer, sharper bullets over broad coverage.
+        - Summary must explain the actual substance of the meeting, not describe the transcript. Never write "the transcript consists of", "the transcript contains", "the speaker discusses", or similar meta-summary filler.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the transcript.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the transcript names one. If no owner is named, start with "Unassigned:".
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the transcript leaves them as unfinished follow-up work.
         - Put brainstorms, proposals, or maybes in Open Questions or Risks unless the transcript clearly says they were decided.
-        - If a section has nothing supported, write "None found."
+        - Accuracy Notes should be "None found." unless repetition, cut-off text, unclear audio, or speaker confusion changes how much the reader should trust the summary.
+        - If a section has nothing supported, write exactly "None found."
 
         Transcript:
         \(transcript)
@@ -718,13 +738,18 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Preserve every explicit decision, action item, open question, and follow-up from this chunk.
+        - Chunk Summary should capture the actual substance, not describe the transcript or the speaker.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets or long explanations.
         - Include timestamps and speakers when available, especially for action items and decisions.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from this chunk.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the chunk names one. If no owner is named, start with "Unassigned:".
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the chunk leaves them as unfinished follow-up work.
         - Keep brainstorms, proposals, or maybes out of Decisions unless the chunk clearly says they were decided.
-        - If a heading has nothing supported, write "None found."
+        - If a heading has nothing supported, write exactly "None found."
 
         Chunk transcript:
         \(chunk)
@@ -737,29 +762,49 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         Do not invent decisions, tasks, dates, names, or facts.
 
-        Return markdown with exactly these sections:
+        Return markdown in exactly this shape:
         # Title
+        <plain 3-8 word title, no markdown marker>
+
         # Summary
+        - <2-4 bullets on what mattered, outcomes, and important context>
+
         # Decisions
+        - <only explicit choices or commitments>
+
         # Action Items
+        - <Owner if named: concrete unfinished follow-up>
+
         # Open Questions
+        - <unresolved questions>
+
         # Risks or Follow-ups
+        - <risks, blockers, or things to watch>
+
         # Accuracy Notes
+        - <only source-quality caveats that affect trust>
 
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the chunk notes.
+        - Do not make the meeting title itself a markdown heading. Always put it under # Title.
         - Title must be specific, plain, and 3 to 8 words.
-        - Keep each section concise.
+        - Keep the whole output short. Prefer fewer, sharper bullets over broad coverage.
+        - Summary must explain the actual substance of the meeting, not describe the notes. Never write "the transcript consists of", "the transcript contains", "the speaker discusses", or similar meta-summary filler.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Preserve explicit action items, decisions, open questions, and follow-ups from the chunk notes.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the chunk notes.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the notes name one. If no owner is named, start with "Unassigned:".
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the notes leave them as unfinished follow-up work.
         - Remove duplicates only when the same owner, same task or decision, and same topic are repeated.
         - Never promote brainstorms, proposals, or unresolved questions into Decisions.
-        - If a section has nothing supported, write "None found."
+        - Accuracy Notes should be "None found." unless repetition, cut-off text, unclear audio, or speaker confusion changes how much the reader should trust the summary.
+        - If a section has nothing supported, write exactly "None found."
 
         Chunk notes:
         \(notes)
@@ -809,7 +854,7 @@ enum LocalMeetingSummaryNormalizer {
         let explicitTitle = section("# Title", in: raw)?
             .components(separatedBy: .newlines)
             .first
-            .map(cleanSectionText)
+            .map(cleanTitleText)
             .flatMap { isStructuralGeneratedTitle($0) ? nil : String($0.prefix(96)) }
         return explicitTitle ?? firstGeneratedTitleHeading(in: raw)
     }
@@ -849,7 +894,7 @@ enum LocalMeetingSummaryNormalizer {
             guard trimmed.hasPrefix("# "), !requiredSections.contains(trimmed) else {
                 return nil
             }
-            let title = cleanSectionText(String(trimmed.dropFirst(2)))
+            let title = cleanTitleText(String(trimmed.dropFirst(2)))
             return isStructuralGeneratedTitle(title) ? nil : String(title.prefix(96))
         }.first
     }
@@ -872,6 +917,14 @@ enum LocalMeetingSummaryNormalizer {
     private static func cleanSectionText(_ raw: String) -> String {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "None found." : text
+    }
+
+    private static func cleanTitleText(_ raw: String) -> String {
+        var title = cleanSectionText(raw)
+        while title.hasPrefix("#") {
+            title = String(title.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return title
     }
 }
 
