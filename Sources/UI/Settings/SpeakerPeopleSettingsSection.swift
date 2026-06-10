@@ -877,6 +877,8 @@ private struct SpeakerDuplicateCandidateRow: View {
     let candidate: SpeakerDuplicateCandidate
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
+    @State private var showMergeConfirmation = false
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
@@ -898,11 +900,25 @@ private struct SpeakerDuplicateCandidateRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             SettingsInlineActionButton(title: "Merge", symbolName: "arrow.triangle.merge", tone: .accent) {
-                model.merge(source: candidate.source, into: candidate.target)
+                showMergeConfirmation = true
             }
             .help("Merge \(SpeakerDuplicateCandidate.displayName(for: candidate.source)) into \(SpeakerDuplicateCandidate.displayName(for: candidate.target))")
         }
         .padding(.vertical, 4)
+        .alert(mergeConfirmationTitle, isPresented: $showMergeConfirmation) {
+            Button("Merge") {
+                model.merge(source: candidate.source, into: candidate.target)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This combines their history and can't be undone. Past transcripts are updated.")
+        }
+    }
+
+    private var mergeConfirmationTitle: String {
+        let source = SpeakerDuplicateCandidate.displayName(for: candidate.source)
+        let target = SpeakerDuplicateCandidate.displayName(for: candidate.target)
+        return "Merge “\(source)” into “\(target)”?"
     }
 }
 
@@ -981,6 +997,8 @@ private struct SpeakerPersonRow: View {
     @State private var isEditing = false
     @State private var renameDraft: String = ""
     @State private var showDeleteConfirmation = false
+    @State private var pendingMergeTarget: SpeakerProfile?
+    @State private var showMergeConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1037,6 +1055,18 @@ private struct SpeakerPersonRow: View {
         } message: {
             Text("This removes the saved voice profile and sample clip. Past transcripts stay unchanged.")
         }
+        .alert(
+            mergeConfirmationTitle,
+            isPresented: $showMergeConfirmation,
+            presenting: pendingMergeTarget
+        ) { target in
+            Button("Merge") {
+                model.merge(source: profile, into: target)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This combines their history and can't be undone. Past transcripts are updated.")
+        }
     }
 
     private var rowMenu: some View {
@@ -1051,7 +1081,8 @@ private struct SpeakerPersonRow: View {
                 Menu("Merge Into") {
                     ForEach(mergeTargets, id: \.id) { target in
                         Button(mergeLabel(for: target)) {
-                            model.merge(source: profile, into: target)
+                            pendingMergeTarget = target
+                            showMergeConfirmation = true
                         }
                     }
                 }
@@ -1081,6 +1112,14 @@ private struct SpeakerPersonRow: View {
 
     private var displayName: String {
         profile.displayName ?? "Unknown voice"
+    }
+
+    private var mergeConfirmationTitle: String {
+        let source = SpeakerDuplicateCandidate.displayName(for: profile)
+        guard let pendingMergeTarget else {
+            return "Merge “\(source)” into another speaker?"
+        }
+        return "Merge “\(source)” into “\(SpeakerDuplicateCandidate.displayName(for: pendingMergeTarget))”?"
     }
 
     private var metadataLine: String {
