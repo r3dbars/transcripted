@@ -164,9 +164,16 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    func namePendingReviewItem(_ item: SpeakerPendingReviewItem, to newName: String) {
+    func namePendingReviewItem(
+        _ item: SpeakerPendingReviewItem,
+        to newName: String,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            completion?(false)
+            return
+        }
 
         let speakerId = item.speakerId
         let queuedReviewItems = reviewQueueItems.filter { $0.speakerId == speakerId }
@@ -198,6 +205,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                completion?(allTranscriptUpdatesSucceeded)
             }
         }
     }
@@ -704,6 +712,8 @@ private struct SpeakerVoiceToNameRow: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
     @State private var nameDraft = ""
+    @State private var isSaving = false
+    @State private var saveErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -739,8 +749,23 @@ private struct SpeakerVoiceToNameRow: View {
                     actionButtons
                 }
             }
+
+            if let saveErrorMessage {
+                Text(saveErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 4)
+        .onAppear {
+            if nameDraft.isEmpty {
+                nameDraft = group.representative.profile.displayName ?? ""
+            }
+        }
+        .onChange(of: nameDraft) { _, _ in
+            saveErrorMessage = nil
+        }
     }
 
     private var nameField: some View {
@@ -752,10 +777,10 @@ private struct SpeakerVoiceToNameRow: View {
 
     private var actionButtons: some View {
         HStack(spacing: 8) {
-            SettingsInlineActionButton(title: "Save Name", tone: .accent) {
+            SettingsInlineActionButton(title: isSaving ? "Saving…" : "Save Name", tone: .accent) {
                 saveName()
             }
-            .disabled(!canSave)
+            .disabled(!canSave || isSaving)
 
             Button {
                 model.openTranscript(for: group.representative)
@@ -800,9 +825,17 @@ private struct SpeakerVoiceToNameRow: View {
     }
 
     private func saveName() {
-        guard canSave else { return }
-        model.namePendingReviewItem(group.representative, to: nameDraft)
-        nameDraft = ""
+        guard canSave, !isSaving else { return }
+        isSaving = true
+        saveErrorMessage = nil
+        model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
+            isSaving = false
+            if didSave {
+                nameDraft = ""
+            } else {
+                saveErrorMessage = "Couldn't save — the meeting file may have moved."
+            }
+        }
     }
 
     private static let dateFormatter: DateFormatter = {
