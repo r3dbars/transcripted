@@ -371,6 +371,7 @@ private func testMeetingTranscriptStylerRestrictsRewrittenTranscript() {
 private func sampleMeetingTranscriptLocalSummarySections() -> LocalMeetingSummarySections {
     LocalMeetingSummarySections(
         title: "Launch Pricing Review",
+        participants: "- Justin\n- Maya",
         summary: "Team agreed to keep launch pricing simple.",
         decisions: "Keep the first version small.",
         actionItems: "Alex will check pricing language before Friday.",
