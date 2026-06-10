@@ -1345,7 +1345,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set push-to-talk, hands-free, and meeting shortcuts."
+                detail: "Set push-to-talk, hands-free, paste-last-dictation, and meeting shortcuts."
             ) {
                 SettingsToggleRow(
                     title: "Enable dictation shortcuts",
@@ -1363,7 +1363,7 @@ struct TranscriptedSettingsView: View {
                 )
 
                 HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                    .frame(height: 108)
+                    .frame(height: HotkeyRecorderContainer.preferredHeight)
 
                 if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                     HStack(alignment: .top, spacing: 8) {
@@ -1776,7 +1776,7 @@ struct TranscriptedSettingsView: View {
             )
 
             HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                .frame(height: 108)
+                .frame(height: HotkeyRecorderContainer.preferredHeight)
 
             if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                 HStack(alignment: .top, spacing: 8) {

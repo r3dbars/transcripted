@@ -906,6 +906,7 @@ struct ModelCacheMetricRow: View {
 
 struct HotkeyRecorderContainer: NSViewRepresentable {
     var dictationShortcutsEnabled = true
+    static let preferredHeight: CGFloat = 140
 
     func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
         let view = HotkeyRecorderAppKitView(frame: .zero)

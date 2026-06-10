@@ -67,6 +67,10 @@ func testContextCaptureEnginePolicy() {
             source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),
             "meeting physical trigger should have its own debounce key"
         )
+        assertTrue(
+            source.contains("shouldAcceptHotkeyAction(\"paste_last_dictation_physical_trigger\")"),
+            "paste-last-dictation trigger should have its own debounce key"
+        )
     }
 
     // MARK: - Notification.Name.hotkeysDidChange
@@ -85,15 +89,16 @@ func testContextCaptureEnginePolicy() {
     // MARK: - Binding provider default set
     // The engine's bindingProvider always emits the meeting binding and,
     // when dictation shortcuts are enabled, prepends push-to-talk and
-    // hands-free. Pin the three defaults a fresh install hands the provider.
+    // hands-free. Pin the defaults a fresh install hands the provider.
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — engine bindingProvider sees Fn / Right Option / Option-M") {
+    runSuite("PhysicalDictationTriggerPreferences fresh install — engine bindingProvider sees Fn / Right Option / Option-M / Option-Shift-V") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let pushToTalk = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults)
         let handsFree = PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults)
         let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults)
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults)
 
         assertEqual(pushToTalk.keyCode, UInt32(kVK_Function), "push-to-talk default keyCode should be Fn")
         assertEqual(pushToTalk.modifiers, 0, "push-to-talk default should have no modifiers")
@@ -101,12 +106,19 @@ func testContextCaptureEnginePolicy() {
         assertEqual(handsFree.modifiers, 0, "hands-free default should have no modifiers")
         assertEqual(meeting.keyCode, UInt32(kVK_ANSI_M), "meeting default keyCode should be M")
         assertEqual(meeting.modifiers, PhysicalDictationTriggerModifiers.option, "meeting default modifier should be Option")
+        assertEqual(pasteLastDictation.keyCode, UInt32(kVK_ANSI_V), "paste-last-dictation default keyCode should be V")
+        assertEqual(
+            pasteLastDictation.modifiers,
+            PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift,
+            "paste-last-dictation default modifiers should be Option Shift"
+        )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — meeting binding is independent of dictation shortcuts toggle") {
-        // The engine's bindingProvider always includes the meeting binding,
+    runSuite("PhysicalDictationTriggerPreferences fresh install — meeting and paste bindings are independent of dictation shortcuts toggle") {
+        // The engine's bindingProvider always includes the meeting and paste bindings,
         // even when dictation shortcuts are off. The meeting default must
-        // therefore survive in the absence of any saved dictation preference.
+        // therefore survive in the absence of any saved dictation preference,
+        // and paste-last-dictation stays available as a recovery action.
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -122,6 +134,11 @@ func testContextCaptureEnginePolicy() {
             meeting,
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             "meeting binding should stay available even when dictation shortcuts are disabled"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
+            "paste-last-dictation binding should stay available even when dictation shortcuts are disabled"
         )
     }
 
@@ -238,6 +255,14 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("PhysicalDictationTriggerPreferences.displayString — paste-last-dictation default formats as Option-Shift-V chord") {
+        assertEqual(
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
+            "⌥⇧V",
+            "paste-last-dictation default should render as ⌥⇧V in shortcut editors"
+        )
+    }
+
     runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Fn and Right Option") {
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
@@ -267,6 +292,28 @@ func testContextCaptureEnginePolicy() {
                 modifiers: PhysicalDictationTriggerModifiers.option
             ),
             "engine's keyDown matcher should accept the configured meeting chord"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences.matchesKeyDown — paste-last-dictation Option-Shift-V binding accepts ⌥⇧V keyDown") {
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
+
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                pasteLastDictation,
+                keyCode: UInt32(kVK_ANSI_V),
+                modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift
+            ),
+            "engine's keyDown matcher should accept the configured paste-last-dictation chord"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences.matchesKeyDown — paste-last-dictation binding rejects bare V") {
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
+
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(pasteLastDictation, keyCode: UInt32(kVK_ANSI_V), modifiers: 0),
+            "bare V should not fire paste-last-dictation while a user is typing"
         )
     }
 

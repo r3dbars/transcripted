@@ -13,6 +13,7 @@ final class MenuBarShortcutsView: NSView {
     private let pushToTalkRow = PrimaryActionRowView()
     private let handsFreeRow = PrimaryActionRowView()
     private let meetingRow = PrimaryActionRowView()
+    private let pasteLastDictationRow = PrimaryActionRowView()
     private let importButton = MenuOutlineButton(
         title: "Transcribe file",
         symbolName: "waveform",
@@ -48,6 +49,7 @@ final class MenuBarShortcutsView: NSView {
         case pushToTalk
         case handsFree
         case meeting
+        case pasteLastDictation
     }
 
     override init(frame: NSRect) {
@@ -99,6 +101,11 @@ final class MenuBarShortcutsView: NSView {
             self?.startRecording(.meeting)
         }
 
+        pasteLastDictationRow.onPrimaryAction = {}
+        pasteLastDictationRow.onEditShortcut = { [weak self] in
+            self?.startRecording(.pasteLastDictation)
+        }
+
         resetHintLabel.font = NSFont.systemFont(ofSize: 10)
         resetHintLabel.textColor = MenuTokens.textMutedNS
         addSubview(resetHintLabel)
@@ -114,6 +121,7 @@ final class MenuBarShortcutsView: NSView {
         addSubview(pushToTalkRow)
         addSubview(handsFreeRow)
         addSubview(meetingRow)
+        addSubview(pasteLastDictationRow)
     }
 
     override func layout() {
@@ -131,8 +139,14 @@ final class MenuBarShortcutsView: NSView {
             width: bounds.width,
             height: MenuTokens.actionRowHeight
         )
+        pasteLastDictationRow.frame = NSRect(
+            x: 0,
+            y: (MenuTokens.actionRowHeight + 6) * 3,
+            width: bounds.width,
+            height: MenuTokens.actionRowHeight
+        )
 
-        let importY = meetingRow.frame.maxY + 8
+        let importY = pasteLastDictationRow.frame.maxY + 8
         importButton.frame = NSRect(
             x: 0,
             y: importY,
@@ -155,6 +169,7 @@ final class MenuBarShortcutsView: NSView {
         pushToTalkKey: String,
         handsFreeKey: String,
         meetingKey: String,
+        pasteLastDictationKey: String,
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
         canImportAudioFiles: Bool
@@ -198,6 +213,17 @@ final class MenuBarShortcutsView: NSView {
             key: recordingTarget == .meeting ? "Type keys" : meetingKey,
             isEditing: recordingTarget == .meeting,
             isEnabled: meetingState.isEnabled
+        )
+
+        pasteLastDictationRow.update(
+            symbolName: "doc.on.clipboard",
+            title: "Paste last dictation",
+            subtitle: recordingTarget == .pasteLastDictation
+                ? "Press shortcut…"
+                : "Paste the newest saved dictation",
+            key: recordingTarget == .pasteLastDictation ? "Type keys" : pasteLastDictationKey,
+            isEditing: recordingTarget == .pasteLastDictation,
+            isEnabled: true
         )
 
         needsLayout = true
@@ -287,6 +313,7 @@ final class MenuBarShortcutsView: NSView {
             pushToTalkKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding()),
             handsFreeKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.handsFreeBinding()),
             meetingKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding()),
+            pasteLastDictationKey: PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()),
             dictationState: currentDictationState,
             meetingState: currentMeetingState,
             canImportAudioFiles: canImportAudioFiles
@@ -294,7 +321,7 @@ final class MenuBarShortcutsView: NSView {
     }
 
     var intrinsicHeight: CGFloat {
-        MenuTokens.actionRowHeight * 3 + MenuTokens.secondaryButtonSize * 2 + 26
+        MenuTokens.actionRowHeight * 4 + MenuTokens.secondaryButtonSize * 2 + 32
     }
 
     @objc private func resetShortcuts() {
@@ -311,6 +338,8 @@ final class MenuBarShortcutsView: NSView {
             PhysicalDictationTriggerPreferences.saveHandsFree(binding)
         case .meeting:
             PhysicalDictationTriggerPreferences.saveMeeting(binding)
+        case .pasteLastDictation:
+            PhysicalDictationTriggerPreferences.savePasteLastDictation(binding)
         }
     }
 
