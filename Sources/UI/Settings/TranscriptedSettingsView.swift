@@ -341,6 +341,9 @@ struct TranscriptedSettingsView: View {
             withAnimation(.snappy(duration: 0.2)) {
                 showsSettingsPages.toggle()
             }
+            if !showsSettingsPages, SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
+                navigation.selectedPage = .home
+            }
             trackSettingsAction("toggle_settings_pages", page: navigation.selectedPage)
         } label: {
             HStack(spacing: 8) {
@@ -657,6 +660,14 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private static let statsActivityDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     private var homeGreeting: String {
         HomeCanvasGreeting.text(
             hour: Calendar.current.component(.hour, from: Date()),
@@ -665,8 +676,16 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeContextCompleteness: HomeContextCompleteness {
-        let activityDates = homeViewModel.dictationDaySections.map(\.day)
+        // Day sections cover recent dictations and meetings but are capped to the
+        // visible page slice; the stats database fills in uncapped meeting days
+        // for the current month so heavy single-day use does not hide the rest
+        // of the week.
+        var activityDates = homeViewModel.dictationDaySections.map(\.day)
             + homeViewModel.meetingDaySections.map(\.day)
+        activityDates += statsService.monthlyActivity.compactMap { key, day in
+            guard day.recordingCount > 0 else { return nil }
+            return Self.statsActivityDayFormatter.date(from: key)
+        }
         let namedSpeakerCount = speakerPeopleModel.profiles.filter { profile in
             profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }.count
@@ -3673,6 +3692,12 @@ struct TranscriptedSettingsView: View {
         refreshDockVisibility()
         refreshLaunchAtLoginState()
         agentConnected = ClaudeDesktopIntegrationInstaller.currentStatus().isInstalled
+        Task { @MainActor in
+            await statsService.refreshStats()
+        }
+        if !speakerPeopleModel.hasLoadedProfiles {
+            speakerPeopleModel.refresh()
+        }
         customDictionaryText = CustomDictionaryPreferences.rawText()
         customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
