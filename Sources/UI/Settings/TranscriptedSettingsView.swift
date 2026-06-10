@@ -130,18 +130,6 @@ struct TranscriptedSettingsView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     Divider()
-
-                    HomeContextRingView(
-                        completeness: homeContextCompleteness,
-                        onViewStats: {
-                            trackSettingsAction("open_context_ring_stats", page: navigation.selectedPage)
-                            homeShowsStatsDetails = true
-                        }
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 12)
-                    .padding(.bottom, 6)
-
                     settingsPagesToggle
                     settingsSidebarFooter
                 }
@@ -457,10 +445,15 @@ struct TranscriptedSettingsView: View {
                 streakText: homeStreak.map { "\($0)d" },
                 savedText: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
                 meetingsText: formattedInteger(statsService.totalRecordings),
+                dictationsText: formattedInteger(homeViewModel.totalDictationCount),
                 agentConnected: agentConnected,
                 onAgentAction: {
                     trackSettingsAction("home_agent_chip", page: .home)
                     navigation.selectedPage = .connectAgent
+                },
+                onViewStats: {
+                    trackSettingsAction("open_home_stats", page: .home)
+                    homeShowsStatsDetails = true
                 }
             )
             .padding(.top, 8)
@@ -513,10 +506,64 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            homeMeetingsListSection
+            homeRecentMeetingsSection
                 .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
+    }
+
+    private var homeRecentMeetingsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if homeViewModel.isLoading {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 28)
+            } else {
+                HomeDayGroupedList(
+                    sections: homeRecentMeetingDaySections,
+                    emptyMessage: HomeCaptureListCopy.emptyMeetings,
+                    getID: { AnyHashable($0.id) },
+                    sectionSpacing: 14,
+                    headerSpacing: 2
+                ) { item in
+                    homeMeetingListRow(item)
+                }
+
+                if homeHasMoreMeetingsThanRecentSlice {
+                    HStack {
+                        Spacer(minLength: 0)
+
+                        Button {
+                            trackSettingsAction("home_view_all_meetings", page: .home)
+                            navigation.selectedPage = .meetings
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("View all meetings")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .contentShape(Capsule(style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("transcripted.home.view-all-meetings")
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var meetingsPage: some View {
@@ -660,40 +707,10 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private static let statsActivityDayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private var homeGreeting: String {
         HomeCanvasGreeting.text(
             hour: Calendar.current.component(.hour, from: Date()),
             firstName: homeViewModel.welcomeName
-        )
-    }
-
-    private var homeContextCompleteness: HomeContextCompleteness {
-        // Day sections cover recent dictations and meetings but are capped to the
-        // visible page slice; the stats database fills in uncapped meeting days
-        // for the current month so heavy single-day use does not hide the rest
-        // of the week.
-        var activityDates = homeViewModel.dictationDaySections.map(\.day)
-            + homeViewModel.meetingDaySections.map(\.day)
-        activityDates += statsService.monthlyActivity.compactMap { key, day in
-            guard day.recordingCount > 0 else { return nil }
-            return Self.statsActivityDayFormatter.date(from: key)
-        }
-        let namedSpeakerCount = speakerPeopleModel.profiles.filter { profile in
-            profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        }.count
-        return HomeContextCompleteness.make(
-            activeDaysInLastWeek: HomeContextCompleteness.activeDayCount(dayDates: activityDates),
-            namedSpeakerCount: namedSpeakerCount,
-            totalSpeakerCount: speakerPeopleModel.profiles.count,
-            agentConnected: agentConnected
         )
     }
 
@@ -946,7 +963,14 @@ struct TranscriptedSettingsView: View {
 
             switch readResult {
             case .success(let markdown):
-                homeMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+                homeMeetingPreview = HomeMeetingPreview(
+                    item: item,
+                    markdown: markdown,
+                    summary: HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
+                        for: item,
+                        isEnabled: localMeetingSummariesEnabled
+                    )
+                )
             case .failure(let message):
                 homeMeetingPreview = HomeMeetingPreview(
                     item: item,
@@ -1436,6 +1460,32 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
+    }
+
+    private static let homeRecentMeetingDisplayLimit = 7
+
+    private var homeRecentMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
+        Self.cappedDaySections(homeMeetingDaySections, limit: Self.homeRecentMeetingDisplayLimit)
+    }
+
+    private var homeHasMoreMeetingsThanRecentSlice: Bool {
+        homeViewModel.canLoadMoreMeetings
+            || homeMeetingDaySections.reduce(0) { $0 + $1.items.count } > Self.homeRecentMeetingDisplayLimit
+    }
+
+    private static func cappedDaySections<Item>(
+        _ sections: [HomeDaySection<Item>],
+        limit: Int
+    ) -> [HomeDaySection<Item>] {
+        var remaining = limit
+        var result: [HomeDaySection<Item>] = []
+        for section in sections {
+            guard remaining > 0 else { break }
+            let items = Array(section.items.prefix(remaining))
+            remaining -= items.count
+            result.append(HomeDaySection(day: section.day, label: section.label, items: items))
+        }
+        return result
     }
 
     private var canRetryFailedMeetings: Bool {

@@ -314,9 +314,15 @@ struct HomeMeetingPreview: Identifiable {
     let audio: MeetingAudioAttachment?
     let markdown: String
     let readError: String?
+    let summary: RecentMeetingSummaryPreview?
     let feedbackTarget: HomeFeedbackTarget
 
-    init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
+    init(
+        item: RecentMeetingItem,
+        markdown: String,
+        readError: String? = nil,
+        summary: RecentMeetingSummaryPreview? = nil
+    ) {
         id = item.id
         title = item.displayTitle
         date = item.date
@@ -324,6 +330,7 @@ struct HomeMeetingPreview: Identifiable {
         audio = item.audio
         self.markdown = markdown
         self.readError = readError
+        self.summary = summary
         feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
 }
@@ -340,8 +347,10 @@ struct HomeCanvasHeader: View {
     let streakText: String?
     let savedText: String
     let meetingsText: String
+    let dictationsText: String
     let agentConnected: Bool
     let onAgentAction: () -> Void
+    let onViewStats: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -358,6 +367,20 @@ struct HomeCanvasHeader: View {
                 stat(savedText, "saved")
                 separatorDot
                 stat(meetingsText, "meetings")
+                separatorDot
+                stat(dictationsText, "dictations")
+
+                Button(action: { onViewStats() }) {
+                    Label("View stats", systemImage: "info.circle")
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("View all stats")
+                .accessibilityIdentifier("transcripted.home.stats.view")
+
                 separatorDot
                 agentChip
             }
@@ -487,98 +510,6 @@ private struct HomeAttentionPill: View {
         .accessibilityLabel(issue.title)
         .accessibilityHint(issue.detail)
         .accessibilityIdentifier("transcripted.home.needs-attention.review.\(issue.id)")
-    }
-}
-
-// MARK: - Context ring
-
-struct HomeContextRingView: View {
-    let completeness: HomeContextCompleteness
-    let onViewStats: () -> Void
-
-    @State private var isHovering = false
-
-    private let ringSize: CGFloat = 92
-    private let lineWidth: CGFloat = 4.5
-    private let segmentGap = 0.012
-
-    var body: some View {
-        Button(action: { onViewStats() }) {
-            VStack(spacing: 7) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.08), lineWidth: lineWidth)
-
-                    ForEach(arcs) { arc in
-                        Circle()
-                            .trim(from: arc.start, to: arc.end)
-                            .stroke(
-                                arc.color,
-                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                            )
-                            .rotationEffect(.degrees(-90))
-                    }
-
-                    VStack(spacing: 1) {
-                        Text(completeness.percentText)
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                        Text("CONTEXT")
-                            .font(.system(size: 8, weight: .semibold))
-                            .tracking(0.9)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: ringSize, height: ringSize)
-                .padding(lineWidth / 2)
-
-                Label("View stats", systemImage: "info.circle")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .opacity(isHovering ? 1 : 0.6)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
-        .help("How complete your agent's context is: capture momentum, named speakers, and a connected agent. Click for full stats.")
-        .accessibilityLabel("Context \(completeness.percentText) complete")
-        .accessibilityIdentifier("transcripted.home.stats.view")
-    }
-
-    private struct RingArc: Identifiable {
-        let id: String
-        let start: Double
-        let end: Double
-        let color: Color
-    }
-
-    private var arcs: [RingArc] {
-        var position = 0.0
-        var result: [RingArc] = []
-        for segment in completeness.segments {
-            let start = position == 0 ? 0 : position + segmentGap
-            let end = position + segment.fraction
-            if end > start {
-                result.append(RingArc(
-                    id: segment.id,
-                    start: start,
-                    end: end,
-                    color: segmentColor(segment.id)
-                ))
-            }
-            position = end
-        }
-        return result
-    }
-
-    private func segmentColor(_ id: String) -> Color {
-        switch id {
-        case "capture": return Color.accentColor
-        case "speakers": return Color.teal
-        default: return Color.cyan
-        }
     }
 }
 
@@ -1171,16 +1102,22 @@ struct HomeMeetingRow: View {
     var body: some View {
         HomeActivityRowShell(
             timeString: startTimeString,
-            secondaryTimeString: endTimeString.map { "- \($0)" },
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
             leadingAccessory: aiSummaryAccessory,
-            compact: visibleSummaryPreview == nil && !isSummarizingSummary
+            compact: visibleSummaryPreview == nil && !isSummarizingSummary,
+            showsLeadingTimeColumn: false
         ) {
             VStack(alignment: .leading, spacing: rowContentSpacing) {
+                Text(timeRangeString)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.bottom, 1)
+
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(displayedTitle)
                         .font(.system(size: 14, weight: .semibold))
@@ -1228,7 +1165,12 @@ struct HomeMeetingRow: View {
 
     private var rowContentSpacing: CGFloat {
         if isSummarizingSummary { return 5 }
-        return visibleSummaryPreview == nil ? 0 : 4
+        return visibleSummaryPreview == nil ? 2 : 4
+    }
+
+    private var timeRangeString: String {
+        guard let endTimeString else { return startTimeString }
+        return "\(startTimeString) - \(endTimeString)"
     }
 
     private var aiSummaryAccessory: AnyView? {
@@ -1896,6 +1838,43 @@ struct HomeMeetingPreviewSheet: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
+                            if let summary = preview.summary {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Label("AI summary", systemImage: "sparkles")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                        .textCase(.uppercase)
+                                        .tracking(0.6)
+
+                                    if summary.sections.isEmpty {
+                                        Text(summary.summary)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Color.primary)
+                                            .lineSpacing(2)
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    } else {
+                                        ForEach(Array(summary.sections.enumerated()), id: \.offset) { _, section in
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(section.title)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(.secondary)
+                                                Text(section.text)
+                                                    .font(.system(size: 13))
+                                                    .foregroundStyle(Color.primary)
+                                                    .lineSpacing(2)
+                                                    .textSelection(.enabled)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
+
+                                    Divider()
+                                        .padding(.top, 4)
+                                }
+                                .accessibilityIdentifier("transcripted.home.meeting-preview.summary")
+                            }
+
                             Text("Transcript")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.secondary)

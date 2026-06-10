@@ -23,11 +23,11 @@ settings-side agent connection flow.
 - `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
   showing opt-in local AI meeting-summary titles, previews, badges, and menu
   actions.
-- `HomeView.swift` - Home canvas components (greeting header, attention pills,
-  context ring view, capture list sections), recent capture rows, preview,
+- `HomeView.swift` - Home canvas components (greeting header with stats line,
+  attention pills, capture list sections), recent capture rows, preview,
   feedback, and failed meeting entry points.
-- `HomeContextCompleteness.swift` - pure scoring model behind the sidebar
-  context ring plus the time-of-day greeting helper.
+- `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
+  canvas header.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
   walkthrough.
 - `SpeakerPeopleSettingsSection.swift` - people/speaker profile list, naming,
