@@ -73,6 +73,19 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("ContextCaptureEngine hotkey unregister — preserves paste callback owner") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("var onPasteLastDictation: (() -> Void)?"),
+            "paste-last-dictation callback should stay on the engine like the meeting toggle callback"
+        )
+        assertFalse(
+            source.contains("onPasteLastDictation = nil"),
+            "hotkey unregister/re-register recovery should not clear the app-owned paste callback"
+        )
+    }
+
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would

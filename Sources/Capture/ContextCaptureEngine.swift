@@ -763,6 +763,5 @@ class ContextCaptureEngine: ObservableObject {
         physicalShortcutDetector.remove()
         _sharedSessionController = nil
         _sharedMeetingToggle = nil
-        onPasteLastDictation = nil
     }
 }
