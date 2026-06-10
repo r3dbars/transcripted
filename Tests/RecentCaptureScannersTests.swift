@@ -102,8 +102,13 @@ func testRecentCaptureScanners() async {
         )
         assertEqual(
             RecentMeetingSpeakerStatus.needsReview(1).summary,
-            "1 speaker needs review",
+            "1 speaker label needs a name",
             "singular speaker summary should read naturally"
+        )
+        assertEqual(
+            RecentMeetingSpeakerStatus.needsReview(2).summary,
+            "2 speaker labels need names",
+            "plural speaker summary should explain the orange review affordance"
         )
         assertEqual(
             RecentMeetingSpeakerStatus.ready.summary,
@@ -236,6 +241,30 @@ func testRecentCaptureScanners() async {
                 hasSpeakerReviewWork: false
             ),
             "Ready meetings should keep re-transcription in the row menu instead of showing an inline warning action"
+        )
+    }
+
+    runSuite("RecentMeetingRetranscriptionMenuActionPolicy blocks rows with pending speaker review") {
+        assertFalse(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: nil,
+                hasSpeakerReviewWork: true
+            ),
+            "The row menu should not re-transcribe the same meeting while speaker review is still pending"
+        )
+        assertFalse(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.",
+                hasSpeakerReviewWork: false
+            ),
+            "Global meeting work should still disable the row menu re-transcribe action"
+        )
+        assertTrue(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: nil,
+                hasSpeakerReviewWork: false
+            ),
+            "Reviewed saved meetings should remain re-transcribable from the row menu"
         )
     }
 
@@ -485,8 +514,55 @@ func testRecentCaptureScanners() async {
         assertEqual(preview.summary, "Team agreed to keep launch pricing simple.", "summary should come from the managed transcript block")
         assertEqual(
             preview.sections.map(\.title),
-            ["Summary", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
+            ["Participants", "Summary", "Next Steps", "Decisions", "Action Items", "Open Questions", "Risks or Follow-ups", "Accuracy Notes"],
             "embedded summaries should expose every managed section for Show more"
+        )
+    }
+
+    runSuite("RecentMeetingSummaryPreviewParser prefers marked generated summaries over unmarked sections") {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/launch.md")
+        let baseMarkdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        date: "2026-05-24"
+        time: "14:00:00"
+        duration: "10:00"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        We should keep the launch simple.
+
+        ## Local Gemma Summary
+
+        ### Summary
+        This old user-authored section should not become the generated preview.
+        """
+        let markdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sampleRecentCaptureLocalSummarySections(),
+            to: baseMarkdown,
+            configuration: .m1Optimized(physicalMemoryBytes: 16 * 1024 * 1024 * 1024),
+            generatedAt: recentLoaderDate("2026-05-24T14:20:00Z"),
+            chunkCount: 1,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
+        )
+
+        guard let preview = RecentMeetingSummaryPreviewParser.inlinePreview(
+            from: markdown,
+            url: transcriptURL
+        ) else {
+            assertTrue(false, "embedded summary metadata should produce a Home preview")
+            return
+        }
+
+        assertEqual(
+            preview.summary,
+            "Team agreed to keep launch pricing simple.",
+            "Home preview should prefer the marked generated summary block"
         )
     }
 
@@ -1715,11 +1791,12 @@ func testRecentCaptureLoader() async {
         }
     }
 
-    await runSuite("RecentMeetingsScanner orders rows by filesystem recency") {
+    await runSuite("RecentMeetingsScanner orders rows by filesystem recency but exposes frontmatter dates") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
             let freshFileDate = recentLoaderDate("2026-05-29T14:00:00Z")
             let olderFileDate = recentLoaderDate("2026-05-28T14:00:00Z")
+            let freshRecordedAt = recentLoaderFrontmatterDate("2026-05-01 14:00:00")
 
             try? writeRecentLoaderMeeting(
                 title: "Fresh Copied Meeting",
@@ -1737,7 +1814,8 @@ func testRecentCaptureLoader() async {
             let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
 
             assertEqual(meetings.map(\.title), ["Fresh Copied Meeting", "Older Newer-Frontmatter Meeting"], "Home recency should follow filesystem dates, not stale or future transcript metadata")
-            assertEqual(meetings.first?.date, freshFileDate, "meeting row dates should use the scanner date that controls ordering")
+            assertEqual(meetings.first?.date, freshRecordedAt, "meeting row dates should use frontmatter recording time so Home grouping does not move touched retranscripts to Today")
+            assertEqual(meetings.first?.startDate, freshRecordedAt, "row start date should match the frontmatter recording time")
         }
     }
 
@@ -1934,6 +2012,7 @@ private func writeRecentLoaderSummary(
 private func sampleRecentCaptureLocalSummarySections() -> LocalMeetingSummarySections {
     LocalMeetingSummarySections(
         title: "Launch Pricing Review",
+        participants: "- Justin\n- Maya",
         summary: "Team agreed to keep launch pricing simple.",
         decisions: "Keep the first version small.",
         actionItems: "Alex will check pricing language before Friday.",
@@ -1952,6 +2031,13 @@ private func setRecentLoaderFileDate(_ date: Date, at url: URL) {
 
 private func recentLoaderDate(_ string: String) -> Date {
     ISO8601DateFormatter().date(from: string) ?? Date(timeIntervalSince1970: 0)
+}
+
+private func recentLoaderFrontmatterDate(_ string: String) -> Date {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return formatter.date(from: string) ?? Date(timeIntervalSince1970: 0)
 }
 
 private func recentLoaderFormat(_ date: Date, _ pattern: String) -> String {

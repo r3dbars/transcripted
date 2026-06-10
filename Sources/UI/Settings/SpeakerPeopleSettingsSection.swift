@@ -597,6 +597,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 }
 
 struct SpeakerPeopleSettingsSection: View {
+    enum ScrollTarget: Hashable {
+        case reviewQueue
+    }
+
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
     var body: some View {
@@ -618,6 +622,8 @@ struct SpeakerPeopleSettingsSection: View {
                     }
                 }
             }
+            .id(ScrollTarget.reviewQueue)
+            .accessibilityIdentifier("transcripted.speakers.inbox")
         }
 
         if !model.duplicateCandidates.isEmpty {

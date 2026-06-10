@@ -47,7 +47,7 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
         case .ready:
             return "Speakers ready"
         case .needsReview(let count):
-            return count == 1 ? "1 speaker needs review" : "\(count) speakers need review"
+            return count == 1 ? "1 speaker label needs a name" : "\(count) speaker labels need names"
         }
     }
 
@@ -161,6 +161,15 @@ enum RecentMeetingRetranscriptionActionPolicy {
         hasSpeakerReviewWork: Bool
     ) -> Bool {
         hasRetainedAudio && speakerStatus.needsReview && !hasSpeakerReviewWork
+    }
+}
+
+enum RecentMeetingRetranscriptionMenuActionPolicy {
+    static func isEnabled(
+        globalUnavailableReason: String?,
+        hasSpeakerReviewWork: Bool
+    ) -> Bool {
+        globalUnavailableReason == nil && !hasSpeakerReviewWork
     }
 }
 
@@ -359,10 +368,11 @@ enum RecentMeetingsScanner {
                 frontmatter: frontmatter,
                 fallbackDate: entry.date
             )
+            let displayDate = timing.start ?? entry.date
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
-                    date: entry.date,
+                    date: displayDate,
                     startDate: timing.start,
                     endDate: timing.end,
                     transcriptURL: styled.url,
@@ -495,7 +505,9 @@ enum RecentMeetingSummaryPreviewParser {
 
     private static func sectionsFromFrontmatter(_ values: [String: String]) -> [RecentMeetingSummarySection] {
         [
+            ("Participants", values["local_summary_participants"]),
             ("Summary", values["local_summary"]),
+            ("Next Steps", values["local_summary_next_steps"]),
             ("Decisions", values["local_summary_decisions"]),
             ("Action Items", values["local_summary_action_items"]),
             ("Open Questions", values["local_summary_open_questions"]),
@@ -508,13 +520,16 @@ enum RecentMeetingSummaryPreviewParser {
     }
 
     private static func sectionsFromLocalSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
-        guard let localSummary = section("## Local Gemma Summary", in: body, headingLevel: "##")
-            ?? section("## Local Summary", in: body, headingLevel: "##") else {
+        let searchBody = LocalMeetingSummaryMarkdownUpdater.localSummaryBlock(in: body) ?? body
+        guard let localSummary = section("## Local Gemma Summary", in: searchBody, headingLevel: "##")
+            ?? section("## Local Summary", in: searchBody, headingLevel: "##") else {
             return []
         }
 
         return [
+            "Participants",
             "Summary",
+            "Next Steps",
             "Decisions",
             "Action Items",
             "Open Questions",
@@ -534,7 +549,9 @@ enum RecentMeetingSummaryPreviewParser {
 
     private static func sectionsFromGeneratedSummaryBody(_ body: String) -> [RecentMeetingSummarySection] {
         [
+            ("Participants", "# Participants"),
             ("Summary", "# Summary"),
+            ("Next Steps", "# Next Steps"),
             ("Decisions", "# Decisions"),
             ("Action Items", "# Action Items"),
             ("Open Questions", "# Open Questions"),
