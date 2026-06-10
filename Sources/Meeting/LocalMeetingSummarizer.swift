@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 #if canImport(TranscriptedCore)
 import TranscriptedCore
 #endif
@@ -7,6 +10,7 @@ struct LocalMeetingSummaryResult: Equatable, Sendable {
     let transcriptURL: URL
     let chunkCount: Int
     let profileName: String
+    let provider: LocalMeetingSummaryProvider
 }
 
 struct LocalMeetingSummarySections: Equatable, Sendable {
@@ -37,6 +41,7 @@ enum LocalMeetingSummaryError: LocalizedError, Equatable {
     case emptyTranscript
     case insufficientMemory(availableGB: Int, requiredGB: Int)
     case runtimeUnavailable
+    case appleFoundationUnavailable(reason: String)
     case missingBundledRunner
     case transcriptChanged
     case processTimedOut(label: String)
@@ -51,6 +56,8 @@ enum LocalMeetingSummaryError: LocalizedError, Equatable {
             return "Gemma 4 12B needs about \(requiredGB)GB of memory. This Mac reports \(availableGB)GB, so Transcripted skipped the local summary to avoid heavy swapping."
         case .runtimeUnavailable:
             return "Transcripted could not find the local MLX runner. Install uv, or set TRANSCRIPTED_UV_PATH to a uv executable."
+        case .appleFoundationUnavailable(let reason):
+            return reason
         case .missingBundledRunner:
             return "Transcripted could not find the bundled Gemma summary runner."
         case .transcriptChanged:
@@ -62,6 +69,24 @@ enum LocalMeetingSummaryError: LocalizedError, Equatable {
         case .outputMissing:
             return "The local Gemma runner finished without writing a summary."
         }
+    }
+}
+
+struct LocalMeetingSummaryRunMetadata: Equatable, Sendable {
+    let provider: LocalMeetingSummaryProvider
+    let modelID: String
+    let runtimePackage: String
+    let profileName: String
+    let heading: String
+
+    static func gemma(configuration: LocalGemmaSummaryConfiguration) -> LocalMeetingSummaryRunMetadata {
+        LocalMeetingSummaryRunMetadata(
+            provider: .gemmaMLX,
+            modelID: configuration.modelID,
+            runtimePackage: configuration.runtimePackage,
+            profileName: configuration.profileName,
+            heading: "Local Gemma Summary"
+        )
     }
 }
 
@@ -191,6 +216,66 @@ struct LocalMeetingSummarySetupStatus: Equatable, Sendable {
     }
 }
 
+struct AppleFoundationSummarySetupStatus: Equatable, Sendable {
+    let isFrameworkAvailable: Bool
+    let isModelAvailable: Bool
+    let contextSize: Int
+    let unavailableReason: String?
+
+    var isReady: Bool {
+        isFrameworkAvailable && isModelAvailable
+    }
+
+    var profileName: String {
+        guard isFrameworkAvailable else { return "apple-foundation-unavailable" }
+        guard contextSize > 0 else { return "apple-foundation-unknown-context" }
+        return "apple-foundation-context-\(contextSize)"
+    }
+
+    static func current() -> AppleFoundationSummarySetupStatus {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            switch model.availability {
+            case .available:
+                return AppleFoundationSummarySetupStatus(
+                    isFrameworkAvailable: true,
+                    isModelAvailable: true,
+                    contextSize: model.contextSize,
+                    unavailableReason: nil
+                )
+            case .unavailable(.appleIntelligenceNotEnabled):
+                return unavailable("Turn on Apple Intelligence in System Settings to use Apple on-device summaries.", contextSize: model.contextSize)
+            case .unavailable(.deviceNotEligible):
+                return unavailable("This Mac is not eligible for Apple Intelligence on-device summaries.", contextSize: model.contextSize)
+            case .unavailable(.modelNotReady):
+                return unavailable("Apple's on-device model is still downloading or preparing. Try again when this Mac is idle.", contextSize: model.contextSize)
+            case .unavailable:
+                return unavailable("Apple's on-device model is unavailable on this Mac right now.", contextSize: model.contextSize)
+            @unknown default:
+                return unavailable("Apple's on-device model reported an unknown availability state.", contextSize: model.contextSize)
+            }
+        }
+        #endif
+
+        return AppleFoundationSummarySetupStatus(
+            isFrameworkAvailable: false,
+            isModelAvailable: false,
+            contextSize: 0,
+            unavailableReason: "Apple Foundation Models are not available in this build."
+        )
+    }
+
+    private static func unavailable(_ reason: String, contextSize: Int) -> AppleFoundationSummarySetupStatus {
+        AppleFoundationSummarySetupStatus(
+            isFrameworkAvailable: true,
+            isModelAvailable: false,
+            contextSize: contextSize,
+            unavailableReason: reason
+        )
+    }
+}
+
 struct LocalGemmaSummaryPrompt: Sendable {
     let label: String
     let prompt: String
@@ -257,6 +342,10 @@ enum LocalMeetingTranscriptExtractor {
 }
 
 enum LocalMeetingSummaryChunker {
+    static func turns(from transcript: String) -> [String] {
+        splitIntoTurns(transcript)
+    }
+
     static func chunks(from transcript: String, targetCharacterLimit: Int) -> [String] {
         let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTranscript.isEmpty else { return [] }
@@ -667,6 +756,203 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     }
 }
 
+#if canImport(FoundationModels)
+@available(macOS 26.0, *)
+@Generable
+struct AppleFoundationMeetingSummaryContent {
+    @Guide(description: "A specific plain meeting title, 3 to 8 words.")
+    var title: String
+
+    @Guide(description: "Only transcript-supported summary bullets.", .maximumCount(6))
+    var summary: [String]
+
+    @Guide(description: "Only explicit decisions from the transcript.", .maximumCount(8))
+    var decisions: [String]
+
+    @Guide(description: "Only unfinished future follow-up work after the meeting.", .maximumCount(8))
+    var actionItems: [String]
+
+    @Guide(description: "Only unresolved questions from the transcript.", .maximumCount(8))
+    var openQuestions: [String]
+
+    @Guide(description: "Risks, blockers, or follow-ups supported by the transcript.", .maximumCount(8))
+    var risksOrFollowUps: [String]
+
+    @Guide(description: "Uncertainty and accuracy notes.", .maximumCount(4))
+    var accuracyNotes: [String]
+
+    var markdown: String {
+        """
+        # Title
+        \(clean(title, fallback: "Meeting Summary"))
+
+        # Summary
+        \(render(summary))
+
+        # Decisions
+        \(render(decisions))
+
+        # Action Items
+        \(render(actionItems))
+
+        # Open Questions
+        \(render(openQuestions))
+
+        # Risks or Follow-ups
+        \(render(risksOrFollowUps))
+
+        # Accuracy Notes
+        \(render(accuracyNotes))
+        """
+    }
+
+    private func render(_ values: [String]) -> String {
+        let cleaned = values
+            .map { clean($0, fallback: "") }
+            .filter { !$0.isEmpty && $0.localizedCaseInsensitiveCompare("none found") != .orderedSame }
+        guard !cleaned.isEmpty else { return "None found." }
+        return cleaned.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private func clean(_ value: String, fallback: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+}
+#endif
+
+struct AppleFoundationSummaryRuntime: Sendable {
+    let setupStatus: AppleFoundationSummarySetupStatus
+    let reservedResponseTokens: Int
+    let chunkMaxTokens: Int
+    let directMaxTokens: Int
+    let mergeMaxTokens: Int
+
+    init(
+        setupStatus: AppleFoundationSummarySetupStatus = .current(),
+        reservedResponseTokens: Int = 700,
+        chunkMaxTokens: Int = 420,
+        directMaxTokens: Int = 900,
+        mergeMaxTokens: Int = 1_000
+    ) {
+        self.setupStatus = setupStatus
+        self.reservedResponseTokens = reservedResponseTokens
+        self.chunkMaxTokens = chunkMaxTokens
+        self.directMaxTokens = directMaxTokens
+        self.mergeMaxTokens = mergeMaxTokens
+    }
+
+    var metadata: LocalMeetingSummaryRunMetadata {
+        LocalMeetingSummaryRunMetadata(
+            provider: .appleFoundation,
+            modelID: "com.apple.foundationmodels.system.default",
+            runtimePackage: "FoundationModels.framework",
+            profileName: setupStatus.profileName,
+            heading: "Local Apple Summary"
+        )
+    }
+
+    func generate(prompt: String, maxTokens: Int) async throws -> String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            guard model.isAvailable else {
+                throw LocalMeetingSummaryError.appleFoundationUnavailable(
+                    reason: AppleFoundationSummarySetupStatus.current().unavailableReason
+                        ?? "Apple's on-device model is unavailable on this Mac right now."
+                )
+            }
+
+            let session = LanguageModelSession(
+                model: model,
+                instructions: """
+                You summarize Transcripted meeting transcripts accurately.
+                Use only the supplied transcript or chunk notes.
+                Do not invent decisions, action items, questions, people, dates, or facts.
+                If a field has no direct support, leave it empty.
+                """
+            )
+            do {
+                let response = try await session.respond(
+                    to: prompt,
+                    generating: AppleFoundationMeetingSummaryContent.self,
+                    options: GenerationOptions(
+                        temperature: 0.0,
+                        maximumResponseTokens: maxTokens
+                    )
+                )
+                return response.content.markdown
+            } catch {
+                let fallbackResponse = try await session.respond(
+                    to: prompt,
+                    options: GenerationOptions(
+                        temperature: 0.0,
+                        maximumResponseTokens: maxTokens
+                    )
+                )
+                return fallbackResponse.content
+            }
+        }
+        #endif
+
+        throw LocalMeetingSummaryError.appleFoundationUnavailable(
+            reason: "Apple Foundation Models are not available in this build."
+        )
+    }
+
+    func chunks(for transcript: String, title: String) async throws -> [String] {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let model = SystemLanguageModel.default
+            guard model.isAvailable else {
+                throw LocalMeetingSummaryError.appleFoundationUnavailable(
+                    reason: AppleFoundationSummarySetupStatus.current().unavailableReason
+                        ?? "Apple's on-device model is unavailable on this Mac right now."
+                )
+            }
+
+            let turns = LocalMeetingSummaryChunker.turns(from: transcript)
+            let safePromptBudget = max(900, model.contextSize - reservedResponseTokens - 250)
+            var chunks: [String] = []
+            var current: [String] = []
+
+            for turn in turns {
+                try Task.checkCancellation()
+                let candidate = (current + [turn]).joined(separator: "\n\n")
+                let prompt = LocalMeetingSummaryPrompts.chunk(
+                    title: title,
+                    chunk: candidate,
+                    index: max(1, chunks.count + 1),
+                    total: 999,
+                    runtimeName: "Apple on-device Foundation Models"
+                )
+                let tokenCount: Int
+                if #available(macOS 26.4, *) {
+                    tokenCount = (try? await model.tokenCount(for: prompt)) ?? Int(Double(candidate.count) / 3.6)
+                } else {
+                    tokenCount = Int(Double(candidate.count) / 3.6)
+                }
+                if !current.isEmpty, tokenCount > safePromptBudget {
+                    chunks.append(current.joined(separator: "\n\n"))
+                    current = [turn]
+                } else {
+                    current.append(turn)
+                }
+            }
+
+            if !current.isEmpty {
+                chunks.append(current.joined(separator: "\n\n"))
+            }
+            return chunks.isEmpty ? [transcript] : chunks
+        }
+        #endif
+
+        throw LocalMeetingSummaryError.appleFoundationUnavailable(
+            reason: "Apple Foundation Models are not available in this build."
+        )
+    }
+}
+
 struct LocalMeetingSummarizer: @unchecked Sendable {
     let configuration: LocalGemmaSummaryConfiguration
     var runtime: LocalGemmaSummaryRuntime
@@ -703,7 +989,11 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         if chunks.count == 1 {
             try Task.checkCancellation()
             summaryBody = try runtime.generate(
-                prompt: directPrompt(title: title, transcript: chunks[0]),
+                prompt: LocalMeetingSummaryPrompts.direct(
+                    title: title,
+                    transcript: chunks[0],
+                    runtimeName: "Gemma 4 12B"
+                ),
                 label: "direct",
                 maxTokens: configuration.directMaxTokens,
                 workDirectory: workDirectory
@@ -712,11 +1002,12 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
             let chunkPrompts = chunks.enumerated().map { index, chunk in
                 LocalGemmaSummaryPrompt(
                     label: "chunk-\(index + 1)",
-                    prompt: chunkPrompt(
+                    prompt: LocalMeetingSummaryPrompts.chunk(
                         title: title,
                         chunk: chunk,
                         index: index + 1,
-                        total: chunks.count
+                        total: chunks.count,
+                        runtimeName: "Gemma 4 12B"
                     ),
                     maxTokens: configuration.chunkMaxTokens
                 )
@@ -735,7 +1026,11 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
             try Task.checkCancellation()
             summaryBody = try runtime.generate(
-                prompt: mergePrompt(title: title, notes: chunkNotes.joined(separator: "\n\n---\n\n")),
+                prompt: LocalMeetingSummaryPrompts.merge(
+                    title: title,
+                    notes: chunkNotes.joined(separator: "\n\n---\n\n"),
+                    runtimeName: "Gemma 4 12B"
+                ),
                 label: "merge",
                 maxTokens: configuration.mergeMaxTokens,
                 workDirectory: workDirectory
@@ -755,7 +1050,7 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
             byApplying: sections,
             to: latestMarkdown,
-            configuration: configuration,
+            metadata: .gemma(configuration: configuration),
             generatedAt: date,
             chunkCount: chunks.count,
             sourceTranscriptFilename: transcriptURL.lastPathComponent
@@ -768,7 +1063,8 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         return LocalMeetingSummaryResult(
             transcriptURL: transcriptURL,
             chunkCount: chunks.count,
-            profileName: configuration.profileName
+            profileName: configuration.profileName,
+            provider: .gemmaMLX
         )
     }
 
@@ -801,9 +1097,99 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         return directory
     }
 
-    private func directPrompt(title: String, transcript: String) -> String {
+}
+
+struct AppleFoundationMeetingSummarizer: @unchecked Sendable {
+    var runtime = AppleFoundationSummaryRuntime()
+    var fileManager: FileManager = .default
+
+    func summarize(transcriptURL: URL, title: String, date: Date = Date()) async throws -> LocalMeetingSummaryResult {
+        try Task.checkCancellation()
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let transcript = LocalMeetingTranscriptExtractor.transcriptText(from: markdown)
+        guard transcript.split(whereSeparator: \.isWhitespace).count >= 40 else {
+            throw LocalMeetingSummaryError.emptyTranscript
+        }
+
+        let chunks = try await runtime.chunks(for: transcript, title: title)
+        let summaryBody: String
+        if chunks.count == 1 {
+            summaryBody = try await runtime.generate(
+                prompt: LocalMeetingSummaryPrompts.direct(
+                    title: title,
+                    transcript: chunks[0],
+                    runtimeName: "Apple on-device Foundation Models"
+                ),
+                maxTokens: runtime.directMaxTokens
+            )
+        } else {
+            var chunkNotes: [String] = []
+            for (index, chunk) in chunks.enumerated() {
+                try Task.checkCancellation()
+                let output = try await runtime.generate(
+                    prompt: LocalMeetingSummaryPrompts.chunk(
+                        title: title,
+                        chunk: chunk,
+                        index: index + 1,
+                        total: chunks.count,
+                        runtimeName: "Apple on-device Foundation Models"
+                    ),
+                    maxTokens: runtime.chunkMaxTokens
+                )
+                chunkNotes.append("# Chunk \(index + 1)\n\n\(output)")
+            }
+            summaryBody = try await runtime.generate(
+                prompt: LocalMeetingSummaryPrompts.merge(
+                    title: title,
+                    notes: chunkNotes.joined(separator: "\n\n---\n\n"),
+                    runtimeName: "Apple on-device Foundation Models"
+                ),
+                maxTokens: runtime.mergeMaxTokens
+            )
+        }
+
+        try Task.checkCancellation()
+        let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
+        let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+        let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
+        guard latestTranscript == transcript else {
+            throw LocalMeetingSummaryError.transcriptChanged
+        }
+        let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+            byApplying: sections,
+            to: latestMarkdown,
+            metadata: runtime.metadata,
+            generatedAt: date,
+            chunkCount: chunks.count,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
+        )
+        try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+
+        return LocalMeetingSummaryResult(
+            transcriptURL: transcriptURL,
+            chunkCount: chunks.count,
+            profileName: runtime.metadata.profileName,
+            provider: .appleFoundation
+        )
+    }
+
+    func prepareModelForFirstSummary() async throws -> String {
+        _ = try await runtime.generate(
+            prompt: """
+            You are Transcripted's Apple on-device meeting summarizer. Reply with title Ready and one summary bullet saying Ready.
+            """,
+            maxTokens: 80
+        )
+        return runtime.metadata.profileName
+    }
+}
+
+enum LocalMeetingSummaryPrompts {
+    static func direct(title: String, transcript: String, runtimeName: String) -> String {
         """
-        You are Transcripted's local meeting summarizer. You are running fully on-device with Gemma 4 12B.
+        You are Transcripted's local meeting summarizer. You are running fully on-device with \(runtimeName).
 
         Summarize "\(title)" accurately. Do not invent decisions, tasks, dates, names, or facts. If something is unclear, write unclear.
 
@@ -855,9 +1241,9 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         """
     }
 
-    private func chunkPrompt(title: String, chunk: String, index: Int, total: Int) -> String {
+    static func chunk(title: String, chunk: String, index: Int, total: Int, runtimeName: String) -> String {
         """
-        You are Transcripted's local meeting-note extractor. This is chunk \(index) of \(total) from "\(title)".
+        You are Transcripted's local meeting-note extractor. You are running fully on-device with \(runtimeName). This is chunk \(index) of \(total) from "\(title)".
 
         Extract only facts supported by this chunk. Do not invent.
 
@@ -890,9 +1276,9 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         """
     }
 
-    private func mergePrompt(title: String, notes: String) -> String {
+    static func merge(title: String, notes: String, runtimeName: String) -> String {
         """
-        You are Transcripted's local meeting summarizer. Merge these chunk notes for "\(title)" into one accurate meeting summary.
+        You are Transcripted's local meeting summarizer. You are running fully on-device with \(runtimeName). Merge these chunk notes for "\(title)" into one accurate meeting summary.
 
         Do not invent decisions, tasks, dates, names, or facts.
 
@@ -945,7 +1331,6 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         \(notes)
         """
     }
-
 }
 
 enum LocalMeetingSummaryNormalizer {
@@ -1083,6 +1468,7 @@ enum LocalMeetingSummaryMarkdownUpdater {
         "local_summary_source_transcript",
         "local_summary_title",
         "local_summary_generated_at",
+        "local_summary_provider",
         "local_summary_model",
         "local_summary_runtime",
         "local_summary_profile",
@@ -1106,19 +1492,44 @@ enum LocalMeetingSummaryMarkdownUpdater {
         chunkCount: Int,
         sourceTranscriptFilename: String? = nil
     ) -> String {
+        self.markdown(
+            byApplying: sections,
+            to: markdown,
+            metadata: .gemma(configuration: configuration),
+            generatedAt: generatedAt,
+            chunkCount: chunkCount,
+            sourceTranscriptFilename: sourceTranscriptFilename
+        )
+    }
+
+    static func markdown(
+        byApplying sections: LocalMeetingSummarySections,
+        to markdown: String,
+        metadata: LocalMeetingSummaryRunMetadata,
+        generatedAt: Date,
+        chunkCount: Int,
+        sourceTranscriptFilename: String? = nil
+    ) -> String {
         let document = TranscriptFrontmatter.document(in: markdown)
         let body = document?.body ?? markdown
         let frontmatterLines = updatedFrontmatterLines(
             existing: document?.lines ?? [],
             sections: sections,
-            configuration: configuration,
+            metadata: metadata,
             generatedAt: generatedAt,
             chunkCount: chunkCount,
             sourceTranscriptFilename: sourceTranscriptFilename
         )
         let updatedBody = removingLocalSummaryBlock(from: body)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let renderedBody = [updatedBody, renderedLocalSummarySection(sections, sourceTranscriptFilename: sourceTranscriptFilename)]
+        let renderedBody = [
+            updatedBody,
+            renderedLocalSummarySection(
+                sections,
+                metadata: metadata,
+                sourceTranscriptFilename: sourceTranscriptFilename
+            )
+        ]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
 
@@ -1134,7 +1545,7 @@ enum LocalMeetingSummaryMarkdownUpdater {
     private static func updatedFrontmatterLines(
         existing: [String],
         sections: LocalMeetingSummarySections,
-        configuration: LocalGemmaSummaryConfiguration,
+        metadata: LocalMeetingSummaryRunMetadata,
         generatedAt: Date,
         chunkCount: Int,
         sourceTranscriptFilename: String?
@@ -1154,9 +1565,10 @@ enum LocalMeetingSummaryMarkdownUpdater {
             "local_summary_version: \"1\"",
             yamlLine("local_summary_title", sections.title ?? ""),
             "local_summary_generated_at: \"\(generatedAtString)\"",
-            yamlLine("local_summary_model", configuration.modelID),
-            yamlLine("local_summary_runtime", configuration.runtimePackage),
-            yamlLine("local_summary_profile", configuration.profileName),
+            yamlLine("local_summary_provider", metadata.provider.rawValue),
+            yamlLine("local_summary_model", metadata.modelID),
+            yamlLine("local_summary_runtime", metadata.runtimePackage),
+            yamlLine("local_summary_profile", metadata.profileName),
             "local_summary_chunk_count: \"\(chunkCount)\"",
             yamlLine("local_summary_participants", frontmatterSummaryValue(sections.participants)),
             yamlLine("local_summary", frontmatterSummaryValue(sections.summary)),
@@ -1172,6 +1584,7 @@ enum LocalMeetingSummaryMarkdownUpdater {
 
     private static func renderedLocalSummarySection(
         _ sections: LocalMeetingSummarySections,
+        metadata: LocalMeetingSummaryRunMetadata,
         sourceTranscriptFilename: String?
     ) -> String {
         let sourceLine = sourceTranscriptFilename
@@ -1179,7 +1592,7 @@ enum LocalMeetingSummaryMarkdownUpdater {
                 let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? nil : "Source transcript: `\(trimmed)`"
             }
-        let headerLines = ["## Local Gemma Summary", sourceLine]
+        let headerLines = ["## \(metadata.heading)", sourceLine]
             .compactMap { $0 }
             .joined(separator: "\n\n")
         return """

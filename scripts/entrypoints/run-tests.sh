@@ -294,6 +294,7 @@ SWIFTC_ARGS+=(
     -framework Carbon
     -framework CoreMedia
     -framework EventKit
+    -framework FoundationModels
     -framework Network
     -framework ScreenCaptureKit
     -parse-as-library

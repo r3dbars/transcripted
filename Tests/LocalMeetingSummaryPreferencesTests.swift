@@ -25,6 +25,29 @@ func testLocalMeetingSummaryPreferences() {
             "localMeetingSummaryBetaEnabled",
             "storage key should not drift across updates"
         )
+        assertEqual(
+            LocalMeetingSummaryPreferences.providerKey,
+            "localMeetingSummaryProvider",
+            "provider storage key should not drift across updates"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryPreferences persists provider") {
+        let (defaults, suiteName) = makeLocalMeetingSummaryDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertEqual(
+            LocalMeetingSummaryPreferences.provider(userDefaults: defaults),
+            .gemmaMLX,
+            "Gemma should remain the default provider"
+        )
+
+        LocalMeetingSummaryPreferences.setProvider(.appleFoundation, userDefaults: defaults)
+        assertEqual(
+            LocalMeetingSummaryPreferences.provider(userDefaults: defaults),
+            .appleFoundation,
+            "Apple provider should persist"
+        )
     }
 }
 

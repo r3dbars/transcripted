@@ -78,9 +78,11 @@ struct TranscriptedSettingsView: View {
     @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
     @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
+    @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
     @State private var betaFeatureStatus: String?
     @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+    @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
     @State private var showLocalSummarySetupDetails = false
     @State private var localSummaryModelPreparationStatus: String?
     @State private var localSummaryModelPreparationTask: Task<String, Error>?
@@ -817,24 +819,33 @@ struct TranscriptedSettingsView: View {
             return
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
+        let provider = localMeetingSummaryProvider
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
-            message: "Local Gemma meeting summary started",
+            message: "\(provider.title) meeting summary started",
             context: [
+                "provider": provider.rawValue,
                 "has_existing_summary": item.summaryPreview == nil ? "false" : "true",
-                "setup_ready": localSummarySetupStatus.isReady ? "true" : "false",
-                "setup_profile": localSummarySetupStatus.profileName,
-                "has_runtime": localSummarySetupStatus.hasRuntime ? "true" : "false",
+                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
+                "setup_profile": selectedLocalSummaryProviderProfileName,
             ]
         )
         clearHomeLocalSummaryNotice()
         homeLocalSummaryJobIDs.insert(item.id)
 
         let task = Task.detached(priority: .utility) {
-            try await LocalMeetingSummarizer().summarize(
-                transcriptURL: item.transcriptURL,
-                title: item.title
-            )
+            switch provider {
+            case .gemmaMLX:
+                return try await LocalMeetingSummarizer().summarize(
+                    transcriptURL: item.transcriptURL,
+                    title: item.title
+                )
+            case .appleFoundation:
+                return try await AppleFoundationMeetingSummarizer().summarize(
+                    transcriptURL: item.transcriptURL,
+                    title: item.title
+                )
+            }
         }
         let taskToken = UUID()
         homeLocalSummaryTasks[item.id] = task
@@ -858,8 +869,9 @@ struct TranscriptedSettingsView: View {
                 ))
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_completed",
-                    message: "Local Gemma meeting summary saved",
+                    message: "\(result.provider.title) meeting summary saved",
                     context: [
+                        "provider": result.provider.rawValue,
                         "chunk_count": "\(result.chunkCount)",
                         "profile": result.profileName,
                     ]
@@ -868,7 +880,10 @@ struct TranscriptedSettingsView: View {
             } catch is CancellationError {
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
-                    message: "Local Gemma meeting summary cancelled"
+                    message: "\(provider.title) meeting summary cancelled",
+                    context: [
+                        "provider": provider.rawValue,
+                    ]
                 )
                 return
             } catch {
@@ -876,8 +891,9 @@ struct TranscriptedSettingsView: View {
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
-                    message: "Local Gemma meeting summary failed",
+                    message: "\(provider.title) meeting summary failed",
                     context: [
+                        "provider": provider.rawValue,
                         "error": error.localizedDescription,
                     ]
                 )
@@ -1030,7 +1046,7 @@ struct TranscriptedSettingsView: View {
         var items: [HomeRowMenuItem] = []
         let hasSummary = item.summaryPreview != nil
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
-        let isPreparingLocalGemma = isLocalSummaryModelPreparing
+        let isPreparingLocalSummaryModel = isLocalSummaryModelPreparing
         let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
         let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
         let summaryActionTitle: String
@@ -1038,8 +1054,8 @@ struct TranscriptedSettingsView: View {
             summaryActionTitle = "Running AI summary..."
         } else if hasSummary {
             summaryActionTitle = "Open enhanced transcript"
-        } else if isPreparingLocalGemma {
-            summaryActionTitle = "Preparing Gemma..."
+        } else if isPreparingLocalSummaryModel {
+            summaryActionTitle = "Preparing \(localMeetingSummaryProvider.title)..."
         } else {
             summaryActionTitle = "Run AI summary"
         }
@@ -1079,7 +1095,7 @@ struct TranscriptedSettingsView: View {
                 HomeRowMenuItem(
                     title: isSummarizing
                         ? "Regenerating AI summary..."
-                        : (isPreparingLocalGemma ? "Preparing Gemma..." : "Regenerate AI summary"),
+                        : (isPreparingLocalSummaryModel ? "Preparing \(localMeetingSummaryProvider.title)..." : "Regenerate AI summary"),
                     symbolName: "arrow.clockwise",
                     isEnabled: !isSummarizing && canGenerateSummary
                 ) {
@@ -1457,14 +1473,33 @@ struct TranscriptedSettingsView: View {
     }
 
     private var localMeetingSummaryUnavailableReason: String? {
-        LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+        if let busyReason = LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
             isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
             isMeetingRecording: meetingSession.isRecording,
             isPreparingModels: meetingSession.state == .loadingModels,
             isPreparingLocalSummaryModel: isLocalSummaryModelPreparing,
             hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
             isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
-        )
+        ) {
+            return busyReason
+        }
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB."
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Install uv from Beta settings before running Gemma summaries."
+            }
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isReady {
+                return appleSummarySetupStatus.unavailableReason
+                    ?? "Apple on-device summaries are unavailable on this Mac right now."
+            }
+        }
+
+        return nil
     }
 
     private var shortcutsPage: some View {
@@ -2608,6 +2643,34 @@ struct TranscriptedSettingsView: View {
                         automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
                     )
 
+                    Picker("Summary provider", selection: Binding(
+                        get: { localMeetingSummaryProvider },
+                        set: { provider in
+                            localMeetingSummaryProviderRawValue = provider.rawValue
+                            LocalMeetingSummaryPreferences.setProvider(provider)
+                            trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
+                            refreshLocalSummarySetupStatus()
+                            if localMeetingSummariesEnabled {
+                                cancelLocalSummaryJobs()
+                                clearHomeLocalSummaryNotice()
+                                cancelLocalSummaryModelPreparation()
+                                localSummaryModelPreparationStatus = nil
+                                prepareLocalSummaryModelFromBeta()
+                            }
+                        }
+                    )) {
+                        ForEach(LocalMeetingSummaryProvider.allCases, id: \.self) { provider in
+                            Text(provider.title).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isLocalSummaryModelPreparing)
+
+                    Text(localMeetingSummaryProvider.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     betaLocalSummarySetupStatus
                 }
 
@@ -2666,9 +2729,9 @@ struct TranscriptedSettingsView: View {
                     refreshLocalSummarySetupStatus()
                 }
 
-                if localMeetingSummariesEnabled, localSummarySetupStatus.isReady {
+                if localMeetingSummariesEnabled, selectedLocalSummaryProviderIsReady {
                     SettingsInlineActionButton(
-                        title: isLocalSummaryModelPreparing ? "Cancel setup" : "Prepare Gemma",
+                        title: isLocalSummaryModelPreparing ? "Cancel setup" : localSummaryPrepareButtonTitle,
                         symbolName: isLocalSummaryModelPreparing ? "xmark.circle" : "tray.and.arrow.down",
                         tone: isLocalSummaryModelPreparing ? .warning : .neutral,
                         automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
@@ -2676,7 +2739,7 @@ struct TranscriptedSettingsView: View {
                         if isLocalSummaryModelPreparing {
                             trackSettingsAction("cancel_local_summary_model_prepare", page: .beta)
                             cancelLocalSummaryModelPreparation()
-                            localSummaryModelPreparationStatus = "Gemma setup cancelled. You can try Prepare Gemma again when this Mac is idle."
+                            localSummaryModelPreparationStatus = "\(localMeetingSummaryProvider.title) setup cancelled. You can try again when this Mac is idle."
                         } else {
                             trackSettingsAction("prepare_local_summary_model", page: .beta)
                             prepareLocalSummaryModelFromBeta()
@@ -2685,7 +2748,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
-            if !localSummarySetupStatus.hasRuntime {
+            if localMeetingSummaryProvider == .gemmaMLX, !localSummarySetupStatus.hasRuntime {
                 SettingsInlineActionButton(
                     title: "Install uv",
                     symbolName: "arrow.down.circle",
@@ -2707,27 +2770,12 @@ struct TranscriptedSettingsView: View {
             DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
                 VStack(alignment: .leading, spacing: 8) {
                     betaSetupDetailLine(
-                        title: "Model",
-                        value: "Gemma 4 12B 4-bit MLX"
+                        title: "Provider",
+                        value: localMeetingSummaryProvider.title
                     )
-                    betaSetupDetailLine(
-                        title: "Download",
-                        value: "First summary may download several GB into your local Hugging Face cache."
-                    )
-                    betaSetupDetailLine(
-                        title: "Runtime",
-                        value: localSummarySetupStatus.hasRuntime
-                            ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
-                            : "Install uv so Transcripted can run the local MLX package."
-                    )
-                    betaSetupDetailLine(
-                        title: "Hardware",
-                        value: "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."
-                    )
-                    betaSetupDetailLine(
-                        title: "Privacy",
-                        value: "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached."
-                    )
+                    ForEach(localSummarySetupDetails, id: \.title) { detail in
+                        betaSetupDetailLine(title: detail.title, value: detail.value)
+                    }
                 }
                 .padding(.top, 6)
             }
@@ -2831,30 +2879,45 @@ struct TranscriptedSettingsView: View {
         refreshLocalSummarySetupStatus()
         localSummaryModelPreparationTask?.cancel()
 
-        guard localSummarySetupStatus.hasEnoughMemory else {
-            localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
-            return
-        }
+        let provider = localMeetingSummaryProvider
+        switch provider {
+        case .gemmaMLX:
+            guard localSummarySetupStatus.hasEnoughMemory else {
+                localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
+                return
+            }
 
-        guard localSummarySetupStatus.hasRuntime else {
-            localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
-            return
+            guard localSummarySetupStatus.hasRuntime else {
+                localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
+                return
+            }
+        case .appleFoundation:
+            guard appleSummarySetupStatus.isReady else {
+                localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
+                    ?? "Apple on-device summaries are unavailable on this Mac right now."
+                return
+            }
         }
 
         isLocalSummaryModelPreparing = true
-        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
+        localSummaryModelPreparationStatus = localSummaryPreparationStartedStatus
         recordLocalSummaryEvent(
             event: "local_meeting_summary_model_prepare_started",
-            message: "Local Gemma model preparation started",
+            message: "\(provider.title) summary model preparation started",
             context: [
-                "setup_profile": localSummarySetupStatus.profileName,
-                "has_runtime": "true",
+                "provider": provider.rawValue,
+                "setup_profile": selectedLocalSummaryProviderProfileName,
             ]
         )
 
         let taskToken = UUID()
         let task = Task.detached(priority: .utility) {
-            try await LocalMeetingSummarizer().prepareModelForFirstSummary()
+            switch provider {
+            case .gemmaMLX:
+                return try await LocalMeetingSummarizer().prepareModelForFirstSummary()
+            case .appleFoundation:
+                return try await AppleFoundationMeetingSummarizer().prepareModelForFirstSummary()
+            }
         }
         localSummaryModelPreparationTask = task
         localSummaryModelPreparationToken = taskToken
@@ -2866,11 +2929,13 @@ struct TranscriptedSettingsView: View {
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
-                localSummaryModelPreparationStatus = "Gemma cache is prepared. The first real summary should load from the local cache instead of starting with a surprise setup step."
+                refreshLocalSummarySetupStatus()
+                localSummaryModelPreparationStatus = "\(provider.title) is ready. The first real summary should start without a surprise setup step."
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_completed",
-                    message: "Local Gemma model preparation completed",
+                    message: "\(provider.title) summary model preparation completed",
                     context: [
+                        "provider": provider.rawValue,
                         "profile": profile,
                     ]
                 )
@@ -2882,19 +2947,24 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationStatus = nil
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_cancelled",
-                    message: "Local Gemma model preparation cancelled"
+                    message: "\(provider.title) summary model preparation cancelled",
+                    context: [
+                        "provider": provider.rawValue,
+                    ]
                 )
             } catch {
                 guard localSummaryModelPreparationToken == taskToken else { return }
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
-                localSummaryModelPreparationStatus = "Gemma setup failed: \(error.localizedDescription)"
+                refreshLocalSummarySetupStatus()
+                localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_model_prepare_failed",
-                    message: "Local Gemma model preparation failed",
+                    message: "\(provider.title) summary model preparation failed",
                     context: [
+                        "provider": provider.rawValue,
                         "error": error.localizedDescription,
                     ]
                 )
@@ -2925,6 +2995,7 @@ struct TranscriptedSettingsView: View {
 
     private func refreshLocalSummarySetupStatus() {
         localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+        appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
     }
 
     private func cancelLocalSummaryJobs() {
@@ -2990,37 +3061,125 @@ struct TranscriptedSettingsView: View {
         NSWorkspace.shared.open(url)
     }
 
+    private var localMeetingSummaryProvider: LocalMeetingSummaryProvider {
+        LocalMeetingSummaryProvider(rawValue: localMeetingSummaryProviderRawValue)
+            ?? LocalMeetingSummaryProvider.defaultProvider
+    }
+
+    private var selectedLocalSummaryProviderIsReady: Bool {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return localSummarySetupStatus.isReady
+        case .appleFoundation:
+            return appleSummarySetupStatus.isReady
+        }
+    }
+
+    private var selectedLocalSummaryProviderProfileName: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return localSummarySetupStatus.profileName
+        case .appleFoundation:
+            return appleSummarySetupStatus.profileName
+        }
+    }
+
+    private var localSummaryPrepareButtonTitle: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return "Prepare Gemma"
+        case .appleFoundation:
+            return "Check Apple model"
+        }
+    }
+
+    private var localSummaryPreparationStartedStatus: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
+        case .appleFoundation:
+            return "Checking Apple's on-device Foundation Model locally. Transcripted will use the best Apple model this Mac exposes, including Core Advanced when available."
+        }
+    }
+
+    private var localSummarySetupDetails: [(title: String, value: String)] {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return [
+                ("Model", "Gemma 4 12B 4-bit MLX"),
+                ("Download", "First summary may download several GB into your local Hugging Face cache."),
+                ("Runtime", localSummarySetupStatus.hasRuntime
+                    ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
+                    : "Install uv so Transcripted can run the local MLX package."),
+                ("Hardware", "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."),
+                ("Privacy", "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached.")
+            ]
+        case .appleFoundation:
+            return [
+                ("Model", "Apple Foundation Models system model"),
+                ("Context", appleSummarySetupStatus.contextSize > 0
+                    ? "\(appleSummarySetupStatus.contextSize) tokens reported by this Mac."
+                    : "Context size unavailable."),
+                ("Runtime", appleSummarySetupStatus.isReady
+                    ? "Apple Intelligence model is available."
+                    : (appleSummarySetupStatus.unavailableReason ?? "Apple model unavailable.")),
+                ("Hardware", "Uses the best Apple on-device model this Mac exposes. Core Advanced is used only when the system provides it."),
+                ("Privacy", "Transcript text stays on this Mac and uses Apple's local model path.")
+            ]
+        }
+    }
+
     private var localSummarySetupStatusTitle: String {
         if isLocalSummaryModelPreparing {
-            return "Preparing Gemma locally"
+            return "Preparing \(localMeetingSummaryProvider.title)"
         }
-        if !localSummarySetupStatus.hasEnoughMemory {
-            return "Not supported on this Mac"
-        }
-        if !localSummarySetupStatus.hasRuntime {
-            return "Setup needed"
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "Not supported on this Mac"
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Setup needed"
+            }
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isFrameworkAvailable {
+                return "Framework unavailable"
+            }
+            if !appleSummarySetupStatus.isModelAvailable {
+                return "Apple model unavailable"
+            }
         }
         return "Runtime ready"
     }
 
     private var localSummarySetupStatusDetail: String {
         if isLocalSummaryModelPreparing {
-            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time; detailed download progress is not available yet."
+            return "Transcripted is preparing \(localMeetingSummaryProvider.title). Home summaries stay paused so this Mac only runs one local summary job at a time."
         }
-        if !localSummarySetupStatus.hasEnoughMemory {
-            return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
+            }
+            return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isReady {
+                return appleSummarySetupStatus.unavailableReason ?? "Apple on-device summaries are unavailable on this Mac right now."
+            }
+            return "Apple's on-device model is available with a \(appleSummarySetupStatus.contextSize)-token context. Transcripted will chunk long meetings before merging."
         }
-        if !localSummarySetupStatus.hasRuntime {
-            return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
-        }
-        return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
     }
 
     private var localSummarySetupStatusSymbol: String {
         if isLocalSummaryModelPreparing {
             return "arrow.triangle.2.circlepath"
         }
-        if localSummarySetupStatus.isReady {
+        if selectedLocalSummaryProviderIsReady {
             return "checkmark.circle.fill"
         }
         return "exclamationmark.circle.fill"
@@ -3030,7 +3189,7 @@ struct TranscriptedSettingsView: View {
         if isLocalSummaryModelPreparing {
             return Color.accentColor
         }
-        if localSummarySetupStatus.isReady {
+        if selectedLocalSummaryProviderIsReady {
             return .green
         }
         return .orange

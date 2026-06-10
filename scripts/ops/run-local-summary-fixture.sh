@@ -102,12 +102,109 @@ struct LocalSummaryFixture {
 
         print("[local-summary-fixture] PASS: generated deterministic local summary fixture")
         print("[local-summary-fixture] Transcript: \(transcriptURL.path)")
+
+        try await runChunkedScenario(in: runRoot)
     }
 
     private static func expect(_ condition: Bool, _ message: String) throws {
         if !condition {
             throw FixtureError.failed(message)
         }
+    }
+
+    private static func runChunkedScenario(in runRoot: URL) async throws {
+        let fileManager = FileManager.default
+        let transcriptURL = runRoot.appendingPathComponent("Synthetic Long Summary Fixture.md")
+        let recorder = LocalSummaryFixtureBatchRecorder()
+        try fixtureLongTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        let configuration = LocalGemmaSummaryConfiguration(
+            modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+            runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
+            profileName: "fixture-chunked",
+            minimumPhysicalMemoryBytes: 0,
+            chunkCharacterLimit: 360,
+            chunkMaxTokens: 64,
+            directMaxTokens: 64,
+            mergeMaxTokens: 128,
+            maxKVSize: 1_024,
+            processTimeoutSeconds: 5,
+            processNiceValue: 0,
+            cpuThreadLimit: 1,
+            interJobCooldownSeconds: 0
+        )
+        let runtime = LocalGemmaSummaryRuntime(
+            configuration: configuration,
+            generateBatchOverride: { prompts, _ in
+                recorder.record(prompts)
+                if prompts.allSatisfy({ $0.label.hasPrefix("chunk-") }) {
+                    return prompts.map { prompt in
+                        """
+                        # Summary
+                        \(prompt.label) preserved local-summary fixture details.
+
+                        # Decisions
+                        Keep long local Gemma summaries serialized.
+
+                        # Action Items
+                        Dogfood the next beta on a real meeting.
+
+                        # Open Questions
+                        Whether real model quality is good enough.
+
+                        # Risks or Follow-ups
+                        Long meetings can still be slow on low-memory Macs.
+                        """
+                    }
+                }
+                if prompts.map(\.label) == ["merge"] {
+                    return [fixtureModelOutput]
+                }
+                throw FixtureError.failed("unexpected chunk prompt batch: \(prompts.map(\.label).joined(separator: ", "))")
+            }
+        )
+
+        let result = try await LocalMeetingSummarizer(
+            configuration: configuration,
+            runtime: runtime
+        ).summarize(
+            transcriptURL: transcriptURL,
+            title: "Synthetic Long Summary Fixture",
+            date: Date(timeIntervalSince1970: 1_780_000_000)
+        )
+
+        let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let batches = recorder.batches()
+
+        try expect(result.chunkCount > 1, "long fixture should use the chunked summary path")
+        try expect(batches.count == 2, "long fixture should run one chunk batch and one merge job")
+        try expect(batches[0].labels.allSatisfy { $0.hasPrefix("chunk-") }, "first batch should contain chunk jobs")
+        try expect(batches[1].labels == ["merge"], "second batch should merge chunk notes")
+        try expect(batches[1].prompts.joined(separator: "\n").contains("# Chunk 1"), "merge prompt should receive chunk notes")
+        try expect(updatedMarkdown.contains("local_summary_profile: \"fixture-chunked\""), "frontmatter should record the chunked profile")
+        try expect(updatedMarkdown.contains("local_summary_chunk_count: \"\(result.chunkCount)\""), "frontmatter should record chunk count")
+        try expect(!fileManager.fileExists(atPath: LocalMeetingSummaryStore.summaryURL(for: transcriptURL).path), "chunked fixture should not create a sibling summary sidecar")
+
+        print("[local-summary-fixture] PASS: generated deterministic chunked local summary fixture")
+        print("[local-summary-fixture] Chunked transcript: \(transcriptURL.path)")
+    }
+}
+
+private final class LocalSummaryFixtureBatchRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedBatches: [(labels: [String], prompts: [String])] = []
+
+    func record(_ prompts: [LocalGemmaSummaryPrompt]) {
+        lock.lock()
+        recordedBatches.append((prompts.map(\.label), prompts.map(\.prompt)))
+        lock.unlock()
+    }
+
+    func batches() -> [(labels: [String], prompts: [String])] {
+        lock.lock()
+        let batches = recordedBatches
+        lock.unlock()
+        return batches
     }
 }
 
@@ -154,6 +251,35 @@ QA should keep this fixture in the bench so missing output shape is caught befor
 The open question is whether real Gemma quality still needs manual review, but the fixture can prove the app path does not hang.
 """
 
+private let fixtureLongTranscript = """
+---
+capture_type: meeting
+title: "Synthetic Long Summary Fixture"
+---
+
+# Synthetic Long Summary Fixture
+
+## Transcript
+
+**00:01** [Mic/Alex]
+Chunk one says the local summary path should stay serialized, avoid surprise setup work from Home, keep transcripts canonical, preserve user edits, and leave enough detail for a final merge.
+
+**00:20** [System/Riley]
+Chunk two says the long meeting smoke should finish without model downloads and should catch regressions where chunk summaries never merge.
+
+**00:41** [Mic/Alex]
+Chunk three says the beta dogfood build should make progress visible and avoid pretending a slow model is stuck forever.
+
+**01:02** [System/Riley]
+Chunk four says the saved Markdown should be enhanced in place instead of creating a second summary artifact.
+
+**01:23** [Mic/Alex]
+Chunk five says stale transcript writes should fail closed if the meeting changes while local generation is running.
+
+**01:44** [System/Riley]
+Chunk six says the final notice should be short-lived after success, because the actual saved summary is already in the meeting Markdown.
+"""
+
 private let fixtureModelOutput = """
 # Title
 Fixture Summary Review
@@ -180,9 +306,11 @@ SWIFT
 
 swiftc \
   "${HARNESS}" \
+  "${REPO_ROOT}/Sources/Support/LocalMeetingSummaryPreferences.swift" \
   "${REPO_ROOT}/Sources/Support/TranscriptedStoragePaths.swift" \
   "${REPO_ROOT}/Sources/Meeting/LocalMeetingSummarizer.swift" \
   "${REPO_ROOT}/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
+  -framework FoundationModels \
   -parse-as-library \
   -o "${BIN}"
 
