@@ -411,8 +411,6 @@ struct TranscriptedSettingsView: View {
         switch navigation.selectedPage {
         case .home:
             homePage
-        case .meetings:
-            meetingsPage
         case .dictations:
             dictationsPage
         case .general:
@@ -464,6 +462,8 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
+            homeFailedMeetingsCard
+
             if let activity = homeTranscriptionActivity {
                 SettingsActivityCard(
                     symbolName: activity.symbolName,
@@ -506,105 +506,41 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            homeRecentMeetingsSection
+            homeMeetingsListSection
                 .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
-    private var homeRecentMeetingsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if homeViewModel.isLoading {
-                HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.vertical, 28)
-            } else {
-                HomeDayGroupedList(
-                    sections: homeRecentMeetingDaySections,
-                    emptyMessage: HomeCaptureListCopy.emptyMeetings,
-                    getID: { AnyHashable($0.id) },
-                    sectionSpacing: 14,
-                    headerSpacing: 2
-                ) { item in
-                    homeMeetingListRow(item)
-                }
-
-                if homeHasMoreMeetingsThanRecentSlice {
-                    HStack {
-                        Spacer(minLength: 0)
-
-                        Button {
-                            trackSettingsAction("home_view_all_meetings", page: .home)
-                            navigation.selectedPage = .meetings
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text("View all meetings")
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 9, weight: .bold))
-                            }
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .contentShape(Capsule(style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("transcripted.home.view-all-meetings")
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, 4)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var meetingsPage: some View {
+    @ViewBuilder
+    private var homeFailedMeetingsCard: some View {
         let allFailedMeetings = meetingSession.failedMeetings
-        let failedMeetings = homeShowsAllFailedMeetings
-            ? allFailedMeetings
-            : Array(allFailedMeetings.prefix(3))
-        let hiddenFailedMeetingCount = max(0, allFailedMeetings.count - failedMeetings.count)
-
-        return VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Meetings",
-                summary: "Recent meeting transcripts, summaries, and recovery."
+        if !allFailedMeetings.isEmpty {
+            let failedMeetings = homeShowsAllFailedMeetings
+                ? allFailedMeetings
+                : Array(allFailedMeetings.prefix(3))
+            HomeFailedMeetingsCard(
+                items: failedMeetings,
+                hiddenCount: max(0, allFailedMeetings.count - failedMeetings.count),
+                canRetry: canRetryFailedMeetings,
+                retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                audioAttachment: { failedMeetingAudioAttachment(for: $0) },
+                onRetry: { item in
+                    trackSettingsAction("home_retry_failed_meeting", page: .home)
+                    retryFailedMeeting(item)
+                },
+                onRevealAudio: { item in
+                    trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                    revealFailedMeetingAudio(item)
+                },
+                onClear: { item in
+                    requestClearFailedMeeting(item)
+                },
+                onShowAll: {
+                    trackSettingsAction("home_show_all_failed_meetings", page: .home)
+                    homeShowsAllFailedMeetings = true
+                }
             )
-
-            if !failedMeetings.isEmpty {
-                HomeFailedMeetingsCard(
-                    items: failedMeetings,
-                    hiddenCount: hiddenFailedMeetingCount,
-                    canRetry: canRetryFailedMeetings,
-                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                    onRetry: { item in
-                        trackSettingsAction("home_retry_failed_meeting", page: .meetings)
-                        retryFailedMeeting(item)
-                    },
-                    onRevealAudio: { item in
-                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .meetings)
-                        revealFailedMeetingAudio(item)
-                    },
-                    onClear: { item in
-                        requestClearFailedMeeting(item)
-                    },
-                    onShowAll: {
-                        trackSettingsAction("home_show_all_failed_meetings", page: .meetings)
-                        homeShowsAllFailedMeetings = true
-                    }
-                )
-            }
-
-            homeMeetingsListSection
         }
     }
 
@@ -729,12 +665,13 @@ struct TranscriptedSettingsView: View {
         switch issue.destination {
         case .failedMeetings:
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
-            navigation.selectedPage = .meetings
+            navigation.selectedPage = .home
+            homeShowsAllFailedMeetings = true
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
         case .summaries:
             trackSettingsAction("open_needs_attention_summaries", page: .home)
-            navigation.selectedPage = .meetings
+            navigation.selectedPage = .home
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
             showGeneralPrivacySettings = true
@@ -1460,32 +1397,6 @@ struct TranscriptedSettingsView: View {
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
-    }
-
-    private static let homeRecentMeetingDisplayLimit = 7
-
-    private var homeRecentMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
-        Self.cappedDaySections(homeMeetingDaySections, limit: Self.homeRecentMeetingDisplayLimit)
-    }
-
-    private var homeHasMoreMeetingsThanRecentSlice: Bool {
-        homeViewModel.canLoadMoreMeetings
-            || homeMeetingDaySections.reduce(0) { $0 + $1.items.count } > Self.homeRecentMeetingDisplayLimit
-    }
-
-    private static func cappedDaySections<Item>(
-        _ sections: [HomeDaySection<Item>],
-        limit: Int
-    ) -> [HomeDaySection<Item>] {
-        var remaining = limit
-        var result: [HomeDaySection<Item>] = []
-        for section in sections {
-            guard remaining > 0 else { break }
-            let items = Array(section.items.prefix(remaining))
-            remaining -= items.count
-            result.append(HomeDaySection(day: section.day, label: section.label, items: items))
-        }
-        return result
     }
 
     private var canRetryFailedMeetings: Bool {

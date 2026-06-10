@@ -80,7 +80,6 @@ func testUIAutomationSurfaceContract() {
 
         for pageCase in [
             "case home",
-            "case meetings",
             "case dictations",
             "case general",
             "case models",
@@ -324,7 +323,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.menubar.primary.home",
             "transcripted.settings.sidebar.general",
             "transcripted.settings.sidebar.settings-toggle",
-            "transcripted.settings.sidebar.meetings",
+            "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {

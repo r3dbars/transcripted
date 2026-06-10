@@ -295,7 +295,6 @@ final class UIAutomationSmokeRunner {
 
         let settingsSidebarIDs = [
             "transcripted.settings.sidebar.home",
-            "transcripted.settings.sidebar.meetings",
             "transcripted.settings.sidebar.dictations",
             "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",

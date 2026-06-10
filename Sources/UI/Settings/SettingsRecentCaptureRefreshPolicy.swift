@@ -8,7 +8,7 @@ enum SettingsRecentCaptureRefreshMode {
 enum SettingsRecentCaptureRefreshPolicy {
     static func mode(for page: TranscriptedSettingsPage) -> SettingsRecentCaptureRefreshMode {
         switch page {
-        case .home, .meetings, .dictations:
+        case .home, .dictations:
             return .homeDashboard
         case .general, .models, .shortcuts, .people, .storage, .connectAgent, .beta, .privacy, .support, .about:
             return .none

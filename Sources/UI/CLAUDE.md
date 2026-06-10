@@ -93,9 +93,9 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, meetings, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Meetings/Dictations/Speakers/Agent) plus Setup/Trust sections shown behind the sidebar Settings toggle
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent) plus Setup/Trust sections shown behind the sidebar Settings toggle
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -123,11 +123,11 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The main window is content-first: the sidebar leads with Home, Meetings,
-Dictations, Speakers, and Agent, with a gear toggle that reveals the
-Setup/Trust settings sections. Home is an editorial canvas (time-of-day
-greeting, stats line, needs-attention pills, a capped recent-meetings slice
-with a View-all link); Meetings and Dictations are the deeper paged lists. `HomeView` keeps recent
+The main window is content-first: the sidebar leads with Home, Dictations,
+Speakers, and Agent, with a gear toggle that reveals the Setup/Trust settings
+sections. Home is the meetings surface — an editorial canvas (time-of-day
+greeting, stats line, needs-attention pills, failed-meeting recovery, the
+day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
 captures to small paged slices so the window still opens quickly for users with
 large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those
 refreshes scoped to the pages that actually need them.

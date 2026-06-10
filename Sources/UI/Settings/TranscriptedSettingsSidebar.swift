@@ -9,7 +9,7 @@ struct SettingsSidebarSection: Identifiable {
     static let primarySection = SettingsSidebarSection(
         id: "primary",
         title: nil,
-        pages: [.home, .meetings, .dictations, .people, .connectAgent]
+        pages: [.home, .dictations, .people, .connectAgent]
     )
 
     /// Configuration rows, demoted behind the sidebar's Settings toggle.

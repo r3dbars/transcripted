@@ -2,7 +2,7 @@ import Foundation
 
 func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — sends home to the dashboard loader") {
-        for page in [TranscriptedSettingsPage.home, .meetings, .dictations] {
+        for page in [TranscriptedSettingsPage.home, .dictations] {
             assertEqual(
                 SettingsRecentCaptureRefreshPolicy.mode(for: page),
                 .homeDashboard,
