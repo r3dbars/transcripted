@@ -825,6 +825,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sparkle relaunch records installed-update confirmation") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let relaunchBlock = sourceSlice(
+            controller,
+            from: "func updaterWillRelaunchApplication",
+            to: "extension SparkleUpdaterController: SPUStandardUserDriverDelegate"
+        )
+        let confirmationBlock = sourceSlice(
+            controller,
+            from: "private func trackInstalledUpdateIfNeeded()",
+            to: "private func markUpdateReadyToInstall("
+        )
+
+        assertTrue(
+            relaunchBlock.contains("rememberPendingInstalledUpdate"),
+            "Sparkle relaunch should persist the expected installed version before quitting"
+        )
+        assertTrue(
+            confirmationBlock.contains("update_installed"),
+            "next launch should emit a narrow installed-update confirmation event"
+        )
+        assertTrue(
+            confirmationBlock.contains("removeObject(forKey: Self.pendingInstalledUpdateVersionKey)"),
+            "installed-update confirmation should clear the one-shot marker"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")
@@ -1227,6 +1254,33 @@ func testRepoCommandContract() {
         assertTrue(
             localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
             "local launch smoke should not create dirty-shutdown diagnostics markers"
+        )
+        assertTrue(
+            localBuildScript.contains("/usr/bin/open -n -g -F -W")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report\"")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1\"")
+                && localBuildScript.contains("\"$APP_BUNDLE\""),
+            "local launch smoke should launch the app bundle through LaunchServices"
+        )
+        assertFalse(
+            localBuildScript.contains("\"$APP_BINARY\" >\"$smoke_log\""),
+            "local launch smoke should not run the app executable directly from sandboxed agent contexts"
+        )
+        assertTrue(
+            localBuildScript.contains("pre_launch_app_pids=\"$(snapshot_launch_smoke_app_pids)\"")
+                && localBuildScript.contains("terminate_launch_smoke_app()")
+                && localBuildScript.contains("pgrep -f \"$APP_BINARY\"")
+                && localBuildScript.contains("is_pre_launch_app_pid")
+                && localBuildScript.contains("kill -TERM \"$pid\"")
+                && localBuildScript.contains("kill -KILL \"$pid\""),
+            "local launch smoke timeout cleanup should terminate only app processes created by this smoke run"
+        )
+        let appSource = readRepoTextFile("Sources/TranscriptedApp.swift")
+        assertTrue(
+            appSource.contains("TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT")
+                && appSource.contains("scheduleLaunchUISmokeTerminationIfRequested")
+                && appSource.contains("Darwin.exit(0)"),
+            "launch smoke should let the app terminate itself instead of depending on process-listing in sandboxed agents"
         )
 
         let runtimeDiagnostics = readRepoTextFile("Sources/Observability/RuntimeDiagnostics.swift")

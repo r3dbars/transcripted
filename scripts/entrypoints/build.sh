@@ -158,35 +158,70 @@ verify_signature() {
 }
 
 verify_launch_smoke() {
-    local smoke_log="$BUILD_DIR/launch-smoke.log"
-    local smoke_home="$BUILD_DIR/launch-smoke-home"
-    local ui_report="$BUILD_DIR/launch-ui-smoke.json"
+    local smoke_log="$REPO_ROOT/$BUILD_DIR/launch-smoke.log"
+    local smoke_home="$REPO_ROOT/$BUILD_DIR/launch-smoke-home"
+    local ui_report="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
+    local open_pid=""
+    local pre_launch_app_pids=""
     rm -f "$smoke_log"
     rm -rf "$smoke_home"
     rm -f "$ui_report"
     mkdir -p "$smoke_home"
 
-    CFFIXED_USER_HOME="$smoke_home" \
-    HOME="$smoke_home" \
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
-    TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 \
-    TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 \
-    TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT="$ui_report" \
-    "$APP_BINARY" >"$smoke_log" 2>&1 &
-    local app_pid=$!
+    snapshot_launch_smoke_app_pids() {
+        pgrep -f "$APP_BINARY" || true
+    }
+
+    is_pre_launch_app_pid() {
+        local candidate_pid="$1"
+        printf '%s\n' "$pre_launch_app_pids" | grep -qx "$candidate_pid"
+    }
+
+    terminate_launch_smoke_app() {
+        local app_pids
+        local pid
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+        sleep 0.5
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    }
+
+    pre_launch_app_pids="$(snapshot_launch_smoke_app_pids)"
+
+    /usr/bin/open -n -g -F -W \
+        --stdout "$smoke_log" \
+        --stderr "$smoke_log" \
+        --env "CFFIXED_USER_HOME=$smoke_home" \
+        --env "HOME=$smoke_home" \
+        --env "TRANSCRIPTED_DISABLE_FILE_LOGGER=1" \
+        --env "TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1" \
+        --env "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1" \
+        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report" \
+        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1" \
+        "$APP_BUNDLE" >>"$smoke_log" 2>&1 &
+    open_pid=$!
 
     for _ in $(seq 1 50); do
         if [ -s "$ui_report" ]; then
             break
         fi
-        if ! kill -0 "$app_pid" 2>/dev/null; then
+        if ! kill -0 "$open_pid" 2>/dev/null; then
             break
         fi
         sleep 0.1
     done
 
-    if ! kill -0 "$app_pid" 2>/dev/null; then
-        wait "$app_pid" || true
+    if ! kill -0 "$open_pid" 2>/dev/null && [ ! -s "$ui_report" ]; then
+        wait "$open_pid" || true
         echo "Transcripted exited during launch smoke."
         echo "Smoke log:"
         cat "$smoke_log"
@@ -197,8 +232,9 @@ verify_launch_smoke() {
         echo "Transcripted launch UI smoke report was not written."
         echo "Smoke log:"
         cat "$smoke_log"
-        kill "$app_pid" 2>/dev/null || true
-        wait "$app_pid" 2>/dev/null || true
+        terminate_launch_smoke_app
+        kill "$open_pid" 2>/dev/null || true
+        wait "$open_pid" 2>/dev/null || true
         exit 1
     fi
 
@@ -272,24 +308,18 @@ if errors:
     sys.exit(1)
 PY
     then
-        kill "$app_pid" 2>/dev/null || true
-        wait "$app_pid" 2>/dev/null || true
+        terminate_launch_smoke_app
+        kill "$open_pid" 2>/dev/null || true
+        wait "$open_pid" 2>/dev/null || true
         exit 1
     fi
 
-    for _ in $(seq 1 50); do
-        if ! kill -0 "$app_pid" 2>/dev/null; then
-            wait "$app_pid" || true
-            echo "Transcripted exited during launch smoke."
-            echo "Smoke log:"
-            cat "$smoke_log"
-            exit 1
-        fi
-        sleep 0.1
-    done
-
-    kill "$app_pid" 2>/dev/null || true
-    wait "$app_pid" 2>/dev/null || true
+    if ! wait "$open_pid"; then
+        echo "Transcripted exited with an error during launch smoke."
+        echo "Smoke log:"
+        cat "$smoke_log"
+        exit 1
+    fi
 }
 
 sign_embedded_code() {

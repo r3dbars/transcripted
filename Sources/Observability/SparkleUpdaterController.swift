@@ -74,6 +74,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private var didTrackCurrentUpdateCycleFailure = false
     private var observedUpdateCheckTimeoutTask: Task<Void, Never>?
     private static let observedUpdateCheckTimeoutNanoseconds: UInt64 = 30_000_000_000
+    private static let pendingInstalledUpdateVersionKey = "Transcripted.PendingInstalledUpdateVersion"
+    private static let pendingInstalledUpdatePreviousVersionKey = "Transcripted.PendingInstalledUpdatePreviousVersion"
     private static var isLaunchUISmoke: Bool {
         ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
     }
@@ -81,6 +83,7 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     override init() {
         super.init()
         guard !Self.isLaunchUISmoke else { return }
+        trackInstalledUpdateIfNeeded()
         observeUpdaterReadiness()
         observeUpdaterSettings()
     }
@@ -425,6 +428,41 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         AnalyticsReporter.track(event, properties: properties)
     }
 
+    private func currentAppVersion() -> String {
+        let version = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return version.isEmpty ? "unknown" : version
+    }
+
+    private func rememberPendingInstalledUpdate(version: String) {
+        let trimmedVersion = version.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedVersion.isEmpty else { return }
+
+        let defaults = UserDefaults.standard
+        defaults.set(trimmedVersion, forKey: Self.pendingInstalledUpdateVersionKey)
+        defaults.set(currentAppVersion(), forKey: Self.pendingInstalledUpdatePreviousVersionKey)
+    }
+
+    private func trackInstalledUpdateIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard let pendingVersion = defaults.string(forKey: Self.pendingInstalledUpdateVersionKey),
+              !pendingVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        let installedVersion = currentAppVersion()
+        guard installedVersion == pendingVersion else { return }
+
+        var properties = ["version": pendingVersion]
+        if let previousVersion = defaults.string(forKey: Self.pendingInstalledUpdatePreviousVersionKey),
+           !previousVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            properties["previous_version"] = previousVersion
+        }
+        AnalyticsReporter.track("update_installed", properties: properties)
+        defaults.removeObject(forKey: Self.pendingInstalledUpdateVersionKey)
+        defaults.removeObject(forKey: Self.pendingInstalledUpdatePreviousVersionKey)
+    }
+
     private func markUpdateReadyToInstall(from updater: SPUUpdater, version: String) {
         let state = UpdateStatus.State.readyToInstall(version: version)
         setUpdateStatus(state, canCheckForUpdates: updater.canCheckForUpdates)
@@ -578,6 +616,7 @@ extension SparkleUpdaterController: SPUUpdaterDelegate {
 
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
         if let pendingImmediateInstallVersion {
+            rememberPendingInstalledUpdate(version: pendingImmediateInstallVersion)
             AnalyticsReporter.track(
                 "update_relaunching",
                 properties: ["version": pendingImmediateInstallVersion]

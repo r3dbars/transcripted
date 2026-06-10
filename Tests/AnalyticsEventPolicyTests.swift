@@ -271,10 +271,13 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy keeps relaunch update telemetry narrow") {
         let relaunching = AnalyticsEventPolicy.policy(forEvent: "update_relaunching")
+        let installed = AnalyticsEventPolicy.policy(forEvent: "update_installed")
 
         assertEqual(relaunching?.allowedProperties.contains("version"), true, "relaunch telemetry should preserve the public app version")
         assertEqual(relaunching?.allowedProperties.contains("state"), false, "relaunch telemetry should not add redundant update state")
         assertEqual(relaunching?.allowedProperties.contains("automatic_downloads_enabled"), false, "relaunch telemetry should not add settings state")
+        assertEqual(installed?.allowedProperties.contains("version"), true, "installed update telemetry should preserve the public app version")
+        assertEqual(installed?.allowedProperties.contains("previous_version"), true, "installed update telemetry should preserve the previous public app version")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -292,6 +295,19 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["download_url"], "raw download locations should stay out of analytics")
         assertNil(sanitized["error_message"], "raw update errors should stay out of analytics")
         assertNil(sanitized["state"], "relaunch telemetry should not duplicate lifecycle state")
+
+        let installedSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "previous_version": "1.2.2",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: installed?.allowedProperties ?? []
+        )
+
+        assertEqual(installedSanitized["version"], "1.2.3", "installed update telemetry should keep the target version")
+        assertEqual(installedSanitized["previous_version"], "1.2.2", "installed update telemetry should keep the public previous version")
+        assertNil(installedSanitized["state"], "installed update telemetry should stay lifecycle-specific")
     }
 
     runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
