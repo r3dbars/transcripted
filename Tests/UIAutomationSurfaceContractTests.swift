@@ -320,7 +320,7 @@ func testUIAutomationSurfaceContract() {
             "AXChildrenInNavigationOrder",
             "transcripted.status-item.button",
             "transcripted.menubar.primary.home",
-            "transcripted.settings.sidebar.general",
+            "transcripted.settings.tab.general",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.use-case.dictation",

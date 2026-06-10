@@ -11,8 +11,8 @@ settings-side agent connection flow.
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
-  content section (Home/Dictations/Speakers/Agent) plus Setup/Trust sections
-  revealed by the sidebar Settings toggle.
+  content section (Home/Dictations/Speakers/Agent); the settings pages are
+  reached via the sidebar gear and an in-content tab strip.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:

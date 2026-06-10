@@ -95,7 +95,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
-- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent) plus Setup/Trust sections shown behind the sidebar Settings toggle
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -124,8 +124,8 @@ while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
 The main window is content-first: the sidebar leads with Home, Dictations,
-Speakers, and Agent, with a gear toggle that reveals the Setup/Trust settings
-sections. Home is the meetings surface — an editorial canvas (time-of-day
+Speakers, and Agent; the sidebar gear opens a settings area in the content
+pane with a capsule tab strip (General/Storage/Beta/Support/About). Home is the meetings surface — an editorial canvas (time-of-day
 greeting, stats line, needs-attention pills, failed-meeting recovery, the
 day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
 captures to small paged slices so the window still opens quickly for users with

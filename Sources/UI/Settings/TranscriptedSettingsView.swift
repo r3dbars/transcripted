@@ -64,7 +64,6 @@ struct TranscriptedSettingsView: View {
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
-    @State private var showsSettingsPages = false
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -109,20 +108,6 @@ struct TranscriptedSettingsView: View {
         NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
             List(selection: $navigation.selectedPage) {
                 sidebarRows(for: SettingsSidebarSection.primarySection.pages)
-
-                if showsSettingsPages {
-                    ForEach(SettingsSidebarSection.settingsSections) { section in
-                        if let title = section.title {
-                            Section {
-                                sidebarRows(for: section.pages)
-                            } header: {
-                                Text(title)
-                            }
-                        } else {
-                            sidebarRows(for: section.pages)
-                        }
-                    }
-                }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             .listStyle(.sidebar)
@@ -148,7 +133,10 @@ struct TranscriptedSettingsView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 28) {
+                        VStack(alignment: .leading, spacing: 24) {
+                            if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
+                                settingsTabStrip
+                            }
                             pageBody
                         }
                         .padding(.horizontal, 28)
@@ -250,18 +238,12 @@ struct TranscriptedSettingsView: View {
         .task(id: navigation.presentationID) {
             refreshState()
             expandGeneralDisclosureForPresentedPage()
-            if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                showsSettingsPages = true
-            }
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
         .onChange(of: navigation.selectedPage) { _, page in
             refreshRecentCaptures()
             if page == .people {
                 speakerPeopleModel.refresh()
-            }
-            if SettingsSidebarSection.isSettingsPage(page) {
-                showsSettingsPages = true
             }
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
@@ -325,38 +307,56 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsPagesToggle: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.2)) {
-                showsSettingsPages.toggle()
-            }
-            if !showsSettingsPages, SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
-                navigation.selectedPage = .home
-            }
-            trackSettingsAction("toggle_settings_pages", page: navigation.selectedPage)
+        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
+        return Button {
+            trackSettingsAction("open_settings_area", page: navigation.selectedPage)
+            navigation.selectedPage = .general
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isInSettings ? Color.accentColor : Color.secondary)
                 Text("Settings")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.caption.weight(isInSettings ? .semibold : .regular))
+                    .foregroundStyle(isInSettings ? Color.primary : Color.secondary)
 
                 Spacer(minLength: 6)
-
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(showsSettingsPages ? 180 : 0))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsHoverButtonStyle(tone: .neutral, cornerRadius: 10))
-        .help(showsSettingsPages ? "Hide settings pages" : "Show settings pages")
+        .buttonStyle(SettingsHoverButtonStyle(tone: isInSettings ? .accent : .neutral, cornerRadius: 10))
+        .help("Open settings")
         .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
+    }
+
+    private var settingsTabStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(SettingsSidebarSection.settingsSections.flatMap(\.pages)) { page in
+                let isSelected = navigation.selectedPage == page
+                Button {
+                    navigation.selectedPage = page
+                } label: {
+                    Text(page.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.75))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.055))
+                        )
+                        .contentShape(Capsule(style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("transcripted.settings.tab.\(page.rawValue)")
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
     }
 
     private var settingsSidebarFooter: some View {
