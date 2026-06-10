@@ -565,6 +565,101 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    await runSuite("LocalMeetingSummarizer batches chunk summaries before one merge") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryChunkBatchTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = directory.appendingPathComponent("Long Meeting.md")
+        let recorder = LocalMeetingSummaryBatchRecorder()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try localMeetingSummaryMarkdown(
+                title: "Long Review",
+                transcript: localMeetingSummaryChunkedTranscript()
+            ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let configuration = LocalGemmaSummaryConfiguration(
+                modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+                runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
+                profileName: "chunk-fixture",
+                minimumPhysicalMemoryBytes: 0,
+                chunkCharacterLimit: 360,
+                chunkMaxTokens: 64,
+                directMaxTokens: 64,
+                mergeMaxTokens: 128,
+                maxKVSize: 1_024,
+                processTimeoutSeconds: 5,
+                processNiceValue: 0,
+                cpuThreadLimit: 1,
+                interJobCooldownSeconds: 0
+            )
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: configuration,
+                generateBatchOverride: { prompts, _ in
+                    recorder.record(prompts)
+                    if prompts.allSatisfy({ $0.label.hasPrefix("chunk-") }) {
+                        return prompts.map { prompt in
+                            """
+                            ## Chunk Summary
+                            \(prompt.label) preserved supported meeting facts.
+
+                            ## Decisions
+                            Keep local summary work serialized.
+
+                            ## Action Items
+                            QA should dogfood the next beta.
+
+                            ## Open Questions
+                            Whether real model quality is good enough.
+
+                            ## Risks or Follow-ups
+                            Long meetings can still be slow on low-memory Macs.
+                            """
+                        }
+                    }
+                    if prompts.map(\.label) == ["merge"] {
+                        return [localMeetingSummaryModelOutput()]
+                    }
+                    throw LocalMeetingSummaryError.processFailed(
+                        label: prompts.map(\.label).joined(separator: ", "),
+                        exitCode: 99,
+                        detail: "unexpected prompt batch"
+                    )
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: configuration,
+                runtime: runtime
+            )
+
+            let result = try await summarizer.summarize(
+                transcriptURL: transcriptURL,
+                title: "Long Review",
+                date: Date(timeIntervalSince1970: 1_780_000_000)
+            )
+            let batches = recorder.batches()
+            let currentMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+
+            assertTrue(result.chunkCount > 1, "forced long transcript should use the chunked path")
+            assertEqual(batches.count, 2, "chunked summaries should run one chunk batch and one merge job")
+            assertTrue(batches[0].labels.allSatisfy { $0.hasPrefix("chunk-") }, "first batch should contain chunk jobs")
+            assertEqual(batches[1].labels, ["merge"], "second batch should merge the chunk notes")
+            assertTrue(
+                batches[1].prompts.joined(separator: "\n").contains("# Chunk 1"),
+                "merge prompt should receive chunk notes, not the full transcript again"
+            )
+            assertTrue(currentMarkdown.contains("local_summary_profile: \"chunk-fixture\""), "chunk fixture should record the active profile")
+            assertTrue(currentMarkdown.contains("local_summary_chunk_count: \"\(result.chunkCount)\""), "chunk count should be embedded")
+            assertFalse(
+                FileManager.default.fileExists(atPath: LocalMeetingSummaryStore.summaryURL(for: transcriptURL).path),
+                "chunked summaries should not recreate the old sibling sidecar"
+            )
+        } catch {
+            assertTrue(false, "chunked summary fixture should run: \(error)")
+        }
+    }
+
     runSuite("LocalGemmaSummaryRuntime stops a hung runner at the configured timeout") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalMeetingSummaryTimeoutTests-\(UUID().uuidString)", isDirectory: true)
@@ -1045,6 +1140,15 @@ private func localMeetingSummaryPrivacyTranscript() -> String {
     """
 }
 
+private func localMeetingSummaryChunkedTranscript() -> String {
+    (1...8).map { index in
+        """
+        **00:\(String(format: "%02d", index))** [Mic/Justin]
+        Chunk \(index) says the local summary path should stay serialized, avoid surprise setup work from Home, keep transcripts canonical, preserve user edits, and leave enough detail for the final merge to produce a useful beta dogfood summary.
+        """
+    }.joined(separator: "\n\n")
+}
+
 private func localMeetingSummaryModelOutput() -> String {
     """
     # Title
@@ -1085,5 +1189,23 @@ private func sampleLocalMeetingSummarySections() -> LocalMeetingSummarySections 
 private final class LocalMeetingSummaryNonExecutableFileManager: FileManager {
     override func isExecutableFile(atPath path: String) -> Bool {
         false
+    }
+}
+
+private final class LocalMeetingSummaryBatchRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedBatches: [(labels: [String], prompts: [String])] = []
+
+    func record(_ prompts: [LocalGemmaSummaryPrompt]) {
+        lock.lock()
+        recordedBatches.append((prompts.map(\.label), prompts.map(\.prompt)))
+        lock.unlock()
+    }
+
+    func batches() -> [(labels: [String], prompts: [String])] {
+        lock.lock()
+        let batches = recordedBatches
+        lock.unlock()
+        return batches
     }
 }
