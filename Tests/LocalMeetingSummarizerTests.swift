@@ -61,6 +61,7 @@ func testLocalMeetingSummarizer() async {
         let m1Config = LocalGemmaSummaryConfiguration.m1Optimized(physicalMemoryBytes: 16 * gib)
         assertEqual(m1Config.profileName, "m1-low-memory", "16GB Apple Silicon should use the low-memory profile")
         assertTrue(m1Config.chunkCharacterLimit <= 9_000, "M1 profile should keep chunks small enough for 16GB unified-memory Macs")
+        assertTrue(m1Config.directMaxTokens <= 360, "M1 one-chunk summaries should stay bounded so setup-ready runs do not look stuck")
         assertTrue(m1Config.maxKVSize <= 6_144, "M1 profile should keep KV cache below the hotter baseline")
         assertTrue(m1Config.mergeMaxTokens >= 2_400, "M1 profile should leave enough merge budget for long-meeting final merges")
         assertTrue(m1Config.processNiceValue >= 10, "M1 profile should lower local Gemma process priority")
@@ -365,6 +366,30 @@ func testLocalMeetingSummarizer() async {
             LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
             nil,
             "Chunk labels should not become generated meeting titles"
+        )
+    }
+
+    runSuite("LocalMeetingSummaryNormalizer accepts Apple heading levels") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        ## Apple Summary
+
+        ## Summary
+        Apple returned second-level headings.
+
+        ## Decisions
+        Keep parsing provider output.
+        """)
+        let sections = LocalMeetingSummaryNormalizer.sections(in: normalized)
+
+        assertEqual(
+            sections.summary,
+            "Apple returned second-level headings.",
+            "Apple ## Summary heading should parse"
+        )
+        assertEqual(
+            sections.decisions,
+            "Keep parsing provider output.",
+            "Apple ## Decisions heading should parse"
         )
     }
 

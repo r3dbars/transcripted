@@ -92,7 +92,7 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
                 minimumPhysicalMemoryBytes: 12 * gib,
                 chunkCharacterLimit: 9_000,
                 chunkMaxTokens: 300,
-                directMaxTokens: 900,
+                directMaxTokens: 360,
                 mergeMaxTokens: 2_400,
                 maxKVSize: 6_144,
                 processTimeoutSeconds: 900,
@@ -952,8 +952,9 @@ enum LocalMeetingSummaryNormalizer {
 
     static func section(_ heading: String, in raw: String) -> String? {
         let lines = raw.components(separatedBy: .newlines)
+        let targetTitle = normalizedHeadingTitle(heading)
         guard let startIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines) == heading
+            normalizedHeadingTitle($0) == targetTitle
         }) else {
             return nil
         }
@@ -974,9 +975,18 @@ enum LocalMeetingSummaryNormalizer {
     }
 
     private static func containsHeading(_ heading: String, in text: String) -> Bool {
-        text.components(separatedBy: .newlines).contains { line in
-            line.trimmingCharacters(in: .whitespacesAndNewlines) == heading
+        let targetTitle = normalizedHeadingTitle(heading)
+        return text.components(separatedBy: .newlines).contains { line in
+            normalizedHeadingTitle(line) == targetTitle
         }
+    }
+
+    private static func normalizedHeadingTitle(_ line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("#") else { return nil }
+        let title = trimmed.drop { $0 == "#" }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
     }
 
     private static func firstGeneratedTitleHeading(in raw: String) -> String? {
