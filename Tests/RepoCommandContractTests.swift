@@ -61,8 +61,10 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("sentry_test_event")
-                && contents.contains("select(((.title // \"\") | contains(\"sentry_test_event\")) | not)"),
-            "Sentry probe should filter manual verification events out of health rollups"
+                && contents.contains("support_diagnostic_event")
+                && contents.contains("contains(\"sentry_test_event\")")
+                && contents.contains("contains(\"support_diagnostic_event\")"),
+            "Sentry probe should filter manual verification and support diagnostic events out of health rollups"
         )
         assertFalse(
             contents.contains("/events/"),
@@ -1922,6 +1924,38 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed audio compression reschedules queue changes") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let schedulerBlock = sourceSlice(
+            controllerContents,
+            from: "private func scheduleFailedAudioCompression(",
+            to: "private extension MeetingSessionController.State"
+        )
+        let retryBlock = sourceSlice(
+            controllerContents,
+            from: "func retryFailedMeeting(id: UUID) -> Bool",
+            to: "Task { [weak self] in"
+        )
+
+        assertTrue(
+            controllerContents.contains("failedAudioCompressionNeedsReschedule"),
+            "failed audio compression should track queue changes that arrive during an active pass"
+        )
+        assertTrue(
+            schedulerBlock.contains("failedAudioCompressionNeedsReschedule = true"),
+            "an active compression pass should mark that the failed queue needs another scan"
+        )
+        assertTrue(
+            schedulerBlock.contains("self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)"),
+            "compression completion should re-check the latest failed queue before going idle"
+        )
+        assertTrue(
+            retryBlock.contains("failedAudioCompressionTask?.cancel()")
+                && !retryBlock.contains("failedAudioCompressionTask = nil"),
+            "retry should cancel active failed-audio compression without allowing a concurrent rescan before cleanup finishes"
+        )
+    }
+
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let timeoutBlock = sourceSlice(
@@ -2424,6 +2458,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
+        let shortcutContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarShortcutsView.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
 
         assertTrue(
@@ -2435,6 +2470,12 @@ func testRepoCommandContract() {
             appContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
                 && appContents.contains("settingsTextPaster.paste(latestText, target: pasteTarget)"),
             "settings Paste Last Dictation should use the same focus guard as normal dictation paste"
+        )
+        assertTrue(
+            shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
+                && shortcutContents.contains("self.onPasteLastDictation?()")
+                && !shortcutContents.contains("pasteLastDictationRow.onPrimaryAction = {}"),
+            "shortcut-panel Paste Last Dictation should invoke the paste action instead of an empty primary action"
         )
     }
 

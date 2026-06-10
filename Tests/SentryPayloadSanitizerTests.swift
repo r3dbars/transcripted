@@ -45,6 +45,18 @@ func testSentryPayloadSanitizer() {
         assertNil(sanitized["source_app_bundle_id"], "source app bundle IDs should be dropped")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeTags keeps reviewed boolean file-presence flags") {
+        let sanitized = SentryPayloadSanitizer.sanitizeTags([
+            "mic_file_available": "true",
+            "system_file_available": "false",
+            "transcript_file_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
+        ])
+
+        assertEqual(sanitized["mic_file_available"], "true", "coarse file-presence flags should stay queryable")
+        assertEqual(sanitized["system_file_available"], "false", "coarse system file-presence flags should stay queryable")
+        assertNil(sanitized["transcript_file_path"], "raw file path keys should still be dropped")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeContext keeps audio-start recovery diagnostics coarse") {
         let sanitized = SentryPayloadSanitizer.sanitizeContext([
             "attempt": "2",

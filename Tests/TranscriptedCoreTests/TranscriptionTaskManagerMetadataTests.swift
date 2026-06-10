@@ -1331,6 +1331,70 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         )
     }
 
+    func testStartTranscriptionUsesRecordingDateForSavedMetadata() async throws {
+        let recordingDate = localDate(
+            year: 2026,
+            month: 6,
+            day: 5,
+            hour: 11,
+            minute: 43,
+            second: 12
+        )
+        let statsStore = MetadataCapturingStatsStore()
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Live meeting artifact."),
+            diarization: MetadataStubDiarizationEngine(segments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 0,
+                    endTime: 2,
+                    embedding: [Float](repeating: 0.42, count: 256),
+                    qualityScore: 0.95
+                )
+            ]),
+            statsStore: statsStore
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("live-recording-date-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("live-recording-date-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Live customer call",
+            recordingDate: recordingDate
+        )
+
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(
+            transcriptURL.lastPathComponent.hasPrefix("Call_\(DateFormattingHelper.formatFilename(recordingDate))"),
+            "live recording filenames should use the recording start date"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ndate: \(frontmatterDateString(recordingDate))\n"),
+            "frontmatter date should use the live recording start date"
+        )
+        XCTAssertTrue(
+            markdown.contains("\ntime: \(frontmatterTimeString(recordingDate))\n"),
+            "frontmatter time should use the live recording start time"
+        )
+        XCTAssertEqual(statsStore.recordedSessions.count, 1)
+        let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
+        XCTAssertLessThan(
+            abs(metadata.date.timeIntervalSince(recordingDate)),
+            0.001,
+            "stats metadata should use the live recording start date"
+        )
+    }
+
     func testStartImportedTranscriptionSurfacesNoSpeechWhenNoUtterances() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "ignored")
@@ -1792,6 +1856,68 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedMicURL.path), "successful failed-meeting retry should delete retained mic audio")
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedSystemURL.path), "successful failed-meeting retry should delete retained system audio")
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedDirectory.path), "successful failed-meeting retry should remove the now-empty retained audio directory")
+    }
+
+    func testRetryFailedTranscriptionUsesOriginalRecordingDateForSavedMetadata() async throws {
+        let recordingDate = localDate(
+            year: 2026,
+            month: 6,
+            day: 5,
+            hour: 11,
+            minute: 43,
+            second: 12
+        )
+        let statsStore = MetadataCapturingStatsStore()
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact."),
+            diarization: MetadataStubDiarizationEngine(segments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 0,
+                    endTime: 2,
+                    embedding: [Float](repeating: 0.42, count: 256),
+                    qualityScore: 0.95
+                )
+            ]),
+            statsStore: statsStore
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let micURL = scratchDirectory.appendingPathComponent("failed-date-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("failed-date-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Parakeet inference failed",
+            meetingTitle: "Recovered customer call",
+            recordingDate: recordingDate
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertTrue(didRetry)
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(
+            transcriptURL.lastPathComponent.hasPrefix("Call_\(DateFormattingHelper.formatFilename(recordingDate))"),
+            "failed meeting retry filenames should use the original recording date"
+        )
+        XCTAssertTrue(markdown.contains("\ndate: \(frontmatterDateString(recordingDate))\n"))
+        XCTAssertTrue(markdown.contains("\ntime: \(frontmatterTimeString(recordingDate))\n"))
+        let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
+        XCTAssertLessThan(
+            abs(metadata.date.timeIntervalSince(recordingDate)),
+            0.001,
+            "retry stats metadata should use the original recording date"
+        )
     }
 
     func testRetryKeepsFailedAudioWhenSpeakerNameFinalizationSucceedsAfterArchiveFailure() async throws {

@@ -114,7 +114,8 @@ public class FailedTranscriptionManager: ObservableObject {
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -130,6 +131,7 @@ public class FailedTranscriptionManager: ObservableObject {
 
         let failed = FailedTranscription(
             id: id,
+            recordingDate: recordingDate,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
@@ -171,6 +173,7 @@ public class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions[index] = FailedTranscription(
             id: existing.id,
             timestamp: existing.timestamp,
+            recordingDate: existing.recordingDate,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: existing.errorMessage,
@@ -220,6 +223,7 @@ public class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions[index] = FailedTranscription(
             id: existing.id,
             timestamp: existing.timestamp,
+            recordingDate: existing.recordingDate,
             micAudioURL: existing.micAudioURL,
             systemAudioURL: existing.systemAudioURL,
             errorMessage: errorMessage,

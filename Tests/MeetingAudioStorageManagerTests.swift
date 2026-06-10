@@ -649,6 +649,319 @@ func testMeetingAudioStorageManager() async {
         assertTrue(FileManager.default.fileExists(atPath: wavURL.path), "failed WAV should remain for the retry/delete flow")
     }
 
+    await runSuite("MeetingAudioStorageManager compresses queue-tracked failed audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = audioRoot
+            .appendingPathComponent("Failed_2026-05-08_15-29-13_83A63B2D_audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: failedAudioDirectory, withIntermediateDirectories: true)
+        let micWAV = failedAudioDirectory.appendingPathComponent("microphone.wav")
+        let systemWAV = failedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try! Data("wav".utf8).write(to: micWAV)
+        try! Data("wav".utf8).write(to: systemWAV)
+
+        var updates = [FailedMeetingAudioCompressionUpdate]()
+        let id = UUID()
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: id,
+                    micAudioURL: micWAV,
+                    systemAudioURL: systemWAV
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { update in
+            updates.append(update)
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 2, updatedEntries: 1),
+            "queue-tracked failed WAVs should be compressed and persisted"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: micWAV.path), "mic WAV should be removed after the queue points at M4A")
+        assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "system WAV should be removed after the queue points at M4A")
+        assertEqual(updates.count, 1, "failed queue should be updated once for the pair")
+        assertEqual(updates.first?.id, id, "failed queue update should keep the original failed meeting id")
+        assertEqual(updates.first?.micAudioURL.lastPathComponent, "microphone.m4a", "failed queue should point retries at compressed mic audio")
+        assertEqual(updates.first?.systemAudioURL?.lastPathComponent, "system_audio.m4a", "failed queue should point retries at compressed system audio")
+    }
+
+    await runSuite("MeetingAudioStorageManager compresses system-only failed audio with placeholder mic") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = audioRoot
+            .appendingPathComponent("Failed_2026-05-08_15-29-13_83A63B2D_audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: failedAudioDirectory, withIntermediateDirectories: true)
+        let placeholderWAV = failedAudioDirectory.appendingPathComponent("microphone_placeholder.wav")
+        let systemWAV = failedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try! Data("wav".utf8).write(to: placeholderWAV)
+        try! Data("wav".utf8).write(to: systemWAV)
+
+        var updates = [FailedMeetingAudioCompressionUpdate]()
+        let id = UUID()
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: id,
+                    micAudioURL: placeholderWAV,
+                    systemAudioURL: systemWAV
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { update in
+            updates.append(update)
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 2, updatedEntries: 1),
+            "system-only failed audio should not be skipped by the placeholder mic track"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: placeholderWAV.path), "placeholder WAV should be removed after persistence")
+        assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "system WAV should be removed after persistence")
+        assertEqual(updates.first?.micAudioURL.lastPathComponent, "microphone_placeholder.m4a", "placeholder mic should stay retryable after compression")
+        assertEqual(updates.first?.systemAudioURL?.lastPathComponent, "system_audio.m4a", "system audio should be compressed")
+    }
+
+    await runSuite("MeetingAudioStorageManager keeps failed WAVs if queue update fails") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = audioRoot
+            .appendingPathComponent("Failed_2026-05-08_15-29-13_83A63B2D_audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: failedAudioDirectory, withIntermediateDirectories: true)
+        let micWAV = failedAudioDirectory.appendingPathComponent("microphone.wav")
+        try! Data("wav".utf8).write(to: micWAV)
+
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: UUID(),
+                    micAudioURL: micWAV,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { _ in
+            false
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 0, updatedEntries: 0),
+            "conversion should not count if the retry queue cannot be updated"
+        )
+        assertTrue(FileManager.default.fileExists(atPath: micWAV.path), "WAV should remain retryable if queue persistence fails")
+        assertFalse(
+            FileManager.default.fileExists(atPath: failedAudioDirectory.appendingPathComponent("microphone.m4a").path),
+            "failed persistence should not leave an untracked converted sibling"
+        )
+    }
+
+    await runSuite("MeetingAudioStorageManager skips failed audio outside the archive") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let scratchDirectory = directory.appendingPathComponent("tmp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let scratchWAV = scratchDirectory.appendingPathComponent("microphone.wav")
+        try! Data("wav".utf8).write(to: scratchWAV)
+
+        var didUpdate = false
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: UUID(),
+                    micAudioURL: scratchWAV,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { _ in
+            didUpdate = true
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 0, convertedFiles: 0, updatedEntries: 0),
+            "scratch failed audio should stay out of retained-audio compression"
+        )
+        assertFalse(didUpdate, "scratch audio should not update the failed queue")
+        assertTrue(FileManager.default.fileExists(atPath: scratchWAV.path), "scratch WAV should remain untouched")
+    }
+
+    await runSuite("MeetingAudioStorageManager promotes existing failed M4A without reconverting") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = makeFailedMeetingAudioDirectory(in: audioRoot)
+        let micWAV = failedAudioDirectory.appendingPathComponent("microphone.wav")
+        let micM4A = failedAudioDirectory.appendingPathComponent("microphone.m4a")
+        try! Data("wav".utf8).write(to: micWAV)
+        try! Data("m4a".utf8).write(to: micM4A)
+        try! FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: micM4A.path)
+
+        var updates = [FailedMeetingAudioCompressionUpdate]()
+        let id = UUID()
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: id,
+                    micAudioURL: micWAV,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator()
+        ) { update in
+            updates.append(update)
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 0, updatedEntries: 1),
+            "existing usable failed M4A should update the queue without running conversion"
+        )
+        assertFalse(FileManager.default.fileExists(atPath: micWAV.path), "stale failed WAV should be removed after the queue points at M4A")
+        assertTrue(FileManager.default.fileExists(atPath: micM4A.path), "existing failed M4A should remain available for retry")
+        assertEqual(posixPermissions(at: micM4A), 0o600, "existing failed M4A should be tightened before promotion")
+        assertEqual(updates.first?.id, id, "failed queue update should preserve the failed meeting id")
+        assertEqual(updates.first?.micAudioURL.lastPathComponent, "microphone.m4a", "queue should point at the existing M4A")
+    }
+
+    await runSuite("MeetingAudioStorageManager tightens already-compressed failed audio without queue churn") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = makeFailedMeetingAudioDirectory(in: audioRoot)
+        let micM4A = failedAudioDirectory.appendingPathComponent("microphone.m4a")
+        try! Data("m4a".utf8).write(to: micM4A)
+        try! FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: micM4A.path)
+
+        var didUpdate = false
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: UUID(),
+                    micAudioURL: micM4A,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator()
+        ) { _ in
+            didUpdate = true
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 0, updatedEntries: 0),
+            "already-compressed failed audio should be scanned but not rewrite the queue"
+        )
+        assertFalse(didUpdate, "unchanged failed audio URLs should not persist a no-op queue update")
+        assertEqual(posixPermissions(at: micM4A), 0o600, "already-compressed failed audio should still be owner-only")
+    }
+
+    await runSuite("MeetingAudioStorageManager keeps failed WAV when conversion output is unusable") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = makeFailedMeetingAudioDirectory(in: audioRoot)
+        let micWAV = failedAudioDirectory.appendingPathComponent("microphone.wav")
+        let micM4A = failedAudioDirectory.appendingPathComponent("microphone.m4a")
+        try! Data("wav".utf8).write(to: micWAV)
+
+        var didUpdate = false
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: UUID(),
+                    micAudioURL: micWAV,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(output: Data("bad".utf8)),
+            validator: FakeMeetingAudioValidator()
+        ) { _ in
+            didUpdate = true
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 1, convertedFiles: 0, updatedEntries: 0),
+            "unusable failed-audio conversion output should not count or update the retry queue"
+        )
+        assertFalse(didUpdate, "bad conversion output should not persist a failed queue update")
+        assertTrue(FileManager.default.fileExists(atPath: micWAV.path), "failed WAV should remain retryable after bad conversion output")
+        assertFalse(FileManager.default.fileExists(atPath: micM4A.path), "bad temp output should not be promoted to final M4A")
+    }
+
+    await runSuite("MeetingAudioStorageManager skips symlinked failed audio payloads") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
+        let failedAudioDirectory = makeFailedMeetingAudioDirectory(in: audioRoot)
+        let externalWAV = directory.appendingPathComponent("external-microphone.wav")
+        let symlinkedWAV = failedAudioDirectory.appendingPathComponent("microphone.wav")
+        try! Data("wav".utf8).write(to: externalWAV)
+        try! FileManager.default.createSymbolicLink(at: symlinkedWAV, withDestinationURL: externalWAV)
+
+        var didUpdate = false
+        let result = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+            candidates: [
+                FailedMeetingAudioCompressionCandidate(
+                    id: UUID(),
+                    micAudioURL: symlinkedWAV,
+                    systemAudioURL: nil
+                )
+            ],
+            audioArchiveRoot: audioRoot,
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator()
+        ) { _ in
+            didUpdate = true
+            return true
+        }
+
+        assertEqual(
+            result,
+            FailedMeetingAudioCompressionResult(scannedEntries: 0, convertedFiles: 0, updatedEntries: 0),
+            "symlinked failed audio should not be treated as archive-owned retry audio"
+        )
+        assertFalse(didUpdate, "symlinked failed audio should not update the retry queue")
+        assertTrue(FileManager.default.fileExists(atPath: externalWAV.path), "symlink target should remain untouched")
+        assertTrue(FileManager.default.fileExists(atPath: symlinkedWAV.path), "symlinked failed audio should remain untouched")
+    }
+
     await runSuite("MeetingAudioStorageManager prunes old WAVs before backfill conversion") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -730,6 +1043,13 @@ private struct FakeMeetingAudioValidator: MeetingAudioFileValidating {
 private func makeMeetingAudioStorageTestDirectory() -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("MeetingAudioStorageManagerTests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+private func makeFailedMeetingAudioDirectory(in audioRoot: URL) -> URL {
+    let directory = audioRoot
+        .appendingPathComponent("Failed_2026-05-08_15-29-13_83A63B2D_audio", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
 }
