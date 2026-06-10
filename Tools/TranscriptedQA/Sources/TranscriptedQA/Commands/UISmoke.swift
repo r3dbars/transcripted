@@ -295,17 +295,13 @@ final class UIAutomationSmokeRunner {
 
         let settingsSidebarIDs = [
             "transcripted.settings.sidebar.home",
-            "transcripted.settings.sidebar.general",
-            "transcripted.settings.sidebar.storage",
+            "transcripted.settings.sidebar.meetings",
+            "transcripted.settings.sidebar.dictations",
+            "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
-            "transcripted.settings.sidebar.beta",
-            "transcripted.settings.sidebar.support",
-            "transcripted.settings.sidebar.about",
+            "transcripted.settings.sidebar.settings-toggle",
         ]
         let homeIDs = [
-            "transcripted.home.mode.meetings",
-            "transcripted.home.mode.dictation",
-            "transcripted.home.mode.speakers",
             "transcripted.home.stats.view",
         ]
 
@@ -327,6 +323,43 @@ final class UIAutomationSmokeRunner {
             "Home settings surface is visible",
             target: "Transcripted Settings",
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
+        ))
+
+        guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.settings-toggle") else {
+            builder.add(.fail(
+                "settings-pages-toggle",
+                "Settings pages expand from the sidebar toggle",
+                target: "transcripted.settings.sidebar.settings-toggle",
+                detail: "Could not press the Settings toggle."
+            ))
+            return builder.build()
+        }
+
+        let settingsPageIDs = [
+            "transcripted.settings.sidebar.general",
+            "transcripted.settings.sidebar.storage",
+            "transcripted.settings.sidebar.beta",
+            "transcripted.settings.sidebar.support",
+            "transcripted.settings.sidebar.about",
+        ]
+
+        guard waitUntil(timeout: timeout, description: "settings pages", condition: {
+            let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+            return settingsPageIDs.allSatisfy(ids.contains)
+        }) else {
+            builder.add(.fail(
+                "settings-pages-toggle",
+                "Settings pages expand from the sidebar toggle",
+                target: "Transcripted Settings",
+                detail: "Sidebar did not expose settings rows after pressing the toggle.",
+                observed: observedElements(for: settingsPageIDs, inspector: appInspector)
+            ))
+            return builder.build()
+        }
+        builder.add(.pass(
+            "settings-pages-toggle",
+            "Settings pages expand from the sidebar toggle",
+            target: "transcripted.settings.sidebar.settings-toggle"
         ))
 
         guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.general") else {

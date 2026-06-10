@@ -2236,7 +2236,7 @@ func testRepoCommandContract() {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let needsAttentionBlock = sourceSlice(
             settingsContents,
-            from: "private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {",
+            from: "private var homeAttentionIssues: [HomeAttentionIssue] {",
             to: "private var homeMeetingDaySections:"
         )
 

@@ -5,11 +5,22 @@ struct SettingsSidebarSection: Identifiable {
     let title: String?
     let pages: [TranscriptedSettingsPage]
 
-    static let defaultSections = [
-        SettingsSidebarSection(id: "home", title: nil, pages: [.home]),
-        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .connectAgent, .beta]),
+    /// Content-first rows that are always visible: the capture library plus the agent connection.
+    static let primarySection = SettingsSidebarSection(
+        id: "primary",
+        title: nil,
+        pages: [.home, .meetings, .dictations, .people, .connectAgent]
+    )
+
+    /// Configuration rows, demoted behind the sidebar's Settings toggle.
+    static let settingsSections = [
+        SettingsSidebarSection(id: "setup", title: "Setup", pages: [.general, .storage, .beta]),
         SettingsSidebarSection(id: "trust", title: "Trust", pages: [.support, .about])
     ]
+
+    static func isSettingsPage(_ page: TranscriptedSettingsPage) -> Bool {
+        settingsSections.contains { $0.pages.contains(page) }
+    }
 }
 
 struct SettingsSidebarRow: View {

@@ -10,7 +10,9 @@ settings-side agent connection flow.
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions.
-- `TranscriptedSettingsSidebar.swift` - sidebar sections and rows.
+- `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
+  content section (Home/Meetings/Dictations/Speakers/Agent) plus Setup/Trust
+  sections revealed by the sidebar Settings toggle.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
@@ -21,8 +23,11 @@ settings-side agent connection flow.
 - `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
   showing opt-in local AI meeting-summary titles, previews, badges, and menu
   actions.
-- `HomeView.swift` - Home dashboard, recent capture lists, stats, preview,
-  feedback, failed meeting, and speaker review entry points.
+- `HomeView.swift` - Home canvas components (greeting header, attention pills,
+  context ring view, capture list sections), recent capture rows, preview,
+  feedback, and failed meeting entry points.
+- `HomeContextCompleteness.swift` - pure scoring model behind the sidebar
+  context ring plus the time-of-day greeting helper.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
   walkthrough.
 - `SpeakerPeopleSettingsSection.swift` - people/speaker profile list, naming,
