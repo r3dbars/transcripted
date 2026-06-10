@@ -251,6 +251,10 @@ func testSentryEventPolicy() {
                 "output_ducking_detected": "true",
                 "quiet_mic_recovered": "false",
                 "quiet_mic_unrecovered": "true",
+                "mic_file_available": "true",
+                "reason": "user_stop",
+                "stop_timed_out": "false",
+                "system_stream_present": "false",
                 "system_status": "failed",
             ]
         )
@@ -261,7 +265,31 @@ func testSentryEventPolicy() {
         assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
         assertEqual(tags["quiet_mic_recovered"], "false", "quiet mic recovery state should stay queryable")
         assertEqual(tags["quiet_mic_unrecovered"], "true", "unrecovered quiet mic state should stay queryable")
+        assertEqual(tags["mic_file_available"], "true", "mic file presence should stay queryable for degraded captures")
+        assertEqual(tags["reason"], "user_stop", "stop reason should stay queryable for degraded captures")
+        assertEqual(tags["stop_timed_out"], "false", "stop timeout state should stay queryable for degraded captures")
+        assertEqual(tags["system_stream_present"], "false", "system file presence should stay queryable for degraded captures")
         assertEqual(tags["system_status"], "failed", "existing meeting health tags should still survive")
+    }
+
+    runSuite("SentryEventPolicy diagnosticTags keeps stop-timeout file-presence flags searchable") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_stop_timeout",
+            context: [
+                "audio_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.wav",
+                "mic_file_available": "true",
+                "stop_timeout_seconds": "45.0",
+                "system_file_available": "false",
+                "transcript_text": "private words",
+            ]
+        )
+
+        assertEqual(tags["mic_file_available"], "true", "mic file presence should stay queryable for stop timeouts")
+        assertEqual(tags["system_file_available"], "false", "system file presence should stay queryable for stop timeouts")
+        assertNil(tags["audio_path"], "raw audio paths should stay out of Sentry tags")
+        assertNil(tags["stop_timeout_seconds"], "raw timeout seconds should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags ignores non-allowlisted events") {
