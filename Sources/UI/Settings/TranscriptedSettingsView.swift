@@ -620,7 +620,6 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction(actionName, page: .home)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        speakerPeopleModel.profileFilter = .needsReview
         navigation.selectedPage = .home
         homeActivityTab = .speakers
         homeHeroMode = .speakers
@@ -2209,7 +2208,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
+                summary: "Name new voices and manage the people in your meetings."
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)

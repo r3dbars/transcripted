@@ -2314,7 +2314,7 @@ struct HomeSpeakersTab: View {
                 Text("Speakers")
                     .font(.headline)
 
-                Text("Fix names that need attention, then browse everyone by meeting count.")
+                Text("Everyone Transcripted has heard in your meetings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
