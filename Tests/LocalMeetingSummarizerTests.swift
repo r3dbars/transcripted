@@ -351,6 +351,22 @@ func testLocalMeetingSummarizer() async {
         )
     }
 
+    runSuite("LocalMeetingSummaryNormalizer strips markdown markers from title values") {
+        let normalized = LocalMeetingSummaryNormalizer.normalized("""
+        # Title
+        # Launch Pricing Review
+
+        # Summary
+        Team agreed to keep the first version small.
+        """)
+
+        assertEqual(
+            LocalMeetingSummaryNormalizer.summaryTitle(in: normalized),
+            "Launch Pricing Review",
+            "Gemma sometimes puts a heading marker inside the # Title section"
+        )
+    }
+
     runSuite("LocalMeetingSummaryNormalizer ignores structural chunk headings as titles") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("""
         # Chunk 1
@@ -538,6 +554,11 @@ func testLocalMeetingSummarizer() async {
                 assertTrue(false, "updated transcript permissions should be readable")
             }
             assertTrue(capturedPrompt.contains("We agreed that the summary beta stays opt-in"), "prompt should include transcript text")
+            assertTrue(capturedPrompt.contains("Return markdown in exactly this shape:"), "prompt should force a stable output skeleton")
+            assertTrue(capturedPrompt.contains("Never write \"the transcript consists of\""), "prompt should reject low-signal transcript meta-summaries")
+            assertTrue(capturedPrompt.contains("the transcript contains"), "prompt should reject broader transcript meta-summaries")
+            assertTrue(capturedPrompt.contains("summarize it as a test recording"), "prompt should handle low-signal test/demo transcripts directly")
+            assertTrue(capturedPrompt.contains("Always put it under # Title"), "prompt should keep generated titles under the managed title heading")
             assertFalse(capturedPrompt.contains("source_path"), "frontmatter keys should not be sent to the model prompt")
             assertFalse(capturedPrompt.contains("/Users/redbars/Private"), "absolute local paths should not be sent to the model prompt")
             assertFalse(capturedPrompt.contains("justin@example.com"), "frontmatter and non-transcript emails should not be sent to the model prompt")
