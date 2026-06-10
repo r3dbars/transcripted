@@ -176,6 +176,7 @@ struct TranscriptedSettingsView: View {
             HomeStatsDetailSheet(
                 stats: homeStatItems,
                 streak: homeStreak,
+                longestStreak: statsService.longestStreak > 0 ? statsService.longestStreak : nil,
                 onDone: {
                     homeShowsStatsDetails = false
                 }
@@ -441,8 +442,9 @@ struct TranscriptedSettingsView: View {
             HomeCanvasHeader(
                 greeting: homeGreeting,
                 streakText: homeStreak.map { "\($0)d" },
-                savedText: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
+                hoursText: statsService.formattedTotalHours,
                 meetingsText: formattedInteger(statsService.totalRecordings),
+                wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
                 dictationsText: formattedInteger(homeViewModel.totalDictationCount),
                 agentConnected: agentConnected,
                 onAgentAction: {
@@ -1242,31 +1244,43 @@ struct TranscriptedSettingsView: View {
                 id: "dictations",
                 symbolName: "text.bubble.fill",
                 value: formattedInteger(homeViewModel.totalDictationCount),
-                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
+                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations",
+                detail: "Spoken notes saved to your daily Markdown files"
             ),
             HomeStatItem(
                 id: "dictation-words",
                 symbolName: "text.alignleft",
                 value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "dictated words"
+                label: "words dictated",
+                detail: "Words you spoke instead of typed"
             ),
             HomeStatItem(
                 id: "typing-time-saved",
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
-                label: "saved"
+                label: "typing time saved",
+                detail: "Estimated from your dictated words at a 40 words-per-minute typing pace"
             ),
             HomeStatItem(
                 id: "meetings",
                 symbolName: "person.2.wave.2.fill",
                 value: formattedInteger(statsService.totalRecordings),
-                label: statsService.totalRecordings == 1 ? "meeting" : "meetings"
+                label: statsService.totalRecordings == 1 ? "meeting" : "meetings",
+                detail: "Transcribed and saved on this Mac"
             ),
             HomeStatItem(
                 id: "meeting-hours",
                 symbolName: "clock.fill",
                 value: statsService.formattedTotalHours,
-                label: "hours"
+                label: "meeting hours recorded",
+                detail: "Total length of everything you've captured"
+            ),
+            HomeStatItem(
+                id: "meetings-30d",
+                symbolName: "calendar",
+                value: formattedInteger(statsService.last30DaysRecordings),
+                label: "meetings, last 30 days",
+                detail: "Your recent capture momentum"
             )
         ]
     }

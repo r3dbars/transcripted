@@ -235,6 +235,15 @@ struct HomeStatItem: Identifiable {
     let symbolName: String
     let value: String
     let label: String
+    let detail: String?
+
+    init(id: String, symbolName: String, value: String, label: String, detail: String? = nil) {
+        self.id = id
+        self.symbolName = symbolName
+        self.value = value
+        self.label = label
+        self.detail = detail
+    }
 }
 
 enum HomeFeedbackIssueKind: String, CaseIterable, Identifiable {
@@ -345,8 +354,9 @@ enum HomeMeetingMarkdownReadResult {
 struct HomeCanvasHeader: View {
     let greeting: String
     let streakText: String?
-    let savedText: String
+    let hoursText: String
     let meetingsText: String
+    let wordsText: String
     let dictationsText: String
     let agentConnected: Bool
     let onAgentAction: () -> Void
@@ -354,9 +364,15 @@ struct HomeCanvasHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(greeting)
-                .font(.system(size: 28, weight: .light))
-                .tracking(0.2)
+            HStack(alignment: .center, spacing: 12) {
+                Text(greeting)
+                    .font(.system(size: 28, weight: .light))
+                    .tracking(0.2)
+
+                Spacer(minLength: 12)
+
+                agentChip
+            }
 
             HStack(spacing: 9) {
                 if let streakText {
@@ -364,9 +380,11 @@ struct HomeCanvasHeader: View {
                     separatorDot
                 }
 
-                stat(savedText, "saved")
+                stat(hoursText, "recorded")
                 separatorDot
                 stat(meetingsText, "meetings")
+                separatorDot
+                stat(wordsText, "words dictated")
                 separatorDot
                 stat(dictationsText, "dictations")
 
@@ -380,10 +398,8 @@ struct HomeCanvasHeader: View {
                 .buttonStyle(.plain)
                 .help("View all stats")
                 .accessibilityIdentifier("transcripted.home.stats.view")
-
-                separatorDot
-                agentChip
             }
+            .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -518,6 +534,7 @@ private struct HomeAttentionPill: View {
 struct HomeStatsDetailSheet: View {
     let stats: [HomeStatItem]
     let streak: Int?
+    let longestStreak: Int?
     let onDone: () -> Void
 
     private let columns = [
@@ -531,7 +548,7 @@ struct HomeStatsDetailSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Overall")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("A quick read on saved work and time returned.")
+                    Text("Everything you've captured, and the time dictation gave back.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -554,7 +571,20 @@ struct HomeStatsDetailSheet: View {
                             id: "streak",
                             symbolName: "flame.fill",
                             value: "\(streak)d",
-                            label: "streak"
+                            label: "current streak",
+                            detail: "Consecutive days with at least one capture"
+                        )
+                    )
+                }
+
+                if let longestStreak, longestStreak > 0, longestStreak != streak {
+                    HomeStatsDetailMetric(
+                        stat: HomeStatItem(
+                            id: "longest-streak",
+                            symbolName: "trophy.fill",
+                            value: "\(longestStreak)d",
+                            label: "longest streak",
+                            detail: "Your best run so far"
                         )
                     )
                 }
@@ -591,6 +621,13 @@ private struct HomeStatsDetailMetric: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if let detail = stat.detail {
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(12)
