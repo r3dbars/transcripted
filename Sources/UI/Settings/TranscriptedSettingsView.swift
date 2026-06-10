@@ -65,7 +65,6 @@ struct TranscriptedSettingsView: View {
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var showsSettingsPages = false
-    @State private var agentConnected = false
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -443,14 +442,7 @@ struct TranscriptedSettingsView: View {
                 greeting: homeGreeting,
                 streakText: homeStreak.map { "\($0)d" },
                 hoursText: statsService.formattedTotalHours,
-                meetingsText: formattedInteger(statsService.totalRecordings),
                 wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
-                dictationsText: formattedInteger(homeViewModel.totalDictationCount),
-                agentConnected: agentConnected,
-                onAgentAction: {
-                    trackSettingsAction("home_agent_chip", page: .home)
-                    navigation.selectedPage = .connectAgent
-                },
                 onViewStats: {
                     trackSettingsAction("open_home_stats", page: .home)
                     homeShowsStatsDetails = true
@@ -3666,7 +3658,6 @@ struct TranscriptedSettingsView: View {
         refreshShortcutState()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
-        agentConnected = ClaudeDesktopIntegrationInstaller.currentStatus().isInstalled
         Task { @MainActor in
             await statsService.refreshStats()
         }

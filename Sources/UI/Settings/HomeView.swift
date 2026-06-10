@@ -355,51 +355,38 @@ struct HomeCanvasHeader: View {
     let greeting: String
     let streakText: String?
     let hoursText: String
-    let meetingsText: String
     let wordsText: String
-    let dictationsText: String
-    let agentConnected: Bool
-    let onAgentAction: () -> Void
     let onViewStats: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Text(greeting)
-                    .font(.system(size: 28, weight: .light))
-                    .tracking(0.2)
+            Text(greeting)
+                .font(.system(size: 28, weight: .light))
+                .tracking(0.2)
 
-                Spacer(minLength: 12)
+            Button(action: { onViewStats() }) {
+                HStack(spacing: 9) {
+                    if let streakText {
+                        stat(streakText, "streak")
+                        separatorDot
+                    }
 
-                agentChip
-            }
-
-            HStack(spacing: 9) {
-                if let streakText {
-                    stat(streakText, "streak")
+                    stat(hoursText, "recorded")
                     separatorDot
+                    stat(wordsText, "words dictated")
                 }
-
-                stat(hoursText, "recorded")
-                separatorDot
-                stat(meetingsText, "meetings")
-                separatorDot
-                stat(wordsText, "words dictated")
-                separatorDot
-                stat(dictationsText, "dictations")
-
-                Button(action: { onViewStats() }) {
-                    Label("View stats", systemImage: "info.circle")
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("View all stats")
-                .accessibilityIdentifier("transcripted.home.stats.view")
+                .lineLimit(1)
+                .contentShape(Rectangle())
             }
-            .lineLimit(1)
+            .buttonStyle(.plain)
+            .opacity(isHovering ? 1 : 0.9)
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .help("View all stats")
+            .accessibilityLabel("View all stats")
+            .accessibilityIdentifier("transcripted.home.stats.view")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -420,25 +407,6 @@ struct HomeCanvasHeader: View {
         Text("\u{00B7}")
             .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(.tertiary)
-    }
-
-    private var agentChip: some View {
-        Button(action: onAgentAction) {
-            HStack(spacing: 5) {
-                Image(systemName: agentConnected ? "checkmark" : "sparkles")
-                    .font(.system(size: 9, weight: .bold))
-                Text(agentConnected ? "Agent connected" : "Connect your agent")
-                    .font(.system(size: 11.5, weight: .medium))
-            }
-            .foregroundStyle(agentConnected ? Color.green.opacity(0.85) : Color.accentColor)
-            .lineLimit(1)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(agentConnected
-            ? "Claude Desktop can read your meetings and dictations. Open the Agent page."
-            : "Give your agent read access to every meeting and dictation you capture.")
-        .accessibilityIdentifier("transcripted.home.agent-chip")
     }
 }
 

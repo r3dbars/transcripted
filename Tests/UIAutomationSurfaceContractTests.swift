@@ -215,7 +215,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.failed-meetings.dismiss",
             "transcripted.home.load-more",
             "transcripted.home.needs-attention.review.",
-            "transcripted.home.agent-chip",
         ] {
             assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
