@@ -188,6 +188,8 @@ Relevant direct coverage:
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
+- `Tests/RecentCaptureScannersTests.swift`
+- `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
