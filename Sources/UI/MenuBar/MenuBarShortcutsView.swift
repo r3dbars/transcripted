@@ -8,6 +8,7 @@ import Carbon
 final class MenuBarShortcutsView: NSView {
     var onStartDictation: (() -> Void)?
     var onStartMeeting: (() -> Void)?
+    var onPasteLastDictation: (() -> Void)?
     var onImportAudioFile: (() -> Void)?
 
     private let pushToTalkRow = PrimaryActionRowView()
@@ -101,7 +102,10 @@ final class MenuBarShortcutsView: NSView {
             self?.startRecording(.meeting)
         }
 
-        pasteLastDictationRow.onPrimaryAction = {}
+        pasteLastDictationRow.onPrimaryAction = { [weak self] in
+            guard let self, self.recordingTarget == nil else { return }
+            self.onPasteLastDictation?()
+        }
         pasteLastDictationRow.onEditShortcut = { [weak self] in
             self?.startRecording(.pasteLastDictation)
         }
