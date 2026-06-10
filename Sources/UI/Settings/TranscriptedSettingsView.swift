@@ -90,6 +90,8 @@ struct TranscriptedSettingsView: View {
     @State private var localSummaryModelPreparationToken: UUID?
     @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var speakerInboxScrollRequest = 0
+    @State private var speakerInboxScrollAwaitingQueue = false
 
     init(
         appState: TranscriptedAppState,
@@ -142,17 +144,28 @@ struct TranscriptedSettingsView: View {
                 )
                 .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        pageBody
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 28) {
+                            pageBody
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.top, settingsContentTopPadding)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: 860, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.top, settingsContentTopPadding)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .onChange(of: speakerInboxScrollRequest) { _, _ in
+                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                        scrollToSpeakerInbox(using: proxy)
+                    }
+                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                        speakerInboxScrollAwaitingQueue = false
+                        scrollToSpeakerInbox(using: proxy)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(minWidth: 880, minHeight: 640)
@@ -620,10 +633,23 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction(actionName, page: .home)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        speakerPeopleModel.profileFilter = .needsReview
         navigation.selectedPage = .home
         homeActivityTab = .speakers
         homeHeroMode = .speakers
+        requestSpeakerInboxFocus()
+    }
+
+    private func requestSpeakerInboxFocus() {
+        speakerInboxScrollRequest += 1
+    }
+
+    private func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.snappy(duration: 0.22)) {
+                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+            }
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -695,6 +721,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
+        guard !hasSpeakerReviewWork(for: item) else {
+            openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
+            return
+        }
+
         guard let input = item.audio?.retranscriptionInput else {
             NSSound.beep()
             return
@@ -946,6 +977,7 @@ struct TranscriptedSettingsView: View {
         let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
         let isPreparingLocalGemma = isLocalSummaryModelPreparing
         let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
+        let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
         let summaryActionTitle: String
         if isSummarizing {
             summaryActionTitle = "Running AI summary..."
@@ -1007,7 +1039,10 @@ struct TranscriptedSettingsView: View {
                     HomeRowMenuItem(
                         title: "Re-transcribe with speaker ID",
                         symbolName: "person.2.fill",
-                        isEnabled: canRetranscribeSavedMeetings
+                        isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                            globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
+                            hasSpeakerReviewWork: hasPendingSpeakerReview
+                        )
                     ) {
                         handleRetranscribeMeeting(item)
                     }
@@ -1293,6 +1328,13 @@ struct TranscriptedSettingsView: View {
 
     private var canRetryFailedMeetings: Bool {
         failedMeetingRetryUnavailableReason == nil
+    }
+
+    private func hasSpeakerReviewWork(for meeting: RecentMeetingItem) -> Bool {
+        guard speakerPeopleModel.hasLoadedProfiles else {
+            return meeting.speakerStatus.needsReview
+        }
+        return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
     private var canRetranscribeSavedMeetings: Bool {
@@ -2209,7 +2251,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
+                summary: "Name new voices and manage the people in your meetings."
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
@@ -2462,8 +2504,8 @@ struct TranscriptedSettingsView: View {
                     SettingsToggleRow(
                         title: "AI meeting summaries",
                         detail: localMeetingSummariesEnabled
-                            ? "On. Home shows summary previews, and summaries run only when you choose Run AI summary from a meeting."
-                            : "Create private meeting summaries on this Mac. Nothing runs until you choose a meeting.",
+                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
+                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
                         isOn: Binding(
                             get: { localMeetingSummariesEnabled },
                             set: { enabled in
@@ -2711,7 +2753,7 @@ struct TranscriptedSettingsView: View {
         }
 
         isLocalSummaryModelPreparing = true
-        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. First run may download several GB from Hugging Face and can take several minutes on M1 Macs."
+        localSummaryModelPreparationStatus = "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
         recordLocalSummaryEvent(
             event: "local_meeting_summary_model_prepare_started",
             message: "Local Gemma model preparation started",
@@ -2735,7 +2777,7 @@ struct TranscriptedSettingsView: View {
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
-                localSummaryModelPreparationStatus = "Gemma is ready. The first real summary should start without a surprise setup step."
+                localSummaryModelPreparationStatus = "Gemma cache is prepared. The first real summary should load from the local cache instead of starting with a surprise setup step."
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_completed",
                     message: "Local Gemma model preparation completed",
@@ -2874,7 +2916,7 @@ struct TranscriptedSettingsView: View {
 
     private var localSummarySetupStatusDetail: String {
         if isLocalSummaryModelPreparing {
-            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time."
+            return "Transcripted is downloading or warming the local Gemma runner. Home summaries stay paused so this Mac only runs one Gemma job at a time; detailed download progress is not available yet."
         }
         if !localSummarySetupStatus.hasEnoughMemory {
             return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."

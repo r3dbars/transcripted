@@ -25,8 +25,9 @@ settings-side agent connection flow.
   feedback, failed meeting, and speaker review entry points.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
   walkthrough.
-- `SpeakerPeopleSettingsSection.swift` - people/speaker profile list, naming,
-  merging, review filters, and local-speaker split preference UI.
+- `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
+  queue (one row per distinct voice), compact duplicate-merge suggestions, and
+  the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
 
 ## Guardrails

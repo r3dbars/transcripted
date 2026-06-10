@@ -1682,6 +1682,7 @@ struct HomeMeetingRow: View {
             return AnyView(
                 reviewDotButton(
                     help: item.speakerStatus.summary,
+                    accessibilityLabel: "Review speaker labels",
                     isDisabled: false,
                     automationIdentifier: "transcripted.home.meeting.review-speakers",
                     action: onReviewSpeakers
@@ -1698,6 +1699,7 @@ struct HomeMeetingRow: View {
         return AnyView(
             reviewDotButton(
                 help: retranscriptionUnavailableReason ?? "Identify speakers from retained audio",
+                accessibilityLabel: "Identify speakers from retained audio",
                 isDisabled: !canRetranscribe,
                 automationIdentifier: "transcripted.home.meeting.retranscribe-speakers",
                 action: onRetranscribe
@@ -1741,19 +1743,22 @@ struct HomeMeetingRow: View {
 
     private func expandedSections(for preview: RecentMeetingSummaryPreview) -> [ExpandedSummarySection] {
         let summary = sectionText("Summary", in: preview.sections) ?? preview.summary
-        let nextSteps = combinedSectionText(
-            titles: ["Action Items", "Risks or Follow-ups"],
-            in: preview.sections
-        )
+        let nextSteps = sectionText("Next Steps", in: preview.sections)
+            ?? combinedSectionText(
+                titles: ["Action Items", "Risks or Follow-ups"],
+                in: preview.sections
+            )
         let decisionsAndQuestions = combinedSectionText(
             titles: ["Decisions", "Open Questions"],
             in: preview.sections
         )
+        let participants = sectionText("Participants", in: preview.sections)
 
         return [
             ExpandedSummarySection(title: "Summary", text: summary),
             ExpandedSummarySection(title: "Next Steps", text: nextSteps),
-            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions)
+            ExpandedSummarySection(title: "Decisions & Questions", text: decisionsAndQuestions),
+            ExpandedSummarySection(title: "Participants", text: participants ?? "")
         ].filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
@@ -1787,14 +1792,15 @@ struct HomeMeetingRow: View {
 
     private func reviewDotButton(
         help: String,
+        accessibilityLabel: String,
         isDisabled: Bool,
         automationIdentifier: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Circle()
-                .fill(Color.orange)
-                .frame(width: 7, height: 7)
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.orange)
                 .frame(width: 18, height: 26)
                 .contentShape(Rectangle())
         }
@@ -1802,6 +1808,8 @@ struct HomeMeetingRow: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
         .help(help)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(help)
         .accessibilityIdentifier(automationIdentifier)
     }
 
@@ -2314,7 +2322,7 @@ struct HomeSpeakersTab: View {
                 Text("Speakers")
                     .font(.headline)
 
-                Text("Fix names that need attention, then browse everyone by meeting count.")
+                Text("Everyone Transcripted has heard in your meetings.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
