@@ -2,20 +2,6 @@ import SwiftUI
 import AppKit
 import TranscriptedCore
 
-enum SpeakerPeopleProfileFilter: String, CaseIterable, Identifiable {
-    case all
-    case needsReview
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: return "All"
-        case .needsReview: return "Needs Review"
-        }
-    }
-}
-
 enum SpeakerDuplicateReason: Int {
     case sameNameAndVoice
     case sameName
@@ -28,8 +14,8 @@ enum SpeakerDuplicateReason: Int {
         case .sameNameAndVoice: return "Same name and voice"
         case .sameName: return "Same name"
         case .similarNameAndVoice: return "Similar name and voice"
-        case .similarName: return "Similar name"
-        case .voiceMatch: return "Voice match"
+        case .similarName: return "Similar names"
+        case .voiceMatch: return "Voices match"
         }
     }
 
@@ -53,14 +39,18 @@ struct SpeakerDuplicateCandidate: Identifiable {
         [source.id.uuidString, target.id.uuidString].sorted().joined(separator: "-")
     }
 
-    var detail: String {
-        let mergeLine = "Suggested merge: \(Self.displayName(for: source)) into \(Self.displayName(for: target))."
-        guard let voiceSimilarity else { return mergeLine }
-        return "\(Self.percentFormatter.string(from: NSNumber(value: voiceSimilarity)) ?? "High") voice match. \(mergeLine)"
+    var summaryLine: String {
+        var parts = [reason.title]
+        if let voiceSimilarity,
+           let percent = Self.percentFormatter.string(from: NSNumber(value: voiceSimilarity)) {
+            parts.append("\(percent) voice match")
+        }
+        parts.append("merging keeps \(Self.displayName(for: target))")
+        return parts.joined(separator: " · ")
     }
 
     static func displayName(for profile: SpeakerProfile) -> String {
-        profile.displayName ?? "Unnamed speaker"
+        profile.displayName ?? "Unknown voice"
     }
 
     private static let percentFormatter: NumberFormatter = {
@@ -75,7 +65,6 @@ struct SpeakerDuplicateCandidate: Identifiable {
 final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var profiles: [SpeakerProfile] = []
     @Published var searchText: String = ""
-    @Published var profileFilter: SpeakerPeopleProfileFilter = .all
     @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = []
     @Published private(set) var hasLoadedProfiles = false
 
@@ -110,51 +99,25 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         refresh()
     }
 
+    var pendingVoiceGroups: [SpeakerPendingVoiceGroup] {
+        SpeakerReviewQueueScanner.groupedByVoice(reviewQueueItems)
+    }
+
     var filteredProfiles: [SpeakerProfile] {
         let duplicateIds = duplicateProfileIDs
-        let reviewProfiles: (SpeakerProfile) -> Bool = { profile in
-            SpeakerPeopleReviewPolicy.needsReview(profile: profile, duplicateIds: duplicateIds)
-        }
-
-        let baseProfiles: [SpeakerProfile]
-        switch profileFilter {
-        case .all:
-            baseProfiles = profiles
-        case .needsReview:
-            baseProfiles = profiles.filter(reviewProfiles)
-        }
-
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(baseProfiles, duplicateIds: duplicateIds)
+            return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(profiles, duplicateIds: duplicateIds)
         }
 
         let query = trimmed.lowercased()
-        let matches = baseProfiles.filter { profile in
+        let matches = profiles.filter { profile in
             if let name = profile.displayName?.lowercased(), name.contains(query) {
                 return true
             }
             return profile.id.uuidString.lowercased().contains(query)
         }
         return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
-    }
-
-    var needsReviewCount: Int {
-        profiles.filter {
-            SpeakerPeopleReviewPolicy.needsReview(profile: $0, duplicateIds: duplicateProfileIDs)
-        }.count
-    }
-
-    var duplicateCandidateCount: Int {
-        duplicateCandidates.count
-    }
-
-    var reviewQueueCount: Int {
-        reviewQueueItems.count
-    }
-
-    var totalMeetingCount: Int {
-        profiles.reduce(0) { $0 + $1.callCount }
     }
 
     func refresh() {
@@ -442,8 +405,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 return lhsIsDuplicate && !rhsIsDuplicate
             }
 
-            let lhsName = lhs.displayName ?? "Unnamed speaker"
-            let rhsName = rhs.displayName ?? "Unnamed speaker"
+            let lhsName = lhs.displayName ?? "Unknown voice"
+            let rhsName = rhs.displayName ?? "Unknown voice"
             if lhsName == rhsName {
                 return lhs.callCount > rhs.callCount
             }
@@ -647,41 +610,22 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    var onShowInbox: (() -> Void)?
 
     var body: some View {
-        SettingsSection(
-            title: actionSectionTitle,
-            detail: actionSectionDetail
-        ) {
-            SpeakerPeopleStatusRow(
-                needsReviewCount: model.needsReviewCount,
-                reviewQueueCount: model.reviewQueueCount,
-                duplicateCount: model.duplicateCandidateCount,
-                speakerCount: model.profiles.count,
-                meetingCount: model.totalMeetingCount,
-                onShowNeedsReview: {
-                    model.searchText = ""
-                    model.profileFilter = .needsReview
-                    if model.reviewQueueCount > 0 {
-                        onShowInbox?()
-                    }
-                }
-            )
-        }
+        let voiceGroups = model.pendingVoiceGroups
 
-        if !model.reviewQueueItems.isEmpty {
+        if !voiceGroups.isEmpty {
             SettingsSection(
-                title: "Please Name These Speakers",
-                detail: reviewQueueDetail
+                title: voicesToNameTitle(count: voiceGroups.count),
+                detail: "Play a clip. If you recognize the voice, type their name — it updates every meeting they're in."
             ) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(model.reviewQueueItems.enumerated()), id: \.element.id) { index, item in
-                        SpeakerPendingReviewRow(item: item, model: model)
+                    ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
+                        SpeakerVoiceToNameRow(group: group, model: model)
 
-                        if index < model.reviewQueueItems.count - 1 {
+                        if index < voiceGroups.count - 1 {
                             Divider()
-                                .padding(.vertical, 10)
+                                .padding(.vertical, 12)
                         }
                     }
                 }
@@ -692,15 +636,16 @@ struct SpeakerPeopleSettingsSection: View {
 
         if !model.duplicateCandidates.isEmpty {
             SettingsSection(
-                title: "Possible Duplicates",
-                detail: "Review these before merging speaker profiles."
+                title: "Possible duplicates",
+                detail: duplicatesDetail
             ) {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(model.duplicateCandidates.enumerated()), id: \.element.id) { index, candidate in
                         SpeakerDuplicateCandidateRow(candidate: candidate, model: model)
 
                         if index < model.duplicateCandidates.count - 1 {
                             Divider()
+                                .padding(.vertical, 10)
                         }
                     }
                 }
@@ -708,10 +653,12 @@ struct SpeakerPeopleSettingsSection: View {
         }
 
         SettingsSection(
-            title: "All Speakers",
+            title: "All speakers",
             detail: allSpeakersDetail
         ) {
-            SpeakerPeopleToolbar(model: model)
+            if !model.profiles.isEmpty {
+                SpeakerSearchRow(model: model)
+            }
 
             if model.filteredProfiles.isEmpty {
                 Text(emptyPeopleMessage)
@@ -732,62 +679,36 @@ struct SpeakerPeopleSettingsSection: View {
         }
     }
 
-    private var actionSectionTitle: String {
-        if model.reviewQueueCount > 0 {
-            return "Speaker Inbox"
-        }
-        if model.needsReviewCount > 0 {
-            return "Needs Review"
-        }
-        return "Speaker Cleanup"
+    private func voicesToNameTitle(count: Int) -> String {
+        count == 1 ? "1 voice to name" : "\(count) voices to name"
     }
 
-    private var actionSectionDetail: String {
-        if model.reviewQueueCount > 0 {
-            return "Speaker labels saved for later are ready to name."
-        }
-        if model.needsReviewCount > 0 {
-            return "Start here when a speaker needs a name or a duplicate needs merging."
-        }
-        return "A quick check before browsing saved speakers."
-    }
-
-    private var reviewQueueDetail: String {
-        let count = model.reviewQueueCount
-        return count == 1
-            ? "1 voice from a saved call still needs a name."
-            : "\(count) voices from saved calls still need names."
+    private var duplicatesDetail: String {
+        model.duplicateCandidates.count == 1
+            ? "These two sound like the same person. Merging combines them into one."
+            : "These pairs sound like the same person. Merging combines each pair into one."
     }
 
     private var allSpeakersDetail: String {
-        guard !model.profiles.isEmpty else {
-            return "People you name after meetings will show up here."
+        let count = model.profiles.count
+        guard count > 0 else {
+            return "People from your meetings show up here once a meeting is saved."
         }
-
-        return "\(Self.speakerCountText(model.profiles.count)) across \(Self.appearanceCountText(model.totalMeetingCount))."
+        return count == 1 ? "1 saved speaker." : "\(count) saved speakers."
     }
 
     private var emptyPeopleMessage: String {
         if model.profiles.isEmpty {
-            return "No saved speakers yet. Name people after a meeting and they will appear here."
+            return "No speakers yet. After your next meeting, the people in it will appear here."
         }
-        if model.profileFilter == .needsReview {
-            return "No deferred speaker reviews right now."
-        }
-        return "No speakers match that search."
-    }
-
-    private static func speakerCountText(_ count: Int) -> String {
-        count == 1 ? "1 saved speaker" : "\(count) saved speakers"
-    }
-
-    private static func appearanceCountText(_ count: Int) -> String {
-        count == 1 ? "1 speaker appearance" : "\(count) speaker appearances"
+        return "No speakers match your search."
     }
 }
 
-private struct SpeakerPendingReviewRow: View {
-    let item: SpeakerPendingReviewItem
+// MARK: - Voices to name
+
+private struct SpeakerVoiceToNameRow: View {
+    let group: SpeakerPendingVoiceGroup
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
     @State private var nameDraft = ""
@@ -795,35 +716,24 @@ private struct SpeakerPendingReviewRow: View {
     @State private var saveErrorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "person.crop.circle.badge.questionmark")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .frame(width: 24, height: 24)
-                    .padding(.top, 1)
+                SpeakerPlayClipButton(
+                    hasClip: group.representative.clipURL != nil,
+                    action: { model.playSample(for: group.representative) }
+                )
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(itemTitle)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-
-                        SpeakerStatusBadge(title: "Needs Name")
-                        SpeakerStatusBadge(title: item.channelTitle)
-                    }
-
-                    Text(meetingLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-
-                    Text(sampleLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(quoteLine)
+                        .font(.subheadline)
+                        .foregroundStyle(group.sampleText == nil ? .secondary : .primary)
+                        .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Text(metaLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -850,7 +760,7 @@ private struct SpeakerPendingReviewRow: View {
         .padding(.vertical, 4)
         .onAppear {
             if nameDraft.isEmpty {
-                nameDraft = item.profile.displayName ?? ""
+                nameDraft = group.representative.profile.displayName ?? ""
             }
         }
         .onChange(of: nameDraft) { _, _ in
@@ -859,54 +769,55 @@ private struct SpeakerPendingReviewRow: View {
     }
 
     private var nameField: some View {
-        TextField("Name this voice", text: $nameDraft)
+        TextField("Who is this?", text: $nameDraft)
             .textFieldStyle(.roundedBorder)
-            .frame(minWidth: 220)
+            .frame(minWidth: 200)
             .onSubmit(saveName)
     }
 
     private var actionButtons: some View {
         HStack(spacing: 8) {
-            SettingsInlineActionButton(
-                title: item.clipURL == nil ? "No Sample" : "Sample",
-                symbolName: item.clipURL == nil ? "play.slash" : "play.circle.fill",
-                tone: item.clipURL == nil ? .neutral : .accent
-            ) {
-                model.playSample(for: item)
-            }
-            .disabled(item.clipURL == nil)
-
-            SettingsInlineActionButton(title: "Open Call", symbolName: "doc.text") {
-                model.openTranscript(for: item)
-            }
-
-            SettingsInlineActionButton(title: isSaving ? "Saving…" : "Name Voice", tone: .accent) {
+            SettingsInlineActionButton(title: isSaving ? "Saving…" : "Save Name", tone: .accent) {
                 saveName()
             }
             .disabled(!canSave || isSaving)
+
+            Button {
+                model.openTranscript(for: group.representative)
+            } label: {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(7)
+            }
+            .buttonStyle(SettingsHoverButtonStyle(
+                cornerRadius: 8,
+                normalFill: Color.primary.opacity(0.025),
+                normalStroke: Color.primary.opacity(0.06)
+            ))
+            .help("Open the meeting this voice was heard in")
+            .accessibilityLabel("Open meeting transcript")
         }
     }
 
-    private var meetingLine: String {
+    private var quoteLine: String {
+        guard let sampleText = group.sampleText else {
+            return "No transcript sample for this voice."
+        }
+        return "\u{201C}\(sampleText)\u{201D}"
+    }
+
+    private var metaLine: String {
+        let item = group.representative
         var parts = [item.meetingTitle]
         if let dateText = Self.dateFormatter.stringIfAvailable(from: item.recordedAt ?? item.fallbackDate) {
             parts.append(dateText)
         }
-        let calls = item.callCount == 1 ? "1 call" : "\(item.callCount) calls"
-        parts.append(calls)
-        return parts.joined(separator: " - ")
-    }
-
-    private var itemTitle: String {
-        "\(item.channelTitle): \(item.speakerLabel)"
-    }
-
-    private var sampleLine: String {
-        guard let sampleText = item.sampleText,
-              !sampleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "No transcript sample found for this voice."
+        parts.append(item.channel == .mic ? "In the room" : "Remote")
+        if group.meetingCount > 1 {
+            let others = group.meetingCount - 1
+            parts.append(others == 1 ? "+1 more meeting" : "+\(others) more meetings")
         }
-        return "\"\(sampleText)\""
+        return parts.joined(separator: " · ")
     }
 
     private var canSave: Bool {
@@ -917,7 +828,7 @@ private struct SpeakerPendingReviewRow: View {
         guard canSave, !isSaving else { return }
         isSaving = true
         saveErrorMessage = nil
-        model.namePendingReviewItem(item, to: nameDraft) { didSave in
+        model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
             isSaving = false
             if didSave {
                 nameDraft = ""
@@ -930,9 +841,28 @@ private struct SpeakerPendingReviewRow: View {
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.timeStyle = .none
         return formatter
     }()
+}
+
+private struct SpeakerPlayClipButton: View {
+    let hasClip: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "play.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(hasClip ? Color.white : Color.secondary)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(hasClip ? Color.accentColor : Color.primary.opacity(0.06)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasClip)
+        .help(hasClip ? "Play a short clip of this voice" : "No voice clip was saved for this speaker")
+        .accessibilityLabel("Play voice sample")
+    }
 }
 
 private extension DateFormatter {
@@ -941,357 +871,106 @@ private extension DateFormatter {
     }
 }
 
-private struct SpeakerPeopleStatusRow: View {
-    let needsReviewCount: Int
-    let reviewQueueCount: Int
-    let duplicateCount: Int
-    let speakerCount: Int
-    let meetingCount: Int
-    let onShowNeedsReview: () -> Void
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 12) {
-                statusIcon
-                statusCopy
-                Spacer(minLength: 12)
-                reviewButton
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    statusIcon
-                    statusCopy
-                }
-                reviewButton
-            }
-        }
-    }
-
-    private var statusIcon: some View {
-        Image(systemName: iconName)
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(iconColor)
-            .frame(width: 24, height: 24)
-            .padding(.top, 1)
-    }
-
-    private var statusCopy: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    metrics
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    metrics
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var metrics: some View {
-        SpeakerPeopleMetricPill(value: "\(speakerCount)", label: speakerCount == 1 ? "saved speaker" : "saved speakers")
-        SpeakerPeopleMetricPill(value: "\(meetingCount)", label: meetingCount == 1 ? "appearance" : "appearances")
-        if reviewQueueCount > 0 {
-            SpeakerPeopleMetricPill(value: "\(reviewQueueCount)", label: "to name", tone: .warning)
-        } else {
-            SpeakerPeopleMetricPill(value: "\(needsReviewCount)", label: "to review", tone: hasWork ? .warning : .neutral)
-        }
-        if duplicateCount > 0 {
-            SpeakerPeopleMetricPill(
-                value: "\(duplicateCount)",
-                label: duplicateCount == 1 ? "duplicate pair" : "duplicate pairs",
-                tone: .warning
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var reviewButton: some View {
-        if hasWork {
-            SettingsInlineActionButton(
-                title: actionTitle,
-                tone: .warning,
-                automationIdentifier: actionAutomationIdentifier
-            ) {
-                onShowNeedsReview()
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .help(actionHelp)
-            .accessibilityHint(actionHelp)
-        }
-    }
-
-    private var actionTitle: String {
-        reviewQueueCount > 0 ? "Show Inbox" : "Show Review"
-    }
-
-    private var actionAutomationIdentifier: String {
-        reviewQueueCount > 0 ? "transcripted.speakers.show-inbox" : "transcripted.speakers.show-review"
-    }
-
-    private var actionHelp: String {
-        if reviewQueueCount > 0 {
-            return "Jump to the saved-call speaker labels that still need names."
-        }
-        return "Show only saved speakers that need review."
-    }
-
-    private var hasWork: Bool {
-        reviewQueueCount > 0 || needsReviewCount > 0
-    }
-
-    private var iconName: String {
-        if speakerCount == 0 {
-            return "person.crop.circle.badge.plus"
-        }
-        return hasWork ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
-    }
-
-    private var iconColor: Color {
-        if speakerCount == 0 {
-            return .secondary
-        }
-        return hasWork ? .orange : .green
-    }
-
-    private var title: String {
-        if speakerCount == 0 {
-            return "No saved speakers yet"
-        }
-
-        if reviewQueueCount > 0 {
-            return reviewQueueCount == 1
-                ? "1 speaker label needs a name"
-                : "\(reviewQueueCount) speaker labels need names"
-        }
-
-        if hasWork {
-            return needsReviewCount == 1
-                ? "1 speaker needs review"
-                : "\(needsReviewCount) speakers need review"
-        }
-
-        return "No speaker cleanup needed"
-    }
-
-    private var detail: String {
-        if speakerCount == 0 {
-            return "After a meeting, speakers you name or save will show up here."
-        }
-
-        if reviewQueueCount > 0 {
-            return "Start with the saved-call rows below. Name only voices you recognize."
-        }
-
-        if hasWork {
-            if duplicateCount > 0 {
-                return "Fix names, review flagged speakers, or merge likely duplicates before trusting old labels."
-            }
-            return "Name the rows marked Needs Name or Review. Everything else is already browsable below."
-        }
-
-        return "Nothing needs your attention. Browse everyone below by name and call history."
-    }
-}
-
-private struct SpeakerPeopleMetricPill: View {
-    let value: String
-    let label: String
-    var tone: SettingsInteractionTone = .neutral
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(valueColor)
-
-            Text(label)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(fillColor))
-    }
-
-    private var valueColor: Color {
-        switch tone {
-        case .warning:
-            return .orange
-        case .destructive:
-            return .red
-        case .accent:
-            return .accentColor
-        case .neutral:
-            return .primary
-        }
-    }
-
-    private var fillColor: Color {
-        switch tone {
-        case .warning:
-            return Color.orange.opacity(0.11)
-        case .destructive:
-            return Color.red.opacity(0.09)
-        case .accent:
-            return Color.accentColor.opacity(0.10)
-        case .neutral:
-            return Color.primary.opacity(0.045)
-        }
-    }
-}
-
-private struct SpeakerPeopleToolbar: View {
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("Search speakers or IDs", text: $model.searchText)
-                .textFieldStyle(.roundedBorder)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    filterControl
-                    Spacer(minLength: 12)
-                    refreshButton
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    filterControl
-                    refreshButton
-                }
-            }
-        }
-    }
-
-    private var filterControl: some View {
-        HStack(spacing: 8) {
-            Text("Show")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Picker("Show speakers", selection: $model.profileFilter) {
-                ForEach(SpeakerPeopleProfileFilter.allCases) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 190)
-        }
-    }
-
-    private var refreshButton: some View {
-        SettingsInlineActionButton(title: "Refresh", symbolName: "arrow.clockwise") {
-            model.refresh()
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-}
+// MARK: - Possible duplicates
 
 private struct SpeakerDuplicateCandidateRow: View {
     let candidate: SpeakerDuplicateCandidate
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 20)
-                    .padding(.top, 2)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    SpeakerDuplicateNameChip(profile: candidate.source, model: model)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(candidate.reason.title)
-                        .font(.subheadline.weight(.semibold))
-
-                    Text(candidate.detail)
-                        .font(.caption)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+
+                    SpeakerDuplicateNameChip(profile: candidate.target, model: model)
                 }
 
-                Spacer(minLength: 12)
-
-                Button {
-                    model.merge(source: candidate.source, into: candidate.target)
-                } label: {
-                    Label("Merge", systemImage: "arrow.triangle.merge")
-                }
-                .help("Merge \(SpeakerDuplicateCandidate.displayName(for: candidate.source)) into \(SpeakerDuplicateCandidate.displayName(for: candidate.target))")
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                DuplicatePersonSummary(profile: candidate.source, role: "Merge from", model: model)
-
-                Image(systemName: "arrow.right")
+                Text(candidate.summaryLine)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 20, height: 28)
-
-                DuplicatePersonSummary(profile: candidate.target, role: "Keep", model: model)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            SettingsInlineActionButton(title: "Merge", symbolName: "arrow.triangle.merge", tone: .accent) {
+                model.merge(source: candidate.source, into: candidate.target)
+            }
+            .help("Merge \(SpeakerDuplicateCandidate.displayName(for: candidate.source)) into \(SpeakerDuplicateCandidate.displayName(for: candidate.target))")
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 }
 
-private struct DuplicatePersonSummary: View {
+private struct SpeakerDuplicateNameChip: View {
     let profile: SpeakerProfile
-    let role: String
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(role)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+        Button {
+            model.playSample(for: profile.id)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: hasClip ? "play.circle.fill" : "person.crop.circle")
+                    .font(.system(size: 11, weight: .semibold))
 
-            Text(SpeakerDuplicateCandidate.displayName(for: profile))
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-
-            Text(profile.callCount == 1 ? "1 call" : "\(profile.callCount) calls")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            Button {
-                model.playSample(for: profile.id)
-            } label: {
-                Label(hasClip ? "Sample" : "No Sample", systemImage: hasClip ? "play.circle.fill" : "play.slash")
+                Text(chipTitle)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
             }
-            .buttonStyle(SettingsHoverButtonStyle(
-                tone: hasClip ? .accent : .neutral,
-                cornerRadius: 8,
-                normalFill: hasClip ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.025),
-                normalStroke: hasClip ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06)
-            ))
-            .disabled(!hasClip)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: .accent,
+            cornerRadius: 8,
+            normalFill: Color.primary.opacity(0.04),
+            normalStroke: Color.primary.opacity(0.08)
+        ))
+        .disabled(!hasClip)
+        .help(hasClip ? "Play this voice" : "No voice clip saved")
+    }
+
+    private var chipTitle: String {
+        let name = SpeakerDuplicateCandidate.displayName(for: profile)
+        let meetings = profile.callCount == 1 ? "1 meeting" : "\(profile.callCount) meetings"
+        return "\(name) · \(meetings)"
     }
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
+    }
+}
+
+// MARK: - All speakers
+
+private struct SpeakerSearchRow: View {
+    @ObservedObject var model: SpeakerPeopleSettingsViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField("Search speakers", text: $model.searchText)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                model.refresh()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(7)
+            }
+            .buttonStyle(SettingsHoverButtonStyle(
+                cornerRadius: 8,
+                normalFill: Color.primary.opacity(0.025),
+                normalStroke: Color.primary.opacity(0.06)
+            ))
+            .help("Refresh the speaker list")
+            .accessibilityLabel("Refresh speakers")
+        }
     }
 }
 
@@ -1304,77 +983,113 @@ private struct SpeakerPersonRow: View {
     @State private var showDeleteConfirmation = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                SpeakerAvatarView(name: profile.displayName)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(profile.displayName == nil ? .secondary : .primary)
+                            .lineLimit(1)
+
+                        if let badge {
+                            SpeakerStatusBadge(title: badge)
+                        }
+                    }
 
                     Text(metadataLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-
-                    if !statusBadges.isEmpty {
-                        HStack(spacing: 6) {
-                            ForEach(statusBadges, id: \.self) { badge in
-                                SpeakerStatusBadge(title: badge)
-                            }
-                        }
-                    }
+                        .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                SpeakerMeetingCountBadge(count: profile.callCount)
-            }
+                if hasClip {
+                    Button {
+                        model.playSample(for: profile.id)
+                    } label: {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(6)
+                    }
+                    .buttonStyle(SettingsHoverButtonStyle(tone: .accent, cornerRadius: 8))
+                    .help("Play this voice")
+                    .accessibilityLabel("Play voice sample")
+                }
 
-            SpeakerPersonActions(
-                profile: profile,
-                model: model,
-                isEditing: $isEditing,
-                renameDraft: $renameDraft,
-                showDeleteConfirmation: $showDeleteConfirmation,
-                hasClip: hasClip
-            )
+                rowMenu
+            }
 
             if isEditing {
                 renameEditor
             }
         }
-        .padding(.vertical, 12)
-        .alert("Delete person?", isPresented: $showDeleteConfirmation) {
+        .padding(.vertical, 10)
+        .alert("Delete this speaker?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 model.delete(profile: profile)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the speaker profile and stored sample clip for future matching. Past transcripts stay unchanged.")
+            Text("This removes the saved voice profile and sample clip. Past transcripts stay unchanged.")
         }
-        .onAppear {
-            if renameDraft.isEmpty {
+    }
+
+    private var rowMenu: some View {
+        Menu {
+            Button(profile.displayName == nil ? "Add Name…" : "Rename…") {
                 renameDraft = profile.displayName ?? ""
+                isEditing = true
             }
+
+            let mergeTargets = model.mergeTargets(for: profile)
+            if !mergeTargets.isEmpty {
+                Menu("Merge Into") {
+                    ForEach(mergeTargets, id: \.id) { target in
+                        Button(mergeLabel(for: target)) {
+                            model.merge(source: profile, into: target)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button("Delete…", role: .destructive) {
+                showDeleteConfirmation = true
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(8)
         }
+        .buttonStyle(SettingsHoverButtonStyle(
+            cornerRadius: 8,
+            normalFill: Color.primary.opacity(0.025),
+            normalStroke: Color.primary.opacity(0.06)
+        ))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Rename, merge, or delete this speaker")
+        .accessibilityLabel("Speaker actions")
     }
 
     private var displayName: String {
-        profile.displayName ?? "Unnamed speaker"
+        profile.displayName ?? "Unknown voice"
     }
 
     private var metadataLine: String {
-        var parts = [
-            "last seen \(Self.lastSeenFormatter.string(from: profile.lastSeen))"
-        ]
-        if profile.disputeCount > 0 {
-            let disputes = profile.disputeCount == 1 ? "1 dispute" : "\(profile.disputeCount) disputes"
-            parts.append(disputes)
+        let meetings = profile.callCount == 1 ? "1 meeting" : "\(profile.callCount) meetings"
+        var parts = [meetings]
+        if let lastHeard = Self.relativeFormatter.string(for: profile.lastSeen) {
+            parts.append("last heard \(lastHeard)")
         }
-        if profile.displayName == nil {
-            parts.append(profile.id.uuidString.prefix(8).description)
-        }
-        return parts.joined(separator: " • ")
+        return parts.joined(separator: " · ")
     }
 
     private var renameEditor: some View {
@@ -1392,15 +1107,15 @@ private struct SpeakerPersonRow: View {
     }
 
     private var renameField: some View {
-        TextField("Enter a speaker name", text: $renameDraft)
+        TextField("Speaker name", text: $renameDraft)
             .textFieldStyle(.roundedBorder)
+            .onSubmit(saveRename)
     }
 
     private var renameButtons: some View {
         HStack(spacing: 8) {
             SettingsInlineActionButton(title: "Save", tone: .accent) {
-                model.rename(profile: profile, to: renameDraft)
-                isEditing = false
+                saveRename()
             }
             .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
@@ -1411,46 +1126,83 @@ private struct SpeakerPersonRow: View {
         }
     }
 
-    private var statusBadges: [String] {
-        var badges: [String] = []
+    private func saveRename() {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        model.rename(profile: profile, to: trimmed)
+        isEditing = false
+    }
+
+    private var badge: String? {
         if model.duplicateCount(for: profile) > 0 {
-            badges.append("Duplicate")
+            return "Possible duplicate"
         }
         if profile.disputeCount > 0 {
-            badges.append("Review")
+            return "Check name"
         }
-        if profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
-            badges.append("Needs Name")
-        }
-        return badges
+        return nil
     }
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
     }
 
-    private static let lastSeenFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+    private func mergeLabel(for target: SpeakerProfile) -> String {
+        let name = target.displayName ?? "Unknown voice"
+        let meetings = target.callCount == 1 ? "1 meeting" : "\(target.callCount) meetings"
+        return "\(name) (\(meetings))"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
         return formatter
     }()
 }
 
-private struct SpeakerMeetingCountBadge: View {
-    let count: Int
+private struct SpeakerAvatarView: View {
+    let name: String?
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            Text("\(count)")
-                .font(.headline.weight(.semibold))
-                .monospacedDigit()
+        Circle()
+            .fill(color.opacity(0.16))
+            .frame(width: 32, height: 32)
+            .overlay(
+                Text(initials)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(color)
+            )
+    }
 
-            Text(count == 1 ? "call" : "calls")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
+    private var initials: String {
+        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "?"
         }
-        .frame(minWidth: 72, alignment: .trailing)
+        let words = name
+            .split(whereSeparator: { $0.isWhitespace })
+            .prefix(2)
+        let letters = words.compactMap { $0.first.map(String.init) }
+        return letters.joined().uppercased()
+    }
+
+    private var color: Color {
+        guard let name, !name.isEmpty else { return .secondary }
+        let palette: [NSColor] = [
+            .systemBlue,
+            .systemGreen,
+            .systemPurple,
+            .systemOrange,
+            .systemPink,
+            .systemTeal,
+            .systemRed,
+            .systemIndigo,
+        ]
+        let normalized = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
+            partial &+ scalar.value
+        }
+        return Color(nsColor: palette[Int(value % UInt32(palette.count))])
     }
 }
 
@@ -1460,172 +1212,10 @@ private struct SpeakerStatusBadge: View {
     var body: some View {
         Text(title)
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
+            .foregroundStyle(.orange)
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Capsule().fill(color.opacity(0.12)))
-    }
-
-    private var color: Color {
-        title == "Duplicate" || title == "Needs Name" ? .orange : .secondary
-    }
-}
-
-private struct SpeakerPersonActions: View {
-    let profile: SpeakerProfile
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    @Binding var isEditing: Bool
-    @Binding var renameDraft: String
-    @Binding var showDeleteConfirmation: Bool
-    let hasClip: Bool
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                actionItems
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 112), spacing: 8, alignment: .leading)],
-                alignment: .leading,
-                spacing: 8
-            ) {
-                actionItems
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var actionItems: some View {
-        SpeakerActionButton(
-            title: hasClip ? "Sample" : "No Sample",
-            symbolName: hasClip ? "play.circle.fill" : "play.slash",
-            tone: hasClip ? .accent : .neutral,
-            minWidth: 104,
-            isDisabled: !hasClip
-        ) {
-            model.playSample(for: profile.id)
-        }
-
-        if !isEditing {
-            SpeakerActionButton(
-                title: profile.displayName == nil ? "Name Voice" : "Rename Everywhere",
-                symbolName: "pencil",
-                minWidth: 104
-            ) {
-                renameDraft = profile.displayName ?? ""
-                isEditing = true
-            }
-        }
-
-        if !model.mergeTargets(for: profile).isEmpty {
-            SpeakerMergeMenu(profile: profile, model: model)
-        }
-
-        SpeakerActionButton(
-            title: "Delete",
-            symbolName: "trash",
-            tone: .destructive,
-            minWidth: 104
-        ) {
-            showDeleteConfirmation = true
-        }
-    }
-}
-
-private struct SpeakerActionButton: View {
-    let title: String
-    let symbolName: String
-    var tone: SettingsInteractionTone = .neutral
-    var minWidth: CGFloat = 96
-    var isDisabled = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            SpeakerActionLabel(title: title, symbolName: symbolName, minWidth: minWidth)
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: tone,
-            cornerRadius: 8,
-            normalFill: SpeakerActionChrome.fill(for: tone),
-            normalStroke: SpeakerActionChrome.stroke(for: tone)
-        ))
-        .disabled(isDisabled)
-    }
-}
-
-private struct SpeakerMergeMenu: View {
-    let profile: SpeakerProfile
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-
-    var body: some View {
-        Menu {
-            ForEach(model.mergeTargets(for: profile), id: \.id) { target in
-                Button(mergeLabel(for: target)) {
-                    model.merge(source: profile, into: target)
-                }
-            }
-        } label: {
-            SpeakerActionLabel(title: "Merge", symbolName: "arrow.triangle.merge", minWidth: 104)
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            cornerRadius: 8,
-            normalFill: SpeakerActionChrome.fill(for: .neutral),
-            normalStroke: SpeakerActionChrome.stroke(for: .neutral)
-        ))
-        .help("Merge this speaker into another saved profile")
-    }
-
-    private func mergeLabel(for target: SpeakerProfile) -> String {
-        let name = target.displayName ?? "Unnamed speaker"
-        let meetingCount = target.callCount == 1 ? "1 call" : "\(target.callCount) calls"
-        return "\(name) (\(meetingCount))"
-    }
-}
-
-private struct SpeakerActionLabel: View {
-    let title: String
-    let symbolName: String
-    let minWidth: CGFloat
-
-    var body: some View {
-        Label(title, systemImage: symbolName)
-            .labelStyle(.titleAndIcon)
-            .font(.caption.weight(.semibold))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(minWidth: minWidth, alignment: .center)
-    }
-}
-
-private enum SpeakerActionChrome {
-    static func fill(for tone: SettingsInteractionTone) -> Color {
-        switch tone {
-        case .neutral:
-            return Color.primary.opacity(0.025)
-        case .accent:
-            return Color.accentColor.opacity(0.08)
-        case .warning:
-            return Color.orange.opacity(0.08)
-        case .destructive:
-            return Color.red.opacity(0.06)
-        }
-    }
-
-    static func stroke(for tone: SettingsInteractionTone) -> Color {
-        switch tone {
-        case .neutral:
-            return Color.primary.opacity(0.06)
-        case .accent:
-            return Color.accentColor.opacity(0.16)
-        case .warning:
-            return Color.orange.opacity(0.16)
-        case .destructive:
-            return Color.red.opacity(0.14)
-        }
+            .background(Capsule().fill(Color.orange.opacity(0.12)))
     }
 }
