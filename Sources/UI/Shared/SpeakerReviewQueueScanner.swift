@@ -49,6 +49,14 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     }
 }
 
+struct SpeakerPendingVoiceGroup: Identifiable, Sendable {
+    let representative: SpeakerPendingReviewItem
+    let meetingCount: Int
+    let sampleText: String?
+
+    var id: UUID { representative.speakerId }
+}
+
 enum SpeakerReviewQueueScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
     private static let reviewPreviewByteLimit = 256 * 1024
@@ -142,6 +150,38 @@ enum SpeakerReviewQueueScanner {
         }
 
         return deduplicatedPendingItems(items)
+    }
+
+    /// Collapses the per-meeting review queue into one entry per distinct voice.
+    /// Items are expected newest-first (the order `loadPendingItems` returns), so
+    /// each group's representative is that voice's most recent appearance.
+    static func groupedByVoice(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingVoiceGroup] {
+        var order: [UUID] = []
+        var itemsBySpeakerID: [UUID: [SpeakerPendingReviewItem]] = [:]
+
+        for item in items {
+            if itemsBySpeakerID[item.speakerId] == nil {
+                order.append(item.speakerId)
+            }
+            itemsBySpeakerID[item.speakerId, default: []].append(item)
+        }
+
+        return order.compactMap { speakerId in
+            guard let groupItems = itemsBySpeakerID[speakerId],
+                  let representative = groupItems.first else {
+                return nil
+            }
+
+            let transcriptPaths = Set(groupItems.map { $0.transcriptURL.standardizedFileURL.path })
+            let sampleText = groupItems
+                .first { $0.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }?
+                .sampleText
+            return SpeakerPendingVoiceGroup(
+                representative: representative,
+                meetingCount: transcriptPaths.count,
+                sampleText: sampleText
+            )
+        }
     }
 
     private static func deduplicatedPendingItems(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingReviewItem] {
