@@ -61,8 +61,10 @@ func testRepoCommandContract() {
         )
         assertTrue(
             contents.contains("sentry_test_event")
-                && contents.contains("select(((.title // \"\") | contains(\"sentry_test_event\")) | not)"),
-            "Sentry probe should filter manual verification events out of health rollups"
+                && contents.contains("support_diagnostic_event")
+                && contents.contains("contains(\"sentry_test_event\")")
+                && contents.contains("contains(\"support_diagnostic_event\")"),
+            "Sentry probe should filter manual verification and support diagnostic events out of health rollups"
         )
         assertFalse(
             contents.contains("/events/"),
