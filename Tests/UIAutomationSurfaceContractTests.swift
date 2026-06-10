@@ -248,11 +248,10 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            speakerPeopleSource.contains("transcripted.speakers.show-inbox")
-                && speakerPeopleSource.contains("transcripted.speakers.inbox")
-                && speakerPeopleSource.contains("onShowInbox?()")
+            speakerPeopleSource.contains("transcripted.speakers.inbox")
+                && speakerPeopleSource.contains(".id(ScrollTarget.reviewQueue)")
                 && settingsSource.contains("proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"),
-            "Speaker Inbox should keep a stable Show Inbox action that scrolls to the pending-name rows"
+            "The voices-to-name section should keep a stable automation anchor that review deep-links can scroll to"
         )
 
         assertTrue(

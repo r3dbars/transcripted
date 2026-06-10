@@ -87,7 +87,7 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
-- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
 - `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
@@ -119,7 +119,7 @@ so the meeting prompt detector and the settings/onboarding flows share the same
 app-level permission logic outside the UI tree.
 
 Cross-cutting local-speaker behavior is split between settings and review UI:
-`SpeakerPeopleSettingsSection` owns the persisted toggle for local mic diarization,
+`TranscriptedSettingsView` owns the persisted toggle for local mic diarization,
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
@@ -193,6 +193,8 @@ Relevant direct coverage:
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
+- `Tests/RecentCaptureScannersTests.swift`
+- `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`

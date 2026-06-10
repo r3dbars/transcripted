@@ -28,7 +28,7 @@
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
-- `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, and meeting shortcuts, including migration from older right-Option settings
+- `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
@@ -41,7 +41,7 @@
 ## Current notes
 
 - Keep preference keys and notification names centralized here so UI and controllers do not drift.
-- `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
+- `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
 - `TranscriptionModelPreferences` is the shared switch between `Parakeet` and the available local Whisper variants. Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
 - `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
 - `TranscriptedPermissionAccess` plus `TranscriptedPermissionKind` are the app-level permission seams. UI flows should call into them instead of duplicating TCC branching, metadata, or user-facing permission copy.

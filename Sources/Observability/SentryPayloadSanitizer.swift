@@ -2,6 +2,10 @@ import Foundation
 
 enum SentryPayloadSanitizer {
     private static let maxValueLength = 240
+    private static let explicitlySafeKeys: Set<String> = [
+        "mic_file_available",
+        "system_file_available",
+    ]
     private static let sensitiveKeyFragments = [
         "audio",
         "authorization",
@@ -102,6 +106,10 @@ enum SentryPayloadSanitizer {
     }
 
     private static func shouldDrop(key: String) -> Bool {
-        PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
+        if explicitlySafeKeys.contains(key) {
+            return false
+        }
+
+        return PayloadSanitizationCore.shouldDrop(key: key, sensitiveFragments: sensitiveKeyFragments)
     }
 }

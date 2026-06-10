@@ -88,6 +88,7 @@ struct TranscriptedSettingsView: View {
     @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
+    @State private var speakerInboxScrollAwaitingQueue = false
 
     init(
         appState: TranscriptedAppState,
@@ -147,12 +148,13 @@ struct TranscriptedSettingsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .onChange(of: speakerInboxScrollRequest) { _, _ in
-                        Task { @MainActor in
-                            await Task.yield()
-                            withAnimation(.snappy(duration: 0.22)) {
-                                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
-                            }
-                        }
+                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                        scrollToSpeakerInbox(using: proxy)
+                    }
+                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                        speakerInboxScrollAwaitingQueue = false
+                        scrollToSpeakerInbox(using: proxy)
                     }
                 }
             }
@@ -681,13 +683,21 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction(actionName, page: navigation.selectedPage)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        speakerPeopleModel.profileFilter = .needsReview
         navigation.selectedPage = .people
         requestSpeakerInboxFocus()
     }
 
     private func requestSpeakerInboxFocus() {
         speakerInboxScrollRequest += 1
+    }
+
+    private func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.snappy(duration: 0.22)) {
+                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+            }
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -1466,7 +1476,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set push-to-talk, hands-free, and meeting shortcuts."
+                detail: "Set push-to-talk, hands-free, paste-last-dictation, and meeting shortcuts."
             ) {
                 SettingsToggleRow(
                     title: "Enable dictation shortcuts",
@@ -1484,7 +1494,7 @@ struct TranscriptedSettingsView: View {
                 )
 
                 HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                    .frame(height: 108)
+                    .frame(height: HotkeyRecorderContainer.preferredHeight)
 
                 if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                     HStack(alignment: .top, spacing: 8) {
@@ -1897,7 +1907,7 @@ struct TranscriptedSettingsView: View {
             )
 
             HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                .frame(height: 108)
+                .frame(height: HotkeyRecorderContainer.preferredHeight)
 
             if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                 HStack(alignment: .top, spacing: 8) {
@@ -2330,13 +2340,10 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name speaker labels saved for later, play samples, and clean up duplicates."
+                summary: "Name new voices and manage the people in your meetings."
             )
 
-            SpeakerPeopleSettingsSection(
-                model: speakerPeopleModel,
-                onShowInbox: requestSpeakerInboxFocus
-            )
+            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
     }
 
