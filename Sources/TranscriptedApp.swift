@@ -181,6 +181,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }
+            appState.contextCapture.onPasteLastDictation = { [weak self] in
+                self?.pasteLastDictationFromSettings()
+            }
             SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
         }
 
