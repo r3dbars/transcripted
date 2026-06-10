@@ -91,6 +91,7 @@ struct TranscriptedSettingsView: View {
     @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
+    @State private var speakerInboxScrollAwaitingQueue = false
 
     init(
         appState: TranscriptedAppState,
@@ -156,12 +157,13 @@ struct TranscriptedSettingsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .onChange(of: speakerInboxScrollRequest) { _, _ in
-                        Task { @MainActor in
-                            await Task.yield()
-                            withAnimation(.snappy(duration: 0.22)) {
-                                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
-                            }
-                        }
+                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                        scrollToSpeakerInbox(using: proxy)
+                    }
+                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                        speakerInboxScrollAwaitingQueue = false
+                        scrollToSpeakerInbox(using: proxy)
                     }
                 }
             }
@@ -639,6 +641,15 @@ struct TranscriptedSettingsView: View {
 
     private func requestSpeakerInboxFocus() {
         speakerInboxScrollRequest += 1
+    }
+
+    private func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.snappy(duration: 0.22)) {
+                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+            }
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {

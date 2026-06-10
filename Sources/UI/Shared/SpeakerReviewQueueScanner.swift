@@ -26,15 +26,6 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
         ].joined(separator: "|")
     }
 
-    var channelTitle: String {
-        switch channel {
-        case .mic:
-            return "Person in the room"
-        case .system:
-            return "Remote participant"
-        }
-    }
-
     var speakerLabel: String {
         "\(channelPrefix)/\(sourceName)"
     }

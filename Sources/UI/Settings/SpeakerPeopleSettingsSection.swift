@@ -770,6 +770,7 @@ private struct SpeakerVoiceToNameRow: View {
                 normalStroke: Color.primary.opacity(0.06)
             ))
             .help("Open the meeting this voice was heard in")
+            .accessibilityLabel("Open meeting transcript")
         }
     }
 
@@ -827,6 +828,7 @@ private struct SpeakerPlayClipButton: View {
         .buttonStyle(.plain)
         .disabled(!hasClip)
         .help(hasClip ? "Play a short clip of this voice" : "No voice clip was saved for this speaker")
+        .accessibilityLabel("Play voice sample")
     }
 }
 
@@ -934,6 +936,7 @@ private struct SpeakerSearchRow: View {
                 normalStroke: Color.primary.opacity(0.06)
             ))
             .help("Refresh the speaker list")
+            .accessibilityLabel("Refresh speakers")
         }
     }
 }
@@ -982,6 +985,7 @@ private struct SpeakerPersonRow: View {
                     }
                     .buttonStyle(SettingsHoverButtonStyle(tone: .accent, cornerRadius: 8))
                     .help("Play this voice")
+                    .accessibilityLabel("Play voice sample")
                 }
 
                 rowMenu
@@ -1039,6 +1043,7 @@ private struct SpeakerPersonRow: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Rename, merge, or delete this speaker")
+        .accessibilityLabel("Speaker actions")
     }
 
     private var displayName: String {
