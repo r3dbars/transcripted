@@ -502,6 +502,124 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    await runSuite("LocalMeetingSummarizer prepare uses the setup prompt contract") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryPrepareContractTests-\(UUID().uuidString)", isDirectory: true)
+        let metadataURL = directory.appendingPathComponent("prepare-metadata.txt")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let runtime = LocalGemmaSummaryRuntime(
+                configuration: localMeetingSummaryTestConfiguration(),
+                generateBatchOverride: { prompts, _ in
+                    let metadata = prompts.map { prompt in
+                        [
+                            prompt.label,
+                            "\(prompt.maxTokens)",
+                            prompt.prompt.contains("Ready.") ? "ready-copy" : "missing-ready-copy",
+                            prompt.prompt.contains("## Transcript") ? "has-transcript-section" : "no-transcript-section",
+                            prompt.prompt.contains("# Action Items") ? "has-summary-sections" : "no-summary-sections",
+                        ].joined(separator: "|")
+                    }.joined(separator: "\n")
+                    try metadata.write(to: metadataURL, atomically: true, encoding: .utf8)
+                    return prompts.map { _ in "Ready." }
+                }
+            )
+            let summarizer = LocalMeetingSummarizer(
+                configuration: localMeetingSummaryTestConfiguration(),
+                runtime: runtime
+            )
+
+            let profile = try await summarizer.prepareModelForFirstSummary()
+            let metadata = try String(contentsOf: metadataURL, encoding: .utf8)
+
+            assertEqual(profile, "test", "prepare should still return the active profile")
+            assertEqual(
+                metadata,
+                "setup|8|ready-copy|no-transcript-section|no-summary-sections",
+                "prepare should issue one tiny setup prompt"
+            )
+        } catch {
+            assertTrue(false, "prepare contract fixture should run: \(error)")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer prepare refuses low-memory setup before runtime work") {
+        let sentinelURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryPrepareLowMemory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: sentinelURL) }
+
+        let configuration = localMeetingSummaryLowMemoryTestConfiguration()
+        let runtime = LocalGemmaSummaryRuntime(
+            configuration: configuration,
+            generateBatchOverride: { _, _ in
+                FileManager.default.createFile(atPath: sentinelURL.path, contents: Data("called".utf8))
+                return ["Ready."]
+            }
+        )
+        let summarizer = LocalMeetingSummarizer(
+            configuration: configuration,
+            runtime: runtime
+        )
+
+        do {
+            _ = try await summarizer.prepareModelForFirstSummary()
+            assertTrue(false, "low-memory setup should fail before the runtime is called")
+        } catch {
+            guard case LocalMeetingSummaryError.insufficientMemory = error else {
+                assertTrue(false, "expected insufficientMemory, got \(error)")
+                return
+            }
+            assertFalse(
+                FileManager.default.fileExists(atPath: sentinelURL.path),
+                "low-memory setup should not start Gemma preparation work"
+            )
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer prepare labels missing setup output") {
+        let runtime = LocalGemmaSummaryRuntime(
+            configuration: localMeetingSummaryTestConfiguration(),
+            generateBatchOverride: { _, _ in [] }
+        )
+        let summarizer = LocalMeetingSummarizer(
+            configuration: localMeetingSummaryTestConfiguration(),
+            runtime: runtime
+        )
+
+        do {
+            _ = try await summarizer.prepareModelForFirstSummary()
+            assertTrue(false, "prepare should fail when the setup runner writes no output")
+        } catch {
+            guard case LocalMeetingSummaryError.outputMissing(let label) = error else {
+                assertTrue(false, "expected outputMissing, got \(error)")
+                return
+            }
+            assertEqual(label, "setup", "missing setup output should be attributed to the setup pass")
+        }
+    }
+
+    await runSuite("LocalMeetingSummarizer prepare surfaces runtime cancellation") {
+        let runtime = LocalGemmaSummaryRuntime(
+            configuration: localMeetingSummaryTestConfiguration(),
+            generateBatchOverride: { _, _ in
+                throw CancellationError()
+            }
+        )
+        let summarizer = LocalMeetingSummarizer(
+            configuration: localMeetingSummaryTestConfiguration(),
+            runtime: runtime
+        )
+
+        do {
+            _ = try await summarizer.prepareModelForFirstSummary()
+            assertTrue(false, "prepare should surface cancellation from setup")
+        } catch {
+            assertTrue(error is CancellationError, "expected CancellationError, got \(error)")
+        }
+    }
+
     runSuite("LocalGemmaSummaryRuntime stops a hung runner at the configured timeout") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("LocalMeetingSummaryTimeoutTests-\(UUID().uuidString)", isDirectory: true)
@@ -869,6 +987,27 @@ private func localMeetingSummaryTestConfiguration() -> LocalGemmaSummaryConfigur
         runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
         profileName: "test",
         minimumPhysicalMemoryBytes: 0,
+        chunkCharacterLimit: 100_000,
+        chunkMaxTokens: 64,
+        directMaxTokens: 64,
+        mergeMaxTokens: 64,
+        maxKVSize: 1_024,
+        processTimeoutSeconds: 5,
+        processNiceValue: 0,
+        cpuThreadLimit: 1,
+        interJobCooldownSeconds: 0
+    )
+}
+
+private func localMeetingSummaryLowMemoryTestConfiguration() -> LocalGemmaSummaryConfiguration {
+    let gib = UInt64(1024 * 1024 * 1024)
+    let currentMemory = ProcessInfo.processInfo.physicalMemory
+    let requiredMemory = currentMemory <= UInt64.max - gib ? currentMemory + gib : currentMemory
+    return LocalGemmaSummaryConfiguration(
+        modelID: LocalMeetingSummarySetupStatus.defaultModelID,
+        runtimePackage: LocalMeetingSummarySetupStatus.defaultRuntimePackage,
+        profileName: "test-low-memory",
+        minimumPhysicalMemoryBytes: requiredMemory,
         chunkCharacterLimit: 100_000,
         chunkMaxTokens: 64,
         directMaxTokens: 64,
