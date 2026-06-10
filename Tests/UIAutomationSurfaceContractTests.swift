@@ -80,6 +80,7 @@ func testUIAutomationSurfaceContract() {
 
         for pageCase in [
             "case home",
+            "case dictations",
             "case general",
             "case models",
             "case shortcuts",
@@ -190,9 +191,6 @@ func testUIAutomationSurfaceContract() {
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
 
         for identifier in [
-            "transcripted.home.mode.meetings",
-            "transcripted.home.mode.dictation",
-            "transcripted.home.mode.speakers",
             "transcripted.home.stats.view",
             "transcripted.home.stats.done",
             "transcripted.home.row.copy",
@@ -200,9 +198,6 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.dictation.open-markdown",
             "transcripted.home.dictation.expand",
             "transcripted.home.meeting.preview",
-            "transcripted.home.meeting.summary-expand",
-            "transcripted.home.meeting.review-speakers",
-            "transcripted.home.meeting.retranscribe-speakers",
             "transcripted.home.meeting-preview.open-markdown",
             "transcripted.home.meeting-preview.copy-for-agent",
             "transcripted.home.meeting-preview.report-issue",
@@ -219,8 +214,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.failed-meetings.delete",
             "transcripted.home.failed-meetings.dismiss",
             "transcripted.home.load-more",
-            "transcripted.home.needs-attention.review",
-            "transcripted.home.needs-attention.review-menu",
+            "transcripted.home.needs-attention.review.",
         ] {
             assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
@@ -261,12 +255,16 @@ func testUIAutomationSurfaceContract() {
         )
 
         assertTrue(
-            homeSource.contains("person.crop.circle.badge.questionmark")
-                && homeSource.contains(".accessibilityLabel(accessibilityLabel)")
-                && homeSource.contains(".accessibilityHint(help)")
-                && homeSource.contains("transcripted.home.meeting.review-speakers")
-                && homeSource.contains("transcripted.home.meeting.retranscribe-speakers"),
-            "Home speaker review affordances should explain the orange icon while keeping stable automation IDs"
+            homeSource.contains("HomeAttentionPillsRow")
+                && homeSource.contains(".accessibilityHint(issue.detail)")
+                && homeSource.contains("transcripted.home.needs-attention.review."),
+            "Home attention pills should stay labeled and scriptable"
+        )
+
+        assertTrue(
+            settingsSource.contains("HomeRowMenuItem(title: \"Review speakers\"")
+                && settingsSource.contains("HomeRowMenuItem(\n                        title: \"Re-transcribe with speaker ID\""),
+            "meeting speaker review and re-transcribe actions should stay reachable from the row menu"
         )
 
         for identifier in [
@@ -321,8 +319,9 @@ func testUIAutomationSurfaceContract() {
             "AXChildrenInNavigationOrder",
             "transcripted.status-item.button",
             "transcripted.menubar.primary.home",
-            "transcripted.settings.sidebar.general",
-            "transcripted.home.mode.meetings",
+            "transcripted.settings.tab.general",
+            "transcripted.settings.sidebar.settings-toggle",
+            "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {

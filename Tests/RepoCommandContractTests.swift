@@ -2236,7 +2236,7 @@ func testRepoCommandContract() {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let needsAttentionBlock = sourceSlice(
             settingsContents,
-            from: "private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {",
+            from: "private var homeAttentionIssues: [HomeAttentionIssue] {",
             to: "private var homeMeetingDaySections:"
         )
 
@@ -2755,8 +2755,9 @@ func testRepoCommandContract() {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         assertTrue(
-            homeContents.contains("Label(\"View stats\", systemImage: \"info.circle\")"),
-            "home stats should keep a visible View stats action"
+            homeContents.contains("transcripted.home.stats.view")
+                && homeContents.contains(".help(\"View all stats\")"),
+            "the home stats line should stay a labeled, scriptable stats affordance"
         )
         assertTrue(
             homeContents.contains("let onViewStats: () -> Void")

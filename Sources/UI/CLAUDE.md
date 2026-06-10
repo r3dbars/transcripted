@@ -13,7 +13,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (66 Swift files)
+## Files (67 Swift files)
 
 ### Overlay/
 
@@ -75,12 +75,13 @@ The current agent-connect surfaces should keep one simple mental model:
 ### Settings/
 
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page, including Claude Desktop install/repair, copy prompts, folder paths, and config reveal actions
+- `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
-- `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, meeting-audio playback, failed-meeting recovery, summary stats, and lightweight copy/feedback/delete affordances
+- `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets with AI-summary lead, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
@@ -92,9 +93,9 @@ The current agent-connect surfaces should keep one simple mental model:
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, people, storage, connectAgent, beta, privacy, support, about) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
-- `Settings/TranscriptedSettingsSidebar.swift` — Settings sidebar section model and sidebar row
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
@@ -122,9 +123,12 @@ Cross-cutting local-speaker behavior is split between settings and review UI:
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The redesigned Settings home surface is intentionally a fast dashboard rather
-than a full archive browser. `HomeView` keeps recent dictations and meetings to
-small paged slices so the settings window still opens quickly for users with
+The main window is content-first: the sidebar leads with Home, Dictations,
+Speakers, and Agent; the sidebar gear opens a settings area in the content
+pane with a capsule tab strip (General/Storage/Beta/Support/About). Home is the meetings surface — an editorial canvas (time-of-day
+greeting, stats line, needs-attention pills, failed-meeting recovery, the
+day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
+captures to small paged slices so the window still opens quickly for users with
 large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those
 refreshes scoped to the pages that actually need them.
 
@@ -183,6 +187,7 @@ Relevant direct coverage:
 - `Tests/DictationRecordingStartOverlayPolicyTests.swift`
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
+- `Tests/HomeCanvasGreetingTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
 - `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
