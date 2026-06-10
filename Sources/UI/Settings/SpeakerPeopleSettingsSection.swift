@@ -634,7 +634,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 }
 
 struct SpeakerPeopleSettingsSection: View {
+    enum ScrollTarget: Hashable {
+        case reviewQueue
+    }
+
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    var onShowInbox: (() -> Void)?
 
     var body: some View {
         SettingsSection(
@@ -648,7 +653,11 @@ struct SpeakerPeopleSettingsSection: View {
                 speakerCount: model.profiles.count,
                 meetingCount: model.totalMeetingCount,
                 onShowNeedsReview: {
+                    model.searchText = ""
                     model.profileFilter = .needsReview
+                    if model.reviewQueueCount > 0 {
+                        onShowInbox?()
+                    }
                 }
             )
         }
@@ -669,6 +678,8 @@ struct SpeakerPeopleSettingsSection: View {
                     }
                 }
             }
+            .id(ScrollTarget.reviewQueue)
+            .accessibilityIdentifier("transcripted.speakers.inbox")
         }
 
         if !model.duplicateCandidates.isEmpty {
@@ -725,7 +736,7 @@ struct SpeakerPeopleSettingsSection: View {
 
     private var actionSectionDetail: String {
         if model.reviewQueueCount > 0 {
-            return "Deferred speaker reviews are ready to finish."
+            return "Speaker labels saved for later are ready to name."
         }
         if model.needsReviewCount > 0 {
             return "Start here when a speaker needs a name or a duplicate needs merging."
@@ -983,11 +994,32 @@ private struct SpeakerPeopleStatusRow: View {
     @ViewBuilder
     private var reviewButton: some View {
         if hasWork {
-            SettingsInlineActionButton(title: reviewQueueCount > 0 ? "Show Inbox" : "Show Review", tone: .warning) {
+            SettingsInlineActionButton(
+                title: actionTitle,
+                tone: .warning,
+                automationIdentifier: actionAutomationIdentifier
+            ) {
                 onShowNeedsReview()
             }
             .fixedSize(horizontal: true, vertical: false)
+            .help(actionHelp)
+            .accessibilityHint(actionHelp)
         }
+    }
+
+    private var actionTitle: String {
+        reviewQueueCount > 0 ? "Show Inbox" : "Show Review"
+    }
+
+    private var actionAutomationIdentifier: String {
+        reviewQueueCount > 0 ? "transcripted.speakers.show-inbox" : "transcripted.speakers.show-review"
+    }
+
+    private var actionHelp: String {
+        if reviewQueueCount > 0 {
+            return "Jump to the saved-call speaker labels that still need names."
+        }
+        return "Show only saved speakers that need review."
     }
 
     private var hasWork: Bool {

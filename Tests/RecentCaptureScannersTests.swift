@@ -102,8 +102,13 @@ func testRecentCaptureScanners() async {
         )
         assertEqual(
             RecentMeetingSpeakerStatus.needsReview(1).summary,
-            "1 speaker needs review",
+            "1 speaker label needs a name",
             "singular speaker summary should read naturally"
+        )
+        assertEqual(
+            RecentMeetingSpeakerStatus.needsReview(2).summary,
+            "2 speaker labels need names",
+            "plural speaker summary should explain the orange review affordance"
         )
         assertEqual(
             RecentMeetingSpeakerStatus.ready.summary,

@@ -1682,6 +1682,7 @@ struct HomeMeetingRow: View {
             return AnyView(
                 reviewDotButton(
                     help: item.speakerStatus.summary,
+                    accessibilityLabel: "Review speaker labels",
                     isDisabled: false,
                     automationIdentifier: "transcripted.home.meeting.review-speakers",
                     action: onReviewSpeakers
@@ -1698,6 +1699,7 @@ struct HomeMeetingRow: View {
         return AnyView(
             reviewDotButton(
                 help: retranscriptionUnavailableReason ?? "Identify speakers from retained audio",
+                accessibilityLabel: "Identify speakers from retained audio",
                 isDisabled: !canRetranscribe,
                 automationIdentifier: "transcripted.home.meeting.retranscribe-speakers",
                 action: onRetranscribe
@@ -1787,14 +1789,15 @@ struct HomeMeetingRow: View {
 
     private func reviewDotButton(
         help: String,
+        accessibilityLabel: String,
         isDisabled: Bool,
         automationIdentifier: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Circle()
-                .fill(Color.orange)
-                .frame(width: 7, height: 7)
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.orange)
                 .frame(width: 18, height: 26)
                 .contentShape(Rectangle())
         }
@@ -1802,6 +1805,8 @@ struct HomeMeetingRow: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
         .help(help)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(help)
         .accessibilityIdentifier(automationIdentifier)
     }
 
@@ -2160,6 +2165,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 struct HomeActivityTabsCard: View {
     let selectedTab: HomeActivityTab
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    let onShowSpeakerInbox: () -> Void
     let dictationSections: [HomeDaySection<SavedDictationEntry>]
     let meetingSections: [HomeDaySection<HomeMeetingListItem>]
     let isLoading: Bool
@@ -2259,7 +2265,7 @@ struct HomeActivityTabsCard: View {
                         }
                     }
                 case .speakers:
-                    HomeSpeakersTab(model: speakerPeopleModel)
+                    HomeSpeakersTab(model: speakerPeopleModel, onShowInbox: onShowSpeakerInbox)
                 }
             }
         }
@@ -2307,6 +2313,7 @@ struct HomeActivityTabsCard: View {
 
 struct HomeSpeakersTab: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    let onShowInbox: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -2320,7 +2327,7 @@ struct HomeSpeakersTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            SpeakerPeopleSettingsSection(model: model)
+            SpeakerPeopleSettingsSection(model: model, onShowInbox: onShowInbox)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

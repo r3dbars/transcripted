@@ -90,6 +90,7 @@ struct TranscriptedSettingsView: View {
     @State private var localSummaryModelPreparationToken: UUID?
     @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var speakerInboxScrollRequest = 0
 
     init(
         appState: TranscriptedAppState,
@@ -142,17 +143,27 @@ struct TranscriptedSettingsView: View {
                 )
                 .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        pageBody
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 28) {
+                            pageBody
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.top, settingsContentTopPadding)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: 860, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.top, settingsContentTopPadding)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .onChange(of: speakerInboxScrollRequest) { _, _ in
+                        Task { @MainActor in
+                            await Task.yield()
+                            withAnimation(.snappy(duration: 0.22)) {
+                                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+                            }
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(minWidth: 880, minHeight: 640)
@@ -420,6 +431,7 @@ struct TranscriptedSettingsView: View {
                 HomeActivityTabsCard(
                     selectedTab: homeActivityTab,
                     speakerPeopleModel: speakerPeopleModel,
+                    onShowSpeakerInbox: requestSpeakerInboxFocus,
                     dictationSections: homeViewModel.dictationDaySections,
                     meetingSections: meetingSections,
                     isLoading: homeViewModel.isLoading,
@@ -624,6 +636,11 @@ struct TranscriptedSettingsView: View {
         navigation.selectedPage = .home
         homeActivityTab = .speakers
         homeHeroMode = .speakers
+        requestSpeakerInboxFocus()
+    }
+
+    private func requestSpeakerInboxFocus() {
+        speakerInboxScrollRequest += 1
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -2209,10 +2226,13 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
+                summary: "Name speaker labels saved for later, play samples, and clean up duplicates."
             )
 
-            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
+            SpeakerPeopleSettingsSection(
+                model: speakerPeopleModel,
+                onShowInbox: requestSpeakerInboxFocus
+            )
         }
     }
 
