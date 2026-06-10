@@ -24,7 +24,7 @@ public class TranscriptionTaskManager: ObservableObject {
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
     private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?)] = [:]
+    private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?, recordingDate: Date?)] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
     private var intentionallyCancelledTaskIds: Set<UUID> = []
     private var committedTranscriptTaskIds: Set<UUID> = []
@@ -85,7 +85,8 @@ public class TranscriptionTaskManager: ObservableObject {
         outputFolder: URL,
         healthInfo: RecordingHealthInfo? = nil,
         meetingTitle: String? = nil,
-        splitLocalSpeakers: Bool = false
+        splitLocalSpeakers: Bool = false,
+        recordingDate: Date? = nil
     ) {
 
         // Guard: reject concurrent pipelines to prevent model contention
@@ -95,7 +96,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: "Transcription already in progress",
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             )
             publishFailure(
                 displayMessage: "Transcription already in progress",
@@ -112,7 +114,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 micAudioURL: micURL,
                 systemAudioURL: nil,
                 errorMessage: errorMessage,
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             )
             publishFailure(
                 displayMessage: "System audio required",
@@ -174,12 +177,18 @@ public class TranscriptionTaskManager: ObservableObject {
             outputFolder: outputFolder,
             healthInfo: healthInfo,
             splitLocalSpeakers: splitLocalSpeakers,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
         )
 
         activeCount += 1
         backgroundTaskCount += 1
-        activeTaskAudio[task.id] = (micURL: micURL, systemURL: systemURL, meetingTitle: meetingTitle)
+        activeTaskAudio[task.id] = (
+            micURL: micURL,
+            systemURL: systemURL,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
+        )
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting transcription task", [
@@ -201,7 +210,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     taskId: task.id,
                     healthInfo: task.healthInfo,
                     splitLocalSpeakers: task.splitLocalSpeakers,
-                    meetingTitle: task.meetingTitle
+                    meetingTitle: task.meetingTitle,
+                    recordingDate: task.recordingDate
                 )
 
                 await MainActor.run {
@@ -229,7 +239,8 @@ public class TranscriptionTaskManager: ObservableObject {
                         systemAudioURL: systemURL,
                         errorMessage: error.localizedDescription,
                         taskId: task.id,
-                        meetingTitle: task.meetingTitle
+                        meetingTitle: task.meetingTitle,
+                        recordingDate: task.recordingDate
                     )
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: task.id)
@@ -652,6 +663,7 @@ public class TranscriptionTaskManager: ObservableObject {
         errorMessage: String,
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) {
         _ = addFailedTranscriptionRetainingAvailableAudio(
@@ -660,6 +672,7 @@ public class TranscriptionTaskManager: ObservableObject {
             errorMessage: errorMessage,
             taskId: taskId,
             meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
             archiveAudio: archiveAudio
         )
     }
@@ -719,6 +732,7 @@ public class TranscriptionTaskManager: ObservableObject {
         errorMessage: String,
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
@@ -742,6 +756,7 @@ public class TranscriptionTaskManager: ObservableObject {
             originalSystemURL: systemAudioURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
             removeOriginalsAfterArchive: archiveAudio
         )
     }
@@ -754,6 +769,7 @@ public class TranscriptionTaskManager: ObservableObject {
         originalSystemURL: URL?,
         errorMessage: String,
         meetingTitle: String?,
+        recordingDate: Date?,
         removeOriginalsAfterArchive: Bool
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
@@ -772,7 +788,8 @@ public class TranscriptionTaskManager: ObservableObject {
             micAudioURL: failedMicURL,
             systemAudioURL: failedSystemURL,
             errorMessage: errorMessage,
-            meetingTitle: meetingTitle
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
         )
         guard didPersist else {
             if let retainedAudio {
@@ -917,6 +934,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 healthInfo: nil,
                 splitLocalSpeakers: false,
                 meetingTitle: failed.meetingTitle,
+                recordingDate: failed.recordingDate ?? failed.timestamp,
                 sourceFailedTranscriptionId: failedId
             )
 
@@ -1109,7 +1127,8 @@ public class TranscriptionTaskManager: ObservableObject {
                 systemAudioURL: audio.systemURL,
                 errorMessage: errorMessage,
                 taskId: taskId,
-                meetingTitle: audio.meetingTitle
+                meetingTitle: audio.meetingTitle,
+                recordingDate: audio.recordingDate
             ) {
                 preservedCount += 1
             }

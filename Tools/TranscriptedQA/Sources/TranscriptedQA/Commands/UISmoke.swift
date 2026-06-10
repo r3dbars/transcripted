@@ -295,17 +295,12 @@ final class UIAutomationSmokeRunner {
 
         let settingsSidebarIDs = [
             "transcripted.settings.sidebar.home",
-            "transcripted.settings.sidebar.general",
-            "transcripted.settings.sidebar.storage",
+            "transcripted.settings.sidebar.dictations",
+            "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
-            "transcripted.settings.sidebar.beta",
-            "transcripted.settings.sidebar.support",
-            "transcripted.settings.sidebar.about",
+            "transcripted.settings.sidebar.settings-toggle",
         ]
         let homeIDs = [
-            "transcripted.home.mode.meetings",
-            "transcripted.home.mode.dictation",
-            "transcripted.home.mode.speakers",
             "transcripted.home.stats.view",
         ]
 
@@ -329,12 +324,49 @@ final class UIAutomationSmokeRunner {
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
-        guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.general") else {
+        guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.settings-toggle") else {
+            builder.add(.fail(
+                "settings-pages-toggle",
+                "Settings area opens from the sidebar toggle",
+                target: "transcripted.settings.sidebar.settings-toggle",
+                detail: "Could not press the Settings toggle."
+            ))
+            return builder.build()
+        }
+
+        let settingsTabIDs = [
+            "transcripted.settings.tab.general",
+            "transcripted.settings.tab.storage",
+            "transcripted.settings.tab.beta",
+            "transcripted.settings.tab.support",
+            "transcripted.settings.tab.about",
+        ]
+
+        guard waitUntil(timeout: timeout, description: "settings tabs", condition: {
+            let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+            return settingsTabIDs.allSatisfy(ids.contains)
+        }) else {
+            builder.add(.fail(
+                "settings-pages-toggle",
+                "Settings area opens from the sidebar toggle",
+                target: "Transcripted Settings",
+                detail: "Settings tab strip did not appear after pressing the toggle.",
+                observed: observedElements(for: settingsTabIDs, inspector: appInspector)
+            ))
+            return builder.build()
+        }
+        builder.add(.pass(
+            "settings-pages-toggle",
+            "Settings area opens from the sidebar toggle",
+            target: "transcripted.settings.sidebar.settings-toggle"
+        ))
+
+        guard appInspector.performPressOrClick(identifier: "transcripted.settings.tab.general") else {
             builder.add(.fail(
                 "settings-navigation",
-                "Settings sidebar navigates to General",
-                target: "transcripted.settings.sidebar.general",
-                detail: "Could not press the General sidebar row."
+                "Settings tabs navigate to General",
+                target: "transcripted.settings.tab.general",
+                detail: "Could not press the General settings tab."
             ))
             return builder.build()
         }
@@ -363,8 +395,8 @@ final class UIAutomationSmokeRunner {
         }
         builder.add(.pass(
             "settings-navigation",
-            "Settings sidebar navigates to General",
-            target: "transcripted.settings.sidebar.general"
+            "Settings tabs navigate to General",
+            target: "transcripted.settings.tab.general"
         ))
         builder.add(.pass(
             "settings-general",

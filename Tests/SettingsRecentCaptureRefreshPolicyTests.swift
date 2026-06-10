@@ -2,11 +2,13 @@ import Foundation
 
 func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — sends home to the dashboard loader") {
-        assertEqual(
-            SettingsRecentCaptureRefreshPolicy.mode(for: .home),
-            .homeDashboard,
-            "home should use the heavier dashboard refresh path"
-        )
+        for page in [TranscriptedSettingsPage.home, .dictations] {
+            assertEqual(
+                SettingsRecentCaptureRefreshPolicy.mode(for: page),
+                .homeDashboard,
+                "\(page.rawValue) should use the heavier dashboard refresh path"
+            )
+        }
     }
 
     runSuite("SettingsRecentCaptureRefreshPolicy.mode — skips recent capture work on non-list pages") {

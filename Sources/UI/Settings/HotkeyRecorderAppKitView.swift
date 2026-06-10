@@ -9,6 +9,7 @@ final class HotkeyRecorderAppKitView: NSView {
     private var pushToTalkRow: ShortcutRecorderRow!
     private var handsFreeRow: ShortcutRecorderRow!
     private var meetingRow: ShortcutRecorderRow!
+    private var pasteLastDictationRow: ShortcutRecorderRow!
     private let resetButton = NSButton(title: "Reset to Defaults", target: nil, action: nil)
 
     private var keyMonitor: Any?
@@ -29,12 +30,13 @@ final class HotkeyRecorderAppKitView: NSView {
         case pushToTalk
         case handsFree
         case meeting
+        case pasteLastDictation
 
         var isDictation: Bool {
             switch self {
             case .pushToTalk, .handsFree:
                 return true
-            case .meeting:
+            case .meeting, .pasteLastDictation:
                 return false
             }
         }
@@ -43,7 +45,9 @@ final class HotkeyRecorderAppKitView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
 
-        pushToTalkRow = ShortcutRecorderRow(label: "Push to Talk") { [weak self] in self?.startRecording(.pushToTalk) }
+        pushToTalkRow = ShortcutRecorderRow(
+            label: "Push to Talk",
+            recordAction: { [weak self] in self?.startRecording(.pushToTalk) },
             resetAction: { [weak self] in
                 self?.stopRecording()
                 PhysicalDictationTriggerPreferences.savePushToTalk(
@@ -51,9 +55,12 @@ final class HotkeyRecorderAppKitView: NSView {
                 )
                 self?.refreshDisplay()
             }
+        )
         addSubview(pushToTalkRow)
 
-        handsFreeRow = ShortcutRecorderRow(label: "Hands-Free") { [weak self] in self?.startRecording(.handsFree) }
+        handsFreeRow = ShortcutRecorderRow(
+            label: "Hands-Free",
+            recordAction: { [weak self] in self?.startRecording(.handsFree) },
             resetAction: { [weak self] in
                 self?.stopRecording()
                 PhysicalDictationTriggerPreferences.saveHandsFree(
@@ -61,9 +68,12 @@ final class HotkeyRecorderAppKitView: NSView {
                 )
                 self?.refreshDisplay()
             }
+        )
         addSubview(handsFreeRow)
 
-        meetingRow = ShortcutRecorderRow(label: "Meetings") { [weak self] in self?.startRecording(.meeting) }
+        meetingRow = ShortcutRecorderRow(
+            label: "Meetings",
+            recordAction: { [weak self] in self?.startRecording(.meeting) },
             resetAction: { [weak self] in
                 self?.stopRecording()
                 PhysicalDictationTriggerPreferences.saveMeeting(
@@ -71,7 +81,21 @@ final class HotkeyRecorderAppKitView: NSView {
                 )
                 self?.refreshDisplay()
             }
+        )
         addSubview(meetingRow)
+
+        pasteLastDictationRow = ShortcutRecorderRow(
+            label: "Paste Last",
+            recordAction: { [weak self] in self?.startRecording(.pasteLastDictation) },
+            resetAction: { [weak self] in
+                self?.stopRecording()
+                PhysicalDictationTriggerPreferences.savePasteLastDictation(
+                    PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
+                )
+                self?.refreshDisplay()
+            }
+        )
+        addSubview(pasteLastDictationRow)
 
         resetButton.bezelStyle = .inline
         resetButton.isBordered = false
@@ -93,6 +117,7 @@ final class HotkeyRecorderAppKitView: NSView {
         pushToTalkRow.frame = NSRect(x: 0, y: bounds.height - rowH, width: bounds.width, height: rowH)
         handsFreeRow.frame = NSRect(x: 0, y: bounds.height - rowH * 2 - 4, width: bounds.width, height: rowH)
         meetingRow.frame = NSRect(x: 0, y: bounds.height - rowH * 3 - 8, width: bounds.width, height: rowH)
+        pasteLastDictationRow.frame = NSRect(x: 0, y: bounds.height - rowH * 4 - 12, width: bounds.width, height: rowH)
         let resetSize = resetButton.fittingSize
         resetButton.frame = NSRect(x: (bounds.width - resetSize.width) / 2, y: 0, width: resetSize.width, height: resetSize.height)
     }
@@ -106,6 +131,7 @@ final class HotkeyRecorderAppKitView: NSView {
         let pushToTalkBinding = PhysicalDictationTriggerPreferences.pushToTalkBinding()
         let handsFreeBinding = PhysicalDictationTriggerPreferences.handsFreeBinding()
         let meetingBinding = PhysicalDictationTriggerPreferences.meetingBinding()
+        let pasteLastDictationBinding = PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
         pushToTalkRow.update(
             displayText: dictationShortcutsEnabled
                 ? (recordingTarget == .pushToTalk ? "Press key..." : PhysicalDictationTriggerPreferences.displayString(for: pushToTalkBinding))
@@ -126,6 +152,12 @@ final class HotkeyRecorderAppKitView: NSView {
             displayText: recordingTarget == .meeting ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: meetingBinding),
             isRecording: recordingTarget == .meeting,
             isDefault: meetingBinding == PhysicalDictationTriggerPreferences.defaultMeetingBinding,
+            isEnabled: true
+        )
+        pasteLastDictationRow.update(
+            displayText: recordingTarget == .pasteLastDictation ? "Press shortcut..." : PhysicalDictationTriggerPreferences.displayString(for: pasteLastDictationBinding),
+            isRecording: recordingTarget == .pasteLastDictation,
+            isDefault: pasteLastDictationBinding == PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
             isEnabled: true
         )
     }
@@ -214,6 +246,8 @@ final class HotkeyRecorderAppKitView: NSView {
             PhysicalDictationTriggerPreferences.saveHandsFree(binding)
         case .meeting:
             PhysicalDictationTriggerPreferences.saveMeeting(binding)
+        case .pasteLastDictation:
+            PhysicalDictationTriggerPreferences.savePasteLastDictation(binding)
         }
     }
 
@@ -224,7 +258,7 @@ final class HotkeyRecorderAppKitView: NSView {
         refreshDisplay()
     }
 
-    var intrinsicHeight: CGFloat { 108 }
+    var intrinsicHeight: CGFloat { 140 }
 }
 
 // MARK: - Single Shortcut Row

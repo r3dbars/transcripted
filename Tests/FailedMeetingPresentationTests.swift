@@ -182,6 +182,27 @@ func testFailedMeetingPresentation() {
             "partial retained audio should not enable the retry action"
         )
     }
+
+    runSuite("FailedMeetingPresentation labels retained WAVs as raw audio") {
+        let source = (try? String(
+            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            source.contains("pathExtension.localizedCaseInsensitiveCompare(\"wav\")"),
+            "failed meeting metadata should detect retained WAV audio"
+        )
+        assertTrue(
+            source.contains("availableAudioURLs.contains"),
+            "failed meeting metadata should label raw audio from files that still exist"
+        )
+        assertTrue(
+            source.contains("\"Raw audio kept\"")
+                && source.contains("\"\\(sizeText) raw audio kept\""),
+            "failed meeting metadata should label retained WAVs as raw audio"
+        )
+    }
 }
 
 private func makeFailedMeetingPresentationTestDirectory() -> URL {

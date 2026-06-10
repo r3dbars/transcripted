@@ -12,8 +12,9 @@ func testHomeStatsPresentation() {
         )) ?? ""
 
         assertTrue(
-            homeSource.contains("Label(\"View stats\", systemImage: \"info.circle\")"),
-            "home stats should keep a visible View stats action"
+            homeSource.contains("transcripted.home.stats.view")
+                && homeSource.contains(".help(\"View all stats\")"),
+            "the home stats line should stay a labeled, scriptable stats affordance"
         )
         assertTrue(
             homeSource.contains("let onViewStats: () -> Void")

@@ -96,7 +96,7 @@ probe_sentry() {
   response=$(curl -s -f -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
     "https://sentry.io/api/0/projects/r3dbars/apple-macos/issues/?query=is:unresolved&limit=10" \
     --header "Content-Type: application/json")
-  response=$(echo "$response" | jq '[.[] | select(((.title // "") | contains("sentry_test_event")) | not)]')
+  response=$(echo "$response" | jq '[.[] | select((((.title // "") | contains("sentry_test_event")) or ((.title // "") | contains("support_diagnostic_event"))) | not)]')
 
   if [[ -z "$response" ]]; then
     echo "Sentry: no unresolved issues"

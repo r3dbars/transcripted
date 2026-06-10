@@ -15,12 +15,26 @@ struct LocalMeetingSummaryResult: Equatable, Sendable {
 
 struct LocalMeetingSummarySections: Equatable, Sendable {
     let title: String?
+    let participants: String
     let summary: String
     let decisions: String
     let actionItems: String
     let openQuestions: String
     let risksOrFollowUps: String
     let accuracyNotes: String
+
+    func withParticipants(_ participants: String) -> LocalMeetingSummarySections {
+        LocalMeetingSummarySections(
+            title: title,
+            participants: participants,
+            summary: summary,
+            decisions: decisions,
+            actionItems: actionItems,
+            openQuestions: openQuestions,
+            risksOrFollowUps: risksOrFollowUps,
+            accuracyNotes: accuracyNotes
+        )
+    }
 }
 
 enum LocalMeetingSummaryError: LocalizedError, Equatable {
@@ -103,7 +117,7 @@ struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
                 minimumPhysicalMemoryBytes: 12 * gib,
                 chunkCharacterLimit: 9_000,
                 chunkMaxTokens: 300,
-                directMaxTokens: 900,
+                directMaxTokens: 360,
                 mergeMaxTokens: 2_400,
                 maxKVSize: 6_144,
                 processTimeoutSeconds: 900,
@@ -410,6 +424,121 @@ enum LocalMeetingSummaryChunker {
         }
 
         return false
+    }
+
+    private static func looksLikeTimestamp(_ value: String) -> Bool {
+        let parts = value.split(separator: ":")
+        guard parts.count == 2 || parts.count == 3 else { return false }
+        return parts.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+    }
+}
+
+enum LocalMeetingSummaryParticipantExtractor {
+    static func participants(from transcript: String) -> String {
+        var names: [String] = []
+        var seen = Set<String>()
+
+        for rawLine in transcript.components(separatedBy: .newlines) {
+            guard let label = speakerLabel(from: rawLine),
+                  let name = normalizedParticipantName(label) else {
+                continue
+            }
+            let key = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            names.append(name)
+        }
+
+        guard !names.isEmpty else { return "None found." }
+        return names.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private static func speakerLabel(from rawLine: String) -> String? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return nil }
+
+        if line.hasPrefix("**") {
+            let timestampStart = line.index(line.startIndex, offsetBy: 2)
+            guard let timestampEnd = line[timestampStart...].range(of: "**")?.lowerBound else {
+                return nil
+            }
+            let timestamp = String(line[timestampStart..<timestampEnd])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !looksLikeTimestamp(timestamp) {
+                return speakerLabel(from: timestamp)
+            }
+            let remainderStart = line.index(timestampEnd, offsetBy: 2)
+            return firstBracketValue(in: String(line[remainderStart...]))
+        }
+
+        if line.hasPrefix("["),
+           let firstEnd = line.firstIndex(of: "]") {
+            let firstValue = String(line[line.index(after: line.startIndex)..<firstEnd])
+            let remainder = String(line[line.index(after: firstEnd)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if looksLikeTimestamp(firstValue) {
+                return firstBracketValue(in: remainder)
+            }
+
+            if startsWithTimestamp(remainder) {
+                return firstValue
+            }
+
+            if firstValue.contains("/") {
+                return firstValue
+            }
+        }
+
+        return nil
+    }
+
+    private static func firstBracketValue(in raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("["),
+              let end = text.firstIndex(of: "]") else {
+            return nil
+        }
+        return String(text[text.index(after: text.startIndex)..<end])
+    }
+
+    private static func normalizedParticipantName(_ raw: String) -> String? {
+        let unwrapped = raw
+            .replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let channelStripped = unwrapped.split(separator: "/", omittingEmptySubsequences: false)
+            .last
+            .map(String.init) ?? unwrapped
+        let name = channelStripped
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !name.isEmpty,
+              !looksLikeTimestamp(name),
+              !isPlaceholderParticipantName(name) else {
+            return nil
+        }
+        return String(name.prefix(96))
+    }
+
+    private static func isPlaceholderParticipantName(_ name: String) -> Bool {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        if normalized == "remote" || normalized == "unknown" || normalized == "unknown speaker" {
+            return true
+        }
+        if normalized == "speaker" {
+            return true
+        }
+        if normalized.hasPrefix("speaker ") {
+            let suffix = normalized.dropFirst("speaker ".count)
+            return !suffix.isEmpty && suffix.allSatisfy { $0.isNumber }
+        }
+        return false
+    }
+
+    private static func startsWithTimestamp(_ value: String) -> Bool {
+        let first = value.split(separator: " ", maxSplits: 1).first.map(String.init) ?? value
+        return looksLikeTimestamp(first)
     }
 
     private static func looksLikeTimestamp(_ value: String) -> Bool {
@@ -910,7 +1039,9 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         try Task.checkCancellation()
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
+        let participants = LocalMeetingSummaryParticipantExtractor.participants(from: transcript)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+            .withParticipants(participants)
         let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
         guard latestTranscript == transcript else {
@@ -921,7 +1052,8 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
             to: latestMarkdown,
             metadata: .gemma(configuration: configuration),
             generatedAt: date,
-            chunkCount: chunks.count
+            chunkCount: chunks.count,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
         )
 
         try Task.checkCancellation()
@@ -1029,7 +1161,8 @@ struct AppleFoundationMeetingSummarizer: @unchecked Sendable {
             to: latestMarkdown,
             metadata: runtime.metadata,
             generatedAt: date,
-            chunkCount: chunks.count
+            chunkCount: chunks.count,
+            sourceTranscriptFilename: transcriptURL.lastPathComponent
         )
         try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
         fileManager.restrictFileToOwnerOnly(at: transcriptURL)
@@ -1060,27 +1193,48 @@ enum LocalMeetingSummaryPrompts {
 
         Summarize "\(title)" accurately. Do not invent decisions, tasks, dates, names, or facts. If something is unclear, write unclear.
 
-        Return markdown with exactly these sections:
+        Return markdown in exactly this shape:
         # Title
+        <plain 3-8 word title, no markdown marker>
+
         # Summary
+        - <2-4 bullets on what mattered, outcomes, and important context>
+
         # Decisions
+        - <only explicit choices or commitments>
+
         # Action Items
+        - <Owner if named: concrete unfinished follow-up>
+
         # Open Questions
+        - <unresolved questions>
+
         # Risks or Follow-ups
+        - <risks, blockers, or things to watch>
+
         # Accuracy Notes
+        - <only source-quality caveats that affect trust>
 
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the transcript.
+        - Do not make the meeting title itself a markdown heading. Always put it under # Title.
         - Title must be specific, plain, and 3 to 8 words.
-        - Keep it concise and useful.
+        - Keep the whole output short. Prefer fewer, sharper bullets over broad coverage.
+        - Summary must explain the actual substance of the meeting, not describe the transcript. Never write "the transcript consists of", "the transcript contains", "the speaker discusses", or similar meta-summary filler.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the transcript.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the transcript names one. If no owner is named, start with "Unassigned:".
+        - Treat commitments as action items when a participant agrees to do, send, decide, test, review, or follow up on something after the meeting.
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the transcript leaves them as unfinished follow-up work.
         - Put brainstorms, proposals, or maybes in Open Questions or Risks unless the transcript clearly says they were decided.
-        - If a section has nothing supported, write "None found."
+        - Accuracy Notes should be "None found." unless repetition, cut-off text, unclear audio, or speaker confusion changes how much the reader should trust the summary.
+        - If a section has nothing supported, write exactly "None found."
 
         Transcript:
         \(transcript)
@@ -1103,13 +1257,19 @@ enum LocalMeetingSummaryPrompts {
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Preserve every explicit decision, action item, open question, and follow-up from this chunk.
+        - Chunk Summary should capture the actual substance, not describe the transcript or the speaker.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets or long explanations.
         - Include timestamps and speakers when available, especially for action items and decisions.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from this chunk.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the chunk names one. If no owner is named, start with "Unassigned:".
+        - Treat commitments as action items when a participant agrees to do, send, decide, test, review, or follow up on something after the meeting.
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the chunk leaves them as unfinished follow-up work.
         - Keep brainstorms, proposals, or maybes out of Decisions unless the chunk clearly says they were decided.
-        - If a heading has nothing supported, write "None found."
+        - If a heading has nothing supported, write exactly "None found."
 
         Chunk transcript:
         \(chunk)
@@ -1122,29 +1282,50 @@ enum LocalMeetingSummaryPrompts {
 
         Do not invent decisions, tasks, dates, names, or facts.
 
-        Return markdown with exactly these sections:
+        Return markdown in exactly this shape:
         # Title
+        <plain 3-8 word title, no markdown marker>
+
         # Summary
+        - <2-4 bullets on what mattered, outcomes, and important context>
+
         # Decisions
+        - <only explicit choices or commitments>
+
         # Action Items
+        - <Owner if named: concrete unfinished follow-up>
+
         # Open Questions
+        - <unresolved questions>
+
         # Risks or Follow-ups
+        - <risks, blockers, or things to watch>
+
         # Accuracy Notes
+        - <only source-quality caveats that affect trust>
 
         Rules:
         - Always include every section heading exactly as listed, even when the section says "None found."
         - Base every point only on the chunk notes.
+        - Do not make the meeting title itself a markdown heading. Always put it under # Title.
         - Title must be specific, plain, and 3 to 8 words.
-        - Keep each section concise.
+        - Keep the whole output short. Prefer fewer, sharper bullets over broad coverage.
+        - Summary must explain the actual substance of the meeting, not describe the notes. Never write "the transcript consists of", "the transcript contains", "the speaker discusses", or similar meta-summary filler.
+        - If the source is a test, demo, repeated status loop, or setup check, summarize it as a test recording or setup check. Do not summarize it as repetitive transcript text.
         - Use compact one-line bullets. Do not use sub-bullets, long explanations, or repeated qualifiers.
         - Include timestamps when available.
+        - Preserve concrete names, product names, decisions, dates, and numbers when they matter.
         - Preserve explicit action items, decisions, open questions, and follow-ups from the chunk notes.
         - Decisions include explicit choices, selections, agreed settings, approvals, or commitments from the chunk notes.
+        - Decision bullets should name the outcome first, then short context.
         - Action Items are only future follow-up work after the meeting, not in-call setup steps or instructions already completed during the transcript.
+        - Action item bullets should start with the owner when the notes name one. If no owner is named, start with "Unassigned:".
+        - Treat commitments as action items when a participant agrees to do, send, decide, test, review, or follow up on something after the meeting.
         - Do not list one-off navigation, roleplay, game, or setup instructions as Action Items unless the notes leave them as unfinished follow-up work.
         - Remove duplicates only when the same owner, same task or decision, and same topic are repeated.
         - Never promote brainstorms, proposals, or unresolved questions into Decisions.
-        - If a section has nothing supported, write "None found."
+        - Accuracy Notes should be "None found." unless repetition, cut-off text, unclear audio, or speaker confusion changes how much the reader should trust the summary.
+        - If a section has nothing supported, write exactly "None found."
 
         Chunk notes:
         \(notes)
@@ -1180,6 +1361,7 @@ enum LocalMeetingSummaryNormalizer {
         let text = normalized(raw)
         return LocalMeetingSummarySections(
             title: summaryTitle(in: text),
+            participants: section("# Participants", in: text) ?? "None found.",
             summary: section("# Summary", in: text) ?? "None found.",
             decisions: section("# Decisions", in: text) ?? "None found.",
             actionItems: section("# Action Items", in: text) ?? "None found.",
@@ -1193,7 +1375,7 @@ enum LocalMeetingSummaryNormalizer {
         let explicitTitle = section("# Title", in: raw)?
             .components(separatedBy: .newlines)
             .first
-            .map(cleanSectionText)
+            .map(cleanTitleText)
             .flatMap { isStructuralGeneratedTitle($0) ? nil : String($0.prefix(96)) }
         return explicitTitle ?? firstGeneratedTitleHeading(in: raw)
     }
@@ -1243,7 +1425,7 @@ enum LocalMeetingSummaryNormalizer {
             guard trimmed.hasPrefix("# "), !requiredSections.contains(trimmed) else {
                 return nil
             }
-            let title = cleanSectionText(String(trimmed.dropFirst(2)))
+            let title = cleanTitleText(String(trimmed.dropFirst(2)))
             return isStructuralGeneratedTitle(title) ? nil : String(title.prefix(96))
         }.first
     }
@@ -1267,6 +1449,14 @@ enum LocalMeetingSummaryNormalizer {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "None found." : text
     }
+
+    private static func cleanTitleText(_ raw: String) -> String {
+        var title = cleanSectionText(raw)
+        while title.hasPrefix("#") {
+            title = String(title.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return title
+    }
 }
 
 enum LocalMeetingSummaryMarkdownUpdater {
@@ -1275,6 +1465,7 @@ enum LocalMeetingSummaryMarkdownUpdater {
 
     private static let managedFrontmatterKeys: Set<String> = [
         "local_summary_version",
+        "local_summary_source_transcript",
         "local_summary_title",
         "local_summary_generated_at",
         "local_summary_provider",
@@ -1282,7 +1473,10 @@ enum LocalMeetingSummaryMarkdownUpdater {
         "local_summary_runtime",
         "local_summary_profile",
         "local_summary_chunk_count",
+        "local_summary_participants",
         "local_summary",
+        "local_summary_next_steps",
+        "local_summary_commitments",
         "local_summary_decisions",
         "local_summary_action_items",
         "local_summary_open_questions",
@@ -1295,14 +1489,16 @@ enum LocalMeetingSummaryMarkdownUpdater {
         to markdown: String,
         configuration: LocalGemmaSummaryConfiguration,
         generatedAt: Date,
-        chunkCount: Int
+        chunkCount: Int,
+        sourceTranscriptFilename: String? = nil
     ) -> String {
         self.markdown(
             byApplying: sections,
             to: markdown,
             metadata: .gemma(configuration: configuration),
             generatedAt: generatedAt,
-            chunkCount: chunkCount
+            chunkCount: chunkCount,
+            sourceTranscriptFilename: sourceTranscriptFilename
         )
     }
 
@@ -1311,7 +1507,8 @@ enum LocalMeetingSummaryMarkdownUpdater {
         to markdown: String,
         metadata: LocalMeetingSummaryRunMetadata,
         generatedAt: Date,
-        chunkCount: Int
+        chunkCount: Int,
+        sourceTranscriptFilename: String? = nil
     ) -> String {
         let document = TranscriptFrontmatter.document(in: markdown)
         let body = document?.body ?? markdown
@@ -1320,11 +1517,19 @@ enum LocalMeetingSummaryMarkdownUpdater {
             sections: sections,
             metadata: metadata,
             generatedAt: generatedAt,
-            chunkCount: chunkCount
+            chunkCount: chunkCount,
+            sourceTranscriptFilename: sourceTranscriptFilename
         )
         let updatedBody = removingLocalSummaryBlock(from: body)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let renderedBody = [updatedBody, renderedLocalSummarySection(sections, metadata: metadata)]
+        let renderedBody = [
+            updatedBody,
+            renderedLocalSummarySection(
+                sections,
+                metadata: metadata,
+                sourceTranscriptFilename: sourceTranscriptFilename
+            )
+        ]
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
 
@@ -1342,14 +1547,21 @@ enum LocalMeetingSummaryMarkdownUpdater {
         sections: LocalMeetingSummarySections,
         metadata: LocalMeetingSummaryRunMetadata,
         generatedAt: Date,
-        chunkCount: Int
+        chunkCount: Int,
+        sourceTranscriptFilename: String?
     ) -> [String] {
         let retained = existing.filter { line in
             guard let key = frontmatterKey(in: line) else { return true }
             return !managedFrontmatterKeys.contains(key)
         }
         let generatedAtString = ISO8601DateFormatter().string(from: generatedAt)
-        return retained + [
+        let sourceLines = sourceTranscriptFilename
+            .flatMap { filename -> String? in
+                let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : yamlLine("local_summary_source_transcript", trimmed)
+            }
+            .map { [$0] } ?? []
+        return retained + sourceLines + [
             "local_summary_version: \"1\"",
             yamlLine("local_summary_title", sections.title ?? ""),
             "local_summary_generated_at: \"\(generatedAtString)\"",
@@ -1358,7 +1570,10 @@ enum LocalMeetingSummaryMarkdownUpdater {
             yamlLine("local_summary_runtime", metadata.runtimePackage),
             yamlLine("local_summary_profile", metadata.profileName),
             "local_summary_chunk_count: \"\(chunkCount)\"",
+            yamlLine("local_summary_participants", frontmatterSummaryValue(sections.participants)),
             yamlLine("local_summary", frontmatterSummaryValue(sections.summary)),
+            yamlLine("local_summary_next_steps", frontmatterSummaryValue(nextStepsText(sections))),
+            yamlLine("local_summary_commitments", frontmatterSummaryValue(sections.actionItems)),
             yamlLine("local_summary_decisions", frontmatterSummaryValue(sections.decisions)),
             yamlLine("local_summary_action_items", frontmatterSummaryValue(sections.actionItems)),
             yamlLine("local_summary_open_questions", frontmatterSummaryValue(sections.openQuestions)),
@@ -1369,23 +1584,38 @@ enum LocalMeetingSummaryMarkdownUpdater {
 
     private static func renderedLocalSummarySection(
         _ sections: LocalMeetingSummarySections,
-        metadata: LocalMeetingSummaryRunMetadata
+        metadata: LocalMeetingSummaryRunMetadata,
+        sourceTranscriptFilename: String?
     ) -> String {
-        """
+        let sourceLine = sourceTranscriptFilename
+            .flatMap { filename -> String? in
+                let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : "Source transcript: `\(trimmed)`"
+            }
+        let headerLines = ["## \(metadata.heading)", sourceLine]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+        return """
         \(startMarker)
-        ## \(metadata.heading)
+        \(headerLines)
 
         ### Summary
         \(sections.summary)
 
+        ### Next Steps
+        \(nextStepsText(sections))
+
         ### Decisions
         \(sections.decisions)
 
-        ### Action Items
-        \(sections.actionItems)
-
         ### Open Questions
         \(sections.openQuestions)
+
+        ### Participants
+        \(sections.participants)
+
+        ### Action Items
+        \(sections.actionItems)
 
         ### Risks or Follow-ups
         \(sections.risksOrFollowUps)
@@ -1409,44 +1639,21 @@ enum LocalMeetingSummaryMarkdownUpdater {
     }
 
     static func removingLocalSummaryBlock(from body: String) -> String {
-        guard let startRange = body.range(of: startMarker),
-              let endRange = body.range(
+        guard let startRange = body.range(of: startMarker) else {
+            return body
+        }
+        guard let endRange = body.range(
                 of: endMarker,
                 range: startRange.upperBound..<body.endIndex
               ) else {
-            return bodyWithoutLegacyLocalSummarySection(body)
+            var updated = body
+            updated.removeSubrange(startRange.lowerBound..<updated.endIndex)
+            return updated
         }
 
         var updated = body
         updated.removeSubrange(startRange.lowerBound..<endRange.upperBound)
         return updated
-    }
-
-    private static func bodyWithoutLegacyLocalSummarySection(_ body: String) -> String {
-        var lines = body.components(separatedBy: .newlines)
-        guard let startIndex = lines.firstIndex(where: {
-            let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed == "## Local Summary"
-                || trimmed == "## Local Gemma Summary"
-                || trimmed == "## Local Apple Summary"
-        }) else {
-            return body
-        }
-
-        var endIndex = lines.endIndex
-        for index in lines.index(after: startIndex)..<lines.endIndex {
-            let trimmed = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("## "),
-               trimmed != "## Local Summary",
-               trimmed != "## Local Gemma Summary",
-               trimmed != "## Local Apple Summary" {
-                endIndex = index
-                break
-            }
-        }
-
-        lines.removeSubrange(startIndex..<endIndex)
-        return lines.joined(separator: "\n")
     }
 
     static func removingLocalSummaryMarkers(from body: String) -> String {
@@ -1463,6 +1670,18 @@ enum LocalMeetingSummaryMarkdownUpdater {
 
     private static func yamlLine(_ key: String, _ value: String) -> String {
         "\(key): \"\(yamlValue(value))\""
+    }
+
+    private static func nextStepsText(_ sections: LocalMeetingSummarySections) -> String {
+        let values = [sections.actionItems, sections.risksOrFollowUps]
+            .filter(isMeaningfulSummaryText)
+        guard !values.isEmpty else { return "None found." }
+        return values.joined(separator: "\n")
+    }
+
+    private static func isMeaningfulSummaryText(_ raw: String) -> Bool {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.isEmpty && text.localizedCaseInsensitiveCompare("none found.") != .orderedSame
     }
 
     private static func yamlValue(_ raw: String) -> String {
