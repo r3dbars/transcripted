@@ -244,6 +244,30 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingRetranscriptionMenuActionPolicy blocks rows with pending speaker review") {
+        assertFalse(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: nil,
+                hasSpeakerReviewWork: true
+            ),
+            "The row menu should not re-transcribe the same meeting while speaker review is still pending"
+        )
+        assertFalse(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: "Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.",
+                hasSpeakerReviewWork: false
+            ),
+            "Global meeting work should still disable the row menu re-transcribe action"
+        )
+        assertTrue(
+            RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                globalUnavailableReason: nil,
+                hasSpeakerReviewWork: false
+            ),
+            "Reviewed saved meetings should remain re-transcribable from the row menu"
+        )
+    }
+
     runSuite("SavedMeetingRetranscriptionAvailabilityPolicy blocks while models prepare") {
         assertEqual(
             SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
@@ -1720,11 +1744,12 @@ func testRecentCaptureLoader() async {
         }
     }
 
-    await runSuite("RecentMeetingsScanner orders rows by filesystem recency") {
+    await runSuite("RecentMeetingsScanner orders rows by filesystem recency but exposes frontmatter dates") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
             let freshFileDate = recentLoaderDate("2026-05-29T14:00:00Z")
             let olderFileDate = recentLoaderDate("2026-05-28T14:00:00Z")
+            let freshRecordedAt = recentLoaderFrontmatterDate("2026-05-01 14:00:00")
 
             try? writeRecentLoaderMeeting(
                 title: "Fresh Copied Meeting",
@@ -1742,7 +1767,8 @@ func testRecentCaptureLoader() async {
             let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
 
             assertEqual(meetings.map(\.title), ["Fresh Copied Meeting", "Older Newer-Frontmatter Meeting"], "Home recency should follow filesystem dates, not stale or future transcript metadata")
-            assertEqual(meetings.first?.date, freshFileDate, "meeting row dates should use the scanner date that controls ordering")
+            assertEqual(meetings.first?.date, freshRecordedAt, "meeting row dates should use frontmatter recording time so Home grouping does not move touched retranscripts to Today")
+            assertEqual(meetings.first?.startDate, freshRecordedAt, "row start date should match the frontmatter recording time")
         }
     }
 
@@ -1957,6 +1983,13 @@ private func setRecentLoaderFileDate(_ date: Date, at url: URL) {
 
 private func recentLoaderDate(_ string: String) -> Date {
     ISO8601DateFormatter().date(from: string) ?? Date(timeIntervalSince1970: 0)
+}
+
+private func recentLoaderFrontmatterDate(_ string: String) -> Date {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return formatter.date(from: string) ?? Date(timeIntervalSince1970: 0)
 }
 
 private func recentLoaderFormat(_ date: Date, _ pattern: String) -> String {

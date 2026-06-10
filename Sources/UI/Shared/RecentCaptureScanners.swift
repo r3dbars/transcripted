@@ -164,6 +164,15 @@ enum RecentMeetingRetranscriptionActionPolicy {
     }
 }
 
+enum RecentMeetingRetranscriptionMenuActionPolicy {
+    static func isEnabled(
+        globalUnavailableReason: String?,
+        hasSpeakerReviewWork: Bool
+    ) -> Bool {
+        globalUnavailableReason == nil && !hasSpeakerReviewWork
+    }
+}
+
 enum SavedMeetingRetranscriptionAvailabilityPolicy {
     static func unavailableReason(
         isDictationActive: Bool,
@@ -359,10 +368,11 @@ enum RecentMeetingsScanner {
                 frontmatter: frontmatter,
                 fallbackDate: entry.date
             )
+            let displayDate = timing.start ?? entry.date
             recentItems.append(
                 RecentMeetingItem(
                     title: styled.title,
-                    date: entry.date,
+                    date: displayDate,
                     startDate: timing.start,
                     endDate: timing.end,
                     transcriptURL: styled.url,

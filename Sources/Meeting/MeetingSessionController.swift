@@ -80,7 +80,8 @@ final class MeetingSessionController: ObservableObject {
                 micURL: URL,
                 systemURL: URL?,
                 healthInfo: RecordingHealthInfo,
-                meetingTitle: String?
+                meetingTitle: String?,
+                recordingDate: Date
             )
             case imported(
                 audioURL: URL,
@@ -108,6 +109,7 @@ final class MeetingSessionController: ObservableObject {
         let healthInfo: RecordingHealthInfo
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
         let suggestedTitle: String?
+        let recordingStartedAt: Date?
     }
 
     private struct BackgroundTranscriptionWorkSnapshot {
@@ -190,6 +192,7 @@ final class MeetingSessionController: ObservableObject {
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeRecordingSuggestedTitle: String?
+    private var activeRecordingStartedAt: Date?
     private var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -404,6 +407,7 @@ final class MeetingSessionController: ObservableObject {
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             activeRecordingTrigger = .unknown
             activeRecordingSuggestedTitle = nil
+            activeRecordingStartedAt = nil
             let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
@@ -429,6 +433,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        activeRecordingStartedAt = Date()
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -601,6 +606,7 @@ final class MeetingSessionController: ObservableObject {
         )
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
+        activeRecordingStartedAt = nil
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
@@ -669,7 +675,8 @@ final class MeetingSessionController: ObservableObject {
                 micAudioURL: nil,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stopped without microphone audio.",
-                meetingTitle: recordingSnapshot.suggestedTitle
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt
             )
             DiagnosticsTrail.record(
                 level: .error,
@@ -715,6 +722,7 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt,
                 archiveAudio: false
             )
             DiagnosticsTrail.record(
@@ -739,6 +747,7 @@ final class MeetingSessionController: ObservableObject {
             systemURL: files.systemURL,
             healthInfo: recordingSnapshot.healthInfo,
             meetingTitle: recordingSnapshot.suggestedTitle,
+            recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
             startTrigger: recordingSnapshot.trigger
         )
 
@@ -852,6 +861,7 @@ final class MeetingSessionController: ObservableObject {
         )
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
+        activeRecordingStartedAt = nil
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
@@ -1030,12 +1040,13 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, let meetingTitle):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
                 preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 )
             case .imported(let audioURL, _, _):
                 try? FileManager.default.removeItem(at: audioURL)
@@ -1086,8 +1097,10 @@ final class MeetingSessionController: ObservableObject {
             stopTimedOut = files.didTimeOut
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             let meetingTitle = activeRecordingSuggestedTitle
+            let recordingDate = activeRecordingStartedAt
             activeRecordingTrigger = .unknown
             activeRecordingSuggestedTitle = nil
+            activeRecordingStartedAt = nil
 
             if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = preserveFailedMeetingForRetry(
@@ -1096,6 +1109,7 @@ final class MeetingSessionController: ObservableObject {
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
                     meetingTitle: meetingTitle,
+                    recordingDate: recordingDate,
                     archiveAudio: !files.didTimeOut
                 )
             }
@@ -1159,12 +1173,13 @@ final class MeetingSessionController: ObservableObject {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, let meetingTitle):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
                 if preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: errorMessage,
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 ) {
                     preservedCount += 1
                 }
@@ -1867,6 +1882,7 @@ final class MeetingSessionController: ObservableObject {
         systemURL: URL?,
         healthInfo: RecordingHealthInfo,
         meetingTitle: String?,
+        recordingDate: Date,
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
@@ -1874,7 +1890,8 @@ final class MeetingSessionController: ObservableObject {
                 micURL: micURL,
                 systemURL: systemURL,
                 healthInfo: healthInfo,
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
             sttModel: sttRouter.selectedModel
@@ -2020,7 +2037,7 @@ final class MeetingSessionController: ObservableObject {
         activeQueuedTranscriptionJobID = job.id
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle):
+        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle, let recordingDate):
             taskManager.startTranscription(
                 taskId: job.id,
                 micURL: micURL,
@@ -2028,7 +2045,8 @@ final class MeetingSessionController: ObservableObject {
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
                 meetingTitle: meetingTitle,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                recordingDate: recordingDate
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             taskManager.startImportedTranscription(
@@ -2053,12 +2071,13 @@ final class MeetingSessionController: ObservableObject {
         }
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, let meetingTitle):
+        case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
             preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message,
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             )
         case .imported(let audioURL, _, _):
             try? FileManager.default.removeItem(at: audioURL)
@@ -2512,7 +2531,8 @@ final class MeetingSessionController: ObservableObject {
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
             ),
-            suggestedTitle: activeRecordingSuggestedTitle
+            suggestedTitle: activeRecordingSuggestedTitle,
+            recordingStartedAt: activeRecordingStartedAt
         )
     }
 
@@ -2560,6 +2580,7 @@ final class MeetingSessionController: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         meetingTitle: String?,
+        recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) -> Bool {
         let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
@@ -2568,6 +2589,7 @@ final class MeetingSessionController: ObservableObject {
             errorMessage: errorMessage,
             taskId: taskId,
             meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
             archiveAudio: archiveAudio
         )
         if preserved {
