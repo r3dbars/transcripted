@@ -70,6 +70,14 @@ jobs:
         shell: bash
         env:
           TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+          # Several dictation-writer tests construct fixed -0500 instants and
+          # assert locally-formatted headings/filenames; match the supported
+          # interactive environment instead of the runner's UTC default.
+          TZ: America/Chicago
+          # Wall-clock timing proofs (clipboard restore windows) are not
+          # provable under shared-runner scheduler jitter; they still run on
+          # every local bash run-tests.sh.
+          TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS: "1"
         run: bash run-tests.sh
 
       - name: Core package tests
