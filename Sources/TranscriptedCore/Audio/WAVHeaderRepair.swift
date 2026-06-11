@@ -30,8 +30,12 @@ enum WAVHeaderRepair {
         let dataActualSize: Int
 
         var needsRepair: Bool {
-            dataDeclaredSize != UInt32(clamping: dataActualSize)
-                || riffDeclaredSize != UInt32(clamping: fileSize - 8)
+            // Only the two states a crashed/truncated writer produces. A
+            // declared size that is nonzero but smaller than the remaining
+            // bytes is legal — metadata chunks may follow the data chunk —
+            // and "repairing" it would decode that metadata as PCM.
+            if dataDeclaredSize == 0 { return dataActualSize > 0 }
+            return Int(dataDeclaredSize) > dataActualSize
         }
     }
 

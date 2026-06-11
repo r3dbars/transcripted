@@ -74,6 +74,25 @@ final class WAVHeaderRepairTests: XCTestCase {
         XCTAssertEqual(repaired.length, 9_600 - 2_000)
     }
 
+    func testLeavesForeignWAVWithTrailingMetadataChunkAlone() throws {
+        let url = temporaryDirectory.appendingPathComponent("foreign.wav")
+        try writeMonoWAV(to: url, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 9_600))
+
+        // Imported WAVs can carry metadata chunks after the data chunk, so the
+        // declared data size is legitimately smaller than the remaining bytes.
+        // "Repairing" such a file would decode the metadata as PCM.
+        let handle = try FileHandle(forUpdating: url)
+        _ = try handle.seekToEnd()
+        var trailing = Data("LIST".utf8)
+        trailing.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Data($0) })
+        trailing.append(Data(repeating: 0x55, count: 16))
+        try handle.write(contentsOf: trailing)
+        try handle.close()
+
+        XCTAssertFalse(try WAVHeaderRepair.repairIfNeeded(at: url))
+        XCTAssertEqual(try AVAudioFile(forReading: url).length, 9_600)
+    }
+
     func testNonWAVFileThrows() throws {
         let url = temporaryDirectory.appendingPathComponent("not-audio.wav")
         try Data(repeating: 0x41, count: 256).write(to: url)
