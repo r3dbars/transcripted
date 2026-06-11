@@ -224,6 +224,13 @@ if [ -n "$changed_paths" ]; then
             add_command "swift test"
         fi
 
+        if matches_any "$path" "Tools/TranscriptedCaptureKit/*"; then
+            add_command "swift test --package-path Tools/TranscriptedCaptureKit"
+            add_command "swift test --package-path Tools/TranscriptedCLI"
+            add_command "swift test --package-path Tools/TranscriptedMCP"
+            add_command "bash run-e2e-smoke.sh"
+        fi
+
         if matches_any "$path" "Tools/TranscriptedCLI/*"; then
             add_command "swift test --package-path Tools/TranscriptedCLI"
         fi

@@ -178,9 +178,9 @@ final class ContextStoreTests: XCTestCase {
 
         XCTAssertEqual(items.count, 2)
 
-        let contextStoreSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("Sources/TranscriptedCLI/ContextStore.swift")
-        let source = try String(contentsOf: contextStoreSourceURL, encoding: .utf8)
+        let parserSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("../TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift")
+        let source = try String(contentsOf: parserSourceURL, encoding: .utf8)
         XCTAssertTrue(source.contains("split(separator: \":\", omittingEmptySubsequences: false)"))
         XCTAssertTrue(source.contains("components.count == rawComponents.count"))
         XCTAssertTrue(source.contains("!components.contains(where: { $0 < 0 })"))

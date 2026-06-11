@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import TranscriptedCaptureKit
 
 // MARK: - Helpers
 
@@ -313,19 +314,7 @@ private func handleListDictations(params: CallTool.Parameters, index: Transcript
 
 /// Extract title from markdown YAML frontmatter
 private func extractTitle(from content: String) -> String? {
-    // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars)
-    guard content.count >= 8, content.hasPrefix("---"),
-          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else { return nil }
-    let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
-    for line in yaml.components(separatedBy: "\n") {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed == "---" { break }
-        if trimmed.hasPrefix("title:") {
-            let title = String(trimmed.dropFirst(6)).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-            return title.isEmpty ? nil : title
-        }
-    }
-    return nil
+    CaptureMarkdown.extractTitle(from: content)
 }
 
 /// Returns non-empty transcript dialogue lines from the `## Full Transcript` section, filtering boilerplate.
