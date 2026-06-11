@@ -230,7 +230,8 @@ enum CoreAudioInputDeviceLookup {
             throw InputDeviceLookupError.propertyReadFailed(status)
         }
 
-        return (value?.takeUnretainedValue() as String?) ?? ""
+        // CoreAudio's get-rule returns a +1 CFString; takeRetainedValue balances it.
+        return (value?.takeRetainedValue() as String?) ?? ""
     }
 
     private static func readUInt32Property(
