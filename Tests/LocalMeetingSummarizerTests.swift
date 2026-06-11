@@ -317,6 +317,47 @@ func testLocalMeetingSummarizer() async {
         )
     }
 
+    runSuite("LocalMeetingSummarySections uses transcript participants for every provider") {
+        let transcript = """
+        **00:01** [Mic/Justin]
+        Justin opened the meeting.
+
+        **00:04** [System/Maya]
+        Maya joined from Zoom.
+        """
+        let sections = LocalMeetingSummaryNormalizer.sections(in: """
+        # Title
+        Launch Review
+
+        # Participants
+        None found.
+
+        # Summary
+        Team reviewed launch work.
+
+        # Decisions
+        None found.
+
+        # Action Items
+        None found.
+
+        # Open Questions
+        None found.
+
+        # Risks or Follow-ups
+        None found.
+
+        # Accuracy Notes
+        None found.
+        """).withTranscriptParticipants(from: transcript)
+
+        assertEqual(
+            sections.participants,
+            "- Justin\n- Maya",
+            "summary providers should write canonical participants from transcript speaker labels"
+        )
+    }
+
     runSuite("LocalMeetingSummaryNormalizer extracts generated titles") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("""
         # Title

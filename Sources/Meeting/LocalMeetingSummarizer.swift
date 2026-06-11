@@ -35,6 +35,10 @@ struct LocalMeetingSummarySections: Equatable, Sendable {
             accuracyNotes: accuracyNotes
         )
     }
+
+    func withTranscriptParticipants(from transcript: String) -> LocalMeetingSummarySections {
+        withParticipants(LocalMeetingSummaryParticipantExtractor.participants(from: transcript))
+    }
 }
 
 enum LocalMeetingSummaryError: LocalizedError, Equatable {
@@ -1039,9 +1043,8 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
 
         try Task.checkCancellation()
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
-        let participants = LocalMeetingSummaryParticipantExtractor.participants(from: transcript)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
-            .withParticipants(participants)
+            .withTranscriptParticipants(from: transcript)
         let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
         guard latestTranscript == transcript else {
@@ -1151,6 +1154,7 @@ struct AppleFoundationMeetingSummarizer: @unchecked Sendable {
         try Task.checkCancellation()
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
+            .withTranscriptParticipants(from: transcript)
         let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
         guard latestTranscript == transcript else {
