@@ -156,8 +156,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     func appendMicSegment(_ segment: MicRecordingSegment) {
         micSegmentsLock.lock()
-        defer { micSegmentsLock.unlock() }
         _micSegments.append(segment)
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments)
     }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
@@ -578,8 +580,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
     let paths: CoreStoragePaths
 
+    /// Durable record of the in-flight recording for crash recovery. Lives
+    /// next to the scratch audio; cleared once the meeting reaches a durable
+    /// state (transcript saved or failed-queue entry persisted).
+    let recordingJournal: MeetingRecordingJournalStore
+
     public init(paths: CoreStoragePaths = .default) {
         self.paths = paths
+        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
     }
 
     func ensureCaptureInfrastructureConfigured() {
@@ -950,6 +958,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard recordingSessionGeneration == sessionGeneration else { return }
 
         systemAudioFileURL = fileURL
+        recordingJournal.recordSystemAudio(fileURL)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
@@ -978,6 +987,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let micSegmentsSnapshot = self.micSegments
         let finalSystemURL = systemAudioFileURL
         let cueHandler = self.onCaptureLifecycleCue
+
+        recordingJournal.markStopping()
 
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
@@ -1083,6 +1094,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
+                self.recordingJournal.markFinalized(finalMicURL: finalMicURL)
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil

@@ -295,6 +295,13 @@ final class MeetingSessionController: ObservableObject {
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
         wireSubscriptions()
+
+        // Recover recordings orphaned by a crash before any failed-queue entry
+        // existed — they become visible, retryable items on Home.
+        let scratchDirectory = storagePaths.audioCaptures
+        Task { [taskManager] in
+            await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
+        }
     }
 
     // MARK: - Public API
