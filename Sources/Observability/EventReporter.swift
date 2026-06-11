@@ -20,6 +20,7 @@ private actor EventFileWriter {
     private let fileURL: URL
     private var handle: FileHandle?
     private var isPrepared = false
+    private var approximateSize: UInt64 = 0
     private var bufferedInfoEventLines: [Data] = []
     private var infoFlushTask: Task<Void, Never>?
     private let encoder: JSONEncoder = {
@@ -97,6 +98,13 @@ private actor EventFileWriter {
     private func write(_ lineData: Data) {
         if let handle {
             LockedFileAppender.append(lineData, to: handle)
+            approximateSize += UInt64(lineData.count)
+            if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
+                // Close so the next append re-prepares, which rotates the file.
+                try? handle.close()
+                self.handle = nil
+                isPrepared = false
+            }
         }
     }
 
@@ -111,6 +119,13 @@ private actor EventFileWriter {
             return false
         }
 
+        if ObservabilityLogRotation.rotateIfNeeded(
+            at: fileURL,
+            threshold: TranscriptedConstants.jsonlLogRotationThreshold
+        ) {
+            print("📊 EVENT | rotated events.jsonl")
+        }
+
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
             print("📊 EVENT | created events.jsonl")
@@ -119,7 +134,7 @@ private actor EventFileWriter {
 
         do {
             handle = try FileHandle(forWritingTo: fileURL)
-            handle?.seekToEndOfFile()
+            approximateSize = handle?.seekToEndOfFile() ?? 0
             isPrepared = true
             return true
         } catch {
