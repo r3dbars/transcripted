@@ -96,11 +96,17 @@ private actor EventFileWriter {
     }
 
     private func write(_ lineData: Data) {
+        if handle == nil {
+            // A rotation earlier in this same append cycle (the info-buffer
+            // flush crossing the threshold) closes the handle; reopen here so
+            // the warning/error event that triggered the flush is not lost.
+            guard prepareIfNeeded() else { return }
+        }
         if let handle {
             LockedFileAppender.append(lineData, to: handle)
             approximateSize += UInt64(lineData.count)
             if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
-                // Close so the next append re-prepares, which rotates the file.
+                // Close so the next write re-prepares, which rotates the file.
                 try? handle.close()
                 self.handle = nil
                 isPrepared = false
