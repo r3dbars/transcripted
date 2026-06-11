@@ -2,6 +2,7 @@ import Foundation
 @testable import transcripted_mcp
 
 func makeFixtureJSON(
+    title: String? = nil,
     date: String = "2026-03-29T10:00:00-0500",
     durationSeconds: Int = 1800,
     speakers: [(id: String, name: String, persistentId: String?)] = [
@@ -59,9 +60,11 @@ func makeFixtureJSON(
         return "- **\(name):** \(grouped.count) utterances, ~\(wordCount) words, \(formatDuration(seconds: Int(speakingSeconds.rounded())))"
     }.joined(separator: "\n")
 
+    let titleLine = title.map { "title: \"\($0)\"\n" } ?? ""
+
     return """
     ---
-    transcript_id: "\(UUID().uuidString)"
+    \(titleLine)transcript_id: "\(UUID().uuidString)"
     date: \(dateComponents.date)
     time: \(dateComponents.time)
     duration: "\(formatDuration(seconds: durationSeconds))"
