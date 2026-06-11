@@ -1,0 +1,79 @@
+name: Swift CI
+
+# Builds the app and runs the fast tests + Core package tests on every PR.
+# This is the machine enforcement behind the local verification contract in
+# .agents/test-matrix.yml — without it, merge safety rests entirely on local
+# discipline.
+#
+# FIRST-RUN VALIDATION NEEDED:
+# - The app targets arm64-apple-macos26.0, so the runner image must carry a
+#   toolchain/SDK that can target macOS 26. If `macos-26` is not yet available
+#   as a hosted image (or the job fails on SDK selection), switch `runs-on` to
+#   a self-hosted runner on a Mac that already builds this repo.
+# - Job is continue-on-error until one green run establishes timing and flake
+#   rate; flip it to a required check after that.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swift-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    continue-on-error: true
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Cache prebuilt dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+
+      - name: Build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+            # The cache key already hashes every staleness input, so a hit
+            # means the artifacts match this tree. Refresh the mtime stamp so
+            # build-deps.sh's mtime check agrees with the fresh checkout.
+            touch deps-libs/.build-deps-stamp
+          fi
+          bash build-deps.sh
+
+      - name: Build app
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+          # Hosted runners have no reliable GUI session for the launch smoke;
+          # it stays covered by local builds and the release path.
+          TRANSCRIPTED_SKIP_LAUNCH_SMOKE: "1"
+        run: bash build.sh --no-open
+
+      - name: Fast tests
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: bash run-tests.sh
+
+      - name: Core package tests
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: swift test
