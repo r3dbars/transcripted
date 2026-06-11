@@ -481,7 +481,7 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: recovery.path))
     }
 
-    func testFinalizeMicRecordingFallsBackToPrimaryWhenMergeFails() throws {
+    func testFinalizeMicRecordingSalvagesAroundMissingSegment() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -491,8 +491,31 @@ final class AudioFileManagerTests: XCTestCase {
         let missing = root.appendingPathComponent("does-not-exist.wav")
         try writeMonoWAV(to: primary, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
 
-        // The merger throws when a segment file is missing; finalizeMicRecording
-        // (AudioFileManager.swift:415) swallows the error and returns the primary.
+        // The merger skips the missing segment instead of aborting, so the
+        // primary's audio still lands in a merged file. Degraded salvage keeps
+        // the source segment on disk for recovery.
+        let result = try XCTUnwrap(audio.finalizeMicRecording(
+            primaryURL: primary,
+            segments: [
+                MicRecordingSegment(url: primary),
+                MicRecordingSegment(url: missing)
+            ]
+        ))
+        XCTAssertEqual(result.lastPathComponent, "primary_merged.wav")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primary.path))
+    }
+
+    func testFinalizeMicRecordingFallsBackToPrimaryWhenNothingIsMergeable() throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let audio = makeAudio(root: root)
+
+        // Neither segment exists, so the merger throws and finalizeMicRecording
+        // swallows the error and returns the primary URL unchanged.
+        let primary = root.appendingPathComponent("primary.wav")
+        let missing = root.appendingPathComponent("does-not-exist.wav")
         let result = audio.finalizeMicRecording(
             primaryURL: primary,
             segments: [

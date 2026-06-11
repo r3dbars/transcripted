@@ -1057,6 +1057,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if let currentMicFile = self.micAudioFile, currentMicFile === micAudioFileRef {
                         self.micAudioFile = nil
                     }
+                    // Close explicitly so the WAV header is finalized here on
+                    // the serial queue before cleanupGroup.notify hands the
+                    // file to the merger. Waiting for deinit is racy: other
+                    // closure captures can keep the writer alive past notify,
+                    // and an unpatched header reads back as a zero-length file.
+                    micAudioFileRef.close()
                     AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
@@ -1068,6 +1074,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if let currentSystemFile = self.systemAudioFile, currentSystemFile === systemAudioFileRef {
                         self.systemAudioFile = nil
                     }
+                    systemAudioFileRef.close()
                     AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
