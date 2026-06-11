@@ -24,12 +24,28 @@ public struct RecordingHealthInfo: Sendable {
     public let audioGaps: Int
     public let deviceSwitches: Int
     public let gapDescriptions: [String]
+    /// Issue #500: the host classified this recording as quiet-mic attenuation
+    /// from a foreign call app holding the device in voice mode. Optional and
+    /// defaulted so existing call sites stay source-compatible; classification
+    /// stays app-side and only facts cross the library boundary.
+    public let micAttenuatedByCallApp: Bool?
+    /// MeetingMicBoostPromptOutcome rawValue from the host's in-meeting prompt.
+    public let micBoostPrompt: String?
 
-    public init(captureQuality: CaptureQuality, audioGaps: Int, deviceSwitches: Int, gapDescriptions: [String]) {
+    public init(
+        captureQuality: CaptureQuality,
+        audioGaps: Int,
+        deviceSwitches: Int,
+        gapDescriptions: [String],
+        micAttenuatedByCallApp: Bool? = nil,
+        micBoostPrompt: String? = nil
+    ) {
         self.captureQuality = captureQuality
         self.audioGaps = audioGaps
         self.deviceSwitches = deviceSwitches
         self.gapDescriptions = gapDescriptions
+        self.micAttenuatedByCallApp = micAttenuatedByCallApp
+        self.micBoostPrompt = micBoostPrompt
     }
 
     /// Create health info from Audio instance.

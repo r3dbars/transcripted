@@ -358,13 +358,23 @@ extension Audio {
         // benefit from AGC's normalized loudness.
         guard let bufferForAsyncUse = deepCopyBuffer(buffer) else {
             AppLogger.audioMic.warning("Failed to copy mic buffer for async write")
-            recordMicSignalPeaks(raw: rawPeak, processed: 0)
+            recordMicSignalPeaks(raw: rawPeak, processed: 0, appliedGain: nil, agcMaxGain: nil)
             return
         }
 
-        // Apply real-time AGC to the working copy. No-op when VPIO is on.
-        realtimeAGC?.process(buffer: bufferForAsyncUse)
-        recordMicSignalPeaks(raw: rawPeak, processed: linearPeak(buffer: bufferForAsyncUse))
+        // Apply real-time AGC to the working copy. No-op when VPIO is on
+        // (`agc == nil` records nil gain so the attenuation detector stays
+        // dormant). `appliedGain` is read on the same thread that calls
+        // process() — the only cross-call read — preserving RealtimeAGC's
+        // lock-free single-thread contract.
+        let agc = realtimeAGC
+        agc?.process(buffer: bufferForAsyncUse)
+        recordMicSignalPeaks(
+            raw: rawPeak,
+            processed: linearPeak(buffer: bufferForAsyncUse),
+            appliedGain: agc?.appliedGain,
+            agcMaxGain: agc?.maxGain
+        )
 
         self.onMicPCMBuffer?(bufferForAsyncUse)
 
@@ -446,6 +456,25 @@ extension Audio {
             guard let self = self, let start = self.startTime else { return }
             DispatchQueue.main.async {
                 self.recordingDuration = Date().timeIntervalSince(start)
+            }
+
+            // Live issue #500 attenuation detection. Always drain (even when
+            // not recording) so an interval never spans ticks. Forcing
+            // sawBuffer false while isMicRecovering resets the streak across
+            // deliberate/automatic engine restarts. The cue fires directly
+            // on main (this timer runs on the main run loop), matching where
+            // stop() fires .recordingStopped.
+            let interval = self.drainMicSignalIntervalDiagnostics()
+            if self.isRecording,
+               self.quietMicAttenuationDetector.consume(
+                   rawPeak: interval.rawPeak,
+                   processedPeak: interval.processedPeak,
+                   appliedGain: interval.minAppliedGain,
+                   agcMaxGain: interval.agcMaxGain,
+                   sawBuffer: interval.sawBuffer && !self.isMicRecovering
+               ) {
+                let cueHandler = self.onCaptureLifecycleCue
+                cueHandler?(.micAttenuatedByForeignVoiceProcessing)
             }
 
             // Periodic disk check during recording (~every 30s)

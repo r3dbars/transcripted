@@ -251,6 +251,7 @@ func testSentryEventPolicy() {
                 "output_ducking_detected": "true",
                 "quiet_mic_recovered": "false",
                 "quiet_mic_unrecovered": "true",
+                "mic_boost_prompt": "declined",
                 "mic_file_available": "true",
                 "reason": "user_stop",
                 "stop_timed_out": "false",
@@ -265,6 +266,7 @@ func testSentryEventPolicy() {
         assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
         assertEqual(tags["quiet_mic_recovered"], "false", "quiet mic recovery state should stay queryable")
         assertEqual(tags["quiet_mic_unrecovered"], "true", "unrecovered quiet mic state should stay queryable")
+        assertEqual(tags["mic_boost_prompt"], "declined", "issue 500 mic-boost prompt outcome should ride degraded-capture events")
         assertEqual(tags["mic_file_available"], "true", "mic file presence should stay queryable for degraded captures")
         assertEqual(tags["reason"], "user_stop", "stop reason should stay queryable for degraded captures")
         assertEqual(tags["stop_timed_out"], "false", "stop timeout state should stay queryable for degraded captures")

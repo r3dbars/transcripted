@@ -100,6 +100,7 @@ func testReliabilityPacketRecorder() {
                 "default_system_output_volume_during": "0.750",
                 "input_device_class": "built_in",
                 "input_volume_scalar_available": "true",
+                "mic_boost_prompt": "shown",
                 "mic_processed_peak": "0.30000",
                 "mic_raw_peak": "0.02000",
                 "output_device_class": "bluetooth",
@@ -120,6 +121,7 @@ func testReliabilityPacketRecorder() {
         assertEqual(packet?.context["captured_input_volume_dropped"], "false", "captured mic scalar should stay separate from default route facts")
         assertEqual(packet?.context["default_system_output_volume_dropped"], "true", "system-output ducking should stay queryable")
         assertEqual(packet?.context["output_ducking_detected"], "true", "derived ducking flag should survive")
+        assertEqual(packet?.context["mic_boost_prompt"], "shown", "the coarse issue 500 prompt outcome should survive into support packets")
         assertNil(packet?.context["audio_device"], "raw device names should not be copied into reliability packets")
         assertNil(packet?.context["transcript_text"], "transcript text should not be copied into reliability packets")
     }

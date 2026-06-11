@@ -275,6 +275,7 @@ enum ReliabilityPacketRecorder {
             "input_rate_hz",
             "input_volume_scalar_available",
             "meeting_state",
+            "mic_boost_prompt",
             "mic_file_present",
             "mic_processing",
             "mic_processed_peak",

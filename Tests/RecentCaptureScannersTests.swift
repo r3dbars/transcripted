@@ -917,6 +917,90 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner reads issue 500 audio-health frontmatter") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+
+            try? writeRecentLoaderMeeting(
+                title: "Muffled Mic Sync",
+                date: recentLoaderDate("2026-06-05T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("muffled.md", isDirectory: false),
+                extraFrontmatterLines: [
+                    "audio_health: mic_attenuated_by_call_app",
+                    "mic_boost_prompt: shown",
+                ]
+            )
+            try? writeRecentLoaderMeeting(
+                title: "Healthy Sync",
+                date: recentLoaderDate("2026-06-04T14:00:00Z"),
+                to: meetingsRoot.appendingPathComponent("healthy.md", isDirectory: false)
+            )
+
+            let meetings = RecentMeetingsScanner.loadRecent(limit: 2)
+
+            assertEqual(meetings.count, 2, "both fixtures should load")
+            assertEqual(
+                meetings.first?.audioHealth,
+                RecentMeetingAudioHealth(micBoostPromptOutcome: "shown"),
+                "audio_health frontmatter should surface the prompt outcome on the row item"
+            )
+            assertNil(
+                meetings.last?.audioHealth,
+                "meetings without the audio_health key should not carry an audio-health hint"
+            )
+        }
+    }
+
+    runSuite("RecentMeetingMicBoostHintPolicy offers the enable action only while it can still help") {
+        let unprompted = RecentMeetingAudioHealth(micBoostPromptOutcome: nil)
+        let shown = RecentMeetingAudioHealth(micBoostPromptOutcome: "shown")
+        let declined = RecentMeetingAudioHealth(micBoostPromptOutcome: "declined")
+        let accepted = RecentMeetingAudioHealth(micBoostPromptOutcome: "accepted")
+
+        assertFalse(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: nil,
+                voiceProcessingPreferenceEnabled: false
+            ),
+            "healthy meetings should never offer the enable action"
+        )
+        assertFalse(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: accepted,
+                voiceProcessingPreferenceEnabled: false
+            ),
+            "an accepted in-meeting boost already flipped the preference; no hint needed"
+        )
+        assertFalse(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: shown,
+                voiceProcessingPreferenceEnabled: true
+            ),
+            "users who already enabled the preference should stop seeing hints on old rows"
+        )
+        assertTrue(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: declined,
+                voiceProcessingPreferenceEnabled: false
+            ),
+            "a declined prompt with the preference still off should keep the post-meeting backstop"
+        )
+        assertTrue(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: shown,
+                voiceProcessingPreferenceEnabled: false
+            ),
+            "a shown-but-unanswered prompt should keep the post-meeting backstop"
+        )
+        assertTrue(
+            RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: unprompted,
+                voiceProcessingPreferenceEnabled: false
+            ),
+            "attenuated meetings without a recorded outcome should still offer the action"
+        )
+    }
+
     await runSuite("DictationTranscriptStore cancellation skips recent dictation rows") {
         await withTemporaryRecentCaptureLibrary { captureRoot in
             let dictationsRoot = captureRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -1950,8 +2034,12 @@ private func writeRecentLoaderMeeting(
     to url: URL,
     fileDate: Date? = nil,
     micLabel: String = "You",
-    systemLabel: String = "Remote Participant"
+    systemLabel: String = "Remote Participant",
+    extraFrontmatterLines: [String] = []
 ) throws {
+    let extraFrontmatter = extraFrontmatterLines.isEmpty
+        ? ""
+        : extraFrontmatterLines.joined(separator: "\n") + "\n"
     let markdown = """
     ---
     title: "\(title)"
@@ -1962,7 +2050,7 @@ private func writeRecentLoaderMeeting(
     total_word_count: 5
     mic_utterances: 1
     system_utterances: 1
-    ---
+    \(extraFrontmatter)---
 
     # \(title)
 

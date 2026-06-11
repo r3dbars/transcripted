@@ -585,7 +585,11 @@ struct TranscriptedSettingsView: View {
                     trackSettingsAction("flag_meeting", page: navigation.selectedPage)
                     homeFeedbackTarget = HomeFeedbackTarget.meeting(meeting)
                 },
-                menuItems: meetingRowMenuItems(for: meeting)
+                menuItems: meetingRowMenuItems(for: meeting),
+                showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                    audioHealth: meeting.audioHealth,
+                    voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+                )
             )
         case .failed(let failedMeeting):
             HomeFailedMeetingInlineRow(
@@ -1108,6 +1112,19 @@ struct TranscriptedSettingsView: View {
             items.append(
                 HomeRowMenuItem(title: "Review speakers", symbolName: "person.crop.circle.badge.questionmark") {
                     openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
+                }
+            )
+        }
+
+        if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+            audioHealth: item.audioHealth,
+            voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+        ) {
+            items.append(
+                HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
+                    trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
+                    MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
+                    meetingVoiceProcessingEnabled = true
                 }
             )
         }
@@ -2071,10 +2088,10 @@ struct TranscriptedSettingsView: View {
                     .font(.subheadline.weight(.semibold))
 
                 SettingsToggleRow(
-                    title: "Use Apple voice processing",
+                    title: "Enhanced mic pickup during calls (Apple voice processing)",
                     detail: meetingVoiceProcessingEnabled
-                        ? "May lower other app audio in Zoom/Meet."
-                        : "Off. Transcripted boosts the saved mic and live transcript without changing system audio.",
+                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
+                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
                     isOn: Binding(
                         get: { meetingVoiceProcessingEnabled },
                         set: { newValue in
@@ -2100,7 +2117,7 @@ struct TranscriptedSettingsView: View {
                     )
                 )
 
-                Text("Meeting audio changes apply to the next recording.")
+                Text("Changes here apply from the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -3229,10 +3246,10 @@ struct TranscriptedSettingsView: View {
                 detail: "How Transcripted handles your microphone during meetings."
             ) {
                 SettingsToggleRow(
-                    title: "Use Apple voice processing for Safari/Firefox mic attenuation",
+                    title: "Enhanced mic pickup during calls (Apple voice processing)",
                     detail: meetingVoiceProcessingEnabled
-                        ? "May lower other app audio in Zoom/Meet."
-                        : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio.",
+                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
+                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
                     isOn: Binding(
                         get: { meetingVoiceProcessingEnabled },
                         set: { newValue in
@@ -3258,7 +3275,7 @@ struct TranscriptedSettingsView: View {
                     )
                 )
 
-                Text("Meeting audio changes apply to the next recording.")
+                Text("Changes here apply from the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

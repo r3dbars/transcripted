@@ -117,6 +117,16 @@ extension TranscriptSaver {
                     yaml += "\n  - \"\(Self.escapeYAML(gap))\""
                 }
             }
+
+            // Issue #500: keep these keys flat — TranscriptFrontmatter.values(from:)
+            // skips indented lines, so nested YAML would be invisible to the
+            // Home scanner. Omitted entirely for healthy meetings.
+            if health.micAttenuatedByCallApp == true {
+                yaml += "\naudio_health: mic_attenuated_by_call_app"
+                if let prompt = health.micBoostPrompt, !prompt.isEmpty {
+                    yaml += "\nmic_boost_prompt: \"\(Self.escapeYAML(prompt))\""
+                }
+            }
         }
 
         // Add speaker identification metadata.

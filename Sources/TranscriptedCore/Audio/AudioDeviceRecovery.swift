@@ -5,6 +5,14 @@ import QuartzCore
 
 // MARK: - Device Recovery & Watchdog
 
+/// Why the mic capture engine is being restarted mid-recording. A consented
+/// processing change (issue #500 mic boost) reuses the device-recovery
+/// machinery but must not masquerade as a device failure in health metadata.
+enum MicCaptureRestartReason {
+    case deviceChange
+    case processingChange
+}
+
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
@@ -58,7 +66,10 @@ extension Audio {
 
     // MARK: - Device Recovery
 
-    func recoverFromDeviceChange(sessionGeneration: UInt64) {
+    func recoverFromDeviceChange(
+        sessionGeneration: UInt64,
+        reason: MicCaptureRestartReason = .deviceChange
+    ) {
         // Ignore recovery work that belonged to an older recording session.
         guard sessionGeneration == recordingSessionGeneration else {
             AppLogger.audioMic.info("Skipping stale recovery request", [
@@ -80,9 +91,15 @@ extension Audio {
 
         guard let engine = engine, let inputNode = inputNode else { return }
 
-        // Track device switch for health monitoring
+        // Track device switch for health monitoring. Deliberate processing
+        // restarts stay out of deviceSwitchCount so health metadata and
+        // capture_quality aren't polluted; recoveryAttemptCount stays
+        // unconditional — it's the watchdog give-up safety counter and
+        // resets on success below.
         let switchStart = Date()
-        deviceSwitchCount += 1
+        if reason == .deviceChange {
+            deviceSwitchCount += 1
+        }
         recoveryAttemptCount += 1
         AppLogger.audioMic.debug("Recovering from device change", ["switchNumber": "\(deviceSwitchCount)", "maxAttempts": "\(maxRecoveryAttempts)"])
 
@@ -287,24 +304,25 @@ extension Audio {
             }
             lastBufferTime = CACurrentMediaTime() // Reset watchdog
 
+            let transientMessage = reason == .processingChange ? "Mic boost enabled" : "Switched to default mic"
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.error = "Switched to default mic"
+                self.error = transientMessage
 
                 // Clear error after 3 seconds (use weak self to prevent retain)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                     guard let self = self else { return }
-                    if self.error == "Switched to default mic" {
+                    if self.error == transientMessage {
                         self.error = nil
                     }
                 }
             }
 
-            // Record the device switch gap
+            // Record the restart gap
             let gap = AudioGap(
                 start: switchStart,
                 duration: Date().timeIntervalSince(switchStart),
-                reason: "Device switch"
+                reason: reason == .processingChange ? "Mic processing change" : "Device switch"
             )
             appendRecordingGap(gap)
             if let recoverySegmentURL {

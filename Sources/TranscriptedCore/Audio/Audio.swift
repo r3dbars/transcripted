@@ -5,11 +5,19 @@ import AppKit
 import CoreAudio
 import Combine
 
-/// Cosmetic lifecycle cues emitted by `Audio` so embedders can play start /
-/// stop UI feedback without `Audio` itself depending on AppKit / NSSound.
+/// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
+/// itself depending on AppKit / NSSound.
+///
+/// `recordingStarted` / `recordingStopped` are cosmetic (UI sounds).
+/// `micAttenuatedByForeignVoiceProcessing` is an actionable one-shot signal:
+/// the mic stayed attenuated for ~30s despite the software AGC pinned at max
+/// gain (issue #500 — a foreign app holds the shared input device in macOS
+/// voice/communication mode). Hosts may route it to a consent prompt that
+/// offers Apple voice processing for the active recording.
 public enum CaptureLifecycleCue: Sendable {
     case recordingStarted
     case recordingStopped
+    case micAttenuatedByForeignVoiceProcessing
 }
 
 /// Status of system audio capture for UI feedback
@@ -259,6 +267,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// device recovery, deinit'd at stop.
     var realtimeAGC: RealtimeAGC?
 
+    /// Live issue #500 attenuation detector. Main-thread-only: replaced on
+    /// the start path in `prepareForNewRecordingStart`, consumed only by the
+    /// 0.2s recording timer (both effectively main); no lock.
+    var quietMicAttenuationDetector = QuietMicAttenuationDetector()
+
     // Device change watchdog - thread-safe access via lock
     // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
     // Matches SystemAudioCapture.swift which also uses CACurrentMediaTime().
@@ -423,7 +436,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _micRawPeak: Float = 0
     private var _micProcessedPeak: Float = 0
     private var _systemAudioPeak: Float = 0
+    // Interval-scoped mic facts consumed by the 0.2s recording timer for the
+    // live issue #500 attenuation detector. Zeroed every drain so one loud
+    // cough cannot mask later attenuation the way the lifetime maxima do.
+    // `_intervalMinAppliedGain` is nil when no AGC-processed buffer arrived
+    // this interval; updated via min so one unpinned buffer disqualifies
+    // the tick.
+    private var _intervalMicRawPeak: Float = 0
+    private var _intervalMicProcessedPeak: Float = 0
+    private var _intervalMinAppliedGain: Float?
+    private var _intervalAGCMaxGain: Float?
+    private var _intervalSawMicBuffer: Bool = false
     private let signalDiagnosticsLock = NSLock()
+
+    struct MicSignalIntervalDiagnostics {
+        let rawPeak: Float
+        let processedPeak: Float
+        let minAppliedGain: Float?
+        let agcMaxGain: Float?
+        let sawBuffer: Bool
+    }
 
     var signalDiagnosticsSnapshot: AudioSignalDiagnosticsSnapshot {
         signalDiagnosticsLock.lock()
@@ -441,13 +473,45 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micRawPeak = 0
         _micProcessedPeak = 0
         _systemAudioPeak = 0
+        _intervalMicRawPeak = 0
+        _intervalMicProcessedPeak = 0
+        _intervalMinAppliedGain = nil
+        _intervalAGCMaxGain = nil
+        _intervalSawMicBuffer = false
     }
 
-    func recordMicSignalPeaks(raw: Float, processed: Float) {
+    func recordMicSignalPeaks(raw: Float, processed: Float, appliedGain: Float?, agcMaxGain: Float?) {
         signalDiagnosticsLock.lock()
         defer { signalDiagnosticsLock.unlock() }
         _micRawPeak = max(_micRawPeak, raw)
         _micProcessedPeak = max(_micProcessedPeak, processed)
+        _intervalMicRawPeak = max(_intervalMicRawPeak, raw)
+        _intervalMicProcessedPeak = max(_intervalMicProcessedPeak, processed)
+        if let appliedGain {
+            _intervalMinAppliedGain = min(_intervalMinAppliedGain ?? .infinity, appliedGain)
+            _intervalAGCMaxGain = agcMaxGain
+        }
+        _intervalSawMicBuffer = true
+    }
+
+    /// Read-and-zero the interval-scoped mic facts. Called only from the
+    /// 0.2s recording timer so each tick sees exactly one interval.
+    func drainMicSignalIntervalDiagnostics() -> MicSignalIntervalDiagnostics {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        let interval = MicSignalIntervalDiagnostics(
+            rawPeak: _intervalMicRawPeak,
+            processedPeak: _intervalMicProcessedPeak,
+            minAppliedGain: _intervalMinAppliedGain,
+            agcMaxGain: _intervalAGCMaxGain,
+            sawBuffer: _intervalSawMicBuffer
+        )
+        _intervalMicRawPeak = 0
+        _intervalMicProcessedPeak = 0
+        _intervalMinAppliedGain = nil
+        _intervalAGCMaxGain = nil
+        _intervalSawMicBuffer = false
+        return interval
     }
 
     func recordSystemSignalPeak(_ peak: Float) {
@@ -780,6 +844,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSignalDiagnostics()
+        // Fresh instance = clean one-shot latch per recording.
+        quietMicAttenuationDetector = QuietMicAttenuationDetector()
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
         resetRecordingStartCapturedInput()
         resetSilenceTracking()  // Start fresh silence tracking
@@ -1109,6 +1175,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     self.onRecordingComplete?(finalMicURL, finalSystemURL)
                 }
             }
+        }
+    }
+
+    /// Deliberate mid-recording engine restart so a processing-mode change
+    /// (arming VPIO for the issue #500 mic boost) takes effect immediately.
+    /// Reuses the device-recovery machinery; never runs recovery on the
+    /// calling thread (recovery uses Thread.sleep for HAL settle).
+    public func restartCaptureForProcessingChange() {
+        guard isRecording, !isMicRecovering else { return }
+        enableVoiceProcessing = true
+        // Snapshot the generation BEFORE dispatch: stop() bumps it
+        // synchronously, so a stop racing the boost aborts cleanly at
+        // recovery's existing generation checks.
+        let sessionGeneration = recordingSessionGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.recoverFromDeviceChange(sessionGeneration: sessionGeneration, reason: .processingChange)
         }
     }
 
