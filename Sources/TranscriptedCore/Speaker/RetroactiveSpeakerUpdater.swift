@@ -77,38 +77,19 @@ extension TranscriptSaver {
         newName: String,
         directory: URL
     ) {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" }) else { return }
-
         let dbIdString = dbId.uuidString
         var updatedCount = 0
 
-        for fileURL in files {
+        for fileURL in transcriptMarkdownFiles(under: directory) {
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
                   content.contains("db_id: \"\(dbIdString)\"") else { continue }
 
-            // Find the old speaker name from YAML: the line after db_id contains name: "OldName"
-            let lines = content.components(separatedBy: "\n")
-            var oldNames: [String] = []
-            for (i, line) in lines.enumerated() {
-                if line.contains("db_id: \"\(dbIdString)\"") {
-                    // Next line should be name: "..."
-                    if i + 1 < lines.count {
-                        let nameLine = lines[i + 1]
-                        if let oldName = extractYAMLQuotedString(from: nameLine, prefix: "name: "),
-                           oldName != newName,
-                           !oldNames.contains(oldName) {
-                            oldNames.append(oldName)
-                        }
-                    }
-                }
-            }
-
-            guard !oldNames.isEmpty else { continue }
-
-            for oldName in oldNames {
-                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
-            }
+            guard applyRetroactiveRename(
+                in: &content,
+                dbId: dbId,
+                newName: newName,
+                fileName: fileURL.lastPathComponent
+            ) else { continue }
 
             // Write back atomically
             do {
@@ -188,31 +169,20 @@ extension TranscriptSaver {
         targetName: String,
         directory: URL
     ) {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" }) else { return }
-
         let sourceIdString = sourceDbId.uuidString
         let targetIdString = targetDbId.uuidString
         var updatedCount = 0
 
-        for fileURL in files {
+        for fileURL in transcriptMarkdownFiles(under: directory) {
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
                   content.contains("db_id: \"\(sourceIdString)\"") else { continue }
 
-            let lines = content.components(separatedBy: "\n")
-            var oldNames: [String] = []
-            for (index, line) in lines.enumerated() where line.contains("db_id: \"\(sourceIdString)\"") {
-                guard index + 1 < lines.count else { continue }
-                if let oldName = extractYAMLQuotedString(from: lines[index + 1], prefix: "name: "),
-                   oldName != targetName,
-                   !oldNames.contains(oldName) {
-                    oldNames.append(oldName)
-                }
-            }
-
-            for oldName in oldNames {
-                applyNameReplacement(in: &content, oldName: oldName, newName: targetName, updateSpeakerTag: true)
-            }
+            applyRetroactiveRename(
+                in: &content,
+                dbId: sourceDbId,
+                newName: targetName,
+                fileName: fileURL.lastPathComponent
+            )
             content = content.replacingOccurrences(
                 of: "db_id: \"\(sourceIdString)\"",
                 with: "db_id: \"\(targetIdString)\""
@@ -237,6 +207,170 @@ extension TranscriptSaver {
                 "files": "\(updatedCount)"
             ])
         }
+    }
+
+    // MARK: - Settings Rename/Merge Helpers
+
+    /// Markdown transcripts under the capture directory, including user-created
+    /// subfolders. Depth-bounded so audio bundles and deep trees stay cheap;
+    /// the db_id frontmatter check still gates every write.
+    private static func transcriptMarkdownFiles(under directory: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var files: [URL] = []
+        for case let url as URL in enumerator {
+            if enumerator.level > 4 {
+                enumerator.skipDescendants()
+                continue
+            }
+            if url.pathExtension == "md" {
+                files.append(url)
+            }
+        }
+        return files.sorted { $0.path < $1.path }
+    }
+
+    private struct FrontmatterSpeakerRow {
+        var nameLineIndex: Int?
+        var channel: UtteranceChannel?
+        var dbId: UUID?
+        var name: String?
+    }
+
+    /// Parse the `speakers:` rows out of YAML frontmatter. Tolerates rows without
+    /// a channel field (older dictation-era transcripts).
+    private static func parseFrontmatterSpeakerRows(in lines: [String]) -> [FrontmatterSpeakerRow] {
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [] }
+
+        var rows: [FrontmatterSpeakerRow] = []
+        var current: FrontmatterSpeakerRow?
+        var inSpeakers = false
+        var speakersIndent = 0
+
+        for index in 1..<lines.count {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" { break }
+
+            if !inSpeakers {
+                if trimmed == "speakers:" {
+                    inSpeakers = true
+                    speakersIndent = line.prefix(while: { $0 == " " }).count
+                }
+                continue
+            }
+
+            let indent = line.prefix(while: { $0 == " " }).count
+            if !trimmed.isEmpty, indent <= speakersIndent, !trimmed.hasPrefix("-") {
+                break
+            }
+
+            if trimmed.hasPrefix("- ") {
+                if let row = current { rows.append(row) }
+                current = FrontmatterSpeakerRow()
+            }
+            guard current != nil else { continue }
+
+            if let value = extractYAMLQuotedString(from: line, prefix: "db_id: ") {
+                current?.dbId = UUID(uuidString: value)
+            } else if let value = extractYAMLQuotedString(from: line, prefix: "name: ") {
+                current?.name = value
+                current?.nameLineIndex = index
+            } else if trimmed.hasPrefix("channel: ") {
+                let raw = String(trimmed.dropFirst("channel: ".count)).trimmingCharacters(in: .whitespaces)
+                current?.channel = UtteranceChannel(rawValue: raw)
+            }
+        }
+        if let row = current { rows.append(row) }
+        return rows
+    }
+
+    /// Rename one person (by db_id) inside a single transcript without bleeding into
+    /// other speakers who share the old display name.
+    ///
+    /// - YAML `name:` lines are rewritten row-targeted, only for rows matching `dbId`.
+    /// - When the old name is unique to this db_id in the file, the historical full
+    ///   replacement (labels, wiki links, breakdown, speaker tag) is unambiguous and
+    ///   applies as before.
+    /// - When another speaker row shares the old name, body labels are rewritten only
+    ///   on channels free of the same-name conflict; wiki links and tags are left
+    ///   untouched and the skip is logged. Fails closed rather than corrupting.
+    ///
+    /// Returns true when the content was modified.
+    @discardableResult
+    private static func applyRetroactiveRename(
+        in content: inout String,
+        dbId: UUID,
+        newName: String,
+        fileName: String
+    ) -> Bool {
+        var lines = content.components(separatedBy: "\n")
+        let rows = parseFrontmatterSpeakerRows(in: lines)
+        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != newName }
+        guard !targetRows.isEmpty else { return false }
+
+        var changed = false
+
+        // 1) Row-targeted YAML rename for the matching speaker rows only.
+        for row in targetRows {
+            guard let index = row.nameLineIndex else { continue }
+            let indent = lines[index].prefix(while: { $0 == " " })
+            lines[index] = "\(indent)name: \"\(escapeYAML(newName))\""
+            changed = true
+        }
+        content = lines.joined(separator: "\n")
+
+        // 2) Body labels, guarded against shared-name bleed.
+        let targetRowsByName = Dictionary(grouping: targetRows, by: { $0.name ?? "" })
+        for (oldName, rowsForName) in targetRowsByName {
+            let conflictChannels = Set(
+                rows.filter { $0.dbId != dbId && $0.name == oldName }.compactMap { $0.channel }
+            )
+            let hasAnyConflict = rows.contains { $0.dbId != dbId && $0.name == oldName }
+
+            if !hasAnyConflict {
+                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
+                changed = true
+                continue
+            }
+
+            let rowChannels = Set(rowsForName.compactMap { $0.channel })
+            var skippedChannels: [String] = []
+            var renamedChannels: [String] = []
+
+            if rowChannels.isEmpty {
+                // Channel-less legacy rows with a same-name conflict: nothing in the
+                // body can be attributed safely.
+                skippedChannels.append("unknown")
+            } else {
+                for channel in rowChannels {
+                    if conflictChannels.contains(channel) {
+                        skippedChannels.append(channel.rawValue)
+                        continue
+                    }
+                    applyScopedNameReplacement(
+                        in: &content,
+                        oldName: oldName,
+                        newName: newName,
+                        channel: channel
+                    )
+                    renamedChannels.append(channel.rawValue)
+                    changed = true
+                }
+            }
+
+            AppLogger.pipeline.warning("Speaker rename hit a shared display name; scoped body rewrite", [
+                "file": fileName,
+                "renamedChannels": renamedChannels.joined(separator: ","),
+                "skippedChannels": skippedChannels.joined(separator: ",")
+            ])
+        }
+
+        return changed
     }
 
     // MARK: - Speaker Name Updating (Post-Naming Flow)
