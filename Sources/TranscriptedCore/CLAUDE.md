@@ -33,7 +33,8 @@ These seams exist specifically so the app can embed the library without adopting
 - `AudioCaptureStartState` is the canonical readiness policy for live meeting capture. Meeting capture should not report success until mic recording is running and the system-audio file exists.
 - `MeetingInputDeviceSelectionPolicy` avoids using Bluetooth headset input for meeting capture when a built-in mic fallback is available, so WebRTC-style playback downgrades do not get worse.
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.
-- `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures.
+- `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures and gating idle USB-mic noise.
+- `MeetingRecordingJournalStore` persists in-progress recording journals for launch recovery. Journal mutations are scoped to the session token returned by `begin(...)` so late stop-path writes cannot corrupt a newer recording's journal.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
 - `AudioPipelineDiagnosticsSnapshot` is the privacy-safe route and buffer-health summary used for analytics and Sentry context. Keep it limited to bucketed device classes, rates, channel counts, and recovery state, never raw device names, transcript text, titles, file paths, or audio.
 - Hosts embedding `TranscriptedCore` should keep app-specific permission UX outside this directory, but they should understand that system-audio capture backend behavior now depends on OS availability.
@@ -94,9 +95,11 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/FailedTranscriptionManagerTests.swift`
 - `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
+- `Tests/TranscriptedCoreTests/MeetingRecordingJournalTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingRouteArtifactFixtureTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
+- `Tests/TranscriptedCoreTests/QuietMicAttenuationDetectorTests.swift`
 - `Tests/TranscriptedCoreTests/RealtimeAGCTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingAudioArchiverTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingHealthInfoOverrideTests.swift`

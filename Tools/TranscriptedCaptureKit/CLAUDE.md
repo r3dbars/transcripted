@@ -50,5 +50,5 @@ The e2e smoke matters because `scripts/entrypoints/run-e2e-smoke.sh` compiles th
 ## Gotchas
 
 - Legacy candidate directories are only included when they actually contain capture Markdown; the directory root is symlink-resolved before enumeration (this was a CLI/MCP drift point — the resolved behavior is canonical now).
-- Speaker metadata from frontmatter is matched by `system_<rawId>` or unique normalized display name for all speakers, including mic speakers.
+- Speaker metadata from frontmatter is channel-scoped: `channel: mic` maps to `mic_<rawId>`, `channel: system` maps to `system_<rawId>`, and older channelless metadata is treated as system metadata.
 - Dictation day entries are returned sorted ascending by `createdAt`.

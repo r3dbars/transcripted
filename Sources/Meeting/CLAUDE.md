@@ -22,6 +22,7 @@
 - `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
 - `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
 - `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
+- `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, and provider-aware remind/dismiss backoff rules for calendar- and runtime-based prompt candidates
@@ -66,6 +67,7 @@
 - Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
 - Live streaming ASR can only start with a recording: `MeetingCaptureBridge` live PCM preview handlers must be installed before capture starts and never reassigned mid-session. `connectLiveSidecarToActiveRecording()` is the only mid-recording entry point (used by the meeting overlay's Live View button) and deliberately starts the sidecar session without live ASR; the final transcript still attaches normally.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
+- `MeetingMicBoostPromptPolicy` is the canonical place for the in-meeting Boost Mic consent prompt. It must not present or apply actions after recording stop/cancel/termination teardown begins.
 - `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
@@ -119,6 +121,7 @@ Relevant direct coverage:
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
+- `Tests/MeetingMicBoostPromptPolicyTests.swift`
 - `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
