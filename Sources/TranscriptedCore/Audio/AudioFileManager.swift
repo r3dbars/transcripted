@@ -284,6 +284,7 @@ extension Audio {
                 interleaved: monoFormat.isInterleaved
             )
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+            recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
@@ -357,13 +358,23 @@ extension Audio {
         // benefit from AGC's normalized loudness.
         guard let bufferForAsyncUse = deepCopyBuffer(buffer) else {
             AppLogger.audioMic.warning("Failed to copy mic buffer for async write")
-            recordMicSignalPeaks(raw: rawPeak, processed: 0)
+            recordMicSignalPeaks(raw: rawPeak, processed: 0, appliedGain: nil, agcMaxGain: nil)
             return
         }
 
-        // Apply real-time AGC to the working copy. No-op when VPIO is on.
-        realtimeAGC?.process(buffer: bufferForAsyncUse)
-        recordMicSignalPeaks(raw: rawPeak, processed: linearPeak(buffer: bufferForAsyncUse))
+        // Apply real-time AGC to the working copy. No-op when VPIO is on
+        // (`agc == nil` records nil gain so the attenuation detector stays
+        // dormant). `appliedGain` is read on the same thread that calls
+        // process() — the only cross-call read — preserving RealtimeAGC's
+        // lock-free single-thread contract.
+        let agc = realtimeAGC
+        agc?.process(buffer: bufferForAsyncUse)
+        recordMicSignalPeaks(
+            raw: rawPeak,
+            processed: linearPeak(buffer: bufferForAsyncUse),
+            appliedGain: agc?.appliedGain,
+            agcMaxGain: agc?.maxGain
+        )
 
         self.onMicPCMBuffer?(bufferForAsyncUse)
 
@@ -400,22 +411,36 @@ extension Audio {
         guard let primaryURL else { return segments.last?.url }
         guard segments.count > 1 else { return primaryURL }
 
+        let mergeStart = Date()
         do {
-            let mergedURL = try MicRecordingFileMerger.merge(primaryURL: primaryURL, segments: segments)
+            let outcome = try MicRecordingFileMerger.merge(primaryURL: primaryURL, segments: segments)
             let insertedSilenceSamples = segments
                 .dropFirst()
                 .reduce(0) { partialResult, segment in
                     partialResult + MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 16_000)
                 }
-            AppLogger.audioMic.info("Merged mic recovery segments", [
-                "segments": "\(segments.count)",
+            let context: [String: String] = [
+                "segments": "\(outcome.segmentCount)",
+                "appended": "\(outcome.appendedSegments)",
+                "skipped": "\(outcome.skippedSegments)",
+                "repaired": "\(outcome.repairedSegments)",
+                "padded": "\(outcome.paddedSegments)",
+                "durationSeconds": String(format: "%.2f", Date().timeIntervalSince(mergeStart)),
                 "insertedSilenceSeconds": String(format: "%.3f", Double(insertedSilenceSamples) / 16_000),
-                "file": mergedURL?.lastPathComponent ?? primaryURL.lastPathComponent
-            ])
-            return mergedURL
+                "file": outcome.url?.lastPathComponent ?? primaryURL.lastPathComponent
+            ]
+            if outcome.isFullFidelity {
+                AppLogger.audioMic.info("Merged mic recovery segments", context)
+            } else {
+                // Some recorded audio is missing from the merged file; the
+                // source segments stay on disk for recovery.
+                AppLogger.audioMic.error("Merged mic recovery segments with degraded fidelity", context)
+            }
+            return outcome.url
         } catch {
             AppLogger.audioMic.error("Failed to merge mic recovery segments", [
                 "segments": "\(segments.count)",
+                "durationSeconds": String(format: "%.2f", Date().timeIntervalSince(mergeStart)),
                 "error": error.localizedDescription
             ])
             return primaryURL
@@ -431,6 +456,25 @@ extension Audio {
             guard let self = self, let start = self.startTime else { return }
             DispatchQueue.main.async {
                 self.recordingDuration = Date().timeIntervalSince(start)
+            }
+
+            // Live issue #500 attenuation detection. Always drain (even when
+            // not recording) so an interval never spans ticks. Forcing
+            // sawBuffer false while isMicRecovering resets the streak across
+            // deliberate/automatic engine restarts. The cue fires directly
+            // on main (this timer runs on the main run loop), matching where
+            // stop() fires .recordingStopped.
+            let interval = self.drainMicSignalIntervalDiagnostics()
+            if self.isRecording,
+               self.quietMicAttenuationDetector.consume(
+                   rawPeak: interval.rawPeak,
+                   processedPeak: interval.processedPeak,
+                   appliedGain: interval.minAppliedGain,
+                   agcMaxGain: interval.agcMaxGain,
+                   sawBuffer: interval.sawBuffer && !self.isMicRecovering
+               ) {
+                let cueHandler = self.onCaptureLifecycleCue
+                cueHandler?(.micAttenuatedByForeignVoiceProcessing)
             }
 
             // Periodic disk check during recording (~every 30s)

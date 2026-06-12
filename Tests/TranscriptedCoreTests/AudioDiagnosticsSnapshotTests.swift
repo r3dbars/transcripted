@@ -25,7 +25,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
 
-        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36)
+        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(0.25)
 
         let snapshot = audio.createPipelineDiagnosticsSnapshot()
@@ -88,7 +88,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
 
     func testSnapshotResetsSignalDiagnosticsForNewRecording() {
         let audio = makeAudio()
-        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36)
+        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(0.25)
 
         audio.prepareForNewRecordingStart()

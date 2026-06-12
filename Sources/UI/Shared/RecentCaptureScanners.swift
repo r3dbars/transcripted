@@ -12,6 +12,7 @@ struct RecentMeetingItem: Identifiable, Sendable {
     let audio: MeetingAudioAttachment?
     let speakerStatus: RecentMeetingSpeakerStatus
     let summaryPreview: RecentMeetingSummaryPreview?
+    var audioHealth: RecentMeetingAudioHealth? = nil
 
     var id: String { transcriptURL.path }
     var displayTitle: String { summaryPreview?.title ?? title }
@@ -36,6 +37,30 @@ struct RecentMeetingSummarySection: Identifiable, Equatable, Sendable {
     let text: String
 
     var id: String { title }
+}
+
+/// Issue #500 post-meeting surfacing: facts read back from the saved
+/// transcript's `audio_health` / `mic_boost_prompt` frontmatter keys.
+struct RecentMeetingAudioHealth: Equatable, Sendable {
+    let micBoostPromptOutcome: String?  // raw frontmatter value; nil when key absent
+
+    static func detect(frontmatter: TranscriptFrontmatterDocument?) -> RecentMeetingAudioHealth? {
+        guard frontmatter?.values["audio_health"] == "mic_attenuated_by_call_app" else { return nil }
+        return RecentMeetingAudioHealth(micBoostPromptOutcome: frontmatter?.values["mic_boost_prompt"])
+    }
+}
+
+enum RecentMeetingMicBoostHintPolicy {
+    static func shouldOfferEnableAction(
+        audioHealth: RecentMeetingAudioHealth?,
+        voiceProcessingPreferenceEnabled: Bool
+    ) -> Bool {
+        guard let audioHealth else { return false }
+        guard audioHealth.micBoostPromptOutcome != "accepted" else { return false }
+        // Frontmatter is immutable history: once the preference is on, stop
+        // hinting on old rows — the user already fixed it.
+        return !voiceProcessingPreferenceEnabled
+    }
 }
 
 enum RecentMeetingSpeakerStatus: Equatable, Sendable {
@@ -378,7 +403,8 @@ enum RecentMeetingsScanner {
                     transcriptURL: styled.url,
                     audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
                     speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                    summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter)
+                    summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter),
+                    audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter)
                 )
             )
             if recentItems.count >= limit {

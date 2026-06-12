@@ -131,6 +131,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
+- `meeting_mic_boost_prompt_shown`
+- `meeting_mic_boost_prompt_actioned`
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`

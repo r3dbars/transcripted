@@ -585,6 +585,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("default_output_volume_after"), true, "meeting stop events should preserve output volume after recording")
         assertEqual(policy?.allowedProperties.contains("default_output_volume_dropped"), true, "meeting stop events should preserve issue 500 output-drop flags")
         assertEqual(healthPolicy?.allowedProperties.contains("default_system_output_volume_dropped"), true, "health snapshots should preserve system-output drop flags")
+        assertEqual(policy?.allowedProperties.contains("mic_boost_prompt"), true, "meeting stop events should preserve the issue 500 mic-boost prompt outcome")
+        assertEqual(healthPolicy?.allowedProperties.contains("mic_boost_prompt"), true, "health snapshots should preserve the issue 500 mic-boost prompt outcome")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
@@ -835,6 +837,41 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_shown")
+        let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_actioned")
+
+        assertEqual(
+            shown?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "trigger"],
+            "mic boost prompt shown should carry only coarse duration and trigger"
+        )
+        assertEqual(
+            actioned?.allowedProperties ?? Set<String>(),
+            ["action", "duration_bucket", "trigger"],
+            "mic boost prompt actioned should carry only the accept/decline enum plus coarse attribution"
+        )
+        assertEqual(
+            actioned?.allowedProperties.contains("app_name"),
+            false,
+            "the foreign app holding the mic must never be named in analytics"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action": "accepted",
+                "duration_bucket": "10_29s",
+                "trigger": "hotkey",
+                "app_name": "Safari",
+            ],
+            allowedKeys: actioned?.allowedProperties ?? Set<String>()
+        )
+        assertEqual(sanitized["action"], "accepted", "accept/decline enum should survive sanitization")
+        assertEqual(sanitized["duration_bucket"], "10_29s", "coarse duration bucket should survive sanitization")
+        assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
+        assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
 }
 
