@@ -46,6 +46,7 @@ func testMeetingLiveViewAffordancePolicy() {
             collapsed?.enablesLiveMeetingsOnClick, false,
             "an already-enabled preference should not be re-enabled on click"
         )
+        assertEqual(collapsed?.showsActiveState, false)
 
         let expanded = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
@@ -55,6 +56,10 @@ func testMeetingLiveViewAffordancePolicy() {
         )
         assertEqual(expanded?.tooltip, "Hide live transcript", "open drawer should offer the hide action")
         assertEqual(expanded?.enablesLiveMeetingsOnClick, false)
+        assertEqual(
+            expanded?.showsActiveState, true,
+            "the button should render pressed-in while the drawer is open"
+        )
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — one-click enable when the preference is off") {

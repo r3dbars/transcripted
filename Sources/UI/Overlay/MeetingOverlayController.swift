@@ -152,12 +152,7 @@ final class MeetingOverlayRootView: NSView {
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
     private let liveViewButton = NSButton()
-    private let transcriptTitleLabel = NSTextField(labelWithString: MeetingLiveViewAffordancePolicy.drawerTitle)
-    private let transcriptBrowserButton = NSButton()
-    private let transcriptSeparator = NSView()
-    private let transcriptStatusLabel = NSTextField(wrappingLabelWithString: "")
-    private let transcriptScrollView = NSScrollView()
-    private let transcriptTextView = NSTextView()
+    private let transcriptDrawer = MeetingLiveTranscriptDrawerView(frame: .zero)
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
@@ -176,8 +171,7 @@ final class MeetingOverlayRootView: NSView {
     private var isRecordingMinimized = false
     private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
     private var isTranscriptExpanded = false
-    private var transcriptStatusText: String?
-    private var transcriptHasEntries = false
+    private var isDrawerVisible = false
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
@@ -360,61 +354,10 @@ final class MeetingOverlayRootView: NSView {
         liveViewButton.isHidden = true
         addSubview(liveViewButton)
 
-        setupTranscriptDrawerViews()
-    }
-
-    private func setupTranscriptDrawerViews() {
-        transcriptSeparator.wantsLayer = true
-        transcriptSeparator.layer?.backgroundColor = MeetingOverlayTokens.panelStroke.cgColor
-        transcriptSeparator.isHidden = true
-        addSubview(transcriptSeparator)
-
-        transcriptTitleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-        transcriptTitleLabel.textColor = MeetingOverlayTokens.textSecondary
-        transcriptTitleLabel.isHidden = true
-        addSubview(transcriptTitleLabel)
-
-        transcriptBrowserButton.imageScaling = .scaleProportionallyDown
-        transcriptBrowserButton.image = transcriptBrowserButtonImage()
-        transcriptBrowserButton.imagePosition = .imageOnly
-        transcriptBrowserButton.contentTintColor = MeetingOverlayTokens.quietActionTint
-        transcriptBrowserButton.isBordered = false
-        transcriptBrowserButton.target = self
-        transcriptBrowserButton.action = #selector(handleLiveViewBrowserAction)
-        transcriptBrowserButton.toolTip = nil
-        transcriptBrowserButton.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.browserAutomationIdentifier)
-        transcriptBrowserButton.setAccessibilityLabel(MeetingLiveViewAffordancePolicy.browserTooltip)
-        transcriptBrowserButton.isHidden = true
-        addSubview(transcriptBrowserButton)
-
-        transcriptStatusLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        transcriptStatusLabel.textColor = MeetingOverlayTokens.textSecondary
-        transcriptStatusLabel.isHidden = true
-        addSubview(transcriptStatusLabel)
-
-        transcriptTextView.isEditable = false
-        transcriptTextView.isSelectable = true
-        transcriptTextView.drawsBackground = false
-        transcriptTextView.textContainerInset = NSSize(width: 2, height: 6)
-        transcriptTextView.minSize = .zero
-        transcriptTextView.maxSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        transcriptTextView.isVerticallyResizable = true
-        transcriptTextView.isHorizontallyResizable = false
-        transcriptTextView.autoresizingMask = [.width]
-        transcriptTextView.textContainer?.widthTracksTextView = true
-        transcriptTextView.setAccessibilityLabel(MeetingLiveViewAffordancePolicy.drawerTitle)
-
-        transcriptScrollView.documentView = transcriptTextView
-        transcriptScrollView.hasVerticalScroller = true
-        transcriptScrollView.hasHorizontalScroller = false
-        transcriptScrollView.drawsBackground = false
-        transcriptScrollView.borderType = .noBorder
-        transcriptScrollView.autohidesScrollers = true
-        transcriptScrollView.isHidden = true
-        addSubview(transcriptScrollView)
+        transcriptDrawer.isHidden = true
+        transcriptDrawer.alphaValue = 0
+        transcriptDrawer.onOpenInBrowser = { [weak self] in self?.onLiveViewBrowserAction?() }
+        addSubview(transcriptDrawer)
     }
 
     override func layout() {
@@ -609,78 +552,16 @@ final class MeetingOverlayRootView: NSView {
         micLabel.frame = .zero
         systemLabel.frame = .zero
 
-        if isTranscriptExpanded {
-            layoutTranscriptDrawer(headerBottom: bounds.height - tokens.panelHeight)
-        } else {
-            zeroTranscriptDrawerFrames()
-        }
+        // The drawer fills everything below the recording strip; it stays in
+        // the tree during the height animation so it can fade and clip while
+        // the panel grows or shrinks.
+        transcriptDrawer.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: bounds.width,
+            height: max(0, bounds.height - tokens.panelHeight)
+        )
         refreshTooltipTrackingAreas()
-    }
-
-    private func layoutTranscriptDrawer(headerBottom: CGFloat) {
-        let pad = MeetingOverlayTokens.drawerPad
-        transcriptSeparator.frame = NSRect(
-            x: pad,
-            y: headerBottom,
-            width: bounds.width - pad * 2,
-            height: 1
-        )
-
-        let browserSize = MeetingOverlayTokens.drawerBrowserButtonSize
-        let titleSize = transcriptTitleLabel.fittingSize
-        let headerRowHeight = max(titleSize.height, browserSize)
-        let headerRowTop = headerBottom - 7
-        transcriptTitleLabel.frame = NSRect(
-            x: pad,
-            y: headerRowTop - headerRowHeight + (headerRowHeight - titleSize.height) / 2,
-            width: min(titleSize.width, bounds.width - pad * 2 - browserSize - 8),
-            height: titleSize.height
-        )
-        transcriptBrowserButton.frame = NSRect(
-            x: bounds.width - pad - browserSize,
-            y: headerRowTop - headerRowHeight + (headerRowHeight - browserSize) / 2,
-            width: browserSize,
-            height: browserSize
-        )
-
-        var contentTop = headerRowTop - headerRowHeight - 6
-        if !transcriptStatusLabel.isHidden {
-            let statusWidth = bounds.width - pad * 2
-            let statusHeight = min(
-                transcriptStatusLabel.sizeThatFits(
-                    NSSize(width: statusWidth, height: .greatestFiniteMagnitude)
-                ).height,
-                52
-            )
-            transcriptStatusLabel.frame = NSRect(
-                x: pad,
-                y: contentTop - statusHeight,
-                width: statusWidth,
-                height: statusHeight
-            )
-            contentTop -= statusHeight + 6
-        } else {
-            transcriptStatusLabel.frame = .zero
-        }
-
-        if transcriptScrollView.isHidden {
-            transcriptScrollView.frame = .zero
-        } else {
-            transcriptScrollView.frame = NSRect(
-                x: pad,
-                y: MeetingOverlayTokens.drawerBottomInset,
-                width: bounds.width - pad * 2,
-                height: max(0, contentTop - MeetingOverlayTokens.drawerBottomInset)
-            )
-        }
-    }
-
-    private func zeroTranscriptDrawerFrames() {
-        transcriptSeparator.frame = .zero
-        transcriptTitleLabel.frame = .zero
-        transcriptBrowserButton.frame = .zero
-        transcriptStatusLabel.frame = .zero
-        transcriptScrollView.frame = .zero
     }
 
     private func layoutMinimizedRecording(midY: CGFloat) {
@@ -730,7 +611,7 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.frame = .zero
         audioWaveform.frame = .zero
         liveViewButton.frame = .zero
-        zeroTranscriptDrawerFrames()
+        transcriptDrawer.frame = .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -953,6 +834,10 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.borderWidth = 0.5
             closeButton.layer?.borderColor = MeetingOverlayTokens.finishActionBorder.cgColor
             updateChevronButtonAppearance()
+            if currentLiveViewAffordance?.showsActiveState == true {
+                liveViewButton.contentTintColor = MeetingOverlayTokens.textPrimary
+                liveViewButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.16).cgColor
+            }
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             updateStatusDot(color: MeetingOverlayTokens.dotPrep)
@@ -1004,31 +889,39 @@ final class MeetingOverlayRootView: NSView {
         statusText: String?,
         hasEntries: Bool
     ) {
-        transcriptStatusText = statusText
-        transcriptHasEntries = hasEntries
-        transcriptStatusLabel.stringValue = statusText ?? ""
-
-        let wasPinnedToBottom: Bool = {
-            guard let documentView = transcriptScrollView.documentView else { return true }
-            let visible = transcriptScrollView.contentView.documentVisibleRect
-            return visible.maxY >= documentView.frame.height - 28
-        }()
-        transcriptTextView.textStorage?.setAttributedString(attributed)
-        if wasPinnedToBottom {
-            transcriptTextView.scrollToEndOfDocument(nil)
-        }
-
-        refreshTranscriptDrawerVisibility()
-        needsLayout = true
+        transcriptDrawer.update(
+            transcript: attributed,
+            statusText: statusText,
+            hasEntries: hasEntries
+        )
     }
 
+    /// Fades the drawer in or out as one unit. The panel height animates in
+    /// the same breath (driven by the controller's resize), so the drawer is
+    /// clipped to the space below the recording strip while it appears.
     private func refreshTranscriptDrawerVisibility() {
         let drawerVisible = currentState == .recording && !isRecordingMinimized && isTranscriptExpanded
-        transcriptSeparator.isHidden = !drawerVisible
-        transcriptTitleLabel.isHidden = !drawerVisible
-        transcriptBrowserButton.isHidden = !drawerVisible
-        transcriptStatusLabel.isHidden = !drawerVisible || transcriptStatusText == nil
-        transcriptScrollView.isHidden = !drawerVisible || !transcriptHasEntries
+        guard drawerVisible != isDrawerVisible else { return }
+        isDrawerVisible = drawerVisible
+
+        if drawerVisible {
+            transcriptDrawer.isHidden = false
+            transcriptDrawer.prepareForReveal()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                transcriptDrawer.animator().alphaValue = 1
+            }
+        } else {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                transcriptDrawer.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                guard let self, !self.isDrawerVisible else { return }
+                self.transcriptDrawer.isHidden = true
+            })
+        }
     }
 
     private func applyBaseVisualStyle() {
@@ -1144,13 +1037,6 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
-    private func transcriptBrowserButtonImage() -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-        return NSImage(
-            systemSymbolName: "safari",
-            accessibilityDescription: MeetingLiveViewAffordancePolicy.browserTooltip
-        )?.withSymbolConfiguration(config)
-    }
 
     private func refreshTooltipTrackingAreas() {
         for area in tooltipTrackingAreas {
@@ -1169,10 +1055,12 @@ final class MeetingOverlayRootView: NSView {
         if let liveViewTooltip = currentLiveViewAffordance?.tooltip {
             addTooltipTrackingArea(for: liveViewButton, text: liveViewTooltip)
         }
-        addTooltipTrackingArea(
-            for: transcriptBrowserButton,
-            text: MeetingLiveViewAffordancePolicy.browserTooltip
-        )
+        if isDrawerVisible {
+            addTooltipTrackingArea(
+                for: transcriptDrawer.browserActionView,
+                text: MeetingLiveViewAffordancePolicy.browserTooltip
+            )
+        }
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -1181,8 +1069,11 @@ final class MeetingOverlayRootView: NSView {
 
     private func addTooltipTrackingArea(for view: NSView, text: String) {
         guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
+        // Convert from the anchor's superview so nested views (drawer
+        // children) track correctly, not just direct siblings.
+        let rect = convert(view.bounds, from: view)
         let area = NSTrackingArea(
-            rect: view.frame,
+            rect: rect,
             options: [.mouseEnteredAndExited, .activeAlways],
             owner: self,
             userInfo: ["tooltipText": text, "anchorView": view]
@@ -1257,32 +1148,36 @@ final class MeetingOverlayRootView: NSView {
         return String(format: "%02d:%02d", m, s)
     }
 
+    // Clicking a tracked button while its tooltip is up would otherwise
+    // leave the old tooltip text floating over the new state.
     @objc private func handleSecondaryAction() {
+        hideTooltip()
         onSecondaryAction?()
     }
 
     @objc private func handleRemindAction() {
+        hideTooltip()
         onRemindAction?()
     }
 
     @objc private func handleCancelAction() {
+        hideTooltip()
         onCancelAction?()
     }
 
     @objc private func handlePrimaryAction() {
+        hideTooltip()
         onPrimaryAction?()
     }
 
     @objc private func handleToggleMinimized() {
+        hideTooltip()
         onToggleMinimized?()
     }
 
     @objc private func handleLiveViewAction() {
+        hideTooltip()
         onLiveViewAction?()
-    }
-
-    @objc private func handleLiveViewBrowserAction() {
-        onLiveViewBrowserAction?()
     }
 }
 
@@ -1333,7 +1228,6 @@ enum MeetingOverlayTokens {
     static let cancelHeight: CGFloat = 24
     static let toggleHeight: CGFloat = 22
     static let liveViewHeight: CGFloat = 24
-    static let expandedRecordingPanelWidth: CGFloat = 430
     static let transcriptDrawerHeight: CGFloat = 240
     static let drawerPad: CGFloat = 12
     static let drawerBottomInset: CGFloat = 10
@@ -1403,6 +1297,7 @@ final class MeetingOverlayController {
     private var isShowingCancelConfirmation = false
     private var isRecordingMinimized = false
     private var isTranscriptExpanded = false
+    private var lastRequestedPanelSize: NSSize?
     private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
     private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
     private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
@@ -1811,6 +1706,7 @@ final class MeetingOverlayController {
             width: desiredWidth,
             height: desiredHeight
         ))
+        lastRequestedPanelSize = NSSize(width: desiredWidth, height: desiredHeight)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
@@ -1839,12 +1735,13 @@ final class MeetingOverlayController {
         }
     }
 
+    // The transcript drawer reuses the recording pill's width on purpose:
+    // expansion is a pure downward slide, so the header strip never moves
+    // and text never re-wraps mid-animation.
     private func currentPanelWidth() -> CGFloat {
         switch state {
         case .recording where isRecordingMinimized:
             return MeetingOverlayTokens.minimizedRecordingPanelWidth
-        case .recording where isTranscriptExpanded:
-            return MeetingOverlayTokens.expandedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -1854,6 +1751,7 @@ final class MeetingOverlayController {
 
     private func hidePanel() {
         guard let panel = panel, panel.isVisible else { return }
+        lastRequestedPanelSize = nil
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.14
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -2245,18 +2143,47 @@ final class MeetingOverlayController {
     }
 
     private func resizePanelIfNeeded() {
-        guard let panel, panel.isVisible else { return }
-        let desiredHeight = currentPanelHeight()
-        let desiredWidth = currentPanelWidth()
-        let heightChanged = abs(panel.frame.height - desiredHeight) > 0.5
-        let widthChanged = abs(panel.frame.width - desiredWidth) > 0.5
-        guard heightChanged || widthChanged else { return }
+        guard let panel, panel.isVisible else {
+            lastRequestedPanelSize = nil
+            return
+        }
+        let desired = NSSize(width: currentPanelWidth(), height: currentPanelHeight())
 
-        var frame = panel.frame
-        frame.origin.y += frame.height - desiredHeight
-        frame.origin.x += (frame.width - desiredWidth) / 2
-        frame.size.height = desiredHeight
-        frame.size.width = desiredWidth
-        panel.setFrame(frame, display: true, animate: true)
+        // Compare against the last *requested* size, not the live frame: the
+        // per-second duration tick lands mid-animation, and re-targeting the
+        // same size against an intermediate frame restarts the animation and
+        // makes the resize stutter.
+        if let last = lastRequestedPanelSize,
+           abs(last.width - desired.width) < 0.5,
+           abs(last.height - desired.height) < 0.5 {
+            return
+        }
+        lastRequestedPanelSize = desired
+
+        // Keep the top edge and horizontal center fixed; both are invariant
+        // across our resizes, so reading them mid-animation is safe.
+        let frame = panel.frame
+        let top = frame.origin.y + frame.height
+        var target = NSRect(
+            x: frame.midX - desired.width / 2,
+            y: top - desired.height,
+            width: desired.width,
+            height: desired.height
+        )
+
+        // Never grow past the bottom or sides of the screen the panel is on.
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            target.origin.y = max(target.origin.y, visible.minY + 8)
+            target.origin.x = min(
+                max(target.origin.x, visible.minX + 8),
+                visible.maxX - target.width - 8
+            )
+        }
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.20
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(target, display: true)
+        }
     }
 }

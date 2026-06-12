@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (65 Swift files)
+## Files (66 Swift files)
 
 ### Overlay/
 
@@ -30,6 +30,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
+- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (title, open-in-browser, status line, scrolling transcript) shown below the recording strip, clipped and faded as one unit while the panel resizes
 - `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the recording pill's live transcript button and drawer status copy, including the one-click enable copy when live meetings is off
 - `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status, plus the recording pill's embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`) and its open-in-browser action
 

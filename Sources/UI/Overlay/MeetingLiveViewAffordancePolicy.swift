@@ -27,6 +27,8 @@ enum MeetingLiveViewAffordancePolicy {
         /// True when the click should enable `LiveMeetingCodexPreferences`
         /// (and late-join the sidecar) before showing the drawer.
         let enablesLiveMeetingsOnClick: Bool
+        /// True while the drawer is open so the button can render pressed-in.
+        let showsActiveState: Bool
     }
 
     static func affordance(
@@ -43,14 +45,16 @@ enum MeetingLiveViewAffordancePolicy {
                     tooltip: "Hide live transcript",
                     accessibilityLabel: "Hide live transcript",
                     accessibilityHelp: "Hides the live transcript panel.",
-                    enablesLiveMeetingsOnClick: false
+                    enablesLiveMeetingsOnClick: false,
+                    showsActiveState: true
                 )
             }
             return Affordance(
                 tooltip: "View live transcript",
                 accessibilityLabel: "View live transcript",
                 accessibilityHelp: "Shows the live transcript inside the meeting overlay.",
-                enablesLiveMeetingsOnClick: false
+                enablesLiveMeetingsOnClick: false,
+                showsActiveState: false
             )
         }
 
@@ -58,7 +62,8 @@ enum MeetingLiveViewAffordancePolicy {
             tooltip: "Turn on live transcript",
             accessibilityLabel: "Turn on live transcript",
             accessibilityHelp: "Turns on live meetings and shows the live transcript panel. Live transcript lines begin with your next meeting.",
-            enablesLiveMeetingsOnClick: true
+            enablesLiveMeetingsOnClick: true,
+            showsActiveState: false
         )
     }
 
