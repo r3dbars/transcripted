@@ -1562,6 +1562,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation honors the shared mic boost preference") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let startBlock = sourceSlice(
+            contents,
+            from: "private func installTapAndStartEngine",
+            to: "private func removeRecordingTap"
+        )
+
+        guard
+            let preferenceRead = startBlock.range(of: "MicrophoneProcessingPreferences.isVoiceProcessingEnabled()"),
+            let applyCall = startBlock.range(of: "Self.applyDictationVoiceProcessingPreference"),
+            let tapInstall = startBlock.range(of: "inputNode.installTap(onBus: 0")
+        else {
+            assertionFailure("Dictation start should read the shared mic-processing preference before installing the tap")
+            return
+        }
+
+        assertTrue(
+            preferenceRead.lowerBound < applyCall.lowerBound && applyCall.lowerBound < tapInstall.lowerBound,
+            "dictation should apply the accepted meeting mic boost before recording audio"
+        )
+        assertTrue(
+            contents.contains("dictation_voice_processing_unavailable"),
+            "dictation should report VPIO setup failures without blocking recording"
+        )
+    }
+
     runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let sizeBlock = sourceSlice(
