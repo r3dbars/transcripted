@@ -197,8 +197,10 @@ enum AgentMCPConnector {
         return installedBinaryURL
     }
 
-    /// Points the agent's config at the installed helper. The helper must
-    /// already be installed (callers run the shared helper install first).
+    /// Points the agent's config at the installed helper. Claude Desktop runs
+    /// its own full install + self-test flow; for every other agent the
+    /// helper must already be installed (callers run `ensureHelperInstalled`
+    /// first).
     static func connect(
         _ agent: AgentMCPAgent,
         helperCommandPath: String = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path,
@@ -296,7 +298,7 @@ enum AgentMCPConnector {
             }
 
             if let commandIndex = ((headerIndex + 1)..<tableEnd).first(where: { index in
-                trimmedTOMLLine(lines[index]).hasPrefix("command")
+                lineDefinesTOMLCommandKey(trimmedTOMLLine(lines[index]))
             }) {
                 lines[commandIndex] = commandLine
             } else {
@@ -338,7 +340,7 @@ enum AgentMCPConnector {
                 continue
             }
 
-            guard inServerTable, line.hasPrefix("command") else { continue }
+            guard inServerTable, lineDefinesTOMLCommandKey(line) else { continue }
             guard let equalsIndex = line.firstIndex(of: "=") else { continue }
             let value = String(line[line.index(after: equalsIndex)...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -352,6 +354,15 @@ enum AgentMCPConnector {
     /// CRLF config is split on `\n`.
     private static func trimmedTOMLLine(_ line: String) -> String {
         line.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True only for the bare `command` key — not `command_timeout` or any
+    /// other key that merely starts with "command".
+    private static func lineDefinesTOMLCommandKey(_ trimmedLine: String) -> Bool {
+        guard trimmedLine.hasPrefix("command") else { return false }
+        let remainder = trimmedLine.dropFirst("command".count)
+            .trimmingCharacters(in: .whitespaces)
+        return remainder.hasPrefix("=")
     }
 
     static func tomlBasicString(_ value: String) -> String {

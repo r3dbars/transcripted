@@ -131,15 +131,7 @@ struct AgentConnectionSettingsPage: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .modifier(AgentRowCard())
     }
 
     private var copyPromptRow: some View {
@@ -186,15 +178,7 @@ struct AgentConnectionSettingsPage: View {
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .modifier(AgentRowCard())
     }
 
     private func agentSymbol(_ agent: AgentMCPAgent) -> String {
@@ -431,6 +415,9 @@ struct AgentConnectionSettingsPage: View {
             // the user clearly has the agent if its config points at us.
             detectedAgents = states.detected.union(states.connected)
             connectedAgents = states.connected
+            // Fresh on-disk state supersedes stale per-row phases (e.g. an
+            // old failure message); only in-flight connects survive.
+            rowPhases = rowPhases.filter { $0.value == .connecting }
         }
     }
 
@@ -783,6 +770,21 @@ struct AgentConnectionSettingsPage: View {
     private func reveal(_ url: URL) {
         let target = folderExists(url) ? url : url.deletingLastPathComponent()
         NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+}
+
+private struct AgentRowCard: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 

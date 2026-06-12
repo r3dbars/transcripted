@@ -105,6 +105,148 @@ func testAgentMCPConnector() {
         }
     }
 
+    runSuite("AgentMCPConnector.codexConfigText — never touches keys that merely start with 'command'") {
+        let existing = """
+        [mcp_servers.transcripted]
+        command_timeout_sec = 9
+        command = "/old/transcripted-mcp"
+        """
+
+        let updated = (try? AgentMCPConnector.codexConfigText(
+            updating: existing,
+            commandPath: "/new/transcripted-mcp"
+        )) ?? ""
+
+        assertTrue(
+            updated.contains("command_timeout_sec = 9"),
+            "a command_timeout_sec key must survive the rewrite untouched"
+        )
+        assertEqual(
+            AgentMCPConnector.codexConfiguredCommandPath(inConfigText: updated),
+            "/new/transcripted-mcp",
+            "the bare command key should be the one replaced"
+        )
+        assertFalse(updated.contains("/old/transcripted-mcp"), "stale command value should be gone")
+    }
+
+    runSuite("AgentMCPConnector.codexConfiguredCommandPath — skips command-prefixed keys when reading") {
+        let config = """
+        [mcp_servers.transcripted]
+        command_timeout_sec = 9
+        command = "/tmp/transcripted-mcp"
+        """
+
+        assertEqual(
+            AgentMCPConnector.codexConfiguredCommandPath(inConfigText: config),
+            "/tmp/transcripted-mcp",
+            "reader should skip command_timeout_sec and return the bare command value"
+        )
+    }
+
+    runSuite("AgentMCPConnector.codexConfiguredCommandPath — ignores command keys in subtables") {
+        let config = """
+        [mcp_servers.transcripted]
+        command = "/tmp/transcripted-mcp"
+
+        [mcp_servers.transcripted.env]
+        command = "/should/not/be/read"
+        """
+
+        assertEqual(
+            AgentMCPConnector.codexConfiguredCommandPath(inConfigText: config),
+            "/tmp/transcripted-mcp",
+            "subtable command keys must not shadow the main table entry"
+        )
+    }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — registers through the claude CLI") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeConnectTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(
+            homeDirectory: tempRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: []
+        )
+        let binaryURL = tempRoot.appendingPathComponent(".claude/local/claude", isDirectory: false)
+        let callLogURL = tempRoot.appendingPathComponent("cli-calls.log", isDirectory: false)
+
+        try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let fakeCLI = """
+        #!/bin/sh
+        echo "$@" >> "\(callLogURL.path)"
+        exit 0
+        """
+        try? fakeCLI.write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "Claude Code connect should not throw with a working CLI: \(error)")
+        }
+
+        let calls = ((try? String(contentsOf: callLogURL, encoding: .utf8)) ?? "")
+            .split(separator: "\n")
+            .map(String.init)
+        assertEqual(calls.count, 2, "connect should call the CLI twice: remove, then add")
+        assertEqual(
+            calls.first ?? "",
+            "mcp remove --scope user transcripted",
+            "stale registrations should be removed first so reconnect stays one click"
+        )
+        assertEqual(
+            calls.last ?? "",
+            "mcp add --scope user transcripted /tmp/transcripted-mcp",
+            "the helper should be registered user-scope under the transcripted name"
+        )
+    }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — surfaces CLI failures and missing CLI") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeFailTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(
+            homeDirectory: tempRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: []
+        )
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+            assertTrue(false, "missing CLI should throw")
+        } catch let error as AgentMCPConnectorError {
+            assertEqual(error, .agentCLINotFound(.claudeCode), "missing CLI should raise agentCLINotFound")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+
+        let binaryURL = tempRoot.appendingPathComponent(".claude/local/claude", isDirectory: false)
+        try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let failingCLI = """
+        #!/bin/sh
+        if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+            echo "registration exploded" >&2
+            exit 1
+        fi
+        exit 0
+        """
+        try? failingCLI.write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+            assertTrue(false, "failing CLI add should throw")
+        } catch let error as AgentMCPConnectorError {
+            assertTrue(
+                error.errorDescription?.contains("registration exploded") == true,
+                "CLI stderr should reach the user-facing error, got: \(String(describing: error.errorDescription))"
+            )
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+    }
+
     runSuite("AgentMCPConnector.codexConfiguredCommandPath — tolerates CRLF configs") {
         let crlfConfig = "[mcp_servers.transcripted]\r\ncommand = \"/tmp/transcripted-mcp\"\r\n"
 
