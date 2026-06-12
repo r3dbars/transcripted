@@ -35,6 +35,19 @@ struct MeetingRecordingJournal: Codable, Equatable {
     var finalMicFilename: String?
 }
 
+/// Opaque ownership token for one recording session's journal writes. Issued
+/// by `begin()`; every mutation must present the matching token or it is
+/// dropped. Stop-path finalization can land seconds after `stop()` returns
+/// (multi-segment merges), so without the token a previous session's late
+/// writes would corrupt the journal of the recording that is now active.
+struct MeetingRecordingJournalSession: Equatable, Sendable {
+    private let id: UUID
+
+    init() {
+        self.id = UUID()
+    }
+}
+
 final class MeetingRecordingJournalStore: @unchecked Sendable {
     static let filenameSuffix = ".recording.json"
 
@@ -42,14 +55,18 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
     private var journalURL: URL?
     private var journal: MeetingRecordingJournal?
+    private var activeSession: MeetingRecordingJournalSession?
 
     init(directory: URL) {
         self.directory = directory
     }
 
-    func begin(primaryMicURL: URL, startedAt: Date = Date()) {
+    @discardableResult
+    func begin(primaryMicURL: URL, startedAt: Date = Date()) -> MeetingRecordingJournalSession {
+        let session = MeetingRecordingJournalSession()
         queue.async {
             let name = primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
+            self.activeSession = session
             self.journalURL = self.directory.appendingPathComponent(name)
             self.journal = MeetingRecordingJournal(
                 version: 1,
@@ -66,28 +83,29 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             )
             self.persistLocked()
         }
+        return session
     }
 
-    func recordSystemAudio(_ url: URL) {
-        mutate { $0.systemAudioFilename = url.lastPathComponent }
+    func recordSystemAudio(_ url: URL, session: MeetingRecordingJournalSession?) {
+        mutate(session: session) { $0.systemAudioFilename = url.lastPathComponent }
     }
 
-    func recordSegments(_ segments: [MicRecordingSegment]) {
+    func recordSegments(_ segments: [MicRecordingSegment], session: MeetingRecordingJournalSession?) {
         let records = segments.map {
             MeetingRecordingJournal.SegmentRecord(
                 filename: $0.url.lastPathComponent,
                 gapBefore: $0.gapBeforeDuration
             )
         }
-        mutate { $0.micSegments = records }
+        mutate(session: session) { $0.micSegments = records }
     }
 
-    func markStopping() {
-        mutate { $0.state = .stopping }
+    func markStopping(session: MeetingRecordingJournalSession?) {
+        mutate(session: session) { $0.state = .stopping }
     }
 
-    func markFinalized(finalMicURL: URL?) {
-        mutate {
+    func markFinalized(finalMicURL: URL?, session: MeetingRecordingJournalSession?) {
+        mutate(session: session) {
             $0.state = .finalized
             $0.finalMicFilename = finalMicURL?.lastPathComponent
         }
@@ -101,6 +119,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             }
             self.journal = nil
             self.journalURL = nil
+            self.activeSession = nil
         }
     }
 
@@ -109,9 +128,26 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         queue.sync {}
     }
 
-    private func mutate(_ change: @escaping (inout MeetingRecordingJournal) -> Void) {
+    private func mutate(
+        session: MeetingRecordingJournalSession?,
+        _ change: @escaping (inout MeetingRecordingJournal) -> Void
+    ) {
         queue.async {
-            guard var journal = self.journal else { return }
+            // Only the session that began this journal may write to it. A nil
+            // session (a stop with no active recording) owns nothing.
+            guard let session, session == self.activeSession else { return }
+            guard var journal = self.journal, let journalURL = self.journalURL else { return }
+            // The file vanishing means the meeting already reached a durable
+            // state and `removeJournal(forMicAudioURL:)` deleted it without
+            // access to this instance. Drop the in-memory copy instead of
+            // re-persisting: a resurrected journal becomes a duplicate
+            // failed-queue entry on the next launch's recovery scan.
+            guard FileManager.default.fileExists(atPath: journalURL.path) else {
+                self.journal = nil
+                self.journalURL = nil
+                self.activeSession = nil
+                return
+            }
             change(&journal)
             journal.updatedAt = Date()
             self.journal = journal

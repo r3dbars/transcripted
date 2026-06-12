@@ -2,6 +2,9 @@ import XCTest
 @testable import TranscriptedCaptureKit
 
 final class CaptureMarkdownParserTests: XCTestCase {
+    // Frontmatter mirrors what TranscriptFormatter.formatTranscriptMarkdown
+    // actually writes: recording-health keys and gap_events before speakers,
+    // channel-qualified speaker entries, and Obsidian tags/aliases after.
     func testParseMeetingLegacyTranscriptAssignsSpeakerIdsAndMetadata() throws {
         let markdown = """
         ---
@@ -12,12 +15,28 @@ final class CaptureMarkdownParserTests: XCTestCase {
         dropped_segments: 2
         transcription_engine: parakeet_local
         diarization_engine: pyannote_offline
+        capture_quality: degraded
+        audio_gaps: 1
+        device_switches: 0
+        gap_events:
+          - "Audio gap at 00:42 (1.5s)"
+        audio_health: mic_attenuated_by_call_app
+        mic_boost_prompt: "Mic level was boosted after a call app attenuated it."
         speakers:
           - id: "0"
+            channel: system
             db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
             name: "Jenny Wen"
             confidence: high
             source: db_scan
+        tags:
+          - transcripted
+          - meeting
+          - speaker/jenny-wen
+        aliases:
+          - "Meeting 2026-04-18 09:15:00"
+        cssclasses:
+          - transcripted
         ---
 
         # Meeting Fixture
@@ -120,9 +139,11 @@ final class CaptureMarkdownParserTests: XCTestCase {
         time: 09:15:00
         speakers:
           - id: "0"
+            channel: system
             db_id: "AAA"
             name: "Alex"
           - id: "1"
+            channel: system
             db_id: "BBB"
             name: "Alex"
         ---
@@ -221,6 +242,24 @@ final class CaptureMarkdownParserTests: XCTestCase {
         """
         XCTAssertEqual(CaptureMarkdown.extractTitle(from: markdown), "Product review")
         XCTAssertNil(CaptureMarkdown.extractTitle(from: "no frontmatter"))
+    }
+
+    // A file of nothing but "---" delimiter lines passes parseFrontmatter (and
+    // file-level capture detection), so it reaches title hydration in both
+    // standalone tools. extractTitle used to trap on the inverted-range slice.
+    func testDegenerateDelimiterOnlyFrontmatterDoesNotTrap() {
+        XCTAssertNil(CaptureMarkdown.extractTitle(from: "---\n---\n"))
+        XCTAssertNil(CaptureMarkdown.extractTitle(from: "---\n---\n---\n"))
+        XCTAssertNil(CaptureMarkdown.extractTitle(from: "---\n---\n---\n\n# Body\n"))
+
+        let degenerate = "---\n---\n---\n"
+        XCTAssertNotNil(CaptureMarkdownParser.parseFrontmatter(from: degenerate))
+        let meeting = CaptureMarkdownParser.parseMeeting(from: degenerate)
+        XCTAssertNotNil(meeting)
+        XCTAssertEqual(meeting?.utterances.count, 0)
+        XCTAssertEqual(meeting?.speakers.count, 0)
+
+        XCTAssertNil(CaptureMarkdownParser.parseMeeting(from: "---\n---\n"))
     }
 
     func testLooksLikeCaptureMarkdown() throws {

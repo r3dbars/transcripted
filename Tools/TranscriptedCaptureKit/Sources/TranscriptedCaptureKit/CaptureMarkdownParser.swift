@@ -268,7 +268,12 @@ public enum CaptureMarkdownParser {
                 currentConfidence = trimmed
                     .replacingOccurrences(of: "confidence:", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if !trimmed.hasPrefix("-"), !trimmed.hasPrefix("source:"), !trimmed.isEmpty {
+            } else if !trimmed.isEmpty, !trimmed.hasPrefix("-"),
+                      !(rawLine.first?.isWhitespace ?? false) {
+                // Only a new top-level frontmatter key ends the speakers block.
+                // Indented keys the parser doesn't model (channel:, source:,
+                // future writer fields) belong to the current entry and are
+                // skipped, not treated as terminators.
                 break
             }
         }
