@@ -41,8 +41,13 @@ enum MeetingMicBoostPromptPolicy {
     /// preference or record a prompt outcome for a dead recording.
     static func shouldApplyPromptAction(
         isPromptVisible: Bool,
-        isRecording: Bool
+        isRecording: Bool,
+        isFinishingRecording: Bool,
+        sessionStateIsRecording: Bool
     ) -> Bool {
-        isPromptVisible && isRecording
+        isPromptVisible
+            && isRecording
+            && !isFinishingRecording
+            && sessionStateIsRecording
     }
 }

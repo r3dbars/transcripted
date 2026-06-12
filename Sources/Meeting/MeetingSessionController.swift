@@ -196,6 +196,8 @@ final class MeetingSessionController: ObservableObject {
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
+    private var activeRecordingIdentity: UUID?
+    private var micBoostPromptRecordingIdentity: UUID?
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
     private var activeRecordingStartedAt: Date?
@@ -414,6 +416,8 @@ final class MeetingSessionController: ObservableObject {
             calendarTitle: calendarSuggestedTitleProvider?()
         )
         activeRecordingTrigger = trigger
+        activeRecordingIdentity = UUID()
+        micBoostPromptRecordingIdentity = nil
         micBoostPromptOutcome = .notShown
         isMicBoostPromptVisible = false
         activeRecordingSuggestedTitle = resolvedMeetingTitle
@@ -423,6 +427,7 @@ final class MeetingSessionController: ObservableObject {
         guard started else {
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             activeRecordingTrigger = .unknown
+            clearActiveRecordingIdentity()
             activeRecordingSuggestedTitle = nil
             activeRecordingStartedAt = nil
             let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
@@ -588,6 +593,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -825,6 +831,8 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func handleMicAttenuationCue() {
+        guard case .recording = state,
+              let activeRecordingIdentity else { return }
         guard MeetingMicBoostPromptPolicy.shouldPresent(
             isRecording: isRecording,
             isFinishingRecording: isFinishingRecording,
@@ -833,6 +841,7 @@ final class MeetingSessionController: ObservableObject {
             currentOutcome: micBoostPromptOutcome
         ) else { return }
         micBoostPromptOutcome = .shown
+        micBoostPromptRecordingIdentity = activeRecordingIdentity
         isMicBoostPromptVisible = true
         DiagnosticsTrail.record(
             level: .warning,
@@ -855,17 +864,13 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func acceptMicBoostPrompt() {
-        guard MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
-            isPromptVisible: isMicBoostPromptVisible,
-            isRecording: isRecording
-        ) else {
-            // Stale accept: the recording died under the prompt. Dismiss only;
-            // never persist the global VPIO preference for a dead recording.
-            isMicBoostPromptVisible = false
+        guard shouldApplyMicBoostPromptAction() else {
+            clearStaleMicBoostPrompt()
             return
         }
         micBoostPromptOutcome = .accepted
         isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
         capture.armVoiceProcessingForActiveRecording()
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -889,17 +894,13 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func declineMicBoostPrompt() {
-        guard MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
-            isPromptVisible: isMicBoostPromptVisible,
-            isRecording: isRecording
-        ) else {
-            // Stale decline: dismiss without recording an outcome for a
-            // recording that already ended.
-            isMicBoostPromptVisible = false
+        guard shouldApplyMicBoostPromptAction() else {
+            clearStaleMicBoostPrompt()
             return
         }
         micBoostPromptOutcome = .declined
         isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_mic_boost_prompt_actioned",
@@ -919,6 +920,31 @@ final class MeetingSessionController: ObservableObject {
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
             ]
         )
+    }
+
+    private func shouldApplyMicBoostPromptAction() -> Bool {
+        guard case .recording = state,
+              let activeRecordingIdentity,
+              let micBoostPromptRecordingIdentity,
+              micBoostPromptRecordingIdentity == activeRecordingIdentity else {
+            return false
+        }
+        return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: isMicBoostPromptVisible,
+            isRecording: isRecording,
+            isFinishingRecording: isFinishingRecording,
+            sessionStateIsRecording: state == .recording
+        )
+    }
+
+    private func clearStaleMicBoostPrompt() {
+        isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
+    }
+
+    private func clearActiveRecordingIdentity() {
+        activeRecordingIdentity = nil
+        micBoostPromptRecordingIdentity = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -973,6 +999,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -1227,6 +1254,7 @@ final class MeetingSessionController: ObservableObject {
             _ = audioInactivityDetector.stopRecording()
             audioInactivityWarning = nil
             isMicBoostPromptVisible = false
+            clearActiveRecordingIdentity()
 
             let shutdownFailedTaskId = UUID()
             let files = await capture.stopAndAwaitFiles { [weak self] lateResult in

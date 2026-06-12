@@ -103,23 +103,47 @@ func testMeetingMicBoostPromptPolicy() {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: true,
-                isRecording: true
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true
             ),
             "actioning a visible prompt during a live recording applies normally"
         )
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: true,
-                isRecording: false
+                isRecording: false,
+                isFinishingRecording: false,
+                sessionStateIsRecording: false
             ),
             "a stale accept after capture stopped must not flip the global VPIO preference or record an outcome"
         )
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
                 isPromptVisible: false,
-                isRecording: true
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true
             ),
             "an action with no visible prompt stays a no-op"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+                isPromptVisible: true,
+                isRecording: true,
+                isFinishingRecording: true,
+                sessionStateIsRecording: true
+            ),
+            "stale UI actions during stop cleanup should not act"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+                isPromptVisible: true,
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: false
+            ),
+            "stale UI actions after state left recording should not act"
         )
     }
 
