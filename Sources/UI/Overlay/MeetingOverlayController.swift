@@ -517,11 +517,13 @@ final class MeetingOverlayRootView: NSView {
 
         // The drawer fills everything below the recording strip; it stays in
         // the tree during the height animation so it can fade and clip while
-        // the panel grows or shrinks.
+        // the panel grows or shrinks. Its width is pinned to the expanded
+        // panel width so transcript text never re-wraps mid-animation — the
+        // panel's corner mask clips the overhang while narrower.
         transcriptDrawer.frame = NSRect(
             x: 0,
             y: 0,
-            width: bounds.width,
+            width: tokens.expandedRecordingPanelWidth,
             height: max(0, bounds.height - tokens.panelHeight)
         )
         refreshTooltipTrackingAreas()
@@ -549,12 +551,27 @@ final class MeetingOverlayRootView: NSView {
         )
 
         pillBodyView.frame = bounds
-        closeButton.frame = .zero
+
+        // Keep real frames for the stop button and waveform: while the
+        // condense/wake animation runs they cross-fade and ride the moving
+        // edges instead of vanishing on the first layout tick. At capsule
+        // width the waveform's available span collapses to zero naturally,
+        // and both views end the transition hidden.
+        closeButton.frame = NSRect(
+            x: bounds.width - tokens.padRight - tokens.stopHeight,
+            y: midY - tokens.stopHeight / 2,
+            width: tokens.stopHeight,
+            height: tokens.stopHeight
+        )
+        let barsLeft = timerLabel.frame.maxX + tokens.headerGap
+        let barsRight = closeButton.frame.minX - tokens.headerGap
+        let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
+        audioWaveform.frame = NSRect(x: barsLeft, y: midY - 11, width: barsWidth, height: 22)
+
         titleLabel.frame = .zero
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
-        audioWaveform.frame = .zero
         transcriptDrawer.frame = .zero
         refreshTooltipTrackingAreas()
     }
@@ -708,11 +725,16 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
-        let showLevels = state == .recording && !self.isCondensed
-        audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
         remindButton.isHidden = !isPrompting || prompt?.remindTitle == nil
-        closeButton.isHidden = isPreparing || self.isCondensed || (state != .recording && !isPrompting)
+        if state == .recording {
+            applyStripContentFade(wasCondensed: wasCondensed)
+        } else {
+            audioWaveform.isHidden = true
+            audioWaveform.alphaValue = 1
+            closeButton.isHidden = isPreparing || !isPrompting
+            closeButton.alphaValue = 1
+        }
         pillBodyView.isHidden = state != .recording || liveView == nil
         if let liveView {
             pillBodyView.setAccessibilityLabel(liveView.accessibilityLabel)
@@ -814,6 +836,43 @@ final class MeetingOverlayRootView: NSView {
         audioWaveform.isActive = shouldAnimate
 
         needsLayout = true
+    }
+
+    /// Cross-fades the waveform and stop button through rest/wake
+    /// transitions so the capsule morph reads as one motion instead of
+    /// content popping out on the first frame.
+    private func applyStripContentFade(wasCondensed: Bool) {
+        let fadeViews: [NSView] = [audioWaveform, closeButton]
+
+        guard wasCondensed != isCondensed else {
+            // Steady state: pin final values without animating.
+            for view in fadeViews {
+                view.isHidden = isCondensed
+                view.alphaValue = isCondensed ? 0 : 1
+            }
+            return
+        }
+
+        let fadeOut = isCondensed
+        if !fadeOut {
+            for view in fadeViews {
+                view.isHidden = false
+            }
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = fadeOut ? 0.12 : 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: fadeOut ? .easeIn : .easeOut)
+            for view in fadeViews {
+                view.animator().alphaValue = fadeOut ? 0 : 1
+            }
+        }, completionHandler: { [weak self] in
+            guard let self, self.isCondensed == fadeOut else { return }
+            if fadeOut {
+                for view in fadeViews {
+                    view.isHidden = true
+                }
+            }
+        })
     }
 
     func updateAudioLevels(micLevel: Float, systemLevel: Float) {
@@ -1189,7 +1248,10 @@ enum MeetingOverlayTokens {
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.96)
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = 324
+    // Tight fit for dot + timer + waveform + stop; the wide layout only
+    // returns while the transcript drawer is open.
+    static let recordingPanelWidth: CGFloat = 256
+    static let expandedRecordingPanelWidth: CGFloat = 324
     static let condensedPillWidth: CGFloat = 120
     static let panelHeight: CGFloat = 44
     static let condensedPillHeight: CGFloat = 32
@@ -1274,7 +1336,6 @@ final class MeetingOverlayController: NSObject {
     private var isRestingCondensed = false
     private var isPanelHovered = false
     private var restTask: Task<Void, Never>?
-    private var hoverVerifyTask: Task<Void, Never>?
     private var isTranscriptExpanded = false
     private var lastRequestedPanelSize: NSSize?
     private var drawerResizeBaseHeight: CGFloat?
@@ -1293,7 +1354,6 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
         restTask?.cancel()
-        hoverVerifyTask?.cancel()
     }
 
     // MARK: - Dependencies
@@ -1740,6 +1800,8 @@ final class MeetingOverlayController: NSObject {
         switch state {
         case .recording where isVisuallyCondensed:
             return MeetingOverlayTokens.condensedPillWidth
+        case .recording where isTranscriptExpanded:
+            return MeetingOverlayTokens.expandedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -1916,16 +1978,18 @@ final class MeetingOverlayController: NSObject {
         pushToView()
     }
 
-    // MARK: - Rest / bloom
+    // MARK: - Rest / wake
 
     /// True when the pill should currently render as the compact capsule.
-    /// A resting pill blooms while hovered without losing its resting state.
+    /// Hovering wakes the pill (clears the resting state) rather than
+    /// temporarily overriding rendering, so hover-out never resizes anything
+    /// directly — only the countdown does. That asymmetry is what makes the
+    /// interaction immune to spurious enter/exit events during animations.
     private var isVisuallyCondensed: Bool {
         MeetingPillRestPolicy.isCondensedRendered(
             isResting: isRestingCondensed,
             isRecording: state == .recording,
-            isTranscriptVisible: isTranscriptExpanded,
-            isHovered: isPanelHovered
+            isTranscriptVisible: isTranscriptExpanded
         )
     }
 
@@ -1950,9 +2014,21 @@ final class MeetingOverlayController: NSObject {
                 keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
                 isHovered: self.isPanelHovered
             ) else { return }
+            // Belt and braces against a lost exit/enter pair: never rest
+            // while the pointer is physically over the panel, even if the
+            // hover flag went stale.
+            guard !self.pointerIsOverPanel() else {
+                self.scheduleRestIfNeeded()
+                return
+            }
             self.isRestingCondensed = true
             self.pushToView()
         }
+    }
+
+    private func pointerIsOverPanel() -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
     }
 
     /// Leaving the recording flow entirely: stop the countdown and forget
@@ -1972,61 +2048,18 @@ final class MeetingOverlayController: NSObject {
 
     private func handlePanelHoverChanged(_ hovered: Bool) {
         guard hovered != isPanelHovered else { return }
-
-        // Hysteresis against the bloom animation: hover-out events are
-        // judged against the pill's FULL rect, not the animating bounds.
-        // While the capsule grows under the cursor, the pointer can sit
-        // outside the intermediate frame but inside the final one — honoring
-        // that exit would condense, re-enter, and oscillate until clicked.
-        if !hovered, isRestingCondensed, pointerIsWithinBloomedPillRect() {
-            // A fast swipe can land here and keep going — AppKit considers
-            // the cursor exited and sends nothing further, so verify once
-            // the animation settles instead of trusting a future event.
-            scheduleSuppressedExitVerification()
-            return
-        }
-
         isPanelHovered = hovered
         if hovered {
-            hoverVerifyTask?.cancel()
             restTask?.cancel()
             if isRestingCondensed {
+                // Wake: hovering restores the full pill, which then stays
+                // until the next quiet stretch passes — no peek-and-snap.
+                isRestingCondensed = false
                 pushToView()
             }
         } else {
-            if isRestingCondensed {
-                pushToView()
-            }
             scheduleRestIfNeeded()
         }
-    }
-
-    private func scheduleSuppressedExitVerification() {
-        hoverVerifyTask?.cancel()
-        hoverVerifyTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled, let self, self.isPanelHovered else { return }
-            if !self.pointerIsWithinBloomedPillRect() {
-                self.handlePanelHoverChanged(false)
-            }
-        }
-    }
-
-    /// The screen rect the pill occupies when fully bloomed. Top edge and
-    /// horizontal center are invariant across our resizes, so this is
-    /// derivable even mid-animation.
-    private func pointerIsWithinBloomedPillRect() -> Bool {
-        guard let panel, panel.isVisible else { return false }
-        let frame = panel.frame
-        let width = MeetingOverlayTokens.recordingPanelWidth
-        let height = MeetingOverlayTokens.panelHeight
-        let bloomed = NSRect(
-            x: frame.midX - width / 2,
-            y: frame.maxY - height,
-            width: width,
-            height: height
-        ).insetBy(dx: -4, dy: -4)
-        return bloomed.contains(NSEvent.mouseLocation)
     }
 
     // MARK: - Pill context menu

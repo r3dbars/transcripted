@@ -49,40 +49,28 @@ func testMeetingPillRestPolicy() {
         )
     }
 
-    runSuite("MeetingPillRestPolicy — hover blooms a resting pill without clearing the rest state") {
+    runSuite("MeetingPillRestPolicy — capsule rendering follows the resting state, not hover") {
         assertTrue(
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: false,
-                isHovered: false
+                isTranscriptVisible: false
             ),
-            "a resting unattended pill renders as the capsule"
-        )
-        assertFalse(
-            MeetingPillRestPolicy.isCondensedRendered(
-                isResting: true,
-                isRecording: true,
-                isTranscriptVisible: false,
-                isHovered: true
-            ),
-            "hovering a resting pill blooms the full strip"
+            "a resting pill renders as the capsule"
         )
         assertFalse(
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: false,
                 isRecording: true,
-                isTranscriptVisible: false,
-                isHovered: false
+                isTranscriptVisible: false
             ),
-            "a pill that never rested renders full"
+            "an awake pill renders full — hover wakes by clearing the resting state, not by overriding rendering"
         )
         assertFalse(
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: true,
-                isTranscriptVisible: true,
-                isHovered: false
+                isTranscriptVisible: true
             ),
             "an open transcript always renders the full strip"
         )
@@ -90,8 +78,7 @@ func testMeetingPillRestPolicy() {
             MeetingPillRestPolicy.isCondensedRendered(
                 isResting: true,
                 isRecording: false,
-                isTranscriptVisible: false,
-                isHovered: false
+                isTranscriptVisible: false
             ),
             "non-recording states never render the capsule"
         )
