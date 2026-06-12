@@ -106,7 +106,7 @@ struct AgentDictationEntry: Codable {
 // MARK: - MCP Response Types
 
 struct GroupedSearchResult: Codable {
-    let results: [MeetingSearchGroup]
+    var results: [MeetingSearchGroup]
     let totalMeetingsMatched: Int
     let truncated: Bool
 
@@ -118,7 +118,7 @@ struct GroupedSearchResult: Codable {
 }
 
 struct MeetingSearchGroup: Codable {
-    let meetingTitle: String
+    var meetingTitle: String
     let meetingDate: String
     let meetingDateTime: String
     let filename: String

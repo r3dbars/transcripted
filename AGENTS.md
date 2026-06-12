@@ -94,6 +94,12 @@ Treat release notes, appcast/update docs, Homebrew cask docs, QA-gate docs, and
 public download/release-truth docs as release-impacting even when the diff is
 Markdown-only.
 
+`codex-review` means: an independent model review of the full PR diff against
+the real base branch — e.g. `codex review` from the OpenAI Codex CLI, or an
+equivalent independent agent reviewer. Record the verdict (and any findings you
+rejected, with reasons) in the PR description. It is not defined as a repo
+script; any tool that reviews the true diff qualifies.
+
 ## Releases, Sparkle, and Homebrew
 
 When the task is a user-facing release, package handoff, or update-path change,

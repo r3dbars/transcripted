@@ -24,6 +24,7 @@ private actor ReliabilityPacketFileWriter {
     private let fileURL: URL
     private var handle: FileHandle?
     private var isPrepared = false
+    private var approximateSize: UInt64 = 0
     private let encoder = JSONEncoder()
 
     init(fileURL: URL = ReliabilityPacketRecorder.defaultFileURL()) {
@@ -45,6 +46,13 @@ private actor ReliabilityPacketFileWriter {
         lineData.append(0x0A)
         if let handle {
             LockedFileAppender.append(lineData, to: handle)
+            approximateSize += UInt64(lineData.count)
+            if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
+                // Close so the next append re-prepares, which rotates the file.
+                try? handle.close()
+                self.handle = nil
+                isPrepared = false
+            }
         }
     }
 
@@ -59,6 +67,11 @@ private actor ReliabilityPacketFileWriter {
             return false
         }
 
+        ObservabilityLogRotation.rotateIfNeeded(
+            at: fileURL,
+            threshold: TranscriptedConstants.jsonlLogRotationThreshold
+        )
+
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }
@@ -66,7 +79,7 @@ private actor ReliabilityPacketFileWriter {
 
         do {
             handle = try FileHandle(forWritingTo: fileURL)
-            handle?.seekToEndOfFile()
+            approximateSize = handle?.seekToEndOfFile() ?? 0
             isPrepared = true
             return true
         } catch {

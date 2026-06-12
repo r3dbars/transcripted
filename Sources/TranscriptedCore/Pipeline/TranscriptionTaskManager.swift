@@ -1065,11 +1065,35 @@ public class TranscriptionTaskManager: ObservableObject {
 
         AppLogger.pipeline.info("Retrying failed transcription", ["failedId": "\(failedId)"])
 
-        // Register a sentinel in activeTasks before the first suspension point so that
-        // startTranscription's `activeTasks.isEmpty` guard blocks until the retry finishes.
-        // The sentinel Task does no work — its presence in the dict is what matters.
-        activeTasks[failedId] = Task {}
+        // Register the retry work itself in activeTasks before the first suspension
+        // point: startTranscription's `activeTasks.isEmpty` guard must block until the
+        // retry finishes, and cancelAll() must reach the in-flight inference — so the
+        // stored task has to be the one doing the work, not a placeholder.
+        let outcome = RetryOutcome()
+        let retryTask = Task { [weak self] in
+            guard let self else { return }
+            outcome.didPublish = await self.performRetry(
+                failed: failed,
+                failedId: failedId,
+                outputFolder: outputFolder
+            )
+        }
+        activeTasks[failedId] = retryTask
+        await retryTask.value
+        return outcome.didPublish
+    }
 
+    /// Mutable box that hands the retry's published result across the stored
+    /// `Task<Void, Never>` boundary. Main-actor confined like the manager.
+    private final class RetryOutcome {
+        var didPublish = false
+    }
+
+    private func performRetry(
+        failed: FailedTranscription,
+        failedId: UUID,
+        outputFolder: URL
+    ) async -> Bool {
         await MainActor.run {
             failedTranscriptionManager.incrementRetryCount(id: failedId)
             self.activeCount += 1

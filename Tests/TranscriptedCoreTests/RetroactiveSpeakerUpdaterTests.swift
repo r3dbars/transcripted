@@ -130,6 +130,114 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains("[Mic/Speaker 1]"))
     }
 
+    func testRetroactivelyUpdateSpeakerDoesNotRenameOtherSpeakerWithSameName() throws {
+        let micId = UUID()
+        let systemId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("shared-name.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: mic
+            db_id: "\(micId.uuidString)"
+            name: "John"
+            confidence: unknown
+            source: db_pending
+          - id: "1"
+            channel: system
+            db_id: "\(systemId.uuidString)"
+            name: "John"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        #### Local Speaker Breakdown
+
+        - **John:** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [Mic/John] hello there
+        [00:05] [System/John] hi back
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: micId,
+            newName: "Jonathan",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        // The mic row's YAML name and mic body labels move to the new name.
+        XCTAssertTrue(updated.contains(#"name: "Jonathan""#))
+        XCTAssertTrue(updated.contains("[Mic/Jonathan]"))
+        // The system speaker who shares the old display name is untouched.
+        XCTAssertTrue(updated.contains(#"name: "John""#))
+        XCTAssertTrue(updated.contains("[System/John] hi back"))
+        XCTAssertFalse(updated.contains("[System/Jonathan]"))
+    }
+
+    func testRetroactivelyUpdateSpeakerFailsClosedForSameChannelSharedName() throws {
+        let targetId = UUID()
+        let otherId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("same-channel-shared-name.md")
+        try """
+        ---
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(targetId.uuidString)"
+            name: "John"
+            confidence: unknown
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(otherId.uuidString)"
+            name: "John"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        [00:00] [System/John] which john said this is unknowable
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: targetId,
+            newName: "Jonathan",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        // The target row's YAML metadata is corrected…
+        XCTAssertTrue(updated.contains(#"name: "Jonathan""#))
+        XCTAssertTrue(updated.contains(#"name: "John""#))
+        // …but ambiguous body labels are left alone rather than guessed at.
+        XCTAssertTrue(updated.contains("[System/John] which john said this is unknowable"))
+        XCTAssertFalse(updated.contains("[System/Jonathan]"))
+    }
+
+    func testRetroactivelyUpdateSpeakerScansSubfolders() throws {
+        let speakerId = UUID()
+        let subfolder = temporaryDirectory.appendingPathComponent("2026/june", isDirectory: true)
+        try FileManager.default.createDirectory(at: subfolder, withIntermediateDirectories: true)
+        let transcriptURL = subfolder.appendingPathComponent("nested.md")
+
+        try markdown(
+            speakerId: speakerId,
+            speakerName: "Speaker 1"
+        ).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Jamie",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Jamie""#))
+        XCTAssertFalse(updated.contains(#"name: "Speaker 1""#))
+    }
+
     func testUpdateDeferredSpeakerNameOnlyRenamesQueuedChannelSpeaker() throws {
         let micId = UUID()
         let systemId = UUID()

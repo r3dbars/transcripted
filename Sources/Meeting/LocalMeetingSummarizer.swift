@@ -552,6 +552,45 @@ enum LocalMeetingSummaryParticipantExtractor {
     }
 }
 
+/// Thread-safe accumulator for child-process pipe output drained from a
+/// readability handler while another thread polls the process.
+final class LocalSummaryProcessOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        data.append(chunk)
+    }
+
+    func text() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+/// Cancellation flag bridging a Swift-concurrency cancellation handler to
+/// blocking work running on a plain dispatch queue, where `Task.isCancelled`
+/// is not visible.
+final class LocalSummaryCancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func set() {
+        lock.lock()
+        defer { lock.unlock() }
+        cancelled = true
+    }
+
+    func isSet() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+}
+
 struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     let configuration: LocalGemmaSummaryConfiguration
     var environment: [String: String] = ProcessInfo.processInfo.environment
@@ -560,10 +599,17 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
     var runnerURLOverride: URL?
     var generateBatchOverride: (@Sendable ([LocalGemmaSummaryPrompt], URL) throws -> [String])?
 
-    func generate(prompt: String, label: String, maxTokens: Int, workDirectory: URL) throws -> String {
+    func generate(
+        prompt: String,
+        label: String,
+        maxTokens: Int,
+        workDirectory: URL,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
+    ) throws -> String {
         let outputs = try generateBatch(
             [LocalGemmaSummaryPrompt(label: label, prompt: prompt, maxTokens: maxTokens)],
-            workDirectory: workDirectory
+            workDirectory: workDirectory,
+            isCancelled: isCancelled
         )
         guard let output = outputs.first else {
             throw LocalMeetingSummaryError.outputMissing(label: label)
@@ -571,12 +617,18 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
         return output
     }
 
-    func generateBatch(_ prompts: [LocalGemmaSummaryPrompt], workDirectory: URL) throws -> [String] {
+    func generateBatch(
+        _ prompts: [LocalGemmaSummaryPrompt],
+        workDirectory: URL,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled }
+    ) throws -> [String] {
         guard !prompts.isEmpty else { return [] }
         try Task.checkCancellation()
+        if isCancelled() { throw CancellationError() }
         if let generateBatchOverride {
             let outputs = try generateBatchOverride(prompts, workDirectory)
             try Task.checkCancellation()
+            if isCancelled() { throw CancellationError() }
             return outputs
         }
         guard let runnerURL = runnerURL() else {
@@ -645,9 +697,23 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = stderr
 
+        // Drain stderr while the child runs. The runner can emit large warning
+        // dumps; an undrained pipe fills its ~64KB buffer and blocks the child
+        // mid-write, which would turn a fast failure into a full timeout.
+        let stderrBuffer = LocalSummaryProcessOutputBuffer()
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                stderrBuffer.append(data)
+            }
+        }
+
         do {
             try process.run()
         } catch {
+            stderr.fileHandleForReading.readabilityHandler = nil
             throw LocalMeetingSummaryError.processFailed(
                 label: batchLabel,
                 exitCode: -1,
@@ -657,18 +723,22 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
 
         let startedAt = Date()
         while process.isRunning {
-            if Task.isCancelled {
-                process.terminate()
+            if isCancelled() || Task.isCancelled {
+                Self.terminateThenKill(process)
                 throw CancellationError()
             }
             if Date().timeIntervalSince(startedAt) > configuration.processTimeoutSeconds {
-                process.terminate()
+                Self.terminateThenKill(process)
                 throw LocalMeetingSummaryError.processTimedOut(label: batchLabel)
             }
             Thread.sleep(forTimeInterval: 0.2)
         }
 
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        stderr.fileHandleForReading.readabilityHandler = nil
+        if let remainder = try? stderr.fileHandleForReading.readToEnd(), !remainder.isEmpty {
+            stderrBuffer.append(remainder)
+        }
+        let stderrText = stderrBuffer.text()
         guard process.terminationStatus == 0 else {
             throw LocalMeetingSummaryError.processFailed(
                 label: batchLabel,
@@ -684,6 +754,21 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
                 throw LocalMeetingSummaryError.outputMissing(label: job.label)
             }
             return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// SIGTERM the runner (uv forwards it to its python child), allow a short
+    /// grace window, then SIGKILL. Without escalation a hung MLX run can outlive
+    /// its "cancelled" summary and keep multiple GB of memory pinned.
+    private static func terminateThenKill(_ process: Process, graceSeconds: TimeInterval = 5) {
+        guard process.isRunning else { return }
+        process.terminate()
+        let deadline = Date().addingTimeInterval(graceSeconds)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
         }
     }
 
@@ -992,16 +1077,20 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         let summaryBody: String
         if chunks.count == 1 {
             try Task.checkCancellation()
-            summaryBody = try runtime.generate(
-                prompt: LocalMeetingSummaryPrompts.direct(
-                    title: title,
-                    transcript: chunks[0],
-                    runtimeName: "Gemma 4 12B"
-                ),
-                label: "direct",
-                maxTokens: configuration.directMaxTokens,
-                workDirectory: workDirectory
+            let directPrompt = LocalMeetingSummaryPrompts.direct(
+                title: title,
+                transcript: chunks[0],
+                runtimeName: "Gemma 4 12B"
             )
+            summaryBody = try await Self.runRuntimeWork { [runtime, configuration] isCancelled in
+                try runtime.generate(
+                    prompt: directPrompt,
+                    label: "direct",
+                    maxTokens: configuration.directMaxTokens,
+                    workDirectory: workDirectory,
+                    isCancelled: isCancelled
+                )
+            }
         } else {
             let chunkPrompts = chunks.enumerated().map { index, chunk in
                 LocalGemmaSummaryPrompt(
@@ -1018,10 +1107,13 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
             }
 
             try Task.checkCancellation()
-            let chunkOutputs = try runtime.generateBatch(
-                chunkPrompts,
-                workDirectory: workDirectory
-            )
+            let chunkOutputs = try await Self.runRuntimeWork { [runtime] isCancelled in
+                try runtime.generateBatch(
+                    chunkPrompts,
+                    workDirectory: workDirectory,
+                    isCancelled: isCancelled
+                )
+            }
             var chunkNotes: [String] = []
             for (index, note) in chunkOutputs.enumerated() {
                 try Task.checkCancellation()
@@ -1029,16 +1121,20 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
             }
 
             try Task.checkCancellation()
-            summaryBody = try runtime.generate(
-                prompt: LocalMeetingSummaryPrompts.merge(
-                    title: title,
-                    notes: chunkNotes.joined(separator: "\n\n---\n\n"),
-                    runtimeName: "Gemma 4 12B"
-                ),
-                label: "merge",
-                maxTokens: configuration.mergeMaxTokens,
-                workDirectory: workDirectory
+            let mergePrompt = LocalMeetingSummaryPrompts.merge(
+                title: title,
+                notes: chunkNotes.joined(separator: "\n\n---\n\n"),
+                runtimeName: "Gemma 4 12B"
             )
+            summaryBody = try await Self.runRuntimeWork { [runtime, configuration] isCancelled in
+                try runtime.generate(
+                    prompt: mergePrompt,
+                    label: "merge",
+                    maxTokens: configuration.mergeMaxTokens,
+                    workDirectory: workDirectory,
+                    isCancelled: isCancelled
+                )
+            }
         }
 
         try Task.checkCancellation()
@@ -1078,15 +1174,18 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         let workDirectory = try makeWorkDirectory()
         defer { try? fileManager.removeItem(at: workDirectory) }
 
-        _ = try runtime.generate(
-            prompt: """
-            You are Transcripted's local meeting summarizer. Reply with exactly:
-            Ready.
-            """,
-            label: "setup",
-            maxTokens: 8,
-            workDirectory: workDirectory
-        )
+        _ = try await Self.runRuntimeWork { [runtime] isCancelled in
+            try runtime.generate(
+                prompt: """
+                You are Transcripted's local meeting summarizer. Reply with exactly:
+                Ready.
+                """,
+                label: "setup",
+                maxTokens: 8,
+                workDirectory: workDirectory,
+                isCancelled: isCancelled
+            )
+        }
 
         return configuration.profileName
     }
@@ -1098,6 +1197,33 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         let directory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try fileManager.createPrivateDirectory(at: directory)
         return directory
+    }
+
+    /// Multi-minute model runs are blocking work; running them through a
+    /// dedicated queue keeps them off the Swift-concurrency cooperative pool,
+    /// whose threads other app tasks need while a summary is in flight.
+    private static let runtimeWorkQueue = DispatchQueue(
+        label: "com.transcripted.local-summary-runtime",
+        qos: .utility
+    )
+
+    /// Run blocking runtime work off the cooperative pool while keeping the
+    /// awaiting task's cancellation observable inside the work via the
+    /// `isCancelled` probe (`Task.isCancelled` is invisible on a plain queue).
+    private static func runRuntimeWork<T: Sendable>(
+        _ body: @escaping @Sendable (_ isCancelled: @escaping @Sendable () -> Bool) throws -> T
+    ) async throws -> T {
+        let cancelled = LocalSummaryCancelFlag()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                runtimeWorkQueue.async {
+                    continuation.resume(with: Result { try body { cancelled.isSet() } })
+                }
+            }
+        } onCancel: {
+            cancelled.set()
+        }
     }
 
 }

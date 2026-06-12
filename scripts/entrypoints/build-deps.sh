@@ -6,16 +6,28 @@
 # Run once — artifacts go into deps-libs/ and deps-modules/
 # Pattern follows the cache-first build workflow: expensive build runs once, build.sh reuses cached artifacts
 
-set -e
+set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRAFT_DIR="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$DRAFT_DIR"
-TMP_ROOT="${TMPDIR%/}"
+TMP_ROOT="${TMPDIR:-}"
+TMP_ROOT="${TMP_ROOT%/}"
 if [ -z "$TMP_ROOT" ]; then
     TMP_ROOT="/tmp"
 fi
 DEPS_BUILD="$(mktemp -d "$TMP_ROOT/transcripted-deps-build.XXXXXX")"
+DEPS_STAGING=""
+
+# Always remove the multi-GB SwiftPM scratch tree, and any staging dirs that
+# never got swapped into place, no matter how the script exits.
+cleanup_scratch() {
+    rm -rf "$DEPS_BUILD"
+    if [ -n "$DEPS_STAGING" ]; then
+        rm -rf "$DEPS_STAGING"
+    fi
+}
+trap cleanup_scratch EXIT
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
@@ -272,8 +284,22 @@ fi
 
 echo "Building FluidAudio + mlx-swift-lm + WhisperKit (unified)..."
 
-# Clean previous build
-rm -rf "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS" "$DEPS_TOOLS"
+# Build into staging directories and swap them into place only after the whole
+# build succeeds. A mid-build failure (network, checksum mismatch, compile
+# error) must leave the previous artifacts usable — deleting them up front
+# strands the checkout with no working build.sh/run-tests.sh until a full
+# successful rebuild.
+FINAL_DEPS_LIBS="$DEPS_LIBS"
+FINAL_DEPS_MODULES="$DEPS_MODULES"
+FINAL_DEPS_FRAMEWORKS="$DEPS_FRAMEWORKS"
+FINAL_DEPS_TOOLS="$DEPS_TOOLS"
+DEPS_STAGING="$DRAFT_DIR/.deps-staging"
+rm -rf "$DEPS_STAGING"
+DEPS_LIBS="$DEPS_STAGING/deps-libs"
+DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
+DEPS_MODULES="$DEPS_STAGING/deps-modules"
+DEPS_FRAMEWORKS="$DEPS_STAGING/deps-frameworks"
+DEPS_TOOLS="$DEPS_STAGING/deps-tools"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Copy TranscriptedCore's source tree into $DEPS_BUILD so SPM sees a stable,
@@ -541,6 +567,29 @@ else
 fi
 
 touch "$DEPS_BUILD_STAMP"
+
+# Everything succeeded — swap staged artifacts into their final locations.
+# The window where old artifacts are gone is now a few renames, not the
+# entire multi-minute build.
+swap_in_place() {
+    local staged="$1"
+    local final="$2"
+    rm -rf "${final}.old"
+    if [ -e "$final" ]; then
+        mv "$final" "${final}.old"
+    fi
+    mv "$staged" "$final"
+    rm -rf "${final}.old"
+}
+swap_in_place "$DEPS_LIBS" "$FINAL_DEPS_LIBS"
+swap_in_place "$DEPS_MODULES" "$FINAL_DEPS_MODULES"
+swap_in_place "$DEPS_FRAMEWORKS" "$FINAL_DEPS_FRAMEWORKS"
+swap_in_place "$DEPS_TOOLS" "$FINAL_DEPS_TOOLS"
+rmdir "$DEPS_STAGING" 2>/dev/null || true
+DEPS_LIBS="$FINAL_DEPS_LIBS"
+DEPS_MODULES="$FINAL_DEPS_MODULES"
+DEPS_FRAMEWORKS="$FINAL_DEPS_FRAMEWORKS"
+DEPS_TOOLS="$FINAL_DEPS_TOOLS"
 
 echo ""
 echo "=== Results ==="

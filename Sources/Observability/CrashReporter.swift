@@ -52,7 +52,9 @@ final class CrashReporter {
     func capture(error: Error, context: String = "") {
         var extra: [String: String] = [:]
         if !context.isEmpty {
-            extra["context"] = context
+            // Keyed "detail", not "context": "context" is a sensitive-key fragment in
+            // SentryPayloadSanitizer, so that key would be dropped before send.
+            extra["detail"] = context
         }
 
         _ = captureMessageEvent(
@@ -119,12 +121,16 @@ final class CrashReporter {
             "event": event,
         ].merging(diagnosticTags) { current, _ in current }
 
+        // Extras carry only the allowlist-filtered diagnostic subset. The full
+        // merged context can hold free-text values under innocuous keys (engine
+        // state snapshots, device names), and the off-device contract is
+        // allowlist-gated, not just key-drop + redaction.
         _ = captureMessageEvent(
             level: sentryLevel(for: level),
             title: "\(engine).\(event)",
             message: message,
             tags: tags,
-            extra: context,
+            extra: diagnosticTags,
             fingerprint: [engine, event]
         )
     }
