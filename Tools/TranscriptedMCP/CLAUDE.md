@@ -46,10 +46,10 @@ that mode the SQLite index also defaults to the shared root unless
 | File | Purpose |
 |------|---------|
 | `Main.swift` | `@main` entry point; resolves directories, builds the index, starts file watchers, then starts the MCP stdio server |
-| `DataDirectories.swift` | Default-path and env-override resolution for meetings, dictations, and index storage |
+| `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
 | `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
-| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files directly from disk |
+| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
@@ -159,6 +159,7 @@ The in-app Claude Desktop installer copies that helper into:
 
 - reads meeting markdown transcripts written by `Sources/TranscriptedCore/Storage/TranscriptSaver.swift`
 - reads dictation markdown day files written by `Sources/Dictation/DictationTranscriptWriter.swift`
+- shares capture-library resolution and capture-Markdown parsing with `Tools/TranscriptedCLI` through `Tools/TranscriptedCaptureKit`; change that logic in the kit, not here
 - mirrors speaker-name matching logic from the app with `NameVariants.swift`
 - has no compile-time dependency on the main Transcripted app target
 

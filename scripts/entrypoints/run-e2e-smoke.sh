@@ -33,6 +33,7 @@ mkdir -p "$FAKE_HOME" "$WORK_ROOT"
 SWIFT_SOURCES=(
     "Tests/E2E/TranscriptedE2ESmoke.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
@@ -65,9 +66,23 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
 )
 
+CAPTURE_KIT_BUILD_DIR="$BUILD_DIR/capture-kit"
+mkdir -p "$CAPTURE_KIT_BUILD_DIR"
+
+echo "Compiling TranscriptedCaptureKit module..."
+swiftc \
+    Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/*.swift \
+    -module-name TranscriptedCaptureKit \
+    -emit-module -emit-module-path "$CAPTURE_KIT_BUILD_DIR/TranscriptedCaptureKit.swiftmodule" \
+    -emit-library -static -o "$CAPTURE_KIT_BUILD_DIR/libTranscriptedCaptureKit.a" \
+    -parse-as-library
+
 echo "Compiling deterministic E2E smoke..."
 swiftc \
     "${SWIFT_SOURCES[@]}" \
+    -I "$CAPTURE_KIT_BUILD_DIR" \
+    -L "$CAPTURE_KIT_BUILD_DIR" \
+    -lTranscriptedCaptureKit \
     -framework AppKit \
     -lsqlite3 \
     -parse-as-library \

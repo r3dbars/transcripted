@@ -245,6 +245,14 @@ rules:
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
 
   - paths:
+      - "Tools/TranscriptedCaptureKit/**"
+    checks:
+      - "swift test --package-path Tools/TranscriptedCaptureKit"
+      - "swift test --package-path Tools/TranscriptedCLI"
+      - "swift test --package-path Tools/TranscriptedMCP"
+      - "bash run-e2e-smoke.sh"
+
+  - paths:
       - "Tools/TranscriptedCLI/**"
     checks:
       - "swift test --package-path Tools/TranscriptedCLI"

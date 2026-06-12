@@ -52,6 +52,6 @@ bash run-tests.sh
 
 ## Agent notes
 
-- If you change the markdown layout, update the tests.
+- If you change the markdown layout, update the tests. The `Dictations_YYYY-MM-DD.md` day-file format is also parsed by the standalone tools through `Tools/TranscriptedCaptureKit` — update its parser and tests in the same change.
 - Dictation artifacts are append-only by day; do not assume one file per session.
 - This directory owns dictation persistence plus the newest-saved-dictation lookup seam. Recording lifecycle changes still belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.
