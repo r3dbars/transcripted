@@ -21,6 +21,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var detectedAgents: Set<AgentMCPAgent> = []
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
+    @State private var configRepairNotices: [AgentMCPAgent: String] = [:]
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
     @State private var copiedLocalAgentPrompt = false
     @State private var copiedClaudeDesktopConfig = false
@@ -120,6 +121,13 @@ struct AgentConnectionSettingsPage: View {
 
             if case .failed(let message) = phase {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let configRepairNotice = configRepairNotices[agent] {
+                Label(configRepairNotice, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
@@ -426,6 +434,7 @@ struct AgentConnectionSettingsPage: View {
     private func connect(_ agent: AgentMCPAgent) {
         guard rowPhases[agent] != .connecting else { return }
         rowPhases[agent] = .connecting
+        configRepairNotices[agent] = nil
         if agent == .claudeDesktop {
             claudeDesktopSelfTest = nil
         }
@@ -434,19 +443,26 @@ struct AgentConnectionSettingsPage: View {
 
         Task {
             do {
-                let selfTest = try await Task.detached(priority: .userInitiated) { () -> TranscriptedMCPSelfTest? in
+                let outcome = try await Task.detached(priority: .userInitiated) { () -> (selfTest: TranscriptedMCPSelfTest?, replacedConfigBackupURL: URL?) in
                     if agent == .claudeDesktop {
-                        return try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop().selfTest
+                        let result = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
+                        return (result.selfTest, result.backupURL)
                     }
                     let helper = try AgentMCPConnector.ensureHelperInstalled()
-                    try AgentMCPConnector.connect(agent, helperCommandPath: helper.path)
-                    return nil
+                    let result = try AgentMCPConnector.connect(agent, helperCommandPath: helper.path)
+                    return (nil, result.replacedConfigBackupURL)
                 }.value
 
                 rowPhases[agent] = .connected
                 connectedAgents.insert(agent)
                 if agent == .claudeDesktop {
-                    claudeDesktopSelfTest = selfTest
+                    claudeDesktopSelfTest = outcome.selfTest
+                }
+                if let backupURL = outcome.replacedConfigBackupURL {
+                    // An unreadable config was backed up and replaced — that
+                    // dropped the user's other MCP servers, so say so instead
+                    // of reporting a clean "Connected".
+                    configRepairNotices[agent] = AgentMCPConnector.replacedConfigNotice(for: agent, backupURL: backupURL)
                 }
                 trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {

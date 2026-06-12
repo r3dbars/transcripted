@@ -105,6 +105,206 @@ func testAgentMCPConnector() {
         }
     }
 
+    runSuite("AgentMCPConnector.codexConfigText — refuses every alternate spelling of an existing server table") {
+        let variants: [(label: String, config: String)] = [
+            ("comment after header", "[mcp_servers.transcripted] # managed by transcripted\ncommand = \"/old/transcripted-mcp\"\n"),
+            ("whitespace inside brackets", "[ mcp_servers.transcripted ]\ncommand = \"/old/transcripted-mcp\"\n"),
+            ("quoted key", "[mcp_servers.\"transcripted\"]\ncommand = \"/old/transcripted-mcp\"\n"),
+            ("literal-quoted key", "[mcp_servers.'transcripted']\ncommand = \"/old/transcripted-mcp\"\n"),
+            ("array of tables", "[[mcp_servers.transcripted]]\ncommand = \"/old/transcripted-mcp\"\n"),
+            ("sub-table header only", "[mcp_servers.transcripted.env]\nFOO = \"bar\"\n"),
+            ("root dotted inline table", "mcp_servers.transcripted = { command = \"/old/transcripted-mcp\" }\n"),
+            ("root dotted command key", "mcp_servers.transcripted.command = \"/old/transcripted-mcp\"\n"),
+            ("root dotted quoted key", "mcp_servers.\"transcripted\".command = \"/old/transcripted-mcp\"\n"),
+            ("assignment under [mcp_servers]", "[mcp_servers]\ntranscripted = { command = \"/old/transcripted-mcp\" }\n"),
+        ]
+
+        for variant in variants {
+            do {
+                _ = try AgentMCPConnector.codexConfigText(updating: variant.config, commandPath: "/tmp/transcripted-mcp")
+                assertTrue(false, "\(variant.label) should throw instead of appending a duplicate table")
+            } catch let error as AgentMCPConnectorError {
+                assertEqual(
+                    error,
+                    .codexConfigDefinesServerInUnsupportedForm,
+                    "\(variant.label) should raise the unsupported-form error"
+                )
+            } catch {
+                assertTrue(false, "\(variant.label) raised an unexpected error type: \(error)")
+            }
+        }
+    }
+
+    runSuite("AgentMCPConnector.codexConfigText — refuses root-level dotted mcp_servers assignments") {
+        let existing = "mcp_servers.other = { command = \"/usr/local/bin/other-mcp\" }\n"
+
+        do {
+            _ = try AgentMCPConnector.codexConfigText(updating: existing, commandPath: "/tmp/transcripted-mcp")
+            assertTrue(false, "root dotted mcp_servers assignment should refuse instead of appending")
+        } catch let error as AgentMCPConnectorError {
+            assertEqual(error, .codexConfigUsesInlineServers, "dotted root assignment should reuse the inline-servers guidance")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+    }
+
+    runSuite("AgentMCPConnector.codexConfigText — still appends alongside other table-form servers") {
+        for existing in [
+            "[mcp_servers.other]\ncommand = \"/usr/local/bin/other-mcp\"\n",
+            "[mcp_servers]\nother = { command = \"/usr/local/bin/other-mcp\" }\n",
+        ] {
+            let updated = (try? AgentMCPConnector.codexConfigText(
+                updating: existing,
+                commandPath: "/tmp/transcripted-mcp"
+            )) ?? ""
+
+            assertTrue(updated.hasPrefix(existing), "existing server entries should be preserved byte for byte")
+            assertTrue(
+                updated.contains("command = \"/usr/local/bin/other-mcp\""),
+                "other MCP servers should survive the append"
+            )
+            assertEqual(
+                AgentMCPConnector.codexConfiguredCommandPath(inConfigText: updated),
+                "/tmp/transcripted-mcp",
+                "appended table should read back the helper path"
+            )
+        }
+    }
+
+    runSuite("AgentMCPConnector.codexConfiguredCommandPath — reads alternate header spellings") {
+        for config in [
+            "[ mcp_servers.transcripted ]\ncommand = \"/tmp/transcripted-mcp\"\n",
+            "[mcp_servers.\"transcripted\"] # managed elsewhere\ncommand = \"/tmp/transcripted-mcp\"\n",
+        ] {
+            assertEqual(
+                AgentMCPConnector.codexConfiguredCommandPath(inConfigText: config),
+                "/tmp/transcripted-mcp",
+                "a hand-written header spelling should read as connected: \(config)"
+            )
+        }
+    }
+
+    runSuite("AgentMCPConnector.connect(.codex) — leaves a variant-spelled config untouched") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCodexVariantTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [])
+        let codexDirectory = paths.codexConfigURL.deletingLastPathComponent()
+        let existing = "[ mcp_servers.transcripted ]\ncommand = \"/old/transcripted-mcp\"\n"
+
+        try? FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        try? existing.write(to: paths.codexConfigURL, atomically: true, encoding: .utf8)
+
+        do {
+            try AgentMCPConnector.connect(.codex, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+            assertTrue(false, "variant-spelled server table should refuse to connect")
+        } catch let error as AgentMCPConnectorError {
+            assertEqual(error, .codexConfigDefinesServerInUnsupportedForm, "variant spelling should raise the unsupported-form error")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+
+        assertEqual(
+            (try? String(contentsOf: paths.codexConfigURL, encoding: .utf8)) ?? "",
+            existing,
+            "refused connect must leave the config untouched"
+        )
+        let leftoverBackups = ((try? FileManager.default.contentsOfDirectory(atPath: codexDirectory.path)) ?? [])
+            .filter { $0.contains(".backup-") }
+        assertEqual(leftoverBackups.count, 0, "refused connect should not leave backup files behind")
+    }
+
+    runSuite("AgentMCPConnector.connect(.codex) — backs up the existing config before the first write") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCodexBackupTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [])
+        let codexDirectory = paths.codexConfigURL.deletingLastPathComponent()
+
+        try? FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        try? "model = \"o4\"\n".write(to: paths.codexConfigURL, atomically: true, encoding: .utf8)
+
+        do {
+            try AgentMCPConnector.connect(.codex, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "Codex connect should not throw: \(error)")
+        }
+
+        func backupNames() -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: codexDirectory.path)) ?? [])
+                .filter { $0.hasPrefix("config.toml.backup-") }
+        }
+
+        let backups = backupNames()
+        assertEqual(backups.count, 1, "modifying an existing Codex config should leave exactly one backup")
+        if let backupName = backups.first {
+            let backupURL = codexDirectory.appendingPathComponent(backupName, isDirectory: false)
+            assertEqual(
+                (try? String(contentsOf: backupURL, encoding: .utf8)) ?? "",
+                "model = \"o4\"\n",
+                "backup should preserve the pre-write config bytes"
+            )
+        }
+
+        do {
+            try AgentMCPConnector.connect(.codex, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "repeat Codex connect should not throw: \(error)")
+        }
+        assertEqual(backupNames().count, 1, "an unchanged reconnect should not pile up more backups")
+    }
+
+    runSuite("AgentMCPConnector.connect(.cursor) — surfaces the backup when an unreadable config is replaced") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCursorRepairTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [])
+
+        try? FileManager.default.createDirectory(
+            at: paths.cursorConfigURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? "{ not json".write(to: paths.cursorConfigURL, atomically: true, encoding: .utf8)
+
+        let result = try? AgentMCPConnector.connect(.cursor, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        assertNotNil(result?.replacedConfigBackupURL, "replacing an unreadable config must surface the backup to callers")
+        if let backupURL = result?.replacedConfigBackupURL {
+            assertEqual(
+                (try? String(contentsOf: backupURL, encoding: .utf8)) ?? "",
+                "{ not json",
+                "backup should preserve the unreadable config"
+            )
+        }
+        assertTrue(
+            AgentMCPConnector.isConnected(.cursor, helperCommandPath: "/tmp/transcripted-mcp", paths: paths),
+            "Cursor should be connected after the repair"
+        )
+
+        let repeatResult = try? AgentMCPConnector.connect(.cursor, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        assertNotNil(repeatResult, "reconnect over a valid config should succeed")
+        assertNil(
+            repeatResult?.replacedConfigBackupURL,
+            "a readable config should connect without reporting a replacement backup"
+        )
+    }
+
+    runSuite("AgentMCPConnector.replacedConfigNotice — names the agent, the backup file, and the loss") {
+        let notice = AgentMCPConnector.replacedConfigNotice(
+            for: .claudeDesktop,
+            backupURL: URL(fileURLWithPath: "/cfg/claude_desktop_config.json.backup-2026-06-12T00-00-00Z")
+        )
+
+        assertTrue(notice.contains("Claude Desktop"), "notice should name the agent whose config was replaced")
+        assertTrue(
+            notice.contains("claude_desktop_config.json.backup-2026-06-12T00-00-00Z"),
+            "notice should name the backup file so users can find it"
+        )
+        assertTrue(
+            notice.lowercased().contains("re-add"),
+            "notice should tell users their other MCP servers need re-adding"
+        )
+    }
+
     runSuite("AgentMCPConnector.codexConfigText — never touches keys that merely start with 'command'") {
         let existing = """
         [mcp_servers.transcripted]

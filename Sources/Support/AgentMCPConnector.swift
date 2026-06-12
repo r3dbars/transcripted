@@ -101,6 +101,7 @@ enum AgentMCPConnectorError: LocalizedError, Equatable {
     case agentCLIFailed(AgentMCPAgent, status: Int32, output: String)
     case agentCLITimedOut(AgentMCPAgent)
     case codexConfigUsesInlineServers
+    case codexConfigDefinesServerInUnsupportedForm
 
     var errorDescription: String? {
         switch self {
@@ -115,8 +116,18 @@ enum AgentMCPConnectorError: LocalizedError, Equatable {
             return "\(agent.displayName) did not respond. Try again, or register Transcripted from the \(agent.displayName) side."
         case .codexConfigUsesInlineServers:
             return "Your Codex config defines mcp_servers inline. Add Transcripted there manually, or convert it to [mcp_servers.transcripted] table form."
+        case .codexConfigDefinesServerInUnsupportedForm:
+            return "Your Codex config already defines mcp_servers.transcripted in a form Transcripted can't safely edit. Remove or update that entry in ~/.codex/config.toml, then connect again."
         }
     }
+}
+
+/// Outcome of a connect. Most connects edit the agent's config in place, but
+/// when an existing config file is unreadable it is backed up and replaced —
+/// callers must surface that, because the rewritten file no longer carries
+/// the user's other MCP servers.
+struct AgentMCPConnectResult: Equatable {
+    let replacedConfigBackupURL: URL?
 }
 
 enum AgentMCPConnector {
@@ -201,17 +212,19 @@ enum AgentMCPConnector {
     /// its own full install + self-test flow; for every other agent the
     /// helper must already be installed (callers run `ensureHelperInstalled`
     /// first).
+    @discardableResult
     static func connect(
         _ agent: AgentMCPAgent,
         helperCommandPath: String = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path,
         paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
         fileManager: FileManager = .default,
         cliTimeout: TimeInterval = defaultCLITimeout
-    ) throws {
+    ) throws -> AgentMCPConnectResult {
         switch agent {
         case .claudeDesktop:
             // Claude Desktop keeps its dedicated install + self-test flow.
-            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(fileManager: fileManager)
+            let result = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(fileManager: fileManager)
+            return AgentMCPConnectResult(replacedConfigBackupURL: result.backupURL)
         case .claudeCode:
             try connectClaudeCode(
                 helperCommandPath: helperCommandPath,
@@ -219,15 +232,28 @@ enum AgentMCPConnector {
                 fileManager: fileManager,
                 cliTimeout: cliTimeout
             )
+            return AgentMCPConnectResult(replacedConfigBackupURL: nil)
         case .codex:
             try connectCodex(helperCommandPath: helperCommandPath, paths: paths, fileManager: fileManager)
+            // The Codex path takes routine safety backups but never replaces
+            // an unreadable config (it throws instead), so there is no
+            // replacement to surface.
+            return AgentMCPConnectResult(replacedConfigBackupURL: nil)
         case .cursor:
-            try ClaudeDesktopIntegrationInstaller.writeMCPServersConfig(
+            let backupURL = try ClaudeDesktopIntegrationInstaller.writeMCPServersConfig(
                 commandPath: helperCommandPath,
                 configURL: paths.cursorConfigURL,
                 fileManager: fileManager
             )
+            return AgentMCPConnectResult(replacedConfigBackupURL: backupURL)
         }
+    }
+
+    /// Notice for the agent row after a connect had to replace an unreadable
+    /// config. The backup must be named in UI — without it the rewrite
+    /// silently drops every other MCP server the user had configured.
+    static func replacedConfigNotice(for agent: AgentMCPAgent, backupURL: URL) -> String {
+        "Your previous \(agent.displayName) config wasn't readable, so it was backed up as \(backupURL.lastPathComponent) next to the config file and replaced. Re-add any other MCP servers from that backup."
     }
 
     // MARK: - Claude Code
@@ -285,6 +311,14 @@ enum AgentMCPConnector {
 
         let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
         let updated = try codexConfigText(updating: existing, commandPath: helperCommandPath)
+        guard updated != existing else {
+            fileManager.restrictFileToOwnerOnly(at: configURL)
+            return
+        }
+
+        // The text-level TOML edit is conservative, but the file belongs to
+        // Codex — keep a copy of what was there before the first byte changes.
+        _ = try ClaudeDesktopIntegrationInstaller.backupConfig(at: configURL, fileManager: fileManager)
         try updated.write(to: configURL, atomically: true, encoding: .utf8)
         fileManager.restrictFileToOwnerOnly(at: configURL)
     }
@@ -294,9 +328,10 @@ enum AgentMCPConnector {
     /// Conservative text-level TOML edit: replaces the `command` entry inside
     /// the `[mcp_servers.transcripted]` table, or appends the table when it is
     /// missing. Everything else in the user's config is preserved byte for
-    /// byte. Throws instead of appending when the config defines `mcp_servers`
-    /// as an inline table — appending a table header after that would corrupt
-    /// the file with a duplicate-key error.
+    /// byte. Throws instead of appending when any TOML spelling of the server
+    /// table already exists or when `mcp_servers` is defined without table
+    /// headers — appending a table header after either would corrupt the file
+    /// with a duplicate-table error.
     static func codexConfigText(updating existing: String, commandPath: String) throws -> String {
         let commandLine = "command = \(tomlBasicString(commandPath))"
         var lines = existing.components(separatedBy: "\n")
@@ -320,15 +355,7 @@ enum AgentMCPConnector {
             return lines.joined(separator: "\n")
         }
 
-        let definesInlineServers = lines.contains { line in
-            let trimmed = trimmedTOMLLine(line)
-            guard trimmed.hasPrefix("mcp_servers") else { return false }
-            let remainder = trimmed.dropFirst("mcp_servers".count).trimmingCharacters(in: .whitespaces)
-            return remainder.hasPrefix("=")
-        }
-        guard !definesInlineServers else {
-            throw AgentMCPConnectorError.codexConfigUsesInlineServers
-        }
+        try ensureCodexConfigSafeToAppendServerTable(lines: lines)
 
         var text = existing
         if !text.isEmpty, !text.hasSuffix("\n") {
@@ -341,6 +368,43 @@ enum AgentMCPConnector {
         return text
     }
 
+    /// The append path is only safe when no TOML spelling of the Transcripted
+    /// server table exists anywhere in the config. TOML accepts spellings this
+    /// text-level editor does not rewrite — `[ mcp_servers.transcripted ]`,
+    /// `[mcp_servers."transcripted"] # comment`, dotted assignments like
+    /// `mcp_servers.transcripted.command = "…"` — and appending a second
+    /// definition would make Codex reject the whole file, disabling every MCP
+    /// server in it. Throw a manual-edit error instead.
+    private static func ensureCodexConfigSafeToAppendServerTable(lines: [String]) throws {
+        var currentSection: [String] = []
+
+        for rawLine in lines {
+            let line = trimmedTOMLLine(rawLine)
+
+            if line.hasPrefix("[") {
+                // An unparseable header line leaves the config invalid TOML on
+                // its own; appending cannot make it less valid.
+                guard let headerPath = tomlTableHeaderKeyPath(line) else { continue }
+                currentSection = headerPath
+                if headerPath.starts(with: codexServerTableKeyPath) {
+                    throw AgentMCPConnectorError.codexConfigDefinesServerInUnsupportedForm
+                }
+                continue
+            }
+
+            guard let keyPath = tomlAssignmentKeyPath(line) else { continue }
+            if (currentSection + keyPath).starts(with: codexServerTableKeyPath) {
+                throw AgentMCPConnectorError.codexConfigDefinesServerInUnsupportedForm
+            }
+            // Root-level `mcp_servers = …` or `mcp_servers.other = …` defines
+            // the server map without table headers; appending a table header
+            // after either is corruption-prone, so route to manual edit.
+            if currentSection.isEmpty, keyPath.first == "mcp_servers" {
+                throw AgentMCPConnectorError.codexConfigUsesInlineServers
+            }
+        }
+    }
+
     static func codexConfiguredCommandPath(inConfigText text: String) -> String? {
         var inServerTable = false
 
@@ -348,7 +412,11 @@ enum AgentMCPConnector {
             let line = trimmedTOMLLine(rawLine)
 
             if line.hasPrefix("[") {
-                inServerTable = line == codexServerTableHeader
+                // Recognize every legal spelling of the table header (inner
+                // whitespace, quoted key, trailing comment) so an existing
+                // hand-written entry reads as connected instead of luring a
+                // Connect click into the duplicate-table guard.
+                inServerTable = tomlTableHeaderKeyPath(line) == codexServerTableKeyPath
                 continue
             }
 
@@ -375,6 +443,165 @@ enum AgentMCPConnector {
         let remainder = trimmedLine.dropFirst("command".count)
             .trimmingCharacters(in: .whitespaces)
         return remainder.hasPrefix("=")
+    }
+
+    private static var codexServerTableKeyPath: [String] {
+        ["mcp_servers", serverName]
+    }
+
+    /// Normalized dotted-key path of a `[table]` or `[[array-of-tables]]`
+    /// header line, or nil when the line is not a well-formed header.
+    private static func tomlTableHeaderKeyPath(_ trimmedLine: String) -> [String]? {
+        guard trimmedLine.hasPrefix("[") else { return nil }
+        var inner = trimmedLine.dropFirst()
+        var isArrayOfTables = false
+        if inner.hasPrefix("[") {
+            isArrayOfTables = true
+            inner = inner.dropFirst()
+        }
+
+        let characters = Array(inner)
+        var keyText = ""
+        var quote: Character?
+        var index = 0
+        var closeIndex: Int?
+        while index < characters.count {
+            let character = characters[index]
+            if let activeQuote = quote {
+                if activeQuote == "\"", character == "\\" {
+                    guard index + 1 < characters.count else { return nil }
+                    keyText.append(character)
+                    keyText.append(characters[index + 1])
+                    index += 2
+                    continue
+                }
+                if character == activeQuote {
+                    quote = nil
+                }
+                keyText.append(character)
+            } else if character == "\"" || character == "'" {
+                quote = character
+                keyText.append(character)
+            } else if character == "]" {
+                closeIndex = index
+                break
+            } else {
+                keyText.append(character)
+            }
+            index += 1
+        }
+
+        guard var afterClose = closeIndex.map({ $0 + 1 }) else { return nil }
+        if isArrayOfTables {
+            guard afterClose < characters.count, characters[afterClose] == "]" else { return nil }
+            afterClose += 1
+        }
+        let remainder = String(characters[afterClose...]).trimmingCharacters(in: .whitespaces)
+        guard remainder.isEmpty || remainder.hasPrefix("#") else { return nil }
+
+        return tomlDottedKeyParts(keyText)
+    }
+
+    /// Normalized dotted-key path on the left-hand side of a TOML assignment
+    /// line, or nil when the line carries no top-level `=`.
+    private static func tomlAssignmentKeyPath(_ trimmedLine: String) -> [String]? {
+        guard !trimmedLine.isEmpty,
+              !trimmedLine.hasPrefix("#"),
+              !trimmedLine.hasPrefix("[") else {
+            return nil
+        }
+
+        let characters = Array(trimmedLine)
+        var quote: Character?
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if let activeQuote = quote {
+                if activeQuote == "\"", character == "\\" {
+                    index += 2
+                    continue
+                }
+                if character == activeQuote {
+                    quote = nil
+                }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "=" {
+                return tomlDottedKeyParts(String(characters[..<index]))
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// Splits a TOML dotted key (`mcp_servers . "transcripted" . command`)
+    /// into normalized parts. Returns nil for anything that is not a
+    /// well-formed dotted key, so unparseable lines never match.
+    private static func tomlDottedKeyParts(_ text: String) -> [String]? {
+        let characters = Array(text)
+        var parts: [String] = []
+        var index = 0
+
+        func skipWhitespace() {
+            while index < characters.count, characters[index] == " " || characters[index] == "\t" {
+                index += 1
+            }
+        }
+
+        while true {
+            skipWhitespace()
+            guard index < characters.count else { return nil }
+
+            var part = ""
+            let leading = characters[index]
+            if leading == "\"" || leading == "'" {
+                let quote = leading
+                index += 1
+                var closed = false
+                while index < characters.count {
+                    let character = characters[index]
+                    if quote == "\"", character == "\\" {
+                        guard index + 1 < characters.count else { return nil }
+                        switch characters[index + 1] {
+                        case "\\": part.append("\\")
+                        case "\"": part.append("\"")
+                        case "n": part.append("\n")
+                        case "r": part.append("\r")
+                        case "t": part.append("\t")
+                        default: return nil
+                        }
+                        index += 2
+                        continue
+                    }
+                    if character == quote {
+                        closed = true
+                        index += 1
+                        break
+                    }
+                    part.append(character)
+                    index += 1
+                }
+                guard closed else { return nil }
+            } else {
+                while index < characters.count, isTOMLBareKeyCharacter(characters[index]) {
+                    part.append(characters[index])
+                    index += 1
+                }
+                guard !part.isEmpty else { return nil }
+            }
+
+            parts.append(part)
+            skipWhitespace()
+            guard index < characters.count else { return parts }
+            guard characters[index] == "." else { return nil }
+            index += 1
+        }
+    }
+
+    private static func isTOMLBareKeyCharacter(_ character: Character) -> Bool {
+        (character.isASCII && (character.isLetter || character.isNumber))
+            || character == "_"
+            || character == "-"
     }
 
     static func tomlBasicString(_ value: String) -> String {
@@ -445,43 +672,17 @@ enum AgentMCPConnector {
         agent: AgentMCPAgent = .claudeCode,
         timeout: TimeInterval = defaultCLITimeout
     ) throws -> (status: Int32, output: String) {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        let finished = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in finished.signal() }
-
-        try process.run()
-
-        // Drain both pipes off-thread so a chatty CLI cannot fill a pipe
-        // buffer and stall before its exit is observed.
-        final class PipeOutputBox: @unchecked Sendable {
-            var data = Data()
-        }
-        let stdoutBox = PipeOutputBox()
-        let stderrBox = PipeOutputBox()
-        let drained = DispatchGroup()
-        for (pipe, box) in [(stdout, stdoutBox), (stderr, stderrBox)] {
-            drained.enter()
-            DispatchQueue.global(qos: .utility).async {
-                box.data = pipe.fileHandleForReading.readDataToEndOfFile()
-                drained.leave()
-            }
-        }
-
-        if finished.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            _ = finished.wait(timeout: .now() + 2)
+        let result: BoundedProcessRunner.Output
+        do {
+            result = try BoundedProcessRunner.run(
+                executable: executable,
+                arguments: arguments,
+                timeout: timeout
+            )
+        } catch is BoundedProcessRunner.RunError {
             throw AgentMCPConnectorError.agentCLITimedOut(agent)
         }
 
-        drained.wait()
-        return (process.terminationStatus, String(decoding: stdoutBox.data + stderrBox.data, as: UTF8.self))
+        return (result.status, String(decoding: result.stdoutData + result.stderrData, as: UTF8.self))
     }
 }
