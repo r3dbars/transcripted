@@ -163,6 +163,7 @@ final class MeetingOverlayRootView: NSView {
     private var tooltipPanel: MeetingOverlayTooltipPanel?
     private var tooltipTask: Task<Void, Never>?
     private var tooltipTrackingAreas: [NSTrackingArea] = []
+    private var lastTooltipAreaSignature: String?
     private var panelHoverTrackingArea: NSTrackingArea?
     private var isCondensed = false
     private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
@@ -925,6 +926,14 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func refreshTooltipTrackingAreas() {
+        // Layout runs every duration tick and every animation frame;
+        // removing and re-adding tracking areas while the cursor sits inside
+        // one re-fires synthetic enter events and churns tooltips. Only
+        // rebuild when a tracked rect or text actually changed.
+        let signature = tooltipAreaSignature()
+        if signature == lastTooltipAreaSignature { return }
+        lastTooltipAreaSignature = signature
+
         for area in tooltipTrackingAreas {
             removeTrackingArea(area)
         }
@@ -957,6 +966,35 @@ final class MeetingOverlayRootView: NSView {
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
         }
+    }
+
+    /// Mirrors exactly the rect/text pairs `refreshTooltipTrackingAreas`
+    /// would install, so steady-state layout passes can skip the rebuild.
+    private func tooltipAreaSignature() -> String {
+        var parts: [String] = []
+        func sig(_ view: NSView, _ text: String) {
+            guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
+            let rect = convert(view.bounds, from: view)
+            parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(text)")
+        }
+        sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
+        sig(remindButton, remindPromptTooltip)
+        sig(recordButton, startTooltip)
+        if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
+            var rect = convert(pillBodyView.bounds, from: pillBodyView)
+            if !closeButton.isHidden {
+                let stopRect = convert(closeButton.bounds, from: closeButton)
+                rect.size.width = max(0, stopRect.minX - rect.minX - 4)
+            }
+            if rect.width > 0, rect.height > 0 {
+                parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(stripTooltip)")
+            }
+        }
+        if isDrawerVisible {
+            sig(transcriptDrawer.copyActionView, MeetingLiveViewAffordancePolicy.copyTooltip)
+            sig(transcriptDrawer.moreActionView, MeetingLiveViewAffordancePolicy.moreTooltip)
+        }
+        return parts.joined(separator: ";")
     }
 
     private func addTooltipTrackingArea(for view: NSView, text: String) {
@@ -1236,6 +1274,7 @@ final class MeetingOverlayController: NSObject {
     private var isRestingCondensed = false
     private var isPanelHovered = false
     private var restTask: Task<Void, Never>?
+    private var hoverVerifyTask: Task<Void, Never>?
     private var isTranscriptExpanded = false
     private var lastRequestedPanelSize: NSSize?
     private var drawerResizeBaseHeight: CGFloat?
@@ -1254,6 +1293,7 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
         restTask?.cancel()
+        hoverVerifyTask?.cancel()
     }
 
     // MARK: - Dependencies
@@ -1602,9 +1642,11 @@ final class MeetingOverlayController: NSObject {
         case .recording:
             if state != .recording {
                 // New recording: restore the user's last drawer choice so a
-                // transcript they kept open last meeting opens itself.
+                // transcript they kept open last meeting opens itself, and
+                // start from a clean hover state — enter events re-arm it.
                 isTranscriptExpanded = LiveMeetingCodexPreferences.isEnabled()
                     && LiveMeetingCodexPreferences.isDrawerOpenPreferred()
+                isPanelHovered = false
             }
             isRestingCondensed = false
             state = .recording
@@ -1708,6 +1750,9 @@ final class MeetingOverlayController: NSObject {
     private func hidePanel() {
         guard let panel = panel, panel.isVisible else { return }
         lastRequestedPanelSize = nil
+        // A panel hidden under the cursor never delivers mouseExited; a
+        // stale hover flag would silently block resting next recording.
+        isPanelHovered = false
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.14
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -1927,8 +1972,23 @@ final class MeetingOverlayController: NSObject {
 
     private func handlePanelHoverChanged(_ hovered: Bool) {
         guard hovered != isPanelHovered else { return }
+
+        // Hysteresis against the bloom animation: hover-out events are
+        // judged against the pill's FULL rect, not the animating bounds.
+        // While the capsule grows under the cursor, the pointer can sit
+        // outside the intermediate frame but inside the final one — honoring
+        // that exit would condense, re-enter, and oscillate until clicked.
+        if !hovered, isRestingCondensed, pointerIsWithinBloomedPillRect() {
+            // A fast swipe can land here and keep going — AppKit considers
+            // the cursor exited and sends nothing further, so verify once
+            // the animation settles instead of trusting a future event.
+            scheduleSuppressedExitVerification()
+            return
+        }
+
         isPanelHovered = hovered
         if hovered {
+            hoverVerifyTask?.cancel()
             restTask?.cancel()
             if isRestingCondensed {
                 pushToView()
@@ -1939,6 +1999,34 @@ final class MeetingOverlayController: NSObject {
             }
             scheduleRestIfNeeded()
         }
+    }
+
+    private func scheduleSuppressedExitVerification() {
+        hoverVerifyTask?.cancel()
+        hoverVerifyTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled, let self, self.isPanelHovered else { return }
+            if !self.pointerIsWithinBloomedPillRect() {
+                self.handlePanelHoverChanged(false)
+            }
+        }
+    }
+
+    /// The screen rect the pill occupies when fully bloomed. Top edge and
+    /// horizontal center are invariant across our resizes, so this is
+    /// derivable even mid-animation.
+    private func pointerIsWithinBloomedPillRect() -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        let frame = panel.frame
+        let width = MeetingOverlayTokens.recordingPanelWidth
+        let height = MeetingOverlayTokens.panelHeight
+        let bloomed = NSRect(
+            x: frame.midX - width / 2,
+            y: frame.maxY - height,
+            width: width,
+            height: height
+        ).insetBy(dx: -4, dy: -4)
+        return bloomed.contains(NSEvent.mouseLocation)
     }
 
     // MARK: - Pill context menu
