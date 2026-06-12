@@ -184,6 +184,18 @@ func testAgentMCPConnector() {
         }
     }
 
+    runSuite("AgentMCPConnector.codexConfiguredCommandPath — ignores array-of-tables server entries") {
+        let config = """
+        [[mcp_servers.transcripted]]
+        command = "/tmp/transcripted-mcp"
+        """
+
+        assertNil(
+            AgentMCPConnector.codexConfiguredCommandPath(inConfigText: config),
+            "array-of-tables entries are unsupported by connect and should not read as connected"
+        )
+    }
+
     runSuite("AgentMCPConnector.connect(.codex) — leaves a variant-spelled config untouched") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedCodexVariantTests-\(UUID().uuidString)", isDirectory: true)

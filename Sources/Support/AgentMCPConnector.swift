@@ -384,9 +384,9 @@ enum AgentMCPConnector {
             if line.hasPrefix("[") {
                 // An unparseable header line leaves the config invalid TOML on
                 // its own; appending cannot make it less valid.
-                guard let headerPath = tomlTableHeaderKeyPath(line) else { continue }
-                currentSection = headerPath
-                if headerPath.starts(with: codexServerTableKeyPath) {
+                guard let header = tomlTableHeader(line) else { continue }
+                currentSection = header.keyPath
+                if header.keyPath.starts(with: codexServerTableKeyPath) {
                     throw AgentMCPConnectorError.codexConfigDefinesServerInUnsupportedForm
                 }
                 continue
@@ -416,7 +416,11 @@ enum AgentMCPConnector {
                 // whitespace, quoted key, trailing comment) so an existing
                 // hand-written entry reads as connected instead of luring a
                 // Connect click into the duplicate-table guard.
-                inServerTable = tomlTableHeaderKeyPath(line) == codexServerTableKeyPath
+                if let header = tomlTableHeader(line) {
+                    inServerTable = !header.isArrayOfTables && header.keyPath == codexServerTableKeyPath
+                } else {
+                    inServerTable = false
+                }
                 continue
             }
 
@@ -450,8 +454,8 @@ enum AgentMCPConnector {
     }
 
     /// Normalized dotted-key path of a `[table]` or `[[array-of-tables]]`
-    /// header line, or nil when the line is not a well-formed header.
-    private static func tomlTableHeaderKeyPath(_ trimmedLine: String) -> [String]? {
+    /// header line, plus whether the header used array-of-tables form.
+    private static func tomlTableHeader(_ trimmedLine: String) -> (keyPath: [String], isArrayOfTables: Bool)? {
         guard trimmedLine.hasPrefix("[") else { return nil }
         var inner = trimmedLine.dropFirst()
         var isArrayOfTables = false
@@ -499,7 +503,8 @@ enum AgentMCPConnector {
         let remainder = String(characters[afterClose...]).trimmingCharacters(in: .whitespaces)
         guard remainder.isEmpty || remainder.hasPrefix("#") else { return nil }
 
-        return tomlDottedKeyParts(keyText)
+        guard let keyPath = tomlDottedKeyParts(keyText) else { return nil }
+        return (keyPath: keyPath, isArrayOfTables: isArrayOfTables)
     }
 
     /// Normalized dotted-key path on the left-hand side of a TOML assignment
