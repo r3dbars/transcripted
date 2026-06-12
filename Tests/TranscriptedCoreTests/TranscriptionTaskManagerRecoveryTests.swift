@@ -122,6 +122,45 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertGreaterThan(merged.length, 3_000)
     }
 
+    func testLateJournalWriteAfterRecoveryHandoffDoesNotDuplicateFailedEntry() async throws {
+        let (manager, paths) = makeManager()
+
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_dup_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try backdate(micURL)
+
+        // Go through a live store so its in-memory journal survives the
+        // handoff the way it does in the app process.
+        let store = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        let session = store.begin(primaryMicURL: micURL)
+        store.markStopping(session: session)
+        store.flush()
+        let journalURL = paths.audioCaptures.appendingPathComponent(
+            "meeting_dup_mic" + MeetingRecordingJournalStore.filenameSuffix
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        XCTAssertEqual(recovered, 1)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+
+        // A late stop-path write from the stale session (a timed-out bridge
+        // stop finishing its merge) must not resurrect the journal...
+        store.markFinalized(finalMicURL: micURL, session: session)
+        store.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+
+        // ...so the next scan finds nothing and the failed queue keeps a
+        // single entry for this recording.
+        let recoveredAgain = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        XCTAssertEqual(recoveredAgain, 0)
+        XCTAssertEqual(
+            manager.failedTranscriptionManager.failedTranscriptions.count, 1,
+            "a resurrected journal would re-recover the same audio into a duplicate failed-queue entry"
+        )
+    }
+
     // MARK: - Fixtures
 
     private func makeManager() -> (TranscriptionTaskManager, CoreStoragePaths) {
