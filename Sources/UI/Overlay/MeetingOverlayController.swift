@@ -490,7 +490,12 @@ final class MeetingOverlayRootView: NSView {
         let tokens = MeetingOverlayTokens.self
 
         if isRecordingMinimized {
-            layoutMinimizedRecording(midY: bounds.height / 2)
+            // Top-anchored like the full strip, so minimizing while the
+            // drawer is open cannot jump the controls to the middle of the
+            // still-tall panel mid-animation.
+            layoutMinimizedRecording(
+                midY: bounds.height - tokens.minimizedRecordingPanelHeight / 2
+            )
             return
         }
 
@@ -623,7 +628,15 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.frame = .zero
         audioWaveform.frame = .zero
         liveViewButton.frame = .zero
-        transcriptDrawer.frame = .zero
+        // Keep the drawer filling the space below the strip so its fade-out
+        // plays while the panel shrinks, instead of vanishing on the first
+        // layout tick of the minimize animation.
+        transcriptDrawer.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: bounds.width,
+            height: max(0, bounds.height - tokens.minimizedRecordingPanelHeight)
+        )
         refreshTooltipTrackingAreas()
     }
 
