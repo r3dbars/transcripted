@@ -213,6 +213,33 @@ enum ClaudeDesktopIntegrationInstaller {
         )
     }
 
+    /// Silently re-copies the bundled helper over a previously installed one
+    /// when their contents differ, e.g. after an app update. Configs are left
+    /// untouched — they already point at the stable installed path. Never
+    /// installs fresh: a missing installed helper means the user has not
+    /// opted into agent setup yet.
+    @discardableResult
+    static func refreshInstalledHelperIfNeeded(
+        bundledBinaryURL: URL? = bundledMCPBinaryURL(),
+        installedBinaryURL: URL = installedMCPBinaryURL,
+        fileManager: FileManager = .default
+    ) throws -> Bool {
+        guard let bundledBinaryURL,
+              fileManager.isExecutableFile(atPath: bundledBinaryURL.path),
+              fileManager.fileExists(atPath: installedBinaryURL.path),
+              bundledBinaryURL.standardizedFileURL.path != installedBinaryURL.standardizedFileURL.path,
+              !fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path) else {
+            return false
+        }
+
+        try installBundledBinary(
+            from: bundledBinaryURL,
+            to: installedBinaryURL,
+            fileManager: fileManager
+        )
+        return true
+    }
+
     static func configSnippet(commandPath: String = installedMCPBinaryURL.path) -> String {
         let root: [String: Any] = [
             "mcpServers": [
@@ -254,6 +281,22 @@ enum ClaudeDesktopIntegrationInstaller {
 
     @discardableResult
     static func writeClaudeDesktopConfig(
+        commandPath: String,
+        configURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL? {
+        try writeMCPServersConfig(
+            commandPath: commandPath,
+            configURL: configURL,
+            fileManager: fileManager
+        )
+    }
+
+    /// Merges the Transcripted server entry into any `mcpServers`-style JSON
+    /// config (Claude Desktop, Cursor). Preserves other servers and top-level
+    /// keys; backs up unreadable configs instead of overwriting them blindly.
+    @discardableResult
+    static func writeMCPServersConfig(
         commandPath: String,
         configURL: URL,
         fileManager: FileManager = .default

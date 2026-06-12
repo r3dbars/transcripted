@@ -3,19 +3,22 @@
 The setup should feel like this:
 
 1. Pick the app you use.
-2. Click one button.
-3. Restart or paste the copied prompt.
+2. Click `Connect`.
+3. Restart the agent, or paste the copied prompt for agents we cannot configure directly.
 
 No manual JSON for normal users. No source build for DMG installs.
 
-## Best Path: Claude Desktop
+The Agent page shows one row per agent found on the Mac — Claude Desktop,
+Claude Code, Codex, Cursor — each with a single `Connect` button. Every row
+points that agent's own MCP config at the same installed `transcripted-mcp`
+helper. Agents we cannot configure directly use the universal copy-prompt row.
 
-Claude Desktop is the best full-library experience.
+## Claude Desktop
 
 1. Open Transcripted.
 2. Open Settings.
 3. Go to `Agent`.
-4. Click `Install in Claude`.
+4. Click `Connect` on the Claude Desktop row.
 5. Restart Claude Desktop.
 
 After restart, ask Claude:
@@ -49,17 +52,12 @@ Then it safely merges this entry into Claude Desktop's config:
 Existing MCP servers are preserved. If the config is invalid JSON,
 Transcripted backs it up before writing a clean config.
 
-If the installed helper's `--self-test` prints many `[transcripted-mcp] Indexed`
-lines before the JSON payload, the helper copied into Application Support is
-stale. Click `Update Claude Helper` from Transcripted Settings to replace it
-with the current bundled helper. The current helper should print only the JSON
-self-test payload.
-
-A stale helper can also pass `--self-test` but still behave like an older build,
-for example if `transcripted-mcp --help` starts the MCP server instead of
-printing usage. If Transcripted Settings says the direct tools need repair, or
-the installed helper differs from the app-bundled helper, click the repair or
-update button shown in Settings.
+The installed helper is self-healing: at app launch, Transcripted compares the
+installed helper against the one bundled in the current app build and silently
+replaces it when they differ. Users should never have to think about a stale
+helper. If the silent refresh fails (for example a permissions problem), the
+Agent page surfaces the error on the affected row and `Connect` performs a
+full reinstall.
 
 Current `transcripted-mcp` capabilities:
 
@@ -76,25 +74,18 @@ Current `transcripted-mcp` capabilities:
 These tools are read-only, but they are not redacted. `read_meeting` and
 `read_dictation` can return local transcript text to the agent you connected.
 
-## Good Path: Local Coding Agents
+## Local Coding Agents
 
-Use this for local agents that can read files on the user's Mac.
+Claude Code, Codex, and Cursor get the same one-click `Connect` as Claude
+Desktop:
 
-Examples:
+- Claude Code — registered through the `claude` CLI (`claude mcp add --scope user`), so the CLI keeps ownership of `~/.claude.json`.
+- Codex — a conservative text-level edit of `~/.codex/config.toml` that only touches the `[mcp_servers.transcripted]` table.
+- Cursor — the same safe `mcpServers` JSON merge as Claude Desktop, written to `~/.cursor/mcp.json`.
 
-- Claude Code
-- Codex
-- Cursor
-- Windsurf
-- Zed
-- OpenCode
-- OpenClaw
-- Cline
-- Continue
-- VS Code agents
-
-The user copies the local-agent prompt from Transcripted, pastes it into the
-agent, and asks normal questions like:
+For everything else (Windsurf, Zed, OpenCode, OpenClaw, Cline, Continue,
+VS Code agents, web chats), the user copies the universal prompt from the
+`Something else` row, pastes it into the agent, and asks normal questions like:
 
 - what did I miss today
 - summarize my latest meeting
@@ -116,9 +107,9 @@ The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 
 1. Open Transcripted Settings.
 2. Go to `Agent`.
-3. Turn on `Live meeting sidecar`.
-4. Click `Open in Codex`, or click `Copy for Cowork` and paste that setup prompt into Claude Cowork.
-5. Click `Open Preview` if you want a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
+3. Turn on `Live meetings`.
+4. Click `Open Live View` for a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
+5. For a dedicated agent meeting room, expand `Advanced` and click `Open in Codex`, or `Copy for Cowork` and paste that setup prompt into Claude Cowork.
 
 Transcripted creates:
 

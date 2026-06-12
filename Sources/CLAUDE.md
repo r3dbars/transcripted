@@ -42,7 +42,7 @@ Important entry points:
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
-- `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
+- `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 
 The historical planning docs that used to live alongside older placeholder
 areas were moved under `docs/archive/` so the source tree reads more like the

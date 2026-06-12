@@ -8,12 +8,11 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 - `Overlay/`
 - `MenuBar/`
 - `Settings/`
-- `AgentConnect/`
 - `Shared/`
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (67 Swift files)
+## Files (64 Swift files)
 
 ### Overlay/
 
@@ -46,7 +45,6 @@ into a taller loading or error state.
 
 ### MenuBar/
 
-- `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
@@ -61,20 +59,17 @@ into a taller loading or error state.
 - `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views
 
-### AgentConnect/
+The agent-connect surface is the Settings window's Agent page plus the
+onboarding connect stage. Both keep one mental model:
 
-- `AgentConnect/AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
-- `AgentConnect/AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
-
-The current agent-connect surfaces should keep one simple mental model:
-
-- lead with one smart copy-paste prompt
-- let that prompt prefer MCP when available and fall back to folders when not
-- keep manual folder paths and MCP setup secondary, not primary
+- one row per agent found on the Mac, one Connect button each
+- every row points the agent's own MCP config at the same installed helper
+- the universal copy-prompt row covers agents we cannot configure directly
+- folders, the Codex inbox automation, and config details stay behind Advanced
 
 ### Settings/
 
-- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page, including Claude Desktop install/repair, copy prompts, folder paths, and config reveal actions
+- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, the live-meetings toggle, and the Advanced disclosure (folders, Codex inbox, config details)
 - `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
@@ -101,7 +96,7 @@ The current agent-connect surfaces should keep one simple mental model:
 
 ### Shared/
 
-- `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
+- `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, live-sidecar, and portable meeting bundle copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
