@@ -245,6 +245,10 @@ func testClipboardRestoringTextPaster() async {
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — keeps dictation available for delayed paste consumers") {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+            print("    SKIPPED: wall-clock timing proof — scheduler jitter on shared CI runners makes the 30/80ms windows unprovable there; covered by local runs")
+            return
+        }
         let existingClipboard = "synthetic existing clipboard"
         let dictationText = "synthetic delayed dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedDelayedPasteTest-\(UUID().uuidString)")
