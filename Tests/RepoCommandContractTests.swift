@@ -1562,6 +1562,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation honors the shared mic boost preference") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let startBlock = sourceSlice(
+            contents,
+            from: "private func installTapAndStartEngine",
+            to: "private func removeRecordingTap"
+        )
+
+        guard
+            let preferenceRead = startBlock.range(of: "MicrophoneProcessingPreferences.isVoiceProcessingEnabled()"),
+            let applyCall = startBlock.range(of: "Self.applyDictationVoiceProcessingPreference"),
+            let tapInstall = startBlock.range(of: "inputNode.installTap(onBus: 0")
+        else {
+            assertionFailure("Dictation start should read the shared mic-processing preference before installing the tap")
+            return
+        }
+
+        assertTrue(
+            preferenceRead.lowerBound < applyCall.lowerBound && applyCall.lowerBound < tapInstall.lowerBound,
+            "dictation should apply the accepted meeting mic boost before recording audio"
+        )
+        assertTrue(
+            contents.contains("dictation_voice_processing_unavailable"),
+            "dictation should report VPIO setup failures without blocking recording"
+        )
+    }
+
     runSuite("Repo command contract - mini cursor stays compact from startup through paste") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let sizeBlock = sourceSlice(
@@ -2865,6 +2892,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
+        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let deleteBlock = sourceSlice(
             settingsContents,
@@ -2882,6 +2910,17 @@ func testRepoCommandContract() {
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
                 deleteBlock.contains("_ = try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+        assertTrue(
+            homeContents.contains("func removeVisibleMeeting(id: String)")
+                && deleteBlock.contains("homeViewModel.removeVisibleMeeting(id: item.id)")
+                && deleteBlock.contains("if homeMeetingPreview?.transcriptURL == item.transcriptURL"),
+            "confirmed Home delete should immediately close stale preview state and remove the visible meeting row before the filesystem refresh"
+        )
+        assertTrue(
+            deleteBlock.contains("} catch {\n                refreshRecentCaptures(force: true)")
+                && deleteBlock.contains("presentHomeDeleteFailure("),
+            "failed Home delete should force a reload so an optimistically hidden row is restored with a visible error"
         )
     }
 

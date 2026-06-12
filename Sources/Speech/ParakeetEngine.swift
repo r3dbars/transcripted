@@ -1456,6 +1456,10 @@ class ParakeetEngine: ObservableObject {
             let tapRemoveStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.removeTap(onBus: 0)
             stageTimings["audio_tap_remove_ms"] = Self.elapsedMilliseconds(since: tapRemoveStartedAt)
+            let voiceProcessingRequested = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+            let voiceProcessingStartedAt = CFAbsoluteTimeGetCurrent()
+            Self.applyDictationVoiceProcessingPreference(voiceProcessingRequested, to: inputNode)
+            stageTimings["audio_voice_processing_apply_ms"] = Self.elapsedMilliseconds(since: voiceProcessingStartedAt)
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
             inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
                 guard let self = self,
@@ -1554,6 +1558,39 @@ class ParakeetEngine: ObservableObject {
             audioEngine.inputNode.removeTap(onBus: 0)
         }
         inputTapInstalled = false
+    }
+
+    /// Share the user-consented issue #500 VPIO path with dictation. Meeting
+    /// capture owns the prompt; dictation just honors the stable mic-processing
+    /// preference on each new recording start.
+    private nonisolated static func applyDictationVoiceProcessingPreference(
+        _ enabled: Bool,
+        to inputNode: AVAudioInputNode
+    ) {
+        guard inputNode.isVoiceProcessingEnabled != enabled else { return }
+        do {
+            try inputNode.setVoiceProcessingEnabled(enabled)
+            if enabled {
+                inputNode.isVoiceProcessingAGCEnabled = true
+                if #available(macOS 14.0, *) {
+                    inputNode.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                        enableAdvancedDucking: false,
+                        duckingLevel: .min
+                    )
+                }
+            }
+        } catch {
+            let action = enabled ? "enable" : "disable"
+            Task { @MainActor in
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: "dictation_voice_processing_unavailable",
+                    message: "Could not \(action) dictation voice processing; continuing with current input node mode",
+                    context: ["requested": "\(enabled)"]
+                )
+            }
+        }
     }
 
     private func stopAudioEngine() async {

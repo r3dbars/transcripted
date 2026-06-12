@@ -48,6 +48,28 @@ final class HomeViewModel: ObservableObject {
         loadCurrentLimits(isInitialLoad: false)
     }
 
+    func removeVisibleMeeting(id: String) {
+        var didRemove = false
+        meetingDaySections = meetingDaySections.compactMap { section in
+            let remainingItems = section.items.filter { item in
+                let shouldKeep = item.id != id
+                if !shouldKeep {
+                    didRemove = true
+                }
+                return shouldKeep
+            }
+            guard !remainingItems.isEmpty else { return nil }
+            return HomeDaySection(day: section.day, label: section.label, items: remainingItems)
+        }
+
+        guard didRemove else { return }
+        recentMeetingCount = max(0, recentMeetingCount - 1)
+        todayMeetingCount = meetingDaySections
+            .flatMap(\.items)
+            .filter { Calendar.current.isDateInToday($0.date) }
+            .count
+    }
+
     func loadMoreDictations() {
         guard !isLoading, !isLoadingMore, canLoadMoreDictations else { return }
         dictationLimit += initialDictationLimit
