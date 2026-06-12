@@ -1172,6 +1172,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
+        if homeMeetingPreview?.transcriptURL == item.transcriptURL {
+            homeMeetingPreview = nil
+        }
+        homeViewModel.removeVisibleMeeting(id: item.id)
+
         let deletionTask = Task.detached(priority: .userInitiated) {
             let plan = HomeMeetingDeletion.plan(for: item)
             await MainActor.run {
@@ -1185,6 +1190,7 @@ struct TranscriptedSettingsView: View {
                 _ = try await deletionTask.value
                 refreshRecentCaptures(force: true)
             } catch {
+                refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not delete meeting",
                     error: error
