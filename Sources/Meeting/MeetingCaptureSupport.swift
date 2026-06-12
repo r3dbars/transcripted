@@ -222,6 +222,13 @@ enum MeetingCaptureVolumeDiagnostics {
         return "voice_processed"
     }
 
+    /// Issue #500 still-open case: quiet raw mic that gain could not recover,
+    /// with no input-scalar drop — a foreign app holds the device in voice mode.
+    static func isVoiceProcessedUnrecovered(in context: [String: String]) -> Bool {
+        context["attenuation_kind"] == "voice_processed"
+            && context["quiet_mic_unrecovered"] == "true"
+    }
+
     private static func outputDuckingState(dropStates: [String?]) -> String {
         let values = dropStates.compactMap { $0 }
         if values.contains("true") { return "true" }

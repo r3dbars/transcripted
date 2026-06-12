@@ -156,6 +156,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var lastSavedTitle: String? = nil
     @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
+    @Published private(set) var isMicBoostPromptVisible = false
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -191,6 +192,7 @@ final class MeetingSessionController: ObservableObject {
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
+    private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
     private var activeRecordingStartedAt: Date?
     private var activeTranscriptionTrigger: StartTrigger = .unknown
@@ -408,6 +410,8 @@ final class MeetingSessionController: ObservableObject {
             calendarTitle: calendarSuggestedTitleProvider?()
         )
         activeRecordingTrigger = trigger
+        micBoostPromptOutcome = .notShown
+        isMicBoostPromptVisible = false
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
 
@@ -579,6 +583,7 @@ final class MeetingSessionController: ObservableObject {
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
+        isMicBoostPromptVisible = false
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -609,10 +614,14 @@ final class MeetingSessionController: ObservableObject {
             shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
         )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
-        let stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+        var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
+        // Read the prompt outcome before any state mutations below; it is only
+        // reset at the NEXT recording start, so the value is stable through stop.
+        let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
+        stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -751,10 +760,28 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        // Issue #500: when stop diagnostics classified an unrecovered
+        // voice-processed quiet mic, ride the facts into the saved transcript
+        // frontmatter so Home can surface the enable-for-next-time hint.
+        let healthInfoForSave: RecordingHealthInfo
+        if micAttenuatedByCallApp {
+            let base = recordingSnapshot.healthInfo
+            healthInfoForSave = RecordingHealthInfo(
+                captureQuality: base.captureQuality,
+                audioGaps: base.audioGaps,
+                deviceSwitches: base.deviceSwitches,
+                gapDescriptions: base.gapDescriptions,
+                micAttenuatedByCallApp: true,
+                micBoostPrompt: micBoostPromptOutcome.rawValue
+            )
+        } else {
+            healthInfoForSave = recordingSnapshot.healthInfo
+        }
+
         let outcome = enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
-            healthInfo: recordingSnapshot.healthInfo,
+            healthInfo: healthInfoForSave,
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
             startTrigger: recordingSnapshot.trigger
@@ -790,6 +817,85 @@ final class MeetingSessionController: ObservableObject {
                     "duration_ms": "\(Int(recordingDuration * 1000))"
                 ]
             )
+        )
+    }
+
+    private func handleMicAttenuationCue() {
+        guard MeetingMicBoostPromptPolicy.shouldPresent(
+            isRecording: isRecording,
+            voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+            currentOutcome: micBoostPromptOutcome
+        ) else { return }
+        micBoostPromptOutcome = .shown
+        isMicBoostPromptVisible = true
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_shown",
+            message: "Mic attenuated by another app's voice processing; offering boost",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_shown",
+            properties: [
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
+        )
+    }
+
+    func acceptMicBoostPrompt() {
+        guard isMicBoostPromptVisible else { return }
+        micBoostPromptOutcome = .accepted
+        isMicBoostPromptVisible = false
+        capture.armVoiceProcessingForActiveRecording()
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_actioned",
+            message: "Mic boost prompt accepted; arming VPIO mid-recording",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "action": "accepted",
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_actioned",
+            properties: [
+                "action": "accepted",
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
+        )
+    }
+
+    func declineMicBoostPrompt() {
+        guard isMicBoostPromptVisible else { return }
+        micBoostPromptOutcome = .declined
+        isMicBoostPromptVisible = false
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_actioned",
+            message: "Mic boost prompt declined",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "action": "declined",
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_actioned",
+            properties: [
+                "action": "declined",
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
         )
     }
 
@@ -844,6 +950,7 @@ final class MeetingSessionController: ObservableObject {
         defer { isFinishingRecording = false }
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
+        isMicBoostPromptVisible = false
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -1094,6 +1201,7 @@ final class MeetingSessionController: ObservableObject {
 
             _ = audioInactivityDetector.stopRecording()
             audioInactivityWarning = nil
+            isMicBoostPromptVisible = false
 
             let shutdownFailedTaskId = UUID()
             let files = await capture.stopAndAwaitFiles { [weak self] lateResult in
@@ -1404,6 +1512,14 @@ final class MeetingSessionController: ObservableObject {
                 self.applyAudioInactivityEvent(
                     self.audioInactivityDetector.tick(at: duration)
                 )
+            }
+            .store(in: &cancellables)
+
+        capture.$micAttenuationCueObserved
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                self?.handleMicAttenuationCue()
             }
             .store(in: &cancellables)
 

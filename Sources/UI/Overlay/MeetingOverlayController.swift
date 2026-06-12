@@ -1140,6 +1140,7 @@ final class MeetingOverlayController {
     private enum PromptKind {
         case detectedMeeting
         case audioInactivity
+        case micBoost
     }
 
     deinit {
@@ -1290,6 +1291,13 @@ final class MeetingOverlayController {
                 self?.applyAudioInactivityWarning(warning)
             }
             .store(in: &subscriptions)
+
+        session.$isMicBoostPromptVisible
+            .receive(on: RunLoop.main)
+            .sink { [weak self] visible in
+                self?.applyMicBoostPrompt(visible)
+            }
+            .store(in: &subscriptions)
     }
 
     private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {
@@ -1316,6 +1324,47 @@ final class MeetingOverlayController {
         pushToView()
         if warning.automaticStopAllowed {
             schedulePromptCountdown()
+        }
+    }
+
+    private func applyMicBoostPrompt(_ visible: Bool) {
+        guard visible else {
+            clearMicBoostPrompt()
+            return
+        }
+        guard meetingSession?.state == .recording else { return }
+        // Precedence: never replace an active audio-inactivity prompt (it can
+        // auto-stop the recording). The post-meeting Home hint is the backstop.
+        if state == .prompt, promptKind == .audioInactivity { return }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+
+        promptCandidate = nil
+        promptKind = .micBoost
+        promptSecondsRemaining = 0
+        currentPrompt = micBoostPromptDisplay()
+        isRecordingMinimized = false
+        state = .prompt
+        showPanel()
+        pushToView()
+        // No schedulePromptCountdown(): expiry must never auto-enable VPIO.
+    }
+
+    private func clearMicBoostPrompt() {
+        guard promptKind == .micBoost else { return }
+
+        promptCountdownTask?.cancel()
+        promptKind = nil
+        currentPrompt = nil
+
+        if meetingSession?.state == .recording {
+            state = .recording
+            showPanel()
+            pushToView()
+        } else {
+            state = .idle
+            hidePanel()
         }
     }
 
@@ -1510,6 +1559,8 @@ final class MeetingOverlayController {
             switch promptKind {
             case .audioInactivity:
                 meetingSession?.dismissAudioInactivityWarning()
+            case .micBoost:
+                meetingSession?.declineMicBoostPrompt()
             case .detectedMeeting, .none:
                 dismissPrompt(notifyDetector: true)
             }
@@ -1530,6 +1581,10 @@ final class MeetingOverlayController {
                 guard let session = self?.meetingSession else { return }
                 await session.endRecordingFromAudioInactivityPrompt(automatic: false)
             }
+        case .micBoost:
+            // Session clears the published flag, which routes back through
+            // applyMicBoostPrompt(false) -> clearMicBoostPrompt -> .recording.
+            meetingSession?.acceptMicBoostPrompt()
         case .detectedMeeting, .none:
             guard let candidate = promptCandidate else { return }
             onPromptRecord?(candidate)
@@ -1577,6 +1632,14 @@ final class MeetingOverlayController {
             state = .recording
             showPanel()
             pushToView()
+            // A mic-boost prompt may have fired while the inactivity prompt
+            // was up (suppressed by precedence) or been replaced by it. The
+            // session still latches it visible — and already recorded its
+            // outcome as "shown" — so re-present instead of silently losing
+            // the one-shot in-meeting offer.
+            if meetingSession?.isMicBoostPromptVisible == true {
+                applyMicBoostPrompt(true)
+            }
         } else {
             state = .idle
             hidePanel()
@@ -1613,6 +1676,8 @@ final class MeetingOverlayController {
                 warning: warning,
                 countdownSeconds: promptSecondsRemaining
             )
+        case .micBoost:
+            currentPrompt = micBoostPromptDisplay()
         case .detectedMeeting, .none:
             currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
         }
@@ -1620,6 +1685,10 @@ final class MeetingOverlayController {
 
     private func handlePromptCountdownExpired() {
         switch promptKind {
+        case .micBoost:
+            // Defensive no-op: a countdown is never scheduled for this kind,
+            // and expiry must never auto-enable VPIO.
+            return
         case .audioInactivity:
             guard meetingSession?.audioInactivityWarning?.automaticStopAllowed != false else {
                 return
@@ -1675,6 +1744,25 @@ final class MeetingOverlayController {
             remindAccessibilityLabel: nil,
             primaryTitle: "End & Transcribe",
             primaryAccessibilityLabel: "End and transcribe meeting"
+        )
+    }
+
+    // The prompt panel renders `detail` as a single truncating line (~336pt
+    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The ducking
+    // trade-off disclosure must be the detail on its own and fit untruncated
+    // — the user has to see the cost before consenting to VPIO — so the
+    // cause lives in the title instead.
+    private func micBoostPromptDisplay() -> PromptDisplay {
+        PromptDisplay(
+            title: "Mic is very quiet — another app's call",
+            detail: "Boosting may make other apps' audio slightly quieter.",
+            countdownText: "",
+            secondaryTitle: "Not now",
+            secondaryAccessibilityLabel: "Keep software mic boost",
+            remindTitle: nil,
+            remindAccessibilityLabel: nil,
+            primaryTitle: "Boost Mic",
+            primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
         )
     }
 

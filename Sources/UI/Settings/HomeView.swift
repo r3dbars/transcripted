@@ -1101,6 +1101,7 @@ struct HomeMeetingRow: View {
     let onCopy: () -> Void
     let onFlag: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var showsMicBoostHint: Bool = false
 
     private let collapsedSummaryCharacterLimit = 260
 
@@ -1112,7 +1113,7 @@ struct HomeMeetingRow: View {
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
-            leadingAccessory: aiSummaryAccessory,
+            leadingAccessory: leadingRowAccessory,
             compact: visibleSummaryPreview == nil && !isSummarizingSummary,
             showsLeadingTimeColumn: false
         ) {
@@ -1176,6 +1177,19 @@ struct HomeMeetingRow: View {
     private var timeRangeString: String {
         guard let endTimeString else { return startTimeString }
         return "\(startTimeString) - \(endTimeString)"
+    }
+
+    private var leadingRowAccessory: AnyView? {
+        // The shell supports one leading accessory; the summary dot keeps
+        // priority. The mic-boost action stays reachable via the row menu.
+        if let summary = aiSummaryAccessory { return summary }
+        guard showsMicBoostHint else { return nil }
+        return AnyView(
+            attentionDot(
+                color: .orange,
+                help: "Your mic was muffled by another call app"
+            )
+        )
     }
 
     private var aiSummaryAccessory: AnyView? {

@@ -204,6 +204,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingRecordingCleanup.swift"
     "Sources/Meeting/MeetingImportedAudioPreparer.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
+    "Sources/Meeting/MeetingMicBoostPromptPolicy.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/LocalMeetingSummarizer.swift"

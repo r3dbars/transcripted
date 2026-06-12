@@ -47,6 +47,7 @@ struct SentryEventPolicy: Equatable {
         "input_device_class",
         "input_rate_hz",
         "input_volume_scalar_available",
+        "mic_boost_prompt",
         "mic_file_available",
         "output_ducking_detected",
         "output_channels",

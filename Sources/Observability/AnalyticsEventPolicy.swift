@@ -35,6 +35,7 @@ struct AnalyticsEventPolicy: Equatable {
         "input_device_class",
         "input_rate_hz",
         "input_volume_scalar_available",
+        "mic_boost_prompt",
         "mic_processing",
         "mic_processed_peak",
         "mic_raw_peak",
@@ -545,6 +546,21 @@ struct AnalyticsEventPolicy: Equatable {
                 "prompt_reason",
                 "provider",
                 "source",
+            ]
+        ),
+        "meeting_mic_boost_prompt_shown": .init(
+            name: "meeting_mic_boost_prompt_shown",
+            allowedProperties: [
+                "duration_bucket",
+                "trigger",
+            ]
+        ),
+        "meeting_mic_boost_prompt_actioned": .init(
+            name: "meeting_mic_boost_prompt_actioned",
+            allowedProperties: [
+                "action",
+                "duration_bucket",
+                "trigger",
             ]
         ),
         "meeting_recording_stopped": .init(
