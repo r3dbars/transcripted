@@ -156,18 +156,24 @@ func testUIAutomationSurfaceContract() {
         assertTrue(
             liveViewPolicySource.contains("transcripted.meeting-overlay.live-view")
                 && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
-            "the meeting overlay live-view button should keep a stable automation identifier for point-of-use live meetings"
+            "the recording pill body should keep a stable automation identifier for the transcript toggle"
         )
         let transcriptDrawerSource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
-        assertTrue(
-            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.open-browser")
-                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.browserAutomationIdentifier"),
-            "the transcript drawer's open-in-browser action should keep a stable automation identifier"
-        )
         assertTrue(
             liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.copy")
                 && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
             "the transcript drawer's copy action should keep a stable automation identifier"
+        )
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.more")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.moreAutomationIdentifier"),
+            "the transcript drawer's overflow menu should keep a stable automation identifier"
+        )
+        assertTrue(
+            meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
+                && meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
+            "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
         )
 
         assertTrue(

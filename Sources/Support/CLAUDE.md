@@ -24,6 +24,7 @@
 - `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
+- `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
@@ -80,6 +81,7 @@ Relevant direct coverage includes:
 - `Tests/HotkeyPreferencesTests.swift`
 - `Tests/LaunchAtLoginPreferencesTests.swift`
 - `Tests/LocalMeetingSummaryPreferencesTests.swift`
+- `Tests/MeetingOverlayPillPreferencesTests.swift`
 - `Tests/MenuBarVisibilityPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`

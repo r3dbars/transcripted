@@ -3,9 +3,13 @@
 // A self-contained container so the overlay can fade and clip the whole
 // drawer as one unit while the panel animates its height.
 //
+// The header is hover-revealed: copy and an overflow menu float over the
+// transcript's top-right corner only while the pointer is inside the drawer,
+// keeping the resting surface chrome-free.
+//
 // Pure AppKit renderer per the overlay observation pattern: the controller
-// pushes content through `update(...)`; callbacks cover the open-in-browser,
-// copy, and resize-drag actions.
+// pushes content through `update(...)`; callbacks cover copy, the
+// open-in-browser menu action, and resize drags.
 
 import AppKit
 
@@ -13,9 +17,9 @@ import AppKit
 @MainActor
 final class MeetingLiveTranscriptDrawerView: NSView {
     private let separator = NSView()
-    private let titleLabel = NSTextField(labelWithString: MeetingLiveViewAffordancePolicy.drawerTitle)
+    private let hoverBar = NSView()
     private let copyButton = NSButton()
-    private let browserButton = NSButton()
+    private let moreButton = NSButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let scrollView = NSScrollView()
     private let textView = NSTextView()
@@ -25,6 +29,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     private var hasEntries = false
     private var needsScrollToEnd = false
     private var copyFeedbackTask: Task<Void, Never>?
+    private var hoverTrackingArea: NSTrackingArea?
 
     var onOpenInBrowser: (() -> Void)?
     var onCopyTranscript: (() -> Void)?
@@ -34,8 +39,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
     /// Header action views, exposed so the root view can attach its custom
     /// tooltip tracking to them.
-    var browserActionView: NSView { browserButton }
     var copyActionView: NSView { copyButton }
+    var moreActionView: NSView { moreButton }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -47,27 +52,6 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         separator.wantsLayer = true
         separator.layer?.backgroundColor = MeetingOverlayTokens.panelStroke.cgColor
         addSubview(separator)
-
-        titleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-        titleLabel.textColor = MeetingOverlayTokens.textSecondary
-        addSubview(titleLabel)
-
-        configureHeaderButton(
-            copyButton,
-            image: Self.copyButtonImage(),
-            action: #selector(handleCopyTranscript),
-            automationIdentifier: MeetingLiveViewAffordancePolicy.copyAutomationIdentifier,
-            accessibilityLabel: MeetingLiveViewAffordancePolicy.copyTooltip
-        )
-        copyButton.isEnabled = false
-
-        configureHeaderButton(
-            browserButton,
-            image: Self.browserButtonImage(),
-            action: #selector(handleOpenInBrowser),
-            automationIdentifier: MeetingLiveViewAffordancePolicy.browserAutomationIdentifier,
-            accessibilityLabel: MeetingLiveViewAffordancePolicy.browserTooltip
-        )
 
         statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
         statusLabel.textColor = MeetingOverlayTokens.textSecondary
@@ -108,6 +92,30 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         resizeHandle.onDragChanged = { [weak self] delta in self?.onResizeDragChanged?(delta) }
         resizeHandle.onDragEnded = { [weak self] in self?.onResizeDragEnded?() }
         addSubview(resizeHandle)
+
+        configureHeaderButton(
+            copyButton,
+            image: Self.copyButtonImage(),
+            action: #selector(handleCopyTranscript),
+            automationIdentifier: MeetingLiveViewAffordancePolicy.copyAutomationIdentifier,
+            accessibilityLabel: MeetingLiveViewAffordancePolicy.copyTooltip
+        )
+        copyButton.isEnabled = false
+
+        configureHeaderButton(
+            moreButton,
+            image: Self.moreButtonImage(),
+            action: #selector(handleMoreMenu),
+            automationIdentifier: MeetingLiveViewAffordancePolicy.moreAutomationIdentifier,
+            accessibilityLabel: MeetingLiveViewAffordancePolicy.moreTooltip
+        )
+
+        // Hover-revealed header: floats above the transcript's top-right
+        // corner and only appears while the pointer is inside the drawer.
+        hoverBar.alphaValue = 0
+        hoverBar.addSubview(copyButton)
+        hoverBar.addSubview(moreButton)
+        addSubview(hoverBar)
     }
 
     @available(*, unavailable)
@@ -129,12 +137,52 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         button.imagePosition = .imageOnly
         button.contentTintColor = MeetingOverlayTokens.quietActionTint
         button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
+        button.layer?.backgroundColor = MeetingOverlayTokens.panelBg.withAlphaComponent(0.85).cgColor
         button.target = self
         button.action = action
         button.toolTip = nil
         button.setAccessibilityIdentifier(automationIdentifier)
         button.setAccessibilityLabel(accessibilityLabel)
-        addSubview(button)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard event.trackingArea === hoverTrackingArea else {
+            super.mouseEntered(with: event)
+            return
+        }
+        setHeaderRevealed(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard event.trackingArea === hoverTrackingArea else {
+            super.mouseExited(with: event)
+            return
+        }
+        setHeaderRevealed(false)
+    }
+
+    private func setHeaderRevealed(_ revealed: Bool) {
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.15
+            hoverBar.animator().alphaValue = revealed ? 1 : 0
+        }
     }
 
     func update(transcript: NSAttributedString, statusText: String?, hasEntries: Bool) {
@@ -185,28 +233,15 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         separator.frame = NSRect(x: pad, y: top - 1, width: bounds.width - pad * 2, height: 1)
 
         let buttonSize = MeetingOverlayTokens.drawerBrowserButtonSize
-        let titleSize = titleLabel.fittingSize
-        let headerRowHeight = max(titleSize.height, buttonSize)
-        let headerRowTop = top - 8
-        let headerRowMidY = headerRowTop - headerRowHeight / 2
-        titleLabel.frame = NSRect(
-            x: pad,
-            y: headerRowMidY - titleSize.height / 2,
-            width: min(titleSize.width, bounds.width - pad * 2 - buttonSize * 2 - 16),
-            height: titleSize.height
-        )
-        browserButton.frame = NSRect(
-            x: bounds.width - pad - buttonSize,
-            y: headerRowMidY - buttonSize / 2,
-            width: buttonSize,
+        let barWidth = buttonSize * 2 + 6
+        hoverBar.frame = NSRect(
+            x: bounds.width - pad - barWidth,
+            y: top - 8 - buttonSize,
+            width: barWidth,
             height: buttonSize
         )
-        copyButton.frame = NSRect(
-            x: browserButton.frame.minX - 8 - buttonSize,
-            y: headerRowMidY - buttonSize / 2,
-            width: buttonSize,
-            height: buttonSize
-        )
+        copyButton.frame = NSRect(x: 0, y: 0, width: buttonSize, height: buttonSize)
+        moreButton.frame = NSRect(x: buttonSize + 6, y: 0, width: buttonSize, height: buttonSize)
 
         resizeHandle.frame = NSRect(
             x: 0,
@@ -215,7 +250,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
             height: MeetingOverlayTokens.drawerResizeHandleHeight
         )
 
-        var contentTop = headerRowTop - headerRowHeight - 6
+        var contentTop = top - 7
         if statusLabel.isHidden {
             statusLabel.frame = .zero
         } else {
@@ -252,20 +287,42 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         }
     }
 
-    @objc private func handleOpenInBrowser() {
-        onOpenInBrowser?()
-    }
-
     @objc private func handleCopyTranscript() {
         onCopyTranscript?()
     }
 
-    private static func browserButtonImage() -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-        return NSImage(
-            systemSymbolName: "safari",
-            accessibilityDescription: MeetingLiveViewAffordancePolicy.browserTooltip
-        )?.withSymbolConfiguration(config)
+    @objc private func handleMoreMenu() {
+        let menu = NSMenu()
+        let copyItem = NSMenuItem(
+            title: MeetingLiveViewAffordancePolicy.copyTranscriptMenuTitle,
+            action: #selector(handleMenuCopy),
+            keyEquivalent: ""
+        )
+        copyItem.target = self
+        copyItem.isEnabled = hasEntries
+        menu.addItem(copyItem)
+
+        let browserItem = NSMenuItem(
+            title: MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle,
+            action: #selector(handleMenuOpenInBrowser),
+            keyEquivalent: ""
+        )
+        browserItem.target = self
+        menu.addItem(browserItem)
+
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: moreButton.frame.minX, y: moreButton.frame.minY - 4),
+            in: hoverBar
+        )
+    }
+
+    @objc private func handleMenuCopy() {
+        onCopyTranscript?()
+    }
+
+    @objc private func handleMenuOpenInBrowser() {
+        onOpenInBrowser?()
     }
 
     private static func copyButtonImage() -> NSImage? {
@@ -273,6 +330,14 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         return NSImage(
             systemSymbolName: "doc.on.doc",
             accessibilityDescription: MeetingLiveViewAffordancePolicy.copyTooltip
+        )?.withSymbolConfiguration(config)
+    }
+
+    private static func moreButtonImage() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        return NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: MeetingLiveViewAffordancePolicy.moreTooltip
         )?.withSymbolConfiguration(config)
     }
 

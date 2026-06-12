@@ -1,43 +1,28 @@
 import Foundation
 
 func testMeetingLiveViewAffordancePolicy() {
-    runSuite("MeetingLiveViewAffordancePolicy — hidden outside active recording") {
+    runSuite("MeetingLiveViewAffordancePolicy — no affordance outside active recording") {
         assertNil(
             MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: false,
-                isRecordingMinimized: false,
                 isLiveMeetingSidecarEnabled: true,
                 isTranscriptVisible: false
             ),
-            "the live transcript affordance should only render while a meeting is recording"
+            "the pill click affordance should only exist while a meeting is recording"
         )
         assertNil(
             MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: false,
-                isRecordingMinimized: false,
                 isLiveMeetingSidecarEnabled: false,
                 isTranscriptVisible: false
             ),
-            "no recording means no live transcript button, regardless of the preference"
-        )
-    }
-
-    runSuite("MeetingLiveViewAffordancePolicy — hidden in the minimized recording pill") {
-        assertNil(
-            MeetingLiveViewAffordancePolicy.affordance(
-                isRecording: true,
-                isRecordingMinimized: true,
-                isLiveMeetingSidecarEnabled: true,
-                isTranscriptVisible: false
-            ),
-            "the minimized pill stays stripped down to cancel/timer/stop"
+            "no recording means no transcript affordance, regardless of the preference"
         )
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — toggles the drawer when live meetings is on") {
         let collapsed = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
-            isRecordingMinimized: false,
             isLiveMeetingSidecarEnabled: true,
             isTranscriptVisible: false
         )
@@ -46,26 +31,19 @@ func testMeetingLiveViewAffordancePolicy() {
             collapsed?.enablesLiveMeetingsOnClick, false,
             "an already-enabled preference should not be re-enabled on click"
         )
-        assertEqual(collapsed?.showsActiveState, false)
 
         let expanded = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
-            isRecordingMinimized: false,
             isLiveMeetingSidecarEnabled: true,
             isTranscriptVisible: true
         )
         assertEqual(expanded?.tooltip, "Hide live transcript", "open drawer should offer the hide action")
         assertEqual(expanded?.enablesLiveMeetingsOnClick, false)
-        assertEqual(
-            expanded?.showsActiveState, true,
-            "the button should render pressed-in while the drawer is open"
-        )
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — one-click enable when the preference is off") {
         let affordance = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
-            isRecordingMinimized: false,
             isLiveMeetingSidecarEnabled: false,
             isTranscriptVisible: false
         )
@@ -79,6 +57,37 @@ func testMeetingLiveViewAffordancePolicy() {
             affordance?.accessibilityHelp.contains("next meeting") == true,
             "off-state copy must not promise live text for the current meeting — live ASR cannot join mid-recording"
         )
+    }
+
+    runSuite("MeetingLiveViewAffordancePolicy — context menu copy follows state") {
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
+                isLiveMeetingSidecarEnabled: false,
+                isTranscriptVisible: false
+            ),
+            "Turn On Live Transcript"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
+                isLiveMeetingSidecarEnabled: true,
+                isTranscriptVisible: false
+            ),
+            "View Live Transcript"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
+                isLiveMeetingSidecarEnabled: true,
+                isTranscriptVisible: true
+            ),
+            "Hide Live Transcript"
+        )
+        assertEqual(MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle, "Keep Controls Visible")
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle, "Discard Recording…",
+            "discard moved off the pill into the menu; the title must keep its confirmation ellipsis"
+        )
+        assertEqual(MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle, "Open Live View in Browser")
+        assertEqual(MeetingLiveViewAffordancePolicy.copyTranscriptMenuTitle, "Copy Transcript")
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — drawer status copy follows the feed phase") {
@@ -114,17 +123,17 @@ func testMeetingLiveViewAffordancePolicy() {
         assertEqual(
             MeetingLiveViewAffordancePolicy.automationIdentifier,
             "transcripted.meeting-overlay.live-view",
-            "external UI automation pins this identifier"
-        )
-        assertEqual(
-            MeetingLiveViewAffordancePolicy.browserAutomationIdentifier,
-            "transcripted.meeting-overlay.live-view.open-browser",
-            "the drawer's browser action keeps its own stable identifier"
+            "external UI automation pins the pill body identifier"
         )
         assertEqual(
             MeetingLiveViewAffordancePolicy.copyAutomationIdentifier,
             "transcripted.meeting-overlay.live-view.copy",
             "the drawer's copy action keeps its own stable identifier"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.moreAutomationIdentifier,
+            "transcripted.meeting-overlay.live-view.more",
+            "the drawer's overflow menu keeps its own stable identifier"
         )
     }
 }
