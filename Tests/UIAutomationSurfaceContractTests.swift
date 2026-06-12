@@ -161,8 +161,13 @@ func testUIAutomationSurfaceContract() {
         let transcriptDrawerSource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
         assertTrue(
             liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.open-browser")
-                && transcriptDrawerSource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.browserAutomationIdentifier)"),
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.browserAutomationIdentifier"),
             "the transcript drawer's open-in-browser action should keep a stable automation identifier"
+        )
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.copy")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
+            "the transcript drawer's copy action should keep a stable automation identifier"
         )
 
         assertTrue(

@@ -181,6 +181,10 @@ final class MeetingOverlayRootView: NSView {
     var onToggleMinimized: (() -> Void)?
     var onLiveViewAction: (() -> Void)?
     var onLiveViewBrowserAction: (() -> Void)?
+    var onCopyTranscriptAction: (() -> Void)?
+    var onDrawerResizeBegan: (() -> Void)?
+    var onDrawerResizeChanged: ((CGFloat) -> Void)?
+    var onDrawerResizeEnded: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -357,7 +361,15 @@ final class MeetingOverlayRootView: NSView {
         transcriptDrawer.isHidden = true
         transcriptDrawer.alphaValue = 0
         transcriptDrawer.onOpenInBrowser = { [weak self] in self?.onLiveViewBrowserAction?() }
+        transcriptDrawer.onCopyTranscript = { [weak self] in self?.onCopyTranscriptAction?() }
+        transcriptDrawer.onResizeDragBegan = { [weak self] in self?.onDrawerResizeBegan?() }
+        transcriptDrawer.onResizeDragChanged = { [weak self] delta in self?.onDrawerResizeChanged?(delta) }
+        transcriptDrawer.onResizeDragEnded = { [weak self] in self?.onDrawerResizeEnded?() }
         addSubview(transcriptDrawer)
+    }
+
+    func flashTranscriptCopyFeedback() {
+        transcriptDrawer.flashCopyFeedback()
     }
 
     override func layout() {
@@ -1060,6 +1072,10 @@ final class MeetingOverlayRootView: NSView {
                 for: transcriptDrawer.browserActionView,
                 text: MeetingLiveViewAffordancePolicy.browserTooltip
             )
+            addTooltipTrackingArea(
+                for: transcriptDrawer.copyActionView,
+                text: MeetingLiveViewAffordancePolicy.copyTooltip
+            )
         }
 
         if tooltipTrackingAreas.isEmpty {
@@ -1228,10 +1244,9 @@ enum MeetingOverlayTokens {
     static let cancelHeight: CGFloat = 24
     static let toggleHeight: CGFloat = 22
     static let liveViewHeight: CGFloat = 24
-    static let transcriptDrawerHeight: CGFloat = 240
     static let drawerPad: CGFloat = 12
-    static let drawerBottomInset: CGFloat = 10
     static let drawerBrowserButtonSize: CGFloat = 20
+    static let drawerResizeHandleHeight: CGFloat = 12
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
@@ -1298,6 +1313,8 @@ final class MeetingOverlayController {
     private var isRecordingMinimized = false
     private var isTranscriptExpanded = false
     private var lastRequestedPanelSize: NSSize?
+    private var drawerResizeBaseHeight: CGFloat?
+    private var activeDrawerHeightOverride: CGFloat?
     private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
     private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
     private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
@@ -1352,6 +1369,10 @@ final class MeetingOverlayController {
         rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
         rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
         rootView.onLiveViewBrowserAction = { [weak self] in self?.handleLiveViewBrowserTapped() }
+        rootView.onCopyTranscriptAction = { [weak self] in self?.handleCopyTranscriptTapped() }
+        rootView.onDrawerResizeBegan = { [weak self] in self?.handleDrawerResizeBegan() }
+        rootView.onDrawerResizeChanged = { [weak self] delta in self?.handleDrawerResizeChanged(delta) }
+        rootView.onDrawerResizeEnded = { [weak self] in self?.handleDrawerResizeEnded() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -1652,6 +1673,12 @@ final class MeetingOverlayController {
             state = .idle
             hidePanel()
         case .recording:
+            if state != .recording {
+                // New recording: restore the user's last drawer choice so a
+                // transcript they kept open last meeting opens itself.
+                isTranscriptExpanded = LiveMeetingCodexPreferences.isEnabled()
+                    && LiveMeetingCodexPreferences.isDrawerOpenPreferred()
+            }
             state = .recording
             currentPrompt = nil
             promptCandidate = nil
@@ -1727,7 +1754,7 @@ final class MeetingOverlayController {
         case .recording where isRecordingMinimized:
             return MeetingOverlayTokens.minimizedRecordingPanelHeight
         case .recording where isTranscriptExpanded:
-            return MeetingOverlayTokens.panelHeight + MeetingOverlayTokens.transcriptDrawerHeight
+            return MeetingOverlayTokens.panelHeight + currentDrawerHeight()
         case .error:
             return MeetingOverlayTokens.errorHeight
         default:
@@ -1874,6 +1901,7 @@ final class MeetingOverlayController {
 
         if LiveMeetingCodexPreferences.isEnabled() {
             isTranscriptExpanded.toggle()
+            LiveMeetingCodexPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
             pushToView()
             return
         }
@@ -1884,6 +1912,7 @@ final class MeetingOverlayController {
             meetingSession?.connectLiveSidecarToActiveRecording()
             _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
             isTranscriptExpanded = true
+            LiveMeetingCodexPreferences.setDrawerOpenPreferred(true)
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .localAgent,
@@ -1908,6 +1937,67 @@ final class MeetingOverlayController {
         }
 
         pushToView()
+    }
+
+    private func currentDrawerHeight() -> CGFloat {
+        activeDrawerHeightOverride ?? CGFloat(LiveMeetingCodexPreferences.preferredDrawerHeight())
+    }
+
+    private func handleDrawerResizeBegan() {
+        guard state == .recording, isTranscriptExpanded else { return }
+        let height = currentDrawerHeight()
+        drawerResizeBaseHeight = height
+        activeDrawerHeightOverride = height
+    }
+
+    private func handleDrawerResizeChanged(_ delta: CGFloat) {
+        guard let base = drawerResizeBaseHeight, let panel, panel.isVisible else { return }
+        var height = CGFloat(LiveMeetingCodexPreferences.clampedDrawerHeight(Double(base + delta)))
+
+        var frame = panel.frame
+        let top = frame.origin.y + frame.height
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            height = min(height, top - visible.minY - 8 - MeetingOverlayTokens.panelHeight)
+        }
+
+        activeDrawerHeightOverride = height
+        let total = MeetingOverlayTokens.panelHeight + height
+        frame.origin.y = top - total
+        frame.size.height = total
+        // Direct, unanimated frame tracking while the user drags; the size
+        // memo keeps duration ticks from animating back mid-drag.
+        panel.setFrame(frame, display: true)
+        lastRequestedPanelSize = frame.size
+    }
+
+    private func handleDrawerResizeEnded() {
+        if let height = activeDrawerHeightOverride {
+            LiveMeetingCodexPreferences.setPreferredDrawerHeight(Double(height))
+        }
+        drawerResizeBaseHeight = nil
+        activeDrawerHeightOverride = nil
+    }
+
+    private func handleCopyTranscriptTapped() {
+        let text = makeTranscriptPlainText()
+        guard !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        rootView?.flashTranscriptCopyFeedback()
+    }
+
+    private func makeTranscriptPlainText() -> String {
+        var lines: [String] = []
+        for entry in latestTranscriptFinals {
+            lines.append("\(entry.source == .microphone ? "You" : "Them"): \(entry.text)")
+        }
+        for source in [LiveMeetingCodexSource.microphone, .system] {
+            if let partial = latestTranscriptPartials[source] {
+                lines.append("\(source == .microphone ? "You" : "Them"): \(partial.text)")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Drawer-header action: opens the tokenized browser preview, the same

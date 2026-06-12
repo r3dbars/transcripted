@@ -92,6 +92,8 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var inputTask: Task<Void, Never>?
     private var updateState = LiveMeetingStreamingUpdateState()
+    private var lastFeedText = ""
+    private var lastFeedWasFinal = false
 
     init(
         source: LiveMeetingCodexSource,
@@ -196,6 +198,35 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private func append(update: StreamingTranscriptionUpdate) {
         let now = Date()
         let normalized = LiveMeetingStreamingUpdatePolicy.normalizedText(update.text)
+        guard !normalized.isEmpty else { return }
+        let elapsed = now.timeIntervalSince(startedAt)
+        let entry = LiveMeetingCodexTranscriptEntry(
+            source: source,
+            text: normalized,
+            timestampSeconds: elapsed,
+            createdAt: now,
+            isFinal: update.isConfirmed
+        )
+
+        // In-app drawer lane: unthrottled. Partials replace themselves in
+        // memory, so every distinct hypothesis can flow word-by-word; only
+        // exact repeats are dropped.
+        if let feed {
+            let isDistinct = lock.withLock {
+                guard normalized != lastFeedText || update.isConfirmed != lastFeedWasFinal else {
+                    return false
+                }
+                lastFeedText = normalized
+                lastFeedWasFinal = update.isConfirmed
+                return true
+            }
+            if isDistinct {
+                Task { @MainActor in feed.ingest(entry) }
+            }
+        }
+
+        // Sidecar file lane: keep the append throttle so provisional updates
+        // do not hammer live_transcript.md on disk.
         let shouldAppend = lock.withLock {
             LiveMeetingStreamingUpdatePolicy.shouldAppend(
                 text: normalized,
@@ -212,18 +243,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             updateState.lastAppendedWasFinal = update.isConfirmed
         }
 
-        let elapsed = now.timeIntervalSince(startedAt)
-        let entry = LiveMeetingCodexTranscriptEntry(
-            source: source,
-            text: normalized,
-            timestampSeconds: elapsed,
-            createdAt: now,
-            isFinal: update.isConfirmed
-        )
         try? codexSession.append(entry)
-        if let feed {
-            Task { @MainActor in feed.ingest(entry) }
-        }
     }
 
     private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {

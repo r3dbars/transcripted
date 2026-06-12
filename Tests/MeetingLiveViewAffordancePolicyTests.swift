@@ -121,5 +121,10 @@ func testMeetingLiveViewAffordancePolicy() {
             "transcripted.meeting-overlay.live-view.open-browser",
             "the drawer's browser action keeps its own stable identifier"
         )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.copyAutomationIdentifier,
+            "transcripted.meeting-overlay.live-view.copy",
+            "the drawer's copy action keeps its own stable identifier"
+        )
     }
 }

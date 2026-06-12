@@ -21,7 +21,7 @@
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
-- `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for writing the live-meeting sidecar during meeting recording
+- `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
@@ -72,6 +72,7 @@ Relevant direct coverage includes:
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`
+- `Tests/LiveMeetingCodexPreferencesTests.swift`
 - `Tests/ClipboardRestoringTextPasterTests.swift`
 - `Tests/CustomDictionaryPreferencesTests.swift`
 - `Tests/DictationAutoSendPreferencesTests.swift`

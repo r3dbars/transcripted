@@ -18,6 +18,8 @@ enum MeetingLiveViewAffordancePolicy {
     static let automationIdentifier = "transcripted.meeting-overlay.live-view"
     static let browserAutomationIdentifier = "transcripted.meeting-overlay.live-view.open-browser"
     static let browserTooltip = "Open live transcript in browser"
+    static let copyAutomationIdentifier = "transcripted.meeting-overlay.live-view.copy"
+    static let copyTooltip = "Copy live transcript"
     static let drawerTitle = "Live transcript"
 
     struct Affordance: Equatable {
