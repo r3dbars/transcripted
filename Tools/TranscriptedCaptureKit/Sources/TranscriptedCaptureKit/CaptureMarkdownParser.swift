@@ -72,6 +72,7 @@ public enum CaptureMarkdownParser {
 
     private struct ParsedFrontmatterSpeaker {
         let rawId: String
+        let channel: String?
         let name: String
         let persistentSpeakerId: String?
         let confidence: String?
@@ -112,9 +113,21 @@ public enum CaptureMarkdownParser {
 
         let entries = parseTranscriptEntries(from: document.body)
         let speakerMetadata = parseFrontmatterSpeakers(from: content)
-        let speakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(speakerMetadata)
+        let micSpeakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(
+            speakerMetadata,
+            channel: "mic",
+            includeChannelless: false
+        )
+        let systemSpeakerMetadataByName = uniqueSpeakerMetadataByNormalizedName(
+            speakerMetadata,
+            channel: "system",
+            includeChannelless: true
+        )
+        let speakerMetadataByScopedId = scopedSpeakerMetadataById(speakerMetadata)
+        let reservedSpeakerIds = Set(speakerMetadata.compactMap(reservedSpeakerId))
 
         var generatedIDsByLabel: [String: String] = [:]
+        var assignedSpeakerIds = reservedSpeakerIds
         var nextMicId = 0
         var nextSystemId = 0
         var utterances: [ParsedMeetingCapture.Utterance] = []
@@ -126,22 +139,31 @@ public enum CaptureMarkdownParser {
             let speakerId: String
 
             if entry.source == "Mic" {
-                if let existing = generatedIDsByLabel["mic:\(normalizedLabel)"] {
+                if let metadata = micSpeakerMetadataByName[normalizedLabel] {
+                    speakerId = "mic_\(metadata.rawId)"
+                } else if let existing = generatedIDsByLabel["mic:\(normalizedLabel)"] {
                     speakerId = existing
                 } else {
+                    while assignedSpeakerIds.contains("mic_\(nextMicId)") {
+                        nextMicId += 1
+                    }
                     speakerId = "mic_\(nextMicId)"
                     generatedIDsByLabel["mic:\(normalizedLabel)"] = speakerId
                     nextMicId += 1
                 }
-            } else if let metadata = speakerMetadataByName[normalizedLabel] {
+            } else if let metadata = systemSpeakerMetadataByName[normalizedLabel] {
                 speakerId = "system_\(metadata.rawId)"
             } else if let existing = generatedIDsByLabel["system:\(normalizedLabel)"] {
                 speakerId = existing
             } else {
+                while assignedSpeakerIds.contains("system_\(nextSystemId)") {
+                    nextSystemId += 1
+                }
                 speakerId = "system_\(nextSystemId)"
                 generatedIDsByLabel["system:\(normalizedLabel)"] = speakerId
                 nextSystemId += 1
             }
+            assignedSpeakerIds.insert(speakerId)
 
             let nextEntry = index + 1 < entries.count ? entries[index + 1] : nil
             utterances.append(ParsedMeetingCapture.Utterance(
@@ -156,10 +178,17 @@ public enum CaptureMarkdownParser {
         let speakers = grouped.keys.sorted().map { speakerId -> ParsedMeetingCapture.Speaker in
             let groupedUtterances = grouped[speakerId] ?? []
             let displayName = groupedUtterances.first?.0.label ?? speakerId
-            let metadata = speakerMetadata.first(where: {
-                "system_\($0.rawId)" == speakerId
-                    || normalizeSpeakerLabel($0.name) == normalizeSpeakerLabel(displayName)
-            })
+            let normalizedDisplayName = normalizeSpeakerLabel(displayName)
+            let metadata: ParsedFrontmatterSpeaker?
+            if let exactMetadata = speakerMetadataByScopedId[speakerId] {
+                metadata = exactMetadata
+            } else if speakerId.hasPrefix("mic_") {
+                metadata = micSpeakerMetadataByName[normalizedDisplayName]
+            } else if speakerId.hasPrefix("system_") {
+                metadata = systemSpeakerMetadataByName[normalizedDisplayName]
+            } else {
+                metadata = nil
+            }
             let wordCount = groupedUtterances.reduce(0) { $0 + $1.0.text.split(whereSeparator: \.isWhitespace).count }
             let speakingSeconds = groupedUtterances.reduce(0.0) { $0 + max(0, $1.1.end - $1.1.start) }
             return ParsedMeetingCapture.Speaker(
@@ -227,6 +256,7 @@ public enum CaptureMarkdownParser {
 
         var speakers: [ParsedFrontmatterSpeaker] = []
         var currentId: String?
+        var currentChannel: String?
         var currentName: String?
         var currentPersistentSpeakerId: String?
         var currentConfidence: String?
@@ -235,12 +265,14 @@ public enum CaptureMarkdownParser {
             if let currentId, let currentName {
                 speakers.append(ParsedFrontmatterSpeaker(
                     rawId: currentId,
+                    channel: currentChannel,
                     name: currentName,
                     persistentSpeakerId: currentPersistentSpeakerId,
                     confidence: currentConfidence
                 ))
             }
             currentId = nil
+            currentChannel = nil
             currentName = nil
             currentPersistentSpeakerId = nil
             currentConfidence = nil
@@ -254,6 +286,12 @@ public enum CaptureMarkdownParser {
                     .replacingOccurrences(of: "- id:", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            } else if trimmed.hasPrefix("channel:") {
+                currentChannel = trimmed
+                    .replacingOccurrences(of: "channel:", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    .lowercased()
             } else if trimmed.hasPrefix("name:") {
                 currentName = trimmed
                     .replacingOccurrences(of: "name:", with: "")
@@ -268,7 +306,12 @@ public enum CaptureMarkdownParser {
                 currentConfidence = trimmed
                     .replacingOccurrences(of: "confidence:", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-            } else if !trimmed.hasPrefix("-"), !trimmed.hasPrefix("source:"), !trimmed.isEmpty {
+            } else if !trimmed.isEmpty, !trimmed.hasPrefix("-"),
+                      !(rawLine.first?.isWhitespace ?? false) {
+                // Only a new top-level frontmatter key ends the speakers block.
+                // Indented keys the parser doesn't model (channel:, source:,
+                // future writer fields) belong to the current entry and are
+                // skipped, not treated as terminators.
                 break
             }
         }
@@ -278,10 +321,12 @@ public enum CaptureMarkdownParser {
     }
 
     private static func uniqueSpeakerMetadataByNormalizedName(
-        _ speakers: [ParsedFrontmatterSpeaker]
+        _ speakers: [ParsedFrontmatterSpeaker],
+        channel: String,
+        includeChannelless: Bool
     ) -> [String: ParsedFrontmatterSpeaker] {
         var grouped: [String: [ParsedFrontmatterSpeaker]] = [:]
-        for speaker in speakers {
+        for speaker in speakers where speaker.channel == channel || (includeChannelless && speaker.channel == nil) {
             grouped[normalizeSpeakerLabel(speaker.name), default: []].append(speaker)
         }
 
@@ -290,6 +335,27 @@ public enum CaptureMarkdownParser {
             unique[name] = matches[0]
         }
         return unique
+    }
+
+    private static func scopedSpeakerMetadataById(
+        _ speakers: [ParsedFrontmatterSpeaker]
+    ) -> [String: ParsedFrontmatterSpeaker] {
+        var metadata: [String: ParsedFrontmatterSpeaker] = [:]
+        for speaker in speakers {
+            guard let speakerId = reservedSpeakerId(for: speaker),
+                  metadata[speakerId] == nil
+            else { continue }
+            metadata[speakerId] = speaker
+        }
+        return metadata
+    }
+
+    private static func reservedSpeakerId(for speaker: ParsedFrontmatterSpeaker) -> String? {
+        if let metadataChannel = speaker.channel {
+            guard metadataChannel == "mic" || metadataChannel == "system" else { return nil }
+            return "\(metadataChannel)_\(speaker.rawId)"
+        }
+        return "system_\(speaker.rawId)"
     }
 
     // MARK: - Transcript entries

@@ -244,7 +244,10 @@ struct TranscriptedSettingsView: View {
             expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
-        .onChange(of: navigation.selectedPage) { _, page in
+        .onChange(of: navigation.selectedPage) { oldPage, page in
+            if oldPage == .people && page != .people {
+                SpeakerClipPlayback.stop()
+            }
             refreshRecentCaptures()
             if page == .people {
                 speakerPeopleModel.refresh()
@@ -278,6 +281,11 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
             splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
+            // Accepting the mid-meeting mic-boost prompt flips this preference
+            // outside Settings; keep an open window's toggle in sync.
+            meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
             refreshPermissions()

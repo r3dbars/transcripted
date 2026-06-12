@@ -284,7 +284,7 @@ extension Audio {
                 interleaved: monoFormat.isInterleaved
             )
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            recordingJournal.begin(primaryMicURL: fileURL, sessionID: sessionGeneration)
+            journalSession = recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])

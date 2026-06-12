@@ -186,6 +186,45 @@ final class RealtimeAGCTests: XCTestCase {
                        "Once silence-hold engages, gain must be exactly steady to avoid pumping the next utterance")
     }
 
+    func testSubActivityNoiseIsMutedInsteadOfBoostedDuringPauses() {
+        // A real USB mic feedback report described hiss/squeal getting much
+        // worse in silence. After the AGC has built up gain for quiet speech,
+        // sub-activity idle noise must not be multiplied into the retained
+        // mic file.
+        let agc = RealtimeAGC()
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.005))
+            agc.process(buffer: buffer)
+        }
+        let heldGain = agc.appliedGain
+        XCTAssertGreaterThan(heldGain, 5.0, "Should have built up significant gain on attenuated input")
+
+        let idleNoise = makeMonoBuffer(samples: sineSamples(peak: 0.001))
+        agc.process(buffer: idleNoise)
+
+        XCTAssertEqual(peak(of: samples(from: idleNoise)), 0, accuracy: 0.000001,
+                       "Sub-activity idle noise should be muted instead of boosted into audible hiss")
+        XCTAssertEqual(agc.appliedGain, heldGain, accuracy: 0.0001,
+                       "Noise gating should not pump or reset the current recovery gain")
+    }
+
+    func testIssue500QuietSpeechBandStillPassesThroughNoiseGate() {
+        // The noise gate must stay below the issue #500 quiet-speech band:
+        // voice-like raw peaks around 0.003 should still be recoverable and
+        // visible to the live attenuation detector.
+        let agc = RealtimeAGC()
+        var lastPeak: Float = 0
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.003))
+            agc.process(buffer: buffer)
+            lastPeak = peak(of: samples(from: buffer))
+        }
+
+        XCTAssertGreaterThan(lastPeak, 0.05, "Quiet voice-like input should still pass through and receive gain")
+        XCTAssertLessThanOrEqual(agc.noiseGatePeak, 0.002 + 0.0001,
+                                 "The default gate should stay below the quiet-speech detector's activity floor")
+    }
+
     func testResetReturnsGainToUnity() {
         let agc = RealtimeAGC()
         for _ in 0..<32 {

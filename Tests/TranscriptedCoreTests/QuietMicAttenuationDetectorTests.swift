@@ -189,6 +189,11 @@ final class QuietMicAttenuationDetectorTests: XCTestCase {
             agc.minPeak,
             "activity floor must stay above the AGC ambient/silence floor so a silent room never prompts"
         )
+        XCTAssertGreaterThanOrEqual(
+            QuietMicAttenuationDetector.activityRawPeakFloor,
+            agc.noiseGatePeak,
+            "activity floor must stay at or above the AGC noise gate so #500 prompts remain reachable"
+        )
     }
 
     func testThresholdsMatchStopTimeClassification() {

@@ -16,20 +16,38 @@ enum MeetingMicBoostPromptOutcome: String {
 enum MeetingMicBoostPromptPolicy {
     /// Consent-only gate: present at most once per recording, and never when
     /// the user already enabled Apple voice processing in Settings.
+    ///
+    /// Invariant: the prompt flag is never true while nothing is recording.
+    /// A late cue can land mid-stop — capture teardown awaits file handles
+    /// while the published recording flags are still settling — so
+    /// presentation also requires that no stop/cancel/termination teardown is
+    /// in flight and that the session state machine still says recording.
     static func shouldPresent(
         isRecording: Bool,
-        isStopping: Bool = false,
+        isFinishingRecording: Bool,
+        sessionStateIsRecording: Bool,
         voiceProcessingPreferenceEnabled: Bool,
         currentOutcome: MeetingMicBoostPromptOutcome
     ) -> Bool {
-        isRecording && !isStopping && !voiceProcessingPreferenceEnabled && currentOutcome == .notShown
+        isRecording
+            && !isFinishingRecording
+            && sessionStateIsRecording
+            && !voiceProcessingPreferenceEnabled
+            && currentOutcome == .notShown
     }
 
-    static func shouldApplyAction(
+    /// Stale-action gate: accepting or declining a prompt that outlived its
+    /// recording must only dismiss it — never persist the global VPIO
+    /// preference or record a prompt outcome for a dead recording.
+    static func shouldApplyPromptAction(
         isPromptVisible: Bool,
         isRecording: Bool,
-        isStopping: Bool
+        isFinishingRecording: Bool,
+        sessionStateIsRecording: Bool
     ) -> Bool {
-        isPromptVisible && isRecording && !isStopping
+        isPromptVisible
+            && isRecording
+            && !isFinishingRecording
+            && sessionStateIsRecording
     }
 }
