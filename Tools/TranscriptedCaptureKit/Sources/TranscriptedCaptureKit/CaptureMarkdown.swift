@@ -49,11 +49,15 @@ public enum CaptureMarkdown {
 
     /// Extract the `title:` value from YAML frontmatter, if present.
     public static func extractTitle(from content: String) -> String? {
-        // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars)
+        // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars). The closing
+        // delimiter search must start at offset 4 (past the opening "---\n", same
+        // as CaptureMarkdownParser.parseFrontmatter): from offset 3, a file
+        // beginning "---\n---\n" matches at index 3 and the YAML slice below
+        // becomes an inverted range, which traps.
         guard content.count >= 8, content.hasPrefix("---"),
               let endRange = content.range(
                 of: "\n---\n",
-                range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex
+                range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
               ) else { return nil }
         let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
         for line in yaml.components(separatedBy: "\n") {
