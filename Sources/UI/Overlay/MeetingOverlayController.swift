@@ -482,11 +482,11 @@ final class MeetingOverlayRootView: NSView {
             return
         }
 
-        // With the transcript drawer open, the recording strip anchors to the
-        // top of the panel and the drawer fills the space below it.
-        let midY = isTranscriptExpanded
-            ? bounds.height - tokens.panelHeight / 2
-            : bounds.height / 2
+        // The recording strip always anchors to the top of the panel. When
+        // collapsed the panel *is* the strip, so the anchors coincide — and
+        // never branching on the drawer flag means the strip can't jump when
+        // the flag flips while the panel is still tall mid-animation.
+        let midY = bounds.height - tokens.panelHeight / 2
 
         cancelButton.frame = NSRect(
             x: tokens.padLeft,
