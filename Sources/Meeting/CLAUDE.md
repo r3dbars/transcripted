@@ -19,7 +19,8 @@
 - `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
 - `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
-- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text
+- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
+- `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
 - `LocalMeetingSummarizer.swift` — opt-in local Gemma meeting-summary runner, transcript chunking, managed summary metadata, runtime env sanitizing, and stale-transcript write protection
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
@@ -129,6 +130,7 @@ Relevant direct coverage:
 - `Tests/LiveMeetingCodexSessionTests.swift`
 - `Tests/LiveMeetingPreviewServerTests.swift`
 - `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
+- `Tests/LiveMeetingTranscriptFeedTests.swift`
 - `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`

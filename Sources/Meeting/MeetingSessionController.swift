@@ -173,6 +173,9 @@ final class MeetingSessionController: ObservableObject {
     let capture: MeetingCaptureBridge
     private let liveCodexSession = LiveMeetingCodexSession()
     private let liveMeetingTranscriber = LiveMeetingTranscriber()
+    /// In-memory live transcript behind the meeting overlay's embedded
+    /// drawer. Fed by `liveMeetingTranscriber` alongside the sidecar files.
+    let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
@@ -1688,12 +1691,16 @@ final class MeetingSessionController: ObservableObject {
             liveCodexSessionAwaitingFinalTranscript = false
             liveCodexSessionCanAttachFinalTranscript = false
             liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.reset()
             return
         }
 
         guard !liveCodexSessionAwaitingFinalTranscript else {
             liveCodexSessionOwnedByActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveTranscriptFeed.beginDeferred(
+                note: "Live transcript is paused while the previous meeting finishes its handoff. This meeting still saves normally."
+            )
             DiagnosticsTrail.record(
                 level: .info,
                 engine: "meeting",
@@ -1722,11 +1729,16 @@ final class MeetingSessionController: ObservableObject {
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
             if canStartLiveBackend {
+                liveTranscriptFeed.beginStarting()
                 liveMeetingTranscriber.start(
                     capture: capture,
-                    codexSession: liveCodexSession
+                    codexSession: liveCodexSession,
+                    feed: liveTranscriptFeed
                 )
             } else {
+                liveTranscriptFeed.beginDeferred(
+                    note: "Live transcript is paused while another meeting finishes processing. This meeting still saves normally."
+                )
                 try? liveCodexSession.updateStreamingBackendStatus(
                     backendStatus,
                     note: "Live ASR was deferred because another meeting transcript was already processing. The normal final transcript will still save through Transcripted."
@@ -1751,6 +1763,9 @@ final class MeetingSessionController: ObservableObject {
             liveCodexSessionOwnedByActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.markFailed(
+                note: "Live transcript couldn't start for this meeting. The final transcript still saves normally."
+            )
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -1791,6 +1806,9 @@ final class MeetingSessionController: ObservableObject {
             // untouched: a disable-then-re-enable during the same recording
             // still owes a post-recording handler clear, and clearing the
             // flag here would leak the installed handlers.
+            liveTranscriptFeed.beginDeferred(
+                note: "Live transcript is on now and begins with your next meeting. This meeting's transcript still saves normally when you stop."
+            )
             try? liveCodexSession.updateStreamingBackendStatus(
                 backendStatus,
                 note: "Live View joined after this recording started, so live transcript lines begin with your next meeting. The final transcript will still attach here when this recording is saved."
@@ -1810,6 +1828,9 @@ final class MeetingSessionController: ObservableObject {
             liveCodexSessionOwnedByActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.markFailed(
+                note: "Live transcript couldn't start. This meeting's transcript still saves normally."
+            )
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -1864,6 +1885,7 @@ final class MeetingSessionController: ObservableObject {
         guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
 
         liveMeetingTranscriber.stop(capture: capture, clearPreviewHandlers: clearPreviewHandlers)
+        liveTranscriptFeed.finish()
         if clearPreviewHandlers {
             liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
         }

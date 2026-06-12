@@ -111,12 +111,13 @@ The product contract lives in `docs/live-meeting-codex-sidecar.md`.
 4. Click `Open Live View` for a live transcript page, or open the tokenized browser preview URL from `agent-live-meeting.md` in Codex's in-app browser.
 5. For a dedicated agent meeting room, expand `Advanced` and click `Open in Codex`, or `Copy for Cowork` and paste that setup prompt into Claude Cowork.
 
-While a meeting is recording, the meeting overlay pill also has a Live View
-button, so the page is one click away without visiting Settings. If live
-meetings is still off, that button turns it on in the same click; live
-transcript lines then begin with the next recording (live ASR cannot attach to
-a capture that is already running), while the current meeting's final
-transcript still links into the live page when it saves.
+While a meeting is recording, the meeting overlay pill also has a live
+transcript button: it expands an embedded transcript drawer right inside the
+overlay, with the browser/agent view one more click away from the drawer
+header. If live meetings is still off, that button turns it on in the same
+click; live transcript lines then begin with the next recording (live ASR
+cannot attach to a capture that is already running), while the current
+meeting's final transcript still links into the live page when it saves.
 
 Transcripted creates:
 

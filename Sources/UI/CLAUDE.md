@@ -30,8 +30,8 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the recording pill's point-of-use Live View button, including the one-click enable copy when live meetings is off
-- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status, plus the recording pill's Live View action
+- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the recording pill's live transcript button and drawer status copy, including the one-click enable copy when live meetings is off
+- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status, plus the recording pill's embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`) and its open-in-browser action
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.

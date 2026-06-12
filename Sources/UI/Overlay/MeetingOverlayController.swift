@@ -152,6 +152,12 @@ final class MeetingOverlayRootView: NSView {
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
     private let liveViewButton = NSButton()
+    private let transcriptTitleLabel = NSTextField(labelWithString: MeetingLiveViewAffordancePolicy.drawerTitle)
+    private let transcriptBrowserButton = NSButton()
+    private let transcriptSeparator = NSView()
+    private let transcriptStatusLabel = NSTextField(wrappingLabelWithString: "")
+    private let transcriptScrollView = NSScrollView()
+    private let transcriptTextView = NSTextView()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
@@ -169,6 +175,9 @@ final class MeetingOverlayRootView: NSView {
     private var tooltipTrackingAreas: [NSTrackingArea] = []
     private var isRecordingMinimized = false
     private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
+    private var isTranscriptExpanded = false
+    private var transcriptStatusText: String?
+    private var transcriptHasEntries = false
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
@@ -177,6 +186,7 @@ final class MeetingOverlayRootView: NSView {
     var onPrimaryAction: (() -> Void)?
     var onToggleMinimized: (() -> Void)?
     var onLiveViewAction: (() -> Void)?
+    var onLiveViewBrowserAction: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -349,6 +359,62 @@ final class MeetingOverlayRootView: NSView {
         liveViewButton.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)
         liveViewButton.isHidden = true
         addSubview(liveViewButton)
+
+        setupTranscriptDrawerViews()
+    }
+
+    private func setupTranscriptDrawerViews() {
+        transcriptSeparator.wantsLayer = true
+        transcriptSeparator.layer?.backgroundColor = MeetingOverlayTokens.panelStroke.cgColor
+        transcriptSeparator.isHidden = true
+        addSubview(transcriptSeparator)
+
+        transcriptTitleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        transcriptTitleLabel.textColor = MeetingOverlayTokens.textSecondary
+        transcriptTitleLabel.isHidden = true
+        addSubview(transcriptTitleLabel)
+
+        transcriptBrowserButton.imageScaling = .scaleProportionallyDown
+        transcriptBrowserButton.image = transcriptBrowserButtonImage()
+        transcriptBrowserButton.imagePosition = .imageOnly
+        transcriptBrowserButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        transcriptBrowserButton.isBordered = false
+        transcriptBrowserButton.target = self
+        transcriptBrowserButton.action = #selector(handleLiveViewBrowserAction)
+        transcriptBrowserButton.toolTip = nil
+        transcriptBrowserButton.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.browserAutomationIdentifier)
+        transcriptBrowserButton.setAccessibilityLabel(MeetingLiveViewAffordancePolicy.browserTooltip)
+        transcriptBrowserButton.isHidden = true
+        addSubview(transcriptBrowserButton)
+
+        transcriptStatusLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        transcriptStatusLabel.textColor = MeetingOverlayTokens.textSecondary
+        transcriptStatusLabel.isHidden = true
+        addSubview(transcriptStatusLabel)
+
+        transcriptTextView.isEditable = false
+        transcriptTextView.isSelectable = true
+        transcriptTextView.drawsBackground = false
+        transcriptTextView.textContainerInset = NSSize(width: 2, height: 6)
+        transcriptTextView.minSize = .zero
+        transcriptTextView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        transcriptTextView.isVerticallyResizable = true
+        transcriptTextView.isHorizontallyResizable = false
+        transcriptTextView.autoresizingMask = [.width]
+        transcriptTextView.textContainer?.widthTracksTextView = true
+        transcriptTextView.setAccessibilityLabel(MeetingLiveViewAffordancePolicy.drawerTitle)
+
+        transcriptScrollView.documentView = transcriptTextView
+        transcriptScrollView.hasVerticalScroller = true
+        transcriptScrollView.hasHorizontalScroller = false
+        transcriptScrollView.drawsBackground = false
+        transcriptScrollView.borderType = .noBorder
+        transcriptScrollView.autohidesScrollers = true
+        transcriptScrollView.isHidden = true
+        addSubview(transcriptScrollView)
     }
 
     override func layout() {
@@ -467,12 +533,17 @@ final class MeetingOverlayRootView: NSView {
 
     private func layoutRecording() {
         let tokens = MeetingOverlayTokens.self
-        let midY = bounds.height / 2
 
         if isRecordingMinimized {
-            layoutMinimizedRecording(midY: midY)
+            layoutMinimizedRecording(midY: bounds.height / 2)
             return
         }
+
+        // With the transcript drawer open, the recording strip anchors to the
+        // top of the panel and the drawer fills the space below it.
+        let midY = isTranscriptExpanded
+            ? bounds.height - tokens.panelHeight / 2
+            : bounds.height / 2
 
         cancelButton.frame = NSRect(
             x: tokens.padLeft,
@@ -537,7 +608,79 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
+
+        if isTranscriptExpanded {
+            layoutTranscriptDrawer(headerBottom: bounds.height - tokens.panelHeight)
+        } else {
+            zeroTranscriptDrawerFrames()
+        }
         refreshTooltipTrackingAreas()
+    }
+
+    private func layoutTranscriptDrawer(headerBottom: CGFloat) {
+        let pad = MeetingOverlayTokens.drawerPad
+        transcriptSeparator.frame = NSRect(
+            x: pad,
+            y: headerBottom,
+            width: bounds.width - pad * 2,
+            height: 1
+        )
+
+        let browserSize = MeetingOverlayTokens.drawerBrowserButtonSize
+        let titleSize = transcriptTitleLabel.fittingSize
+        let headerRowHeight = max(titleSize.height, browserSize)
+        let headerRowTop = headerBottom - 7
+        transcriptTitleLabel.frame = NSRect(
+            x: pad,
+            y: headerRowTop - headerRowHeight + (headerRowHeight - titleSize.height) / 2,
+            width: min(titleSize.width, bounds.width - pad * 2 - browserSize - 8),
+            height: titleSize.height
+        )
+        transcriptBrowserButton.frame = NSRect(
+            x: bounds.width - pad - browserSize,
+            y: headerRowTop - headerRowHeight + (headerRowHeight - browserSize) / 2,
+            width: browserSize,
+            height: browserSize
+        )
+
+        var contentTop = headerRowTop - headerRowHeight - 6
+        if !transcriptStatusLabel.isHidden {
+            let statusWidth = bounds.width - pad * 2
+            let statusHeight = min(
+                transcriptStatusLabel.sizeThatFits(
+                    NSSize(width: statusWidth, height: .greatestFiniteMagnitude)
+                ).height,
+                52
+            )
+            transcriptStatusLabel.frame = NSRect(
+                x: pad,
+                y: contentTop - statusHeight,
+                width: statusWidth,
+                height: statusHeight
+            )
+            contentTop -= statusHeight + 6
+        } else {
+            transcriptStatusLabel.frame = .zero
+        }
+
+        if transcriptScrollView.isHidden {
+            transcriptScrollView.frame = .zero
+        } else {
+            transcriptScrollView.frame = NSRect(
+                x: pad,
+                y: MeetingOverlayTokens.drawerBottomInset,
+                width: bounds.width - pad * 2,
+                height: max(0, contentTop - MeetingOverlayTokens.drawerBottomInset)
+            )
+        }
+    }
+
+    private func zeroTranscriptDrawerFrames() {
+        transcriptSeparator.frame = .zero
+        transcriptTitleLabel.frame = .zero
+        transcriptBrowserButton.frame = .zero
+        transcriptStatusLabel.frame = .zero
+        transcriptScrollView.frame = .zero
     }
 
     private func layoutMinimizedRecording(midY: CGFloat) {
@@ -587,6 +730,7 @@ final class MeetingOverlayRootView: NSView {
         systemLabel.frame = .zero
         audioWaveform.frame = .zero
         liveViewButton.frame = .zero
+        zeroTranscriptDrawerFrames()
         refreshTooltipTrackingAreas()
     }
 
@@ -707,10 +851,12 @@ final class MeetingOverlayRootView: NSView {
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
         isRecordingMinimized: Bool,
-        liveView: MeetingLiveViewAffordancePolicy.Affordance?
+        liveView: MeetingLiveViewAffordancePolicy.Affordance?,
+        isTranscriptExpanded: Bool
     ) {
         currentState = state
         currentLiveViewAffordance = liveView
+        self.isTranscriptExpanded = state == .recording && !isRecordingMinimized && isTranscriptExpanded
         self.isRecordingMinimized = state == .recording && isRecordingMinimized
         layer?.cornerRadius = self.isRecordingMinimized
             ? MeetingOverlayTokens.minimizedCornerRadius
@@ -745,6 +891,7 @@ final class MeetingOverlayRootView: NSView {
             liveViewButton.setAccessibilityLabel(liveView.accessibilityLabel)
             liveViewButton.setAccessibilityHelp(liveView.accessibilityHelp)
         }
+        refreshTranscriptDrawerVisibility()
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
@@ -848,6 +995,40 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
+    }
+
+    /// Separate push channel for live transcript content so per-entry updates
+    /// do not re-run the full state update path.
+    func updateLiveTranscript(
+        _ attributed: NSAttributedString,
+        statusText: String?,
+        hasEntries: Bool
+    ) {
+        transcriptStatusText = statusText
+        transcriptHasEntries = hasEntries
+        transcriptStatusLabel.stringValue = statusText ?? ""
+
+        let wasPinnedToBottom: Bool = {
+            guard let documentView = transcriptScrollView.documentView else { return true }
+            let visible = transcriptScrollView.contentView.documentVisibleRect
+            return visible.maxY >= documentView.frame.height - 28
+        }()
+        transcriptTextView.textStorage?.setAttributedString(attributed)
+        if wasPinnedToBottom {
+            transcriptTextView.scrollToEndOfDocument(nil)
+        }
+
+        refreshTranscriptDrawerVisibility()
+        needsLayout = true
+    }
+
+    private func refreshTranscriptDrawerVisibility() {
+        let drawerVisible = currentState == .recording && !isRecordingMinimized && isTranscriptExpanded
+        transcriptSeparator.isHidden = !drawerVisible
+        transcriptTitleLabel.isHidden = !drawerVisible
+        transcriptBrowserButton.isHidden = !drawerVisible
+        transcriptStatusLabel.isHidden = !drawerVisible || transcriptStatusText == nil
+        transcriptScrollView.isHidden = !drawerVisible || !transcriptHasEntries
     }
 
     private func applyBaseVisualStyle() {
@@ -963,6 +1144,14 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
+    private func transcriptBrowserButtonImage() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        return NSImage(
+            systemSymbolName: "safari",
+            accessibilityDescription: MeetingLiveViewAffordancePolicy.browserTooltip
+        )?.withSymbolConfiguration(config)
+    }
+
     private func refreshTooltipTrackingAreas() {
         for area in tooltipTrackingAreas {
             removeTrackingArea(area)
@@ -980,6 +1169,10 @@ final class MeetingOverlayRootView: NSView {
         if let liveViewTooltip = currentLiveViewAffordance?.tooltip {
             addTooltipTrackingArea(for: liveViewButton, text: liveViewTooltip)
         }
+        addTooltipTrackingArea(
+            for: transcriptBrowserButton,
+            text: MeetingLiveViewAffordancePolicy.browserTooltip
+        )
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -1087,6 +1280,10 @@ final class MeetingOverlayRootView: NSView {
     @objc private func handleLiveViewAction() {
         onLiveViewAction?()
     }
+
+    @objc private func handleLiveViewBrowserAction() {
+        onLiveViewBrowserAction?()
+    }
 }
 
 // MARK: - Design tokens (local — keeps the meeting overlay visually distinct
@@ -1136,6 +1333,11 @@ enum MeetingOverlayTokens {
     static let cancelHeight: CGFloat = 24
     static let toggleHeight: CGFloat = 22
     static let liveViewHeight: CGFloat = 24
+    static let expandedRecordingPanelWidth: CGFloat = 430
+    static let transcriptDrawerHeight: CGFloat = 240
+    static let drawerPad: CGFloat = 12
+    static let drawerBottomInset: CGFloat = 10
+    static let drawerBrowserButtonSize: CGFloat = 20
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
@@ -1200,6 +1402,10 @@ final class MeetingOverlayController {
     private var autoHideTask: Task<Void, Never>?
     private var isShowingCancelConfirmation = false
     private var isRecordingMinimized = false
+    private var isTranscriptExpanded = false
+    private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
+    private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
+    private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
 
     private enum PromptKind {
         case detectedMeeting
@@ -1250,6 +1456,7 @@ final class MeetingOverlayController {
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
         rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
+        rootView.onLiveViewBrowserAction = { [weak self] in self?.handleLiveViewBrowserTapped() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -1363,6 +1570,82 @@ final class MeetingOverlayController {
                 self?.applyMicBoostPrompt(visible)
             }
             .store(in: &subscriptions)
+
+        let feed = session.liveTranscriptFeed
+        feed.$finalEntries
+            .combineLatest(feed.$partialEntries, feed.$phase)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] finals, partials, phase in
+                self?.latestTranscriptFinals = finals
+                self?.latestTranscriptPartials = partials
+                self?.latestTranscriptPhase = phase
+                self?.pushTranscriptToView()
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func pushTranscriptToView() {
+        let hasEntries = !latestTranscriptFinals.isEmpty || !latestTranscriptPartials.isEmpty
+        rootView?.updateLiveTranscript(
+            makeTranscriptAttributedText(
+                finals: latestTranscriptFinals,
+                partials: latestTranscriptPartials
+            ),
+            statusText: MeetingLiveViewAffordancePolicy.drawerStatus(
+                phase: latestTranscriptPhase,
+                hasEntries: hasEntries
+            ),
+            hasEntries: hasEntries
+        )
+    }
+
+    private func makeTranscriptAttributedText(
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 7
+
+        func append(_ entry: LiveMeetingCodexTranscriptEntry, isPartial: Bool) {
+            if result.length > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+            let isMic = entry.source == .microphone
+            let tag = isMic ? "You" : "Them"
+            let tagColor = isMic
+                ? MeetingOverlayTokens.waveformMicTint
+                : MeetingOverlayTokens.waveformSystemTint
+            result.append(NSAttributedString(
+                string: "\(tag)  ",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: isPartial ? tagColor.withAlphaComponent(0.55) : tagColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+            result.append(NSAttributedString(
+                string: entry.text,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                    .foregroundColor: isPartial
+                        ? MeetingOverlayTokens.textSecondary
+                        : MeetingOverlayTokens.textPrimary,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+        }
+
+        for entry in finals {
+            append(entry, isPartial: false)
+        }
+        for source in [LiveMeetingCodexSource.microphone, .system] {
+            if let partial = partials[source] {
+                append(partial, isPartial: true)
+            }
+        }
+        return result
     }
 
     private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {
@@ -1437,6 +1720,7 @@ final class MeetingOverlayController {
         switch sessionState {
         case .idle:
             isRecordingMinimized = false
+            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1446,6 +1730,7 @@ final class MeetingOverlayController {
             hidePanel()
         case .loadingModels:
             isRecordingMinimized = false
+            isTranscriptExpanded = false
             state = .preparing
             currentPrompt = nil
             promptCandidate = nil
@@ -1454,6 +1739,7 @@ final class MeetingOverlayController {
             showPanel()
         case .ready:
             isRecordingMinimized = false
+            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1480,6 +1766,7 @@ final class MeetingOverlayController {
             showPanel()
         case .transcribing:
             isRecordingMinimized = false
+            isTranscriptExpanded = false
             state = .transcribing
             currentPrompt = nil
             promptCandidate = nil
@@ -1488,6 +1775,7 @@ final class MeetingOverlayController {
             showPanel()
         case .error(let message):
             isRecordingMinimized = false
+            isTranscriptExpanded = false
             state = .error(message)
             currentPrompt = nil
             promptCandidate = nil
@@ -1542,6 +1830,8 @@ final class MeetingOverlayController {
             return MeetingOverlayTokens.promptHeight
         case .recording where isRecordingMinimized:
             return MeetingOverlayTokens.minimizedRecordingPanelHeight
+        case .recording where isTranscriptExpanded:
+            return MeetingOverlayTokens.panelHeight + MeetingOverlayTokens.transcriptDrawerHeight
         case .error:
             return MeetingOverlayTokens.errorHeight
         default:
@@ -1553,6 +1843,8 @@ final class MeetingOverlayController {
         switch state {
         case .recording where isRecordingMinimized:
             return MeetingOverlayTokens.minimizedRecordingPanelWidth
+        case .recording where isTranscriptExpanded:
+            return MeetingOverlayTokens.expandedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -1672,24 +1964,59 @@ final class MeetingOverlayController {
         pushToView()
     }
 
-    /// Point-of-use Live View action. With the preference already on this
-    /// just opens the tokenized preview; with it off this is the one-click
-    /// enable: persist the preference, prepare the workspace, late-join the
-    /// sidecar to the in-flight recording, start the loopback preview
-    /// server, and open the browser. None of these steps can raise a TCC
-    /// prompt. Failure rolls the enable back, mirroring Settings'
-    /// disable-after-failure behavior.
+    /// Point-of-use live transcript action. With the preference already on
+    /// this toggles the embedded transcript drawer; with it off this is the
+    /// one-click enable: persist the preference, prepare the workspace and
+    /// preview server (so the browser/agent views work too), late-join the
+    /// sidecar to the in-flight recording, and open the drawer. None of
+    /// these steps can raise a TCC prompt. Failure rolls the enable back,
+    /// mirroring Settings' disable-after-failure behavior.
     private func handleLiveViewTapped() {
         guard state == .recording else { return }
 
-        let wasEnabled = LiveMeetingCodexPreferences.isEnabled()
-        if !wasEnabled {
-            LiveMeetingCodexPreferences.setEnabled(true)
+        if LiveMeetingCodexPreferences.isEnabled() {
+            isTranscriptExpanded.toggle()
+            pushToView()
+            return
         }
 
+        LiveMeetingCodexPreferences.setEnabled(true)
         do {
             let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
             meetingSession?.connectLiveSidecarToActiveRecording()
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            isTranscriptExpanded = true
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay
+            )
+        } catch {
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: .failed
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_view_enable_from_overlay_failed",
+                message: "Live transcript could not be enabled from the meeting overlay",
+                context: ["error": error.localizedDescription]
+            )
+        }
+
+        pushToView()
+    }
+
+    /// Drawer-header action: opens the tokenized browser preview, the same
+    /// page Settings' "Open Live View" uses and the one agents watch.
+    private func handleLiveViewBrowserTapped() {
+        do {
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
             let previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
             let opened = NSWorkspace.shared.open(previewURL)
             ActivationTelemetry.trackAgentSetupCTA(
@@ -1707,10 +2034,6 @@ final class MeetingOverlayController {
                 )
             }
         } catch {
-            if !wasEnabled {
-                LiveMeetingCodexPreferences.setEnabled(false)
-                meetingSession?.stopLiveCodexSessionFromSettings()
-            }
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,
@@ -1725,10 +2048,6 @@ final class MeetingOverlayController {
                 context: ["error": error.localizedDescription]
             )
         }
-
-        // Refresh so the tooltip flips to the enabled wording after a
-        // one-click enable.
-        pushToView()
     }
 
     private func dismissPrompt(notifyDetector: Bool) {
@@ -1911,8 +2230,10 @@ final class MeetingOverlayController {
             liveView: MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: state == .recording,
                 isRecordingMinimized: isRecordingMinimized,
-                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled()
-            )
+                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled(),
+                isTranscriptVisible: isTranscriptExpanded
+            ),
+            isTranscriptExpanded: isTranscriptExpanded
         )
     }
 

@@ -212,6 +212,7 @@ APP_SOURCES=(
     "Sources/Meeting/LiveMeetingCodexSession.swift"
     "Sources/Meeting/LiveMeetingPreviewServer.swift"
     "Sources/Meeting/LiveMeetingStreamingUpdatePolicy.swift"
+    "Sources/Meeting/LiveMeetingTranscriptFeed.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/ActivationTelemetry.swift"

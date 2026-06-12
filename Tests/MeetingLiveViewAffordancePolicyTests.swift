@@ -6,17 +6,19 @@ func testMeetingLiveViewAffordancePolicy() {
             MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: false,
                 isRecordingMinimized: false,
-                isLiveMeetingSidecarEnabled: true
+                isLiveMeetingSidecarEnabled: true,
+                isTranscriptVisible: false
             ),
-            "the live view affordance should only render while a meeting is recording"
+            "the live transcript affordance should only render while a meeting is recording"
         )
         assertNil(
             MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: false,
                 isRecordingMinimized: false,
-                isLiveMeetingSidecarEnabled: false
+                isLiveMeetingSidecarEnabled: false,
+                isTranscriptVisible: false
             ),
-            "no recording means no live view button, regardless of the preference"
+            "no recording means no live transcript button, regardless of the preference"
         )
     }
 
@@ -25,38 +27,48 @@ func testMeetingLiveViewAffordancePolicy() {
             MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: true,
                 isRecordingMinimized: true,
-                isLiveMeetingSidecarEnabled: true
+                isLiveMeetingSidecarEnabled: true,
+                isTranscriptVisible: false
             ),
             "the minimized pill stays stripped down to cancel/timer/stop"
         )
     }
 
-    runSuite("MeetingLiveViewAffordancePolicy — opens directly when live meetings is already on") {
-        let affordance = MeetingLiveViewAffordancePolicy.affordance(
+    runSuite("MeetingLiveViewAffordancePolicy — toggles the drawer when live meetings is on") {
+        let collapsed = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
             isRecordingMinimized: false,
-            isLiveMeetingSidecarEnabled: true
+            isLiveMeetingSidecarEnabled: true,
+            isTranscriptVisible: false
         )
-        assertNotNil(affordance, "recording with the preference on should offer the live view")
-        assertEqual(affordance?.tooltip, "Open live transcript view")
-        assertEqual(affordance?.accessibilityLabel, "Open live transcript view")
+        assertEqual(collapsed?.tooltip, "View live transcript")
         assertEqual(
-            affordance?.enablesLiveMeetingsOnClick, false,
+            collapsed?.enablesLiveMeetingsOnClick, false,
             "an already-enabled preference should not be re-enabled on click"
         )
+
+        let expanded = MeetingLiveViewAffordancePolicy.affordance(
+            isRecording: true,
+            isRecordingMinimized: false,
+            isLiveMeetingSidecarEnabled: true,
+            isTranscriptVisible: true
+        )
+        assertEqual(expanded?.tooltip, "Hide live transcript", "open drawer should offer the hide action")
+        assertEqual(expanded?.enablesLiveMeetingsOnClick, false)
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — one-click enable when the preference is off") {
         let affordance = MeetingLiveViewAffordancePolicy.affordance(
             isRecording: true,
             isRecordingMinimized: false,
-            isLiveMeetingSidecarEnabled: false
+            isLiveMeetingSidecarEnabled: false,
+            isTranscriptVisible: false
         )
         assertNotNil(affordance, "the point-of-use affordance should stay discoverable when the preference is off")
-        assertEqual(affordance?.tooltip, "Turn on live transcript view")
+        assertEqual(affordance?.tooltip, "Turn on live transcript")
         assertEqual(
             affordance?.enablesLiveMeetingsOnClick, true,
-            "clicking with the preference off should enable live meetings before opening the view"
+            "clicking with the preference off should enable live meetings before showing the drawer"
         )
         assertTrue(
             affordance?.accessibilityHelp.contains("next meeting") == true,
@@ -64,11 +76,45 @@ func testMeetingLiveViewAffordancePolicy() {
         )
     }
 
-    runSuite("MeetingLiveViewAffordancePolicy — stable automation identifier") {
+    runSuite("MeetingLiveViewAffordancePolicy — drawer status copy follows the feed phase") {
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .starting, hasEntries: false),
+            "Starting live transcription…"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .live, hasEntries: false),
+            "Listening — the live transcript appears as people talk."
+        )
+        assertNil(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .live, hasEntries: true),
+            "entries should render without status copy once live text flows"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .deferred("late join"), hasEntries: false),
+            "late join",
+            "deferred phases carry their own user-facing note"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .failed("asr died"), hasEntries: true),
+            "asr died",
+            "a failure note should show even when earlier entries exist"
+        )
+        assertNil(
+            MeetingLiveViewAffordancePolicy.drawerStatus(phase: .stopped, hasEntries: true),
+            "stopping keeps the captured entries readable without extra copy"
+        )
+    }
+
+    runSuite("MeetingLiveViewAffordancePolicy — stable automation identifiers") {
         assertEqual(
             MeetingLiveViewAffordancePolicy.automationIdentifier,
             "transcripted.meeting-overlay.live-view",
             "external UI automation pins this identifier"
+        )
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.browserAutomationIdentifier,
+            "transcripted.meeting-overlay.live-view.open-browser",
+            "the drawer's browser action keeps its own stable identifier"
         )
     }
 }

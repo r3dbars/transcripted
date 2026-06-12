@@ -15,6 +15,7 @@ final class LiveMeetingTranscriber {
     func start(
         capture: MeetingCaptureBridge,
         codexSession: LiveMeetingCodexSession,
+        feed: LiveMeetingTranscriptFeed? = nil,
         startedAt: Date = Date()
     ) {
         stop(capture: capture)
@@ -27,6 +28,7 @@ final class LiveMeetingTranscriber {
             audioSource: .microphone,
             streamingSession: session,
             codexSession: codexSession,
+            feed: feed,
             startedAt: startedAt
         )
         let systemChannel = LiveMeetingTranscriberChannel(
@@ -34,6 +36,7 @@ final class LiveMeetingTranscriber {
             audioSource: .system,
             streamingSession: session,
             codexSession: codexSession,
+            feed: feed,
             startedAt: startedAt
         )
 
@@ -81,6 +84,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private let audioSource: AudioSource
     private let streamingSession: StreamingAsrSession
     private let codexSession: LiveMeetingCodexSession
+    private let feed: LiveMeetingTranscriptFeed?
     private let startedAt: Date
     private let inputQueue: DispatchQueue
     private let lock = NSLock()
@@ -94,12 +98,14 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         audioSource: AudioSource,
         streamingSession: StreamingAsrSession,
         codexSession: LiveMeetingCodexSession,
+        feed: LiveMeetingTranscriptFeed?,
         startedAt: Date
     ) {
         self.source = source
         self.audioSource = audioSource
         self.streamingSession = streamingSession
         self.codexSession = codexSession
+        self.feed = feed
         self.startedAt = startedAt
         self.inputQueue = DispatchQueue(
             label: "com.transcripted.live-meeting-transcriber.\(source.rawValue)",
@@ -150,6 +156,9 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             )
             try Task.checkCancellation()
             try codexSession.updateStreamingBackendStatus("local_streaming_asr_running")
+            if let feed {
+                await MainActor.run { feed.markLive() }
+            }
 
             let updates = await manager.transcriptionUpdates
             let updateTask = Task.detached(priority: .utility) { [weak self] in
@@ -171,6 +180,10 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
                 "local_streaming_asr_failed",
                 note: "\(source.displayName) live streaming stopped: \(error.localizedDescription)"
             )
+            if let feed {
+                let note = "\(source.displayName) live transcription stopped. The final transcript still saves normally."
+                await MainActor.run { feed.markFailed(note: note) }
+            }
         }
     }
 
@@ -200,15 +213,17 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         }
 
         let elapsed = now.timeIntervalSince(startedAt)
-        try? codexSession.append(
-            LiveMeetingCodexTranscriptEntry(
-                source: source,
-                text: normalized,
-                timestampSeconds: elapsed,
-                createdAt: now,
-                isFinal: update.isConfirmed
-            )
+        let entry = LiveMeetingCodexTranscriptEntry(
+            source: source,
+            text: normalized,
+            timestampSeconds: elapsed,
+            createdAt: now,
+            isFinal: update.isConfirmed
         )
+        try? codexSession.append(entry)
+        if let feed {
+            Task { @MainActor in feed.ingest(entry) }
+        }
     }
 
     private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {

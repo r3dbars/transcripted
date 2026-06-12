@@ -158,6 +158,11 @@ func testUIAutomationSurfaceContract() {
                 && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
             "the meeting overlay live-view button should keep a stable automation identifier for point-of-use live meetings"
         )
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.open-browser")
+                && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.browserAutomationIdentifier)"),
+            "the transcript drawer's open-in-browser action should keep a stable automation identifier"
+        )
 
         assertTrue(
             deletePolicySource.contains("Delete this meeting?")
