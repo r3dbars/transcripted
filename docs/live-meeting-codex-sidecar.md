@@ -39,6 +39,14 @@ The target flow is:
 The sidecar should feel calm, compact, and automatic. The user should not need
 to copy prompts, reload pages, or explain where the transcript lives.
 
+While a meeting is recording, clicking the meeting pill expands an embedded
+transcript drawer inside the overlay itself, so this never requires Settings;
+the browser/agent page stays one click away in the drawer's overflow menu. If
+the sidecar is still off, that first click enables it in the same step; live
+lines then start with the next recording because live ASR cannot attach to an
+already-running capture, but the current meeting's final transcript still
+links into the live page.
+
 ## Local Contract
 
 - Live data stays local.

@@ -151,6 +151,31 @@ func testUIAutomationSurfaceContract() {
             assertTrue(agentSettingsSource.contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
 
+        let meetingOverlaySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let liveViewPolicySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift")
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view")
+                && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
+            "the recording pill body should keep a stable automation identifier for the transcript toggle"
+        )
+        let transcriptDrawerSource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.copy")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
+            "the transcript drawer's copy action should keep a stable automation identifier"
+        )
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.more")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.moreAutomationIdentifier"),
+            "the transcript drawer's overflow menu should keep a stable automation identifier"
+        )
+        assertTrue(
+            meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
+                && meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle")
+                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
+            "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
+        )
+
         assertTrue(
             deletePolicySource.contains("Delete this meeting?")
                 && deletePolicySource.contains("Delete Meeting")

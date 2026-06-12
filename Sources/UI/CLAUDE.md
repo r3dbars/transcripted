@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (64 Swift files)
+## Files (67 Swift files)
 
 ### Overlay/
 
@@ -30,7 +30,10 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
+- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy + overflow menu, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
+- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context/overflow menu titles, and drawer status copy, including the one-click enable copy when live meetings is off
+- `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
+- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -188,6 +191,8 @@ Relevant direct coverage:
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
+- `Tests/MeetingLiveViewAffordancePolicyTests.swift`
+- `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`

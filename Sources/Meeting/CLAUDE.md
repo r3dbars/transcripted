@@ -19,7 +19,8 @@
 - `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
 - `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
-- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text
+- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
+- `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
 - `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
@@ -63,6 +64,7 @@
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Sources/Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
 - Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
+- Live streaming ASR can only start with a recording: `MeetingCaptureBridge` live PCM preview handlers must be installed before capture starts and never reassigned mid-session. `connectLiveSidecarToActiveRecording()` is the only mid-recording entry point (used by the meeting overlay's Live View button) and deliberately starts the sidecar session without live ASR; the final transcript still attaches normally.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
 - `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
@@ -128,6 +130,7 @@ Relevant direct coverage:
 - `Tests/LiveMeetingCodexSessionTests.swift`
 - `Tests/LiveMeetingPreviewServerTests.swift`
 - `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
+- `Tests/LiveMeetingTranscriptFeedTests.swift`
 - `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`

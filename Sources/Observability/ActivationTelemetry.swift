@@ -20,6 +20,7 @@ enum ActivationTelemetry {
         case homePreview = "home_preview"
         case homeCurrentActivity = "home_current_activity"
         case agentSettings = "agent_settings"
+        case meetingOverlay = "meeting_overlay"
     }
 
     enum AgentPromptKind: String {
