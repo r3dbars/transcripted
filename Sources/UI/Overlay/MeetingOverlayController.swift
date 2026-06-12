@@ -166,6 +166,7 @@ final class MeetingOverlayRootView: NSView {
     private var lastTooltipAreaSignature: String?
     private var panelHoverTrackingArea: NSTrackingArea?
     private var isCondensed = false
+    private var lastStripFadeAt = Date.distantPast
     private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
     private var isTranscriptExpanded = false
     private var isDrawerVisible = false
@@ -845,7 +846,10 @@ final class MeetingOverlayRootView: NSView {
         let fadeViews: [NSView] = [audioWaveform, closeButton]
 
         guard wasCondensed != isCondensed else {
-            // Steady state: pin final values without animating.
+            // Steady state: pin final values without animating — but give an
+            // in-flight fade time to finish, or the per-second duration tick
+            // clips it partway through.
+            guard Date().timeIntervalSince(lastStripFadeAt) > 0.3 else { return }
             for view in fadeViews {
                 view.isHidden = isCondensed
                 view.alphaValue = isCondensed ? 0 : 1
@@ -853,6 +857,7 @@ final class MeetingOverlayRootView: NSView {
             return
         }
 
+        lastStripFadeAt = Date()
         let fadeOut = isCondensed
         if !fadeOut {
             for view in fadeViews {
@@ -1343,6 +1348,7 @@ final class MeetingOverlayController: NSObject {
     private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
     private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
     private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
+    private var transcriptPushPending = false
 
     private enum PromptKind {
         case detectedMeeting
@@ -1527,6 +1533,16 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func pushTranscriptToView() {
+        // Word-rate updates arrive for the whole meeting; building the
+        // attributed string and re-laying-out the text view is only worth
+        // doing while the drawer can actually be seen. Hidden updates mark
+        // the view dirty and get flushed once on reveal.
+        guard isTranscriptExpanded, state == .recording else {
+            transcriptPushPending = true
+            return
+        }
+        transcriptPushPending = false
+
         let hasEntries = !latestTranscriptFinals.isEmpty || !latestTranscriptPartials.isEmpty
         rootView?.updateLiveTranscript(
             makeTranscriptAttributedText(
@@ -1539,6 +1555,11 @@ final class MeetingOverlayController: NSObject {
             ),
             hasEntries: hasEntries
         )
+    }
+
+    private func flushPendingTranscriptIfNeeded() {
+        guard transcriptPushPending else { return }
+        pushTranscriptToView()
     }
 
     private func makeTranscriptAttributedText(
@@ -1716,6 +1737,7 @@ final class MeetingOverlayController: NSObject {
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
             showPanel()
+            flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
         case .transcribing:
             cancelRest()
@@ -1937,6 +1959,7 @@ final class MeetingOverlayController: NSObject {
             LiveMeetingCodexPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
             if isTranscriptExpanded {
                 bloomFromRest()
+                flushPendingTranscriptIfNeeded()
             } else {
                 scheduleRestIfNeeded()
             }
@@ -1952,6 +1975,7 @@ final class MeetingOverlayController: NSObject {
             isTranscriptExpanded = true
             LiveMeetingCodexPreferences.setDrawerOpenPreferred(true)
             bloomFromRest()
+            flushPendingTranscriptIfNeeded()
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .localAgent,
