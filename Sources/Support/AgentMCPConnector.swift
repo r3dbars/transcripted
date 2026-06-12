@@ -101,6 +101,8 @@ enum AgentMCPConnectorError: LocalizedError, Equatable {
     case agentCLIFailed(AgentMCPAgent, status: Int32, output: String)
     case agentCLITimedOut(AgentMCPAgent)
     case codexConfigUsesInlineServers
+    case codexConfigHasDuplicateTranscriptedTables
+    case codexConfigUsesUnsupportedTranscriptedServer
 
     var errorDescription: String? {
         switch self {
@@ -115,6 +117,10 @@ enum AgentMCPConnectorError: LocalizedError, Equatable {
             return "\(agent.displayName) did not respond. Try again, or register Transcripted from the \(agent.displayName) side."
         case .codexConfigUsesInlineServers:
             return "Your Codex config defines mcp_servers inline. Add Transcripted there manually, or convert it to [mcp_servers.transcripted] table form."
+        case .codexConfigHasDuplicateTranscriptedTables:
+            return "Your Codex config already has more than one Transcripted MCP table. Remove the duplicate, then connect again."
+        case .codexConfigUsesUnsupportedTranscriptedServer:
+            return "Your Codex config already defines Transcripted through a TOML variant Transcripted cannot safely edit. Add or update it manually."
         }
     }
 }
@@ -285,6 +291,9 @@ enum AgentMCPConnector {
 
         let existing = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
         let updated = try codexConfigText(updating: existing, commandPath: helperCommandPath)
+        if fileManager.fileExists(atPath: configURL.path), updated != existing {
+            try backupCodexConfig(at: configURL, fileManager: fileManager)
+        }
         try updated.write(to: configURL, atomically: true, encoding: .utf8)
         fileManager.restrictFileToOwnerOnly(at: configURL)
     }
@@ -300,11 +309,18 @@ enum AgentMCPConnector {
     static func codexConfigText(updating existing: String, commandPath: String) throws -> String {
         let commandLine = "command = \(tomlBasicString(commandPath))"
         var lines = existing.components(separatedBy: "\n")
+        let serverHeaderIndexes = lines.enumerated()
+            .filter { isCodexServerTableHeader($0.element) }
+            .map(\.offset)
 
-        if let headerIndex = lines.firstIndex(where: { trimmedTOMLLine($0) == codexServerTableHeader }) {
+        guard serverHeaderIndexes.count <= 1 else {
+            throw AgentMCPConnectorError.codexConfigHasDuplicateTranscriptedTables
+        }
+
+        if let headerIndex = serverHeaderIndexes.first {
             var tableEnd = lines.count
             for index in (headerIndex + 1)..<lines.count
-            where trimmedTOMLLine(lines[index]).hasPrefix("[") {
+            where isTOMLTableHeaderLine(lines[index]) {
                 tableEnd = index
                 break
             }
@@ -320,14 +336,13 @@ enum AgentMCPConnector {
             return lines.joined(separator: "\n")
         }
 
-        let definesInlineServers = lines.contains { line in
-            let trimmed = trimmedTOMLLine(line)
-            guard trimmed.hasPrefix("mcp_servers") else { return false }
-            let remainder = trimmed.dropFirst("mcp_servers".count).trimmingCharacters(in: .whitespaces)
-            return remainder.hasPrefix("=")
-        }
-        guard !definesInlineServers else {
+        switch codexUnsupportedServerVariant(in: lines) {
+        case .inlineServers:
             throw AgentMCPConnectorError.codexConfigUsesInlineServers
+        case .transcriptedServer:
+            throw AgentMCPConnectorError.codexConfigUsesUnsupportedTranscriptedServer
+        case nil:
+            break
         }
 
         var text = existing
@@ -347,14 +362,16 @@ enum AgentMCPConnector {
         for rawLine in text.components(separatedBy: "\n") {
             let line = trimmedTOMLLine(rawLine)
 
-            if line.hasPrefix("[") {
-                inServerTable = line == codexServerTableHeader
+            if isTOMLTableHeaderLine(rawLine) {
+                inServerTable = isCodexServerTableHeader(rawLine)
                 continue
             }
 
             guard inServerTable, lineDefinesTOMLCommandKey(line) else { continue }
-            guard let equalsIndex = line.firstIndex(of: "=") else { continue }
-            let value = String(line[line.index(after: equalsIndex)...])
+            let commentFreeLine = tomlLineWithoutComment(rawLine)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let equalsIndex = firstUnquotedEqualsIndex(in: commentFreeLine) else { continue }
+            let value = String(commentFreeLine[commentFreeLine.index(after: equalsIndex)...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return tomlBasicStringValue(value)
         }
@@ -371,10 +388,212 @@ enum AgentMCPConnector {
     /// True only for the bare `command` key — not `command_timeout` or any
     /// other key that merely starts with "command".
     private static func lineDefinesTOMLCommandKey(_ trimmedLine: String) -> Bool {
-        guard trimmedLine.hasPrefix("command") else { return false }
-        let remainder = trimmedLine.dropFirst("command".count)
-            .trimmingCharacters(in: .whitespaces)
-        return remainder.hasPrefix("=")
+        assignmentKeySegments(in: trimmedLine) == ["command"]
+    }
+
+    private enum CodexUnsupportedServerVariant {
+        case inlineServers
+        case transcriptedServer
+    }
+
+    private static func codexUnsupportedServerVariant(in lines: [String]) -> CodexUnsupportedServerVariant? {
+        var currentTable: [String] = []
+
+        for line in lines {
+            if let table = parsedTOMLTableHeader(line) {
+                currentTable = table.segments
+                continue
+            }
+
+            guard let keySegments = assignmentKeySegments(in: line) else { continue }
+            let absoluteKeySegments = currentTable + keySegments
+
+            if absoluteKeySegments == ["mcp_servers"] {
+                return .inlineServers
+            }
+
+            if absoluteKeySegments.starts(with: ["mcp_servers", "transcripted"]) {
+                return .transcriptedServer
+            }
+        }
+
+        return nil
+    }
+
+    private static func isCodexServerTableHeader(_ line: String) -> Bool {
+        guard let header = parsedTOMLTableHeader(line), !header.isArray else {
+            return false
+        }
+        return header.segments == ["mcp_servers", "transcripted"]
+    }
+
+    private static func isTOMLTableHeaderLine(_ line: String) -> Bool {
+        parsedTOMLTableHeader(line) != nil
+    }
+
+    private static func parsedTOMLTableHeader(_ line: String) -> (segments: [String], isArray: Bool)? {
+        let stripped = tomlLineWithoutComment(line).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stripped.hasPrefix("[") else { return nil }
+
+        let isArray = stripped.hasPrefix("[[")
+        let closing = isArray ? "]]" : "]"
+        let openingCount = isArray ? 2 : 1
+        guard stripped.hasSuffix(closing), stripped.count > openingCount + closing.count else {
+            return nil
+        }
+
+        let contentStart = stripped.index(stripped.startIndex, offsetBy: openingCount)
+        let contentEnd = stripped.index(stripped.endIndex, offsetBy: -closing.count)
+        let content = String(stripped[contentStart..<contentEnd])
+        guard let segments = parseTOMLKeySegments(content), !segments.isEmpty else {
+            return nil
+        }
+        return (segments, isArray)
+    }
+
+    private static func assignmentKeySegments(in line: String) -> [String]? {
+        let stripped = tomlLineWithoutComment(line).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let equalsIndex = firstUnquotedEqualsIndex(in: stripped) else {
+            return nil
+        }
+
+        let keyText = String(stripped[..<equalsIndex])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return parseTOMLKeySegments(keyText)
+    }
+
+    private static func firstUnquotedEqualsIndex(in text: String) -> String.Index? {
+        var inString = false
+        var pendingEscape = false
+
+        for index in text.indices {
+            let character = text[index]
+
+            if pendingEscape {
+                pendingEscape = false
+                continue
+            }
+
+            if inString {
+                if character == "\\" {
+                    pendingEscape = true
+                } else if character == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if character == "\"" {
+                inString = true
+            } else if character == "=" {
+                return index
+            }
+        }
+
+        return nil
+    }
+
+    private static func tomlLineWithoutComment(_ line: String) -> String {
+        var output = ""
+        var inString = false
+        var pendingEscape = false
+
+        for character in line {
+            if pendingEscape {
+                output.append(character)
+                pendingEscape = false
+                continue
+            }
+
+            if inString {
+                output.append(character)
+                if character == "\\" {
+                    pendingEscape = true
+                } else if character == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if character == "#" {
+                break
+            }
+
+            output.append(character)
+            if character == "\"" {
+                inString = true
+            }
+        }
+
+        return output
+    }
+
+    private static func parseTOMLKeySegments(_ text: String) -> [String]? {
+        var segments: [String] = []
+        var index = text.startIndex
+
+        func skipWhitespace() {
+            while index < text.endIndex, text[index].isWhitespace {
+                index = text.index(after: index)
+            }
+        }
+
+        while true {
+            skipWhitespace()
+            guard index < text.endIndex else {
+                return segments.isEmpty ? nil : segments
+            }
+
+            let segment: String
+            if text[index] == "\"" {
+                var quoted = "\""
+                index = text.index(after: index)
+                var pendingEscape = false
+                var foundClosingQuote = false
+
+                while index < text.endIndex {
+                    let character = text[index]
+                    quoted.append(character)
+                    index = text.index(after: index)
+
+                    if pendingEscape {
+                        pendingEscape = false
+                    } else if character == "\\" {
+                        pendingEscape = true
+                    } else if character == "\"" {
+                        foundClosingQuote = true
+                        break
+                    }
+                }
+
+                guard foundClosingQuote, let parsedSegment = tomlBasicStringValue(quoted) else {
+                    return nil
+                }
+                segment = parsedSegment
+            } else {
+                let start = index
+                while index < text.endIndex,
+                      text[index] != ".",
+                      !text[index].isWhitespace {
+                    index = text.index(after: index)
+                }
+
+                guard start < index else { return nil }
+                segment = String(text[start..<index])
+            }
+
+            segments.append(segment)
+            skipWhitespace()
+
+            guard index < text.endIndex else {
+                return segments
+            }
+
+            guard text[index] == "." else {
+                return nil
+            }
+            index = text.index(after: index)
+        }
     }
 
     static func tomlBasicString(_ value: String) -> String {
@@ -483,5 +702,24 @@ enum AgentMCPConnector {
 
         drained.wait()
         return (process.terminationStatus, String(decoding: stdoutBox.data + stderrBox.data, as: UTF8.self))
+    }
+
+    @discardableResult
+    private static func backupCodexConfig(at configURL: URL, fileManager: FileManager) throws -> URL {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let baseName = "\(configURL.lastPathComponent).backup-\(timestamp)"
+        var backupURL = configURL.deletingLastPathComponent()
+            .appendingPathComponent(baseName, isDirectory: false)
+        var suffix = 2
+
+        while fileManager.fileExists(atPath: backupURL.path) {
+            backupURL = configURL.deletingLastPathComponent()
+                .appendingPathComponent("\(baseName)-\(suffix)", isDirectory: false)
+            suffix += 1
+        }
+
+        try fileManager.copyItem(at: configURL, to: backupURL)
+        return backupURL
     }
 }

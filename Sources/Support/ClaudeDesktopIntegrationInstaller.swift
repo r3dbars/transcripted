@@ -79,6 +79,7 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
     case selfTestFailed(status: Int32, output: String)
     case selfTestReportedUnhealthy(output: String)
     case selfTestOutputUnreadable(String)
+    case selfTestTimedOut(URL)
 
     var errorDescription: String? {
         switch self {
@@ -98,6 +99,8 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
             return "Transcripted direct tools did not pass the local check."
         case .selfTestOutputUnreadable:
             return "Transcripted direct tools ran, but the health check output could not be read."
+        case .selfTestTimedOut:
+            return "Transcripted direct tools did not respond to the local check. Try again, or reinstall the helper."
         }
     }
 }
@@ -327,7 +330,8 @@ enum ClaudeDesktopIntegrationInstaller {
 
     static func runSelfTest(
         binaryURL: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        timeout: TimeInterval = 30
     ) throws -> TranscriptedMCPSelfTest {
         guard fileManager.isExecutableFile(atPath: binaryURL.path) else {
             throw ClaudeDesktopIntegrationError.installedBinaryNotExecutable(binaryURL)
@@ -342,11 +346,37 @@ enum ClaudeDesktopIntegrationInstaller {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        try process.run()
-        process.waitUntilExit()
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
 
-        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+        try process.run()
+
+        // Drain both pipes while the helper runs so a noisy self-test cannot
+        // fill a pipe buffer and stall before the timeout can fire.
+        final class PipeOutputBox: @unchecked Sendable {
+            var data = Data()
+        }
+        let stdoutBox = PipeOutputBox()
+        let stderrBox = PipeOutputBox()
+        let drained = DispatchGroup()
+        for (pipe, box) in [(stdout, stdoutBox), (stderr, stderrBox)] {
+            drained.enter()
+            DispatchQueue.global(qos: .utility).async {
+                box.data = pipe.fileHandleForReading.readDataToEndOfFile()
+                drained.leave()
+            }
+        }
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 2)
+            throw ClaudeDesktopIntegrationError.selfTestTimedOut(binaryURL)
+        }
+
+        drained.wait()
+
+        let stdoutData = stdoutBox.data
+        let stderrData = stderrBox.data
         let output = String(decoding: stdoutData + stderrData, as: UTF8.self)
 
         guard process.terminationStatus == 0 else {
@@ -432,8 +462,17 @@ enum ClaudeDesktopIntegrationInstaller {
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let backupURL = configURL.deletingLastPathComponent()
-            .appendingPathComponent("\(configURL.lastPathComponent).backup-\(timestamp)", isDirectory: false)
+        let baseName = "\(configURL.lastPathComponent).backup-\(timestamp)"
+        var backupURL = configURL.deletingLastPathComponent()
+            .appendingPathComponent(baseName, isDirectory: false)
+        var suffix = 2
+
+        while fileManager.fileExists(atPath: backupURL.path) {
+            backupURL = configURL.deletingLastPathComponent()
+                .appendingPathComponent("\(baseName)-\(suffix)", isDirectory: false)
+            suffix += 1
+        }
+
         try fileManager.copyItem(at: configURL, to: backupURL)
         return backupURL
     }

@@ -1545,6 +1545,39 @@ func testClaudeDesktopIntegrationInstaller() {
         }
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — times out a hung helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestTimeoutTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nsleep 30\n".write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: helperURL.path)
+
+        let started = Date()
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL, timeout: 0.4)
+            assertTrue(false, "hung helper self-test should throw a timeout error")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(error, .selfTestTimedOut(helperURL), "hung helper should raise selfTestTimedOut")
+            assertEqual(
+                error.errorDescription,
+                "Transcripted direct tools did not respond to the local check. Try again, or reinstall the helper.",
+                "timeout should have a clear user-facing message"
+            )
+        } catch {
+            assertTrue(false, "hung helper should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+
+        assertTrue(
+            Date().timeIntervalSince(started) < 10,
+            "self-test timeout should fire promptly instead of waiting for the full helper sleep"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — backs up non-object config") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeNonObjectConfigTests-\(UUID().uuidString)", isDirectory: true)
@@ -1569,6 +1602,46 @@ func testClaudeDesktopIntegrationInstaller() {
             assertTrue(false, "non-object config backup should be readable")
         }
         assertEqual(transcriptedCommandPath(inConfigAt: configURL), "/tmp/transcripted-mcp", "replacement config should contain the Transcripted helper")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig — creates unique backups without overwriting malformed config history") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeUniqueBackupTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "{ invalid json one".write(to: configURL, atomically: true, encoding: .utf8)
+        let firstBackup = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: "/tmp/transcripted-mcp",
+            configURL: configURL
+        )
+
+        try? "{ invalid json two".write(to: configURL, atomically: true, encoding: .utf8)
+        let secondBackup = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: "/tmp/transcripted-mcp",
+            configURL: configURL
+        )
+
+        assertNotNil(firstBackup, "first malformed config should create a backup")
+        assertNotNil(secondBackup, "second malformed config should create a backup")
+        assertFalse(firstBackup?.path == secondBackup?.path, "backup names should be unique even within the same test run")
+
+        if let firstBackup,
+           let secondBackup {
+            assertEqual(
+                (try? String(contentsOf: firstBackup, encoding: .utf8)) ?? "",
+                "{ invalid json one",
+                "first backup should preserve the first malformed config"
+            )
+            assertEqual(
+                (try? String(contentsOf: secondBackup, encoding: .utf8)) ?? "",
+                "{ invalid json two",
+                "second backup should preserve the second malformed config"
+            )
+        }
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL — uses Helpers bundle location only") {

@@ -22,6 +22,7 @@ struct AgentConnectionSettingsPage: View {
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
+    @State private var claudeDesktopConfigBackupURL: URL?
     @State private var copiedLocalAgentPrompt = false
     @State private var copiedClaudeDesktopConfig = false
     @State private var copiedFolderPaths = false
@@ -129,6 +130,18 @@ struct AgentConnectionSettingsPage: View {
                 Text("\(claudeDesktopSelfTest.meetingFileCount) meetings, \(claudeDesktopSelfTest.dictationFileCount) dictation files visible.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if agent == .claudeDesktop, let claudeDesktopConfigBackupURL {
+                HStack(spacing: 8) {
+                    Label("Previous config backed up.", systemImage: "doc.badge.clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    SettingsInlineActionButton(title: "Show Backup", symbolName: "folder") {
+                        reveal(claudeDesktopConfigBackupURL)
+                    }
+                }
             }
         }
         .modifier(AgentRowCard())
@@ -428,25 +441,28 @@ struct AgentConnectionSettingsPage: View {
         rowPhases[agent] = .connecting
         if agent == .claudeDesktop {
             claudeDesktopSelfTest = nil
+            claudeDesktopConfigBackupURL = nil
         }
         let priorStatus: ActivationTelemetry.AgentSetupPriorStatus =
             connectedAgents.contains(agent) ? .installed : .notInstalled
 
         Task {
             do {
-                let selfTest = try await Task.detached(priority: .userInitiated) { () -> TranscriptedMCPSelfTest? in
+                let result = try await Task.detached(priority: .userInitiated) { () -> AgentConnectResult in
                     if agent == .claudeDesktop {
-                        return try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop().selfTest
+                        let install = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
+                        return AgentConnectResult(selfTest: install.selfTest, backupURL: install.backupURL)
                     }
                     let helper = try AgentMCPConnector.ensureHelperInstalled()
                     try AgentMCPConnector.connect(agent, helperCommandPath: helper.path)
-                    return nil
+                    return AgentConnectResult()
                 }.value
 
                 rowPhases[agent] = .connected
                 connectedAgents.insert(agent)
                 if agent == .claudeDesktop {
-                    claudeDesktopSelfTest = selfTest
+                    claudeDesktopSelfTest = result.selfTest
+                    claudeDesktopConfigBackupURL = result.backupURL
                 }
                 trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {
@@ -770,6 +786,19 @@ struct AgentConnectionSettingsPage: View {
     private func reveal(_ url: URL) {
         let target = folderExists(url) ? url : url.deletingLastPathComponent()
         NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+}
+
+private struct AgentConnectResult {
+    let selfTest: TranscriptedMCPSelfTest?
+    let backupURL: URL?
+
+    init(
+        selfTest: TranscriptedMCPSelfTest? = nil,
+        backupURL: URL? = nil
+    ) {
+        self.selfTest = selfTest
+        self.backupURL = backupURL
     }
 }
 
