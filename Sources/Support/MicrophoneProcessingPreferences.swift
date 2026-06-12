@@ -1,26 +1,28 @@
 // Support/MicrophoneProcessingPreferences.swift
-// Preference flag for the meeting microphone's voice-processing strategy.
+// Preference flag for Transcripted's microphone voice-processing strategy.
 //
-// Two paths exist for cleaning up the meeting mic so transcripts come out at
-// usable volume:
+// Two paths exist for cleaning up the mic so meeting and dictation transcripts
+// come out at usable volume:
 //
-//   - Software AGC (default): a real-time RealtimeAGC instance in the mic tap
-//     callback applies gain to compensate for attenuated streams (e.g. when
-//     Safari/Firefox WebRTC has activated VPIO on the same physical mic and
-//     the shared device hands us a quiet copy). No system-wide side effects.
+//   - Software AGC (default): meeting capture runs a real-time RealtimeAGC
+//     instance in the mic tap callback to compensate for attenuated streams
+//     (e.g. when Safari/Firefox WebRTC has activated VPIO on the same physical
+//     mic and the shared device hands us a quiet copy). No system-wide side
+//     effects.
 //
 //   - Apple voice processing (VPIO): we enable
-//     setVoiceProcessingEnabled(true) on our AVAudioEngine input node so we
+//     setVoiceProcessingEnabled(true) on our AVAudioEngine input nodes so we
 //     get our own AGC'd copy from the OS. This fixes issue #500 most
-//     completely for Safari/Firefox calls, but macOS treats any VPIO holder
-//     as a voice-comms app and ducks audio playback from other apps. Users
-//     on Zoom or other native voice apps will hear those apps get quieter
-//     while Transcripted is recording.
+//     completely for Safari/Firefox calls and now covers dictation starts after
+//     the user accepts the in-meeting boost. macOS treats any VPIO holder as a
+//     voice-comms app and can duck audio playback from other apps. Users on
+//     Zoom or other native voice apps may hear those apps get quieter while
+//     Transcripted is recording.
 //
 // Default-off so existing users on v1.1.24 (where VPIO was unconditionally
 // armed) get the un-ducked behavior on upgrade. Users who specifically need
 // the VPIO path for Safari/Firefox WebRTC meetings can opt in via the
-// Meetings settings page.
+// Meetings settings page or the in-meeting boost prompt.
 
 import Foundation
 
@@ -28,9 +30,10 @@ enum MicrophoneProcessingPreferences {
 
     static let voiceProcessingEnabledKey = "meeting-mic-voice-processing-enabled"
 
-    /// Whether Apple's AUVoiceProcessingIO (VPIO) is armed on the meeting
-    /// mic engine. Default: false. Read once at recording start; changes
-    /// during a session do not take effect until the next recording.
+    /// Whether Apple's AUVoiceProcessingIO (VPIO) is armed on Transcripted's
+    /// mic engines. Default: false. Read once at recording start; changes
+    /// during a session do not take effect until the next recording, except
+    /// meeting capture can explicitly restart its engine after prompt consent.
     /// Tests can inject a sandboxed `UserDefaults` to avoid touching
     /// `.standard` global state.
     static func isVoiceProcessingEnabled(userDefaults: UserDefaults = .standard) -> Bool {
