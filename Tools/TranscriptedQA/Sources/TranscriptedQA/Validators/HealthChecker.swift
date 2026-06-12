@@ -52,10 +52,12 @@ struct HealthChecker {
         // macOS version
         let version = ProcessInfo.processInfo.operatingSystemVersion
         let versionStr = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
-        if version.majorVersion > 14 || (version.majorVersion == 14 && version.minorVersion >= 2) {
+        // The app itself targets arm64-apple-macos26.0; a lower version passing
+        // here would green-light a machine that cannot run Transcripted.
+        if version.majorVersion >= 26 {
             results.append(.pass("health/macos-version", target: "macOS \(versionStr)"))
         } else {
-            results.append(.fail("health/macos-version", target: "macOS \(versionStr)", detail: "Requires macOS 14.2+"))
+            results.append(.fail("health/macos-version", target: "macOS \(versionStr)", detail: "Requires macOS 26+"))
         }
 
         // Recent crash reports

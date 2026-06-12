@@ -752,6 +752,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc func showMenu(_ sender: NSButton) {
             let menu = NSMenu()
+            // Without this, AppKit auto-enables every item whose target responds
+            // to the action, overriding the per-item isEnabled set below.
+            menu.autoenablesItems = false
             for item in items {
                 let menuItem = NSMenuItem(
                     title: item.title,

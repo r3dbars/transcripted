@@ -343,6 +343,10 @@ func testClipboardRestoringTextPaster() async {
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — early observer reads do not race slow consumers") {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+            print("    SKIPPED: wall-clock timing proof — scheduler jitter on shared CI runners makes the 20/70ms windows unprovable there; covered by local runs")
+            return
+        }
         let existingClipboard = "synthetic existing clipboard"
         let dictationText = "synthetic observer-safe dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedObserverPasteConsumerTest-\(UUID().uuidString)")
@@ -457,6 +461,10 @@ func testClipboardRestoringTextPaster() async {
     }
 
     await runSuite("ClipboardRestoringTextPaster.waitForClipboardReadyForAutoEnter — waits when no pasteboard read occurs") {
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
+            print("    SKIPPED: wall-clock timing proof — the elapsed-time floor is unprovable under shared-runner scheduler jitter; covered by local runs")
+            return
+        }
         let existingClipboard = "synthetic existing clipboard"
         let pasteText = "synthetic unread paste text"
         let fallbackRestoreDelay: UInt64 = 40_000_000

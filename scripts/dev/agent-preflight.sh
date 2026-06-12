@@ -100,6 +100,10 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-e2e-smoke.sh"
         fi
 
+        if matches_any "$path" "Tests/E2E/SlowPastebackSmoke.swift" "run-slow-pasteback-smoke.sh" "scripts/entrypoints/run-slow-pasteback-smoke.sh"; then
+            add_command "bash run-slow-pasteback-smoke.sh"
+        fi
+
         if matches_any "$path" "build-deps.sh" "scripts/entrypoints/build-deps.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n build-deps.sh"
@@ -169,6 +173,18 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/release-gate-report.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/ops/packaged-app-smoke.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/packaged-app-smoke.py"
+            add_command "python3 scripts/ops/packaged-app-smoke.py --self-test"
+        fi
+
+        if matches_any "$path" "scripts/ops/privacy-leak-sweep.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/privacy-leak-sweep.py"
+            add_command "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+        fi
+
         if matches_any "$path" "scripts/ops/build-codex-memory-index.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
@@ -184,8 +200,10 @@ if [ -n "$changed_paths" ]; then
             add_command "ruby -c scripts/ops/performance-budget.rb"
         fi
 
-        if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
+        if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/run-local-summary-fixture.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
             add_command "bash -n scripts/ops/transcripted-qa-bench.sh"
+            add_command "bash -n scripts/ops/run-local-summary-fixture.sh"
+            add_command "bash scripts/ops/run-local-summary-fixture.sh"
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
             add_command "swift test --package-path Tools/TranscriptedQA"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
@@ -222,6 +240,13 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-tests.sh"
             add_command "bash run-integration-smoke.sh"
             add_command "swift test"
+        fi
+
+        if matches_any "$path" "Tools/TranscriptedCaptureKit/*"; then
+            add_command "swift test --package-path Tools/TranscriptedCaptureKit"
+            add_command "swift test --package-path Tools/TranscriptedCLI"
+            add_command "swift test --package-path Tools/TranscriptedMCP"
+            add_command "bash run-e2e-smoke.sh"
         fi
 
         if matches_any "$path" "Tools/TranscriptedCLI/*"; then

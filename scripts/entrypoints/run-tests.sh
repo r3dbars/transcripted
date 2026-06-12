@@ -86,6 +86,22 @@ if [ "$manifest_files" != "$actual_files" ]; then
     exit 1
 fi
 
+# Catch root test-shaped files the *Tests.swift glob cannot see (FooTest.swift,
+# FooSmoke.swift): they would neither run nor trip the sync check above.
+# Shared non-test sources are fine when the runner compiles them explicitly.
+stray_root_swift=$(
+    find Tests -maxdepth 1 -name '*.swift' ! -name '*Tests.swift' -exec basename {} \; | \
+    while IFS= read -r stray; do
+        grep -qF "Tests/$stray" "$0" || printf '%s\n' "$stray"
+    done
+)
+if [ -n "$stray_root_swift" ]; then
+    echo "Root Tests/*.swift files invisible to the fast-test runner:"
+    printf '%s\n' "$stray_root_swift" | sed 's/^/  - /'
+    echo "Rename to <Name>Tests.swift and register in $MANIFEST, or add the file to this runner's compile list."
+    exit 1
+fi
+
 mkdir -p "$BUILD_DIR"
 
 cat > "$GENERATED_RUNNER" <<'EOF'
@@ -220,6 +236,7 @@ APP_SOURCES=(
     "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
+    "Sources/Observability/ObservabilityLogRotation.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"
     "Sources/Observability/AnalyticsPayloadSanitizer.swift"
     "Sources/Observability/AnalyticsPreferences.swift"

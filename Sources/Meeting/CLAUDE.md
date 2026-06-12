@@ -21,7 +21,7 @@
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
 - `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
 - `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
-- `LocalMeetingSummarizer.swift` — opt-in local Gemma meeting-summary runner, transcript chunking, managed summary metadata, runtime env sanitizing, and stale-transcript write protection
+- `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, and provider-aware remind/dismiss backoff rules for calendar- and runtime-based prompt candidates
@@ -47,7 +47,7 @@
 9. `MeetingSessionController.cancelRecording(...)` is only for explicit confirmed discard flows; it stops capture, removes scratch audio, and does not enqueue transcription.
 10. `MeetingSessionController.importAudioFile(...)` routes standalone recordings through `MeetingImportedAudioPreparer` and into the same save / naming / restyling pipeline used by live captures.
 11. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
-12. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
+12. A subscription on `taskManager.$lastSavedTranscriptURL` runs `MeetingTranscriptStyler.restyleTranscript(...)` on a serialized background task (the restyle reads/rewrites the whole transcript and can rename artifacts, so it must stay off the main actor) and hops back to the main actor to update the recent-meetings UI state. The restyle fails closed when a transcript body has text the entry parser cannot understand instead of replacing it with the empty placeholder.
 13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts, and queue-tracked failed-meeting audio can be compressed only after the failed queue is updated to point at the converted files.
 14. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
 15. Failed meetings can be played, revealed, retried, deleted, or dismissed from Home, with `MeetingFailureKind` providing stable failure categories, `MeetingFailureExplanation` preserving retry/artifact state, and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
@@ -72,7 +72,7 @@
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
-- Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight.
+- Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
 
 ## Storage
 

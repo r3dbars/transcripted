@@ -137,8 +137,8 @@ For agent and automation use, the JSON form also includes:
 ## Gotchas
 
 - The package is now split across `Commands/`, `Validators/`, `Utilities/`, `Generators/`, and `Models/`, so keep `TranscriptedQA.configuration` in sync when adding or removing subcommands.
-- All validators run synchronously on background threads
-- SQLite readers use dedicated utility queues for thread safety
+- Validators run synchronously on the calling thread; there is no internal dispatching
+- SQLite readers open read-only connections with no internal queueing — callers own thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
 - Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`

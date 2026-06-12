@@ -22,7 +22,7 @@
 - `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
 - `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
 - `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
-- `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle for local AI meeting summaries on Home
+- `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows

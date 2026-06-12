@@ -25,7 +25,12 @@ final class MeetingPromptDetector {
 
     var onPromptRequest: ((Candidate) -> Bool)?
 
-    private let eventStore = EKEventStore()
+    private let calendarReader = MeetingPromptCalendarReader()
+    // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
+    // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
+    // the recording-start title closure), so they read this cache instead of querying
+    // EKEventStore on the main actor.
+    private var calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
     private var pollingTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var snoozedUntil: [String: Date] = [:]
@@ -36,10 +41,9 @@ final class MeetingPromptDetector {
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
     private let pollIntervalNanoseconds: UInt64 = 20_000_000_000
-
-    private static let meetingURLDetector = try? NSDataDetector(
-        types: NSTextCheckingResult.CheckingType.link.rawValue
-    )
+    // Single fetch window covering both the near-term prompt window and the
+    // farthest lookahead used for runtime-dismiss resume dates.
+    private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
 
     private static let browserBundleIdentifiers: Set<String> = [
         "com.apple.Safari",
@@ -183,6 +187,8 @@ final class MeetingPromptDetector {
     }
 
     private func evaluate() async {
+        await refreshCalendarEventSnapshots()
+
         let now = Date()
         let runningApplications = NSWorkspace.shared.runningApplications
         let runningBundleIDs = Set(runningApplications.compactMap(\.bundleIdentifier))
@@ -211,6 +217,19 @@ final class MeetingPromptDetector {
         if onPromptRequest?(match.candidate) == true {
             pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
         }
+    }
+
+    private func refreshCalendarEventSnapshots() async {
+        guard TranscriptedPermissionAccess.calendarAccessGranted() else {
+            calendarEventSnapshots = []
+            return
+        }
+
+        let now = Date()
+        calendarEventSnapshots = await calendarReader.fetchMeetingEventSnapshots(
+            start: now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
+            end: now.addingTimeInterval(calendarLookaheadInterval)
+        )
     }
 
     private func installWorkspaceObservers() {
@@ -306,74 +325,66 @@ final class MeetingPromptDetector {
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
     ) -> [ScoredCandidate] {
-        let searchStart = now.addingTimeInterval(-5 * 60)
-        let searchEnd = now.addingTimeInterval(15 * 60)
-        let predicate = eventStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: nil)
-
-        return eventStore.events(matching: predicate)
-            .compactMap { event in
-                scoredCandidate(
-                    from: event,
-                    now: now,
-                    runningBundleIDs: runningBundleIDs,
-                    frontmostBundleID: frontmostBundleID
-                )
-            }
+        calendarEventSnapshots.compactMap { snapshot in
+            scoredCandidate(
+                from: snapshot,
+                now: now,
+                runningBundleIDs: runningBundleIDs,
+                frontmostBundleID: frontmostBundleID
+            )
+        }
     }
 
     private func scoredCandidate(
-        from event: EKEvent,
+        from snapshot: MeetingPromptCalendarEventSnapshot,
         now: Date,
         runningBundleIDs: Set<String>,
         frontmostBundleID: String?
     ) -> ScoredCandidate? {
-        guard !event.isAllDay else { return nil }
-        guard let meetingURL = extractMeetingURL(from: event), let provider = provider(for: meetingURL) else { return nil }
-
-        let startsIn = event.startDate.timeIntervalSince(now)
-        let endsIn = event.endDate.timeIntervalSince(now)
+        let startsIn = snapshot.startDate.timeIntervalSince(now)
+        let endsIn = snapshot.endDate.timeIntervalSince(now)
         let genericWindow = MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
             startsIn: startsIn,
             endsIn: endsIn
         )
         let runtimeReason = activeRuntimeReason(
-            for: provider,
+            for: snapshot.provider,
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         )
         guard genericWindow else { return nil }
 
-        let eventTitle = displayTitle(from: event)
-        let transcriptTitle = suggestedTranscriptTitle(from: event)
+        let eventTitle = displayTitle(from: snapshot)
+        let transcriptTitle = suggestedTranscriptTitle(from: snapshot)
         let detail = buildDetail(eventTitle: eventTitle, startsIn: startsIn, runtimeReason: runtimeReason)
         let score = scoreForCandidate(startsIn: startsIn, runtimeReason: runtimeReason)
 
         return ScoredCandidate(
             candidate: Candidate(
-                id: "calendar:\(event.calendarItemIdentifier)",
+                id: "calendar:\(snapshot.id)",
                 title: "Meeting detected",
                 detail: detail,
-                provider: provider,
+                provider: snapshot.provider,
                 reason: MeetingPromptHeuristics.reason(
                     for: .calendarEvent,
                     hasRuntimeContext: runtimeReason != nil
                 ),
                 source: .calendarEvent,
-                startDate: event.startDate,
-                endDate: event.endDate,
-                meetingURL: meetingURL,
+                startDate: snapshot.startDate,
+                endDate: snapshot.endDate,
+                meetingURL: snapshot.meetingURL,
                 suggestedTranscriptTitle: transcriptTitle
             ),
             score: score
         )
     }
 
-    private func displayTitle(from event: EKEvent) -> String {
-        suggestedTranscriptTitle(from: event) ?? "Upcoming meeting"
+    private func displayTitle(from snapshot: MeetingPromptCalendarEventSnapshot) -> String {
+        suggestedTranscriptTitle(from: snapshot) ?? "Upcoming meeting"
     }
 
-    private func suggestedTranscriptTitle(from event: EKEvent) -> String? {
-        let trimmed = (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    private func suggestedTranscriptTitle(from snapshot: MeetingPromptCalendarEventSnapshot) -> String? {
+        let trimmed = (snapshot.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
@@ -444,7 +455,84 @@ final class MeetingPromptDetector {
         }
     }
 
-    private func extractMeetingURL(from event: EKEvent) -> URL? {
+    private func provider(forBundleIdentifier bundleIdentifier: String) -> MeetingPromptProvider? {
+        MeetingPromptProvider.allCases.first { $0.activeBundleIdentifiers.contains(bundleIdentifier) }
+    }
+
+    private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date) {
+        let existing = runtimeSuppressedUntil[provider] ?? .distantPast
+        runtimeSuppressedUntil[provider] = max(existing, until)
+    }
+
+    private func nextRuntimePromptResumeDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
+        guard let snapshot = nextRelevantCalendarSnapshot(for: provider, after: now) else { return nil }
+
+        let promptDate = snapshot.startDate.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderLeadTime)
+        if promptDate > now {
+            return promptDate
+        }
+
+        return snapshot.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+    }
+
+    private func runtimeSuppressionEndDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
+        nextRelevantCalendarSnapshot(for: provider, after: now)?
+            .endDate
+            .addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+    }
+
+    private func nextRelevantCalendarSnapshot(
+        for targetProvider: MeetingPromptProvider,
+        after now: Date
+    ) -> MeetingPromptCalendarEventSnapshot? {
+        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+
+        return calendarEventSnapshots
+            .filter { $0.provider == targetProvider && $0.endDate > now }
+            .min { $0.startDate < $1.startDate }
+    }
+
+    private func pruneExpiredEntries(now: Date) {
+        snoozedUntil = snoozedUntil.filter { $0.value > now }
+        pendingUntil = pendingUntil.filter { $0.value > now }
+        runtimeSuppressedUntil = runtimeSuppressedUntil.filter { $0.value > now }
+        recentNativeActivity = recentNativeActivity.filter {
+            now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
+        }
+    }
+}
+
+// Plain-value snapshot of a calendar event carrying a recognized meeting link.
+// Built on the reader's queue because EKEvent objects must not cross threads;
+// all-day events and events without a supported meeting URL are dropped here.
+private struct MeetingPromptCalendarEventSnapshot: Sendable {
+    let id: String
+    let title: String?
+    let startDate: Date
+    let endDate: Date
+    let meetingURL: URL
+    let provider: MeetingPromptProvider
+
+    init?(event: EKEvent) {
+        guard !event.isAllDay,
+              let startDate = event.startDate,
+              let endDate = event.endDate,
+              let meetingURL = Self.extractMeetingURL(from: event),
+              let provider = Self.provider(for: meetingURL) else { return nil }
+
+        self.id = event.calendarItemIdentifier
+        self.title = event.title
+        self.startDate = startDate
+        self.endDate = endDate
+        self.meetingURL = meetingURL
+        self.provider = provider
+    }
+
+    private static let meetingURLDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
+    private static func extractMeetingURL(from event: EKEvent) -> URL? {
         if let url = event.url, provider(for: url) != nil {
             return url
         }
@@ -458,8 +546,8 @@ final class MeetingPromptDetector {
         return nil
     }
 
-    private func extractFirstMeetingURL(in text: String) -> URL? {
-        guard let detector = Self.meetingURLDetector else { return nil }
+    private static func extractFirstMeetingURL(in text: String) -> URL? {
+        guard let detector = meetingURLDetector else { return nil }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = detector.matches(in: text, options: [], range: range)
         for match in matches {
@@ -469,66 +557,27 @@ final class MeetingPromptDetector {
         return nil
     }
 
-    private func provider(for url: URL) -> MeetingPromptProvider? {
+    private static func provider(for url: URL) -> MeetingPromptProvider? {
         guard let host = url.host else { return nil }
         return MeetingPromptProvider.provider(forMeetingHost: host)
     }
+}
 
-    private func provider(forBundleIdentifier bundleIdentifier: String) -> MeetingPromptProvider? {
-        MeetingPromptProvider.allCases.first { $0.activeBundleIdentifiers.contains(bundleIdentifier) }
-    }
+// Runs the synchronous EKEventStore queries on a background queue so large
+// calendars never block the main actor. @unchecked Sendable is safe because
+// EKEventStore is documented thread-safe and all queries serialize on `queue`.
+private final class MeetingPromptCalendarReader: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "MeetingPromptDetector.calendar-reader", qos: .utility)
+    private let eventStore = EKEventStore()
 
-    private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date) {
-        let existing = runtimeSuppressedUntil[provider] ?? .distantPast
-        runtimeSuppressedUntil[provider] = max(existing, until)
-    }
-
-    private func nextRuntimePromptResumeDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
-        guard let event = nextRelevantCalendarEvent(for: provider, after: now) else { return nil }
-
-        let promptDate = event.startDate.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderLeadTime)
-        if promptDate > now {
-            return promptDate
-        }
-
-        return event.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
-    }
-
-    private func runtimeSuppressionEndDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
-        nextRelevantCalendarEvent(for: provider, after: now)?
-            .endDate
-            .addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
-    }
-
-    private func nextRelevantCalendarEvent(
-        for targetProvider: MeetingPromptProvider,
-        after now: Date
-    ) -> EKEvent? {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
-
-        let searchStart = now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace)
-        let searchEnd = now.addingTimeInterval(12 * 60 * 60)
-        let predicate = eventStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: nil)
-
-        return eventStore.events(matching: predicate)
-            .filter { !$0.isAllDay && $0.endDate > now }
-            .compactMap { event -> (EKEvent, MeetingPromptProvider)? in
-                guard let url = extractMeetingURL(from: event),
-                      let eventProvider = provider(for: url),
-                      eventProvider == targetProvider else { return nil }
-                return (event, eventProvider)
+    func fetchMeetingEventSnapshots(start: Date, end: Date) async -> [MeetingPromptCalendarEventSnapshot] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                let predicate = self.eventStore.predicateForEvents(withStart: start, end: end, calendars: nil)
+                let snapshots = self.eventStore.events(matching: predicate)
+                    .compactMap { MeetingPromptCalendarEventSnapshot(event: $0) }
+                continuation.resume(returning: snapshots)
             }
-            .map(\.0)
-            .sorted { $0.startDate < $1.startDate }
-            .first
-    }
-
-    private func pruneExpiredEntries(now: Date) {
-        snoozedUntil = snoozedUntil.filter { $0.value > now }
-        pendingUntil = pendingUntil.filter { $0.value > now }
-        runtimeSuppressedUntil = runtimeSuppressedUntil.filter { $0.value > now }
-        recentNativeActivity = recentNativeActivity.filter {
-            now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
         }
     }
 }
