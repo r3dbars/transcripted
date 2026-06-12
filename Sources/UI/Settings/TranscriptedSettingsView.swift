@@ -244,7 +244,10 @@ struct TranscriptedSettingsView: View {
             expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
-        .onChange(of: navigation.selectedPage) { _, page in
+        .onChange(of: navigation.selectedPage) { oldPage, page in
+            if oldPage == .people && page != .people {
+                SpeakerClipPlayback.stop()
+            }
             refreshRecentCaptures()
             if page == .people {
                 speakerPeopleModel.refresh()
