@@ -28,8 +28,10 @@ except ImportError:  # pragma: no cover - Python 3.9+ on supported machines.
 
 REPORT_STEM = "transcripted-nightly-digest"
 DEFAULT_AUTOMATIONS_DIR = Path.home() / ".codex" / "automations"
-DEFAULT_OUTPUT_DIR = Path("/Users/redbars/Delance")
-DEFAULT_REPO = Path("/Users/redbars/transcripted-latest")
+# Derive defaults from this script's location instead of hardcoding one
+# machine's personal paths; both stay overridable via --repo/--output-dir.
+DEFAULT_REPO = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT_DIR = DEFAULT_REPO / "build" / "nightly-digest"
 LOCAL_TZ = ZoneInfo("America/Chicago") if ZoneInfo else timezone.utc
 FRESH_HOURS = 18
 DAU_GOAL = 1000

@@ -189,6 +189,11 @@ enum TranscriptedConstants {
     /// Throttled logging minimum interval
     static let logThrottleInterval: TimeInterval = 0.25
 
+    /// Size cap for append-only JSONL observability logs (events.jsonl,
+    /// reliability.jsonl). On rotation the file is renamed to `<name>.1`,
+    /// bounding disk use at roughly twice this value per log.
+    static let jsonlLogRotationThreshold: UInt64 = 10_000_000  // 10 MB
+
     // MARK: - Error Display
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)

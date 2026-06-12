@@ -14,7 +14,7 @@ For day-to-day agent work, start with `AGENT_START.md` and treat `AGENTS.md` as 
 - optional local-speaker review for people sharing the room mic
 - agent-readable Markdown output saved to disk
 
-The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main`; `DictationSessionController.cancelSession()` is the only remaining compatibility hook from that removed routing.
+The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main` and no compatibility hooks from that routing remain in the source tree.
 
 ## First reads
 
@@ -56,6 +56,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
 - Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
+- Touched `Tools/TranscriptedCaptureKit/**` → `swift test --package-path Tools/TranscriptedCaptureKit` + `swift test --package-path Tools/TranscriptedCLI` + `swift test --package-path Tools/TranscriptedMCP` + `bash run-e2e-smoke.sh`
 - Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
 - Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
@@ -103,6 +104,7 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
 | `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
+| `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations |
 | `Tools/TranscriptedQA` | standalone artifact validation and QA CLI |

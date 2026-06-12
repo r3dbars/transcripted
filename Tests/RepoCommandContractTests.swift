@@ -192,6 +192,37 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dev and beta builds share one swiftc argument source") {
+        let buildScript = readRepoTextFile("scripts/entrypoints/build.sh")
+        let betaScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        let sharedArgs = readRepoTextFile("scripts/entrypoints/lib/swiftc-app-args.sh")
+
+        for (name, contents) in [("build.sh", buildScript), ("build-beta.sh", betaScript)] {
+            assertTrue(
+                contents.contains("lib/swiftc-app-args.sh") && contents.contains("build_app_swiftc_args"),
+                "\(name) must source the shared swiftc argument library instead of hand-maintaining its own flag list"
+            )
+            assertTrue(
+                contents.contains("\"${APP_SWIFTC_LINK_ARGS[@]}\"")
+                    && contents.contains("\"${APP_SOURCE_FILES[@]}\"")
+                    && contents.contains("\"${APP_SWIFTC_TAIL_ARGS[@]}\""),
+                "\(name) must expand the shared swiftc argument arrays (quoted) in its compile invocation"
+            )
+            assertFalse(
+                contents.contains("-framework ScreenCaptureKit") || contents.contains("-lsqlite3"),
+                "\(name) must not regrow an inline framework/library list next to the shared one — that is how the builds diverged before"
+            )
+        }
+        assertTrue(
+            sharedArgs.contains("-framework ScreenCaptureKit") && sharedArgs.contains("-lsqlite3"),
+            "the shared swiftc args must link ScreenCaptureKit and sqlite3 explicitly rather than relying on autolink"
+        )
+        assertTrue(
+            sharedArgs.contains("-not -path 'Sources/TranscriptedCore/*'"),
+            "the shared source list must keep TranscriptedCore out of the app compile; Core links in via libDraftDeps.a"
+        )
+    }
+
     runSuite("Repo command contract - build-deps readiness matches the app build") {
         let buildDepsScript = readRepoTextFile("scripts/entrypoints/build-deps.sh")
         assertTrue(
@@ -330,6 +361,40 @@ func testRepoCommandContract() {
         for check in expectedChecks {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
             assertTrue(preflight.contains(check), "agent preflight should include \(check)")
+        }
+    }
+
+    runSuite("Repo command contract - agent preflight covers every matrix check") {
+        // The matrix is canonical; preflight mirrors it. This parses every
+        // check string out of the matrix so a rule added there without a
+        // matching preflight rule fails fast instead of silently drifting
+        // (which happened with the slow-pasteback, packaged-app-smoke,
+        // privacy-leak-sweep, and local-summary-fixture rules).
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        var inChecks = false
+        var matrixChecks: [String] = []
+        for rawLine in matrix.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if line == "checks:" { inChecks = true; continue }
+            // Any other key (paths:, notes:, rules:) ends the checks list.
+            if line.hasSuffix(":") || line.hasPrefix("- paths:") { inChecks = false; continue }
+            guard inChecks, line.hasPrefix("- \""), line.hasSuffix("\"") else { continue }
+            let check = String(line.dropFirst(3).dropLast(1))
+            if !matrixChecks.contains(check) { matrixChecks.append(check) }
+        }
+
+        assertTrue(
+            matrixChecks.count >= 30,
+            "matrix check extraction should see the full rule set, got \(matrixChecks.count) — did the matrix format change?"
+        )
+        for check in matrixChecks {
+            assertTrue(
+                preflight.contains(check),
+                "agent preflight has drifted from .agents/test-matrix.yml: missing \(check)"
+            )
         }
     }
 
@@ -1774,7 +1839,7 @@ func testRepoCommandContract() {
         let reportBlock = sourceSlice(
             contents,
             from: "private func reportCaptureHealthIfNeeded(",
-            to: "private func savedTranscriptAnalyticsProperties()"
+            to: "private func trackSavedTranscriptAnalyticsInBackground("
         )
 
         assertTrue(
@@ -2598,9 +2663,9 @@ func testRepoCommandContract() {
         assertTrue(
             repoHygieneWorkflow.contains("on:\n  pull_request:")
                 && repoHygieneWorkflow.contains("bash scripts/dev/agent-preflight.sh origin/main")
-                && repoHygieneWorkflow.contains("ruby -c scripts/ops/agent-todo-runner.rb")
-                && repoHygieneWorkflow.contains("python3 -m py_compile scripts/ops/nightly-security-check.py"),
-            "repo should have a lightweight pull_request hygiene workflow for repo plumbing"
+                && repoHygieneWorkflow.contains("find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c")
+                && repoHygieneWorkflow.contains("find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile"),
+            "repo should have a lightweight pull_request hygiene workflow that syntax-checks every script via globs, not a hand-maintained list"
         )
         assertTrue(
             qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")

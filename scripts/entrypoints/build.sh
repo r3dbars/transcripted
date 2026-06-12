@@ -441,17 +441,10 @@ bundle_mcp_server
 # Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
 
-# Build the -I flags for all module directories
-DEPS_MODULE_FLAGS="-I$DEPS_MODULE_ROOT"
-for dir in "$DEPS_MODULE_ROOT"/*/; do
-    [ -d "$dir" ] || continue
-    case "$(basename "$dir")" in
-        *.swiftmodule) continue ;;
-    esac
-    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
-done
-
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
+# Shared frameworks/linker/source arguments — single source of truth with
+# build-beta.sh so dev and shipped builds cannot diverge.
+source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
+build_app_swiftc_args
 
 # Bundle Metal libraries if present
 # MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
@@ -464,40 +457,22 @@ cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
+# Third-party license texts ship with the app: eSpeak NG is GPL-3.0 and the
+# rest (MIT/Apache) require notice preservation in distributed binaries.
+cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
+
 # Compile
 echo "Compiling..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
-SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
     -whole-module-optimization \
     -num-threads "$SWIFTC_NUM_THREADS" \
     -o "$STAGED_APP_BINARY" \
-    -framework AVFoundation \
-    -framework AppKit \
-    -framework SwiftUI \
-    -framework Combine \
-    -framework EventKit \
-    -framework Security \
-    -framework Carbon \
-    -framework Metal \
-    -framework MetalKit \
-    -framework Accelerate \
-    -framework Vision \
-    -framework FoundationModels \
-    -framework MetalPerformanceShaders \
-    -framework MetalPerformanceShadersGraph \
-    -framework Network \
-    -framework ScreenCaptureKit \
-    -framework Sentry \
-    -framework Sparkle \
-    -lc++ \
-    $DEPS_FLAGS \
-    $SOURCE_FILES \
-    -parse-as-library \
-    -target arm64-apple-macos26.0 \
-    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+    "${APP_SWIFTC_LINK_ARGS[@]}" \
+    "${APP_SOURCE_FILES[@]}" \
+    "${APP_SWIFTC_TAIL_ARGS[@]}" \
     2>&1
 
 mv "$STAGED_APP_BINARY" "$APP_BINARY"
@@ -537,8 +512,12 @@ if [ -n "$SIGN_HASH" ] && codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=a
     exit 1
 fi
 
-echo "Running launch smoke check..."
-verify_launch_smoke
+if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" = "1" ]; then
+    echo "⚠️  Skipping launch smoke (TRANSCRIPTED_SKIP_LAUNCH_SMOKE=1) — app launch is UNVERIFIED in this build"
+else
+    echo "Running launch smoke check..."
+    verify_launch_smoke
+fi
 
 echo "Checking performance budget..."
 PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")

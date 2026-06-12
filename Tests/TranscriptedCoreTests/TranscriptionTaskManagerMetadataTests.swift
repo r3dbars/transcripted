@@ -1160,6 +1160,48 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Recovered after cancel."))
     }
 
+    func testCancelAllDuringRetryCancelsInFlightInference() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Never finishes.")
+        let manager = makeManager(speechToText: speech)
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-inflight-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("retry-inflight-system.wav")
+        let outputFolder = tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure",
+            meetingTitle: "Retry in-flight cancel"
+        ))
+        let failedId = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        let retry = Task {
+            await manager.retryFailedTranscription(
+                failedId: failedId,
+                outputFolder: outputFolder
+            )
+        }
+
+        try await waitUntil {
+            speech.didStart
+        }
+        XCTAssertNotNil(manager.activeTasks[failedId], "retry must register its work in activeTasks")
+
+        manager.cancelAll()
+
+        // No release(): the only way the blocked engine can unwind is real task
+        // cancellation reaching the in-flight inference.
+        let didRetry = await retry.value
+
+        XCTAssertFalse(didRetry)
+        XCTAssertTrue(speech.sawCancellation, "cancelAll must cancel the retry's in-flight inference")
+        XCTAssertFalse(speech.didReturn)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+    }
+
     func testRetrySuccessWithoutSpeakerNamingDeletesRetainedFailedAudio() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -2329,6 +2371,7 @@ private final class BlockingMetadataStubSpeechToTextEngine: SpeechToTextEngine {
     var isReady = true
     private(set) var didStart = false
     private(set) var didReturn = false
+    private(set) var sawCancellation = false
     private var shouldRelease = false
     private let transcript: String
 
@@ -2343,6 +2386,10 @@ private final class BlockingMetadataStubSpeechToTextEngine: SpeechToTextEngine {
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
         didStart = true
         while !shouldRelease {
+            if Task.isCancelled {
+                sawCancellation = true
+                throw CancellationError()
+            }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         didReturn = true

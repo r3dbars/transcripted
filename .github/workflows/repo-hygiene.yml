@@ -38,14 +38,12 @@ jobs:
 
       - name: Ruby syntax
         shell: bash
-        run: ruby -c scripts/ops/agent-todo-runner.rb
+        run: |
+          set -euo pipefail
+          find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c
 
       - name: Python syntax
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/ops/validate-meeting-corpus.py
-          python3 -m py_compile scripts/ops/compare-meeting-corpus.py
-          python3 -m py_compile scripts/ops/nightly-security-check.py
-          python3 -m py_compile scripts/ops/generate-nightly-digest.py
-          python3 -m py_compile scripts/ops/build-codex-memory-index.py
+          find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile

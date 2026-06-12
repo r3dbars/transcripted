@@ -168,6 +168,8 @@ When the issue is vague, classify it before editing:
   Overlay, menubar, onboarding, settings, and agent-connect ownership.
 - `Sources/Capture/CLAUDE.md`
   Global trigger and hotkey routing behavior.
+- `Tools/TranscriptedCaptureKit/CLAUDE.md`
+  Shared capture-library resolution and capture-Markdown parsing for the CLI and MCP tools.
 - `Tools/TranscriptedCLI/CLAUDE.md`
   Standalone local-context and offline diarization CLI.
 - `Tools/TranscriptedMCP/CLAUDE.md`

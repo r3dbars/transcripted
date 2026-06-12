@@ -289,11 +289,11 @@ final class TranscriptIndex: @unchecked Sendable {
         let dateOnly = String(transcript.recording.date.prefix(10))
         let wordCount = transcript.speakers.reduce(0) { $0 + $1.wordCount }
 
-        exec("BEGIN EXCLUSIVE")
+        try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
 
-        bindExec(
+        try bindExec(
             "INSERT OR REPLACE INTO meetings (filename, date, datetime, duration_seconds, speaker_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
             bindings: [
                 .text(filename), .text(dateOnly), .text(transcript.recording.date),
@@ -303,7 +303,7 @@ final class TranscriptIndex: @unchecked Sendable {
         )
 
         for speaker in transcript.speakers {
-            bindExec(
+            try bindExec(
                 "INSERT OR REPLACE INTO meeting_speakers (filename, speaker_name, persistent_speaker_id, word_count, speaking_seconds) VALUES (?,?,?,?,?)",
                 bindings: [
                     .text(filename), .text(speaker.name),
@@ -315,7 +315,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         for utterance in transcript.utterances {
             let speakerName = speakers[utterance.speakerId]?.name ?? "Unknown"
-            bindExec(
+            try bindExec(
                 "INSERT INTO utterances (filename, speaker_name, utterance_start, utterance_end, text) VALUES (?,?,?,?,?)",
                 bindings: [
                     .text(filename), .text(speakerName),
@@ -324,7 +324,7 @@ final class TranscriptIndex: @unchecked Sendable {
             )
         }
 
-        exec("COMMIT")
+        try execOrThrow("COMMIT")
         committed = true
         log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
     }
@@ -334,11 +334,11 @@ final class TranscriptIndex: @unchecked Sendable {
 
         let latestEntryDate = day.entries.last?.createdAt ?? "\(day.date)T00:00:00+0000"
 
-        exec("BEGIN EXCLUSIVE")
+        try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
 
-        bindExec(
+        try bindExec(
             "INSERT OR REPLACE INTO dictation_days (filename, date, datetime, markdown_filename, entry_count, word_count, json_modified_at) VALUES (?,?,?,?,?,?,?)",
             bindings: [
                 .text(filename),
@@ -352,7 +352,7 @@ final class TranscriptIndex: @unchecked Sendable {
         )
 
         for entry in day.entries {
-            bindExec(
+            try bindExec(
                 "INSERT INTO dictation_entries (filename, entry_id, title, created_at, source_app_name, source_app_bundle_id, delivery, word_count, character_count, text) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 bindings: [
                     .text(filename),
@@ -369,7 +369,7 @@ final class TranscriptIndex: @unchecked Sendable {
             )
         }
 
-        exec("COMMIT")
+        try execOrThrow("COMMIT")
         committed = true
         log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
     }
@@ -382,15 +382,15 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     private func removeFromIndex(filename: String) throws {
-        exec("BEGIN EXCLUSIVE")
+        try execOrThrow("BEGIN EXCLUSIVE")
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
-        bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
-        bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
-        bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
-        bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
-        bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
-        exec("COMMIT")
+        try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
+        try execOrThrow("COMMIT")
         committed = true
     }
 
@@ -1082,24 +1082,42 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
-    private func bindExec(_ sql: String, bindings: [SQLBinding]) {
+    /// Write-path statement execution. Logs and throws on failure so callers can
+    /// roll back instead of silently committing a half-indexed artifact.
+    private func bindExec(_ sql: String, bindings: [SQLBinding]) throws {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            log("SQL prepare failed: \(dbError()) for: \(sql)")
-            return
+            let message = dbError()
+            log("SQL prepare failed: \(message) for: \(sql)")
+            throw MCPIndexError.queryFailed(message)
         }
         defer { sqlite3_finalize(stmt) }
         for (i, binding) in bindings.enumerated() {
             bind(stmt: stmt, index: Int32(i + 1), value: binding)
         }
         if sqlite3_step(stmt) != SQLITE_DONE {
+            let message = dbError()
+            log("SQL exec failed: \(message) for: \(sql)")
+            throw MCPIndexError.queryFailed(message)
+        }
+    }
+
+    /// Best-effort execution for setup pragmas and rollback-in-defer, where a
+    /// failure is logged but must not throw.
+    private func exec(_ sql: String) {
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
             log("SQL exec failed: \(dbError()) for: \(sql)")
         }
     }
 
-    private func exec(_ sql: String) {
+    /// Write-path variant of exec(). Logs and throws on failure — used for
+    /// BEGIN/COMMIT so a failed transaction boundary aborts the write instead of
+    /// degrading to per-statement autocommit.
+    private func execOrThrow(_ sql: String) throws {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            log("SQL exec failed: \(dbError()) for: \(sql)")
+            let message = dbError()
+            log("SQL exec failed: \(message) for: \(sql)")
+            throw MCPIndexError.queryFailed(message)
         }
     }
 
