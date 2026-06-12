@@ -105,23 +105,6 @@ func testAgentConnectionGuide() {
         )
     }
 
-    runSuite("AgentConnectionGuide.folderAccessPrompt — marks web setup as fallback") {
-        let prompt = AgentConnectionGuide.folderAccessPrompt
-
-        assertTrue(
-            prompt.contains("fallback setup for a web chat or Cowork session"),
-            "folder prompt should be explicit that web chat setup is fallback only"
-        )
-        assertTrue(
-            prompt.contains("Use those granted folders first."),
-            "folder prompt should prefer folders granted in the current chat"
-        )
-        assertTrue(
-            prompt.contains("tell me exactly which folder is missing"),
-            "folder prompt should ask for a precise missing folder instead of guessing"
-        )
-    }
-
     runSuite("AgentConnectionGuide.codexInbox — creates the local setup folder") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedCodexInbox-\(UUID().uuidString)", isDirectory: true)
@@ -192,119 +175,6 @@ func testAgentConnectionGuide() {
         assertTrue(
             promptValue.contains("codex-inbox-setup.md"),
             "Codex setup should keep the URL prompt short and point at the setup file"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpSetupText — avoids source-build instructions for DMG users") {
-        let setupText = AgentConnectionGuide.mcpSetupText
-
-        assertTrue(
-            setupText.contains("Open Transcripted Settings."),
-            "Claude Desktop setup should start inside the app"
-        )
-        assertTrue(
-            setupText.contains("Click Install in Claude."),
-            "Claude Desktop setup should use the exact in-app installer label"
-        )
-        assertTrue(
-            setupText.contains(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path),
-            "Claude Desktop setup should show the stable installed helper path"
-        )
-        assertTrue(
-            !setupText.contains("swift build"),
-            "DMG setup copy should not ask normal users to build from source"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExample — emits parseable Claude config") {
-        let configExample = AgentConnectionGuide.mcpConfigExample
-        let expectedCommandPath = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
-
-        assertEqual(
-            agentGuideTranscriptedCommandPath(inConfig: configExample),
-            expectedCommandPath,
-            "Claude setup JSON should decode to the installed helper path"
-        )
-        assertEqual(
-            agentGuideMCPServerNames(inConfig: configExample),
-            ["transcripted"],
-            "Claude setup JSON should only include Transcripted's server entry"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExample — matches installer formatter") {
-        let expectedCommandPath = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
-
-        assertEqual(
-            AgentConnectionGuide.mcpConfigExample,
-            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: expectedCommandPath),
-            "agent-facing Claude JSON should stay aligned with the installer formatter"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — preserves paths with spaces") {
-        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
-
-        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
-
-        assertEqual(
-            agentGuideTranscriptedCommandPath(inConfig: configExample),
-            commandPath,
-            "agent-facing Claude JSON should preserve helper paths with spaces"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for spaced paths") {
-        let commandPath = "Managed Helpers/Transcripted Direct Tools/transcripted-mcp"
-
-        assertEqual(
-            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
-            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
-            "spaced helper paths should use the same formatter as the installer"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — escapes quotes and backslashes") {
-        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
-
-        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
-
-        assertEqual(
-            agentGuideTranscriptedCommandPath(inConfig: configExample),
-            commandPath,
-            "agent-facing Claude JSON should escape quotes and backslashes without changing the path"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for escaped paths") {
-        let commandPath = #"Managed "Helpers"/Transcripted\Direct/transcripted-mcp"#
-
-        assertEqual(
-            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
-            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
-            "escaped helper paths should not drift between setup copy and installer output"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — escapes newline paths") {
-        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
-
-        let configExample = AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath)
-
-        assertEqual(
-            agentGuideTranscriptedCommandPath(inConfig: configExample),
-            commandPath,
-            "agent-facing Claude JSON should remain parseable when helper paths contain newlines"
-        )
-    }
-
-    runSuite("AgentConnectionGuide.mcpConfigExampleText — matches installer formatter for newline paths") {
-        let commandPath = "Managed Helpers/line\nbreak/transcripted-mcp"
-
-        assertEqual(
-            AgentConnectionGuide.mcpConfigExampleText(commandPath: commandPath),
-            ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath),
-            "newline helper paths should still share the installer's JSON escaping"
         )
     }
 
@@ -515,19 +385,3 @@ private func readAgentConnectionGuideSource() -> String {
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
 
-private func agentGuideMCPServers(inConfig config: String) -> [String: Any]? {
-    guard let data = config.data(using: .utf8),
-          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-        return nil
-    }
-    return root["mcpServers"] as? [String: Any]
-}
-
-private func agentGuideMCPServerNames(inConfig config: String) -> [String] {
-    agentGuideMCPServers(inConfig: config)?.keys.sorted() ?? []
-}
-
-private func agentGuideTranscriptedCommandPath(inConfig config: String) -> String? {
-    let transcripted = agentGuideMCPServers(inConfig: config)?["transcripted"] as? [String: Any]
-    return transcripted?["command"] as? String
-}

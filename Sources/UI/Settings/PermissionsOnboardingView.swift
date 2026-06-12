@@ -44,6 +44,7 @@ struct PermissionsOnboardingView: View {
     @State private var diagnosticsEnabled = CrashReportingPreferences.isEnabled() && AnalyticsPreferences.isEnabled()
     @State private var demoDictationText = ""
     @State private var copiedAgentItem: AgentCopyItem?
+    @State private var claudeDesktopConnectPhase: OnboardingAgentConnectPhase = .idle
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var pollTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
@@ -341,7 +342,9 @@ struct PermissionsOnboardingView: View {
         case .connectAgent:
             ConnectAgentStage(
                 copiedItem: copiedAgentItem,
-                onCopy: copyAgentItem
+                connectPhase: claudeDesktopConnectPhase,
+                onCopy: copyAgentItem,
+                onConnectClaudeDesktop: connectClaudeDesktop
             )
         case .diagnostics:
             CenterStage {
@@ -469,6 +472,42 @@ struct PermissionsOnboardingView: View {
         )
     }
 
+    private func connectClaudeDesktop() {
+        guard claudeDesktopConnectPhase != .connecting else { return }
+        claudeDesktopConnectPhase = .connecting
+
+        AnalyticsReporter.track(
+            "onboarding_agent_cta_clicked",
+            properties: [
+                "agent_cta": "claude_desktop_connect",
+                "step_id": "connect_agent",
+            ]
+        )
+
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
+                }.value
+                claudeDesktopConnectPhase = .connected
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .claudeDesktop,
+                    agentTarget: .claudeDesktop,
+                    surface: .onboarding,
+                    result: .success
+                )
+            } catch {
+                claudeDesktopConnectPhase = .failed(error.localizedDescription)
+                ActivationTelemetry.trackAgentSetupCTA(
+                    setupKind: .claudeDesktop,
+                    agentTarget: .claudeDesktop,
+                    surface: .onboarding,
+                    result: .failed
+                )
+            }
+        }
+    }
+
     private func copyAgentItem(_ item: AgentCopyItem) {
         let value: String
         let agentCTA: String
@@ -476,16 +515,6 @@ struct PermissionsOnboardingView: View {
         let setupKind: ActivationTelemetry.AgentSetupKind
         let agentTarget: ActivationTelemetry.AgentTarget
         switch item {
-        case .claudeDesktopSetup:
-            agentCTA = "claude_desktop_setup"
-            promptKind = .claudeDesktopSetup
-            setupKind = .claudeDesktop
-            agentTarget = .claudeDesktop
-            value = """
-            \(AgentConnectionGuide.mcpSetupText)
-
-            \(AgentConnectionGuide.mcpConfigExample)
-            """
         case .localAgentPrompt:
             agentCTA = "local_agent_prompt"
             promptKind = .localAgentPrompt
@@ -808,8 +837,14 @@ private enum OnboardingUseCase: Hashable {
 }
 
 private enum AgentCopyItem: Hashable {
-    case claudeDesktopSetup
     case localAgentPrompt
+}
+
+private enum OnboardingAgentConnectPhase: Equatable {
+    case idle
+    case connecting
+    case connected
+    case failed(String)
 }
 
 private enum OnboardingNavigationDirection {
@@ -2013,7 +2048,9 @@ private struct ChatBubble: View {
 
 private struct ConnectAgentStage: View {
     let copiedItem: AgentCopyItem?
+    let connectPhase: OnboardingAgentConnectPhase
     let onCopy: (AgentCopyItem) -> Void
+    let onConnectClaudeDesktop: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2024,19 +2061,19 @@ private struct ConnectAgentStage: View {
                 AgentOptionCard(
                     eyebrow: "Option 1 - Start here",
                     title: "Claude Desktop",
-                    detail: "Copy the setup steps, then install Transcripted direct tools from Settings > Agent.",
+                    detail: claudeDesktopDetail,
                     glyph: "◆",
                     color: OnboardingTheme.claude,
-                    buttonTitle: copiedItem == .claudeDesktopSetup ? "Copied" : "Copy steps",
-                    automationIdentifier: "transcripted.onboarding.agent.copy-claude-desktop-steps"
+                    buttonTitle: claudeDesktopButtonTitle,
+                    automationIdentifier: "transcripted.onboarding.agent.connect-claude-desktop"
                 ) {
-                    onCopy(.claudeDesktopSetup)
+                    onConnectClaudeDesktop()
                 }
 
                 AgentOptionCard(
                     eyebrow: "Option 2 - Other apps",
-                    title: "Claude Code, Codex, OpenClaw",
-                    detail: "Copy one prompt for local coding agents that can read your Transcripted Markdown folders.",
+                    title: "Claude Code, Codex, Cursor",
+                    detail: "Copy one prompt for local coding agents, or connect them one click each later in Settings > Agent.",
                     glyph: "●",
                     color: OnboardingTheme.codex,
                     buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
@@ -2057,6 +2094,30 @@ private struct ConnectAgentStage: View {
         }
         .padding(.horizontal, 60)
         .padding(.vertical, 34)
+    }
+
+    private var claudeDesktopDetail: String {
+        switch connectPhase {
+        case .idle, .connecting:
+            return "One click installs Transcripted's direct tools. Restart Claude Desktop afterwards to pick them up."
+        case .connected:
+            return "Direct tools installed. Restart Claude Desktop, then ask it about your latest meeting."
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var claudeDesktopButtonTitle: String {
+        switch connectPhase {
+        case .idle:
+            return "Connect"
+        case .connecting:
+            return "Connecting..."
+        case .connected:
+            return "Connected"
+        case .failed:
+            return "Try again"
+        }
     }
 }
 

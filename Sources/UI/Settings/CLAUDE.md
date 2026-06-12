@@ -18,8 +18,9 @@ settings-side agent connection flow.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
   model choices, custom corrections, Auto Enter apps, failed meetings, and
   recent-meeting audio controls.
-- `AgentConnectionSettingsPage.swift` - Settings' agent page, including Claude
-  Desktop install/copy/reveal flows.
+- `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
+  per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
+  the live-meetings toggle, and the Advanced disclosure.
 - `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
   showing opt-in local AI meeting-summary titles, previews, badges, and menu
   actions.
@@ -68,4 +69,5 @@ Manual checks:
 - failed meeting retry, reveal, delete/dismiss, and retained-audio playback work
 - custom dictionary edits persist and preview correctly
 - Auto Enter app allow/remove controls work
-- Agent page can copy prompts, reveal config, and install/repair Claude Desktop
+- Agent page can connect detected agents, copy the universal prompt, reveal
+  config and folders, and set up the Codex inbox from Advanced

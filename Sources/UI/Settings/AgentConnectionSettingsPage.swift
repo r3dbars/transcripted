@@ -1,18 +1,29 @@
 import AppKit
 import SwiftUI
 
+/// Settings' Agent page. One mental model: pick the agent you use, click
+/// Connect. Every row points the agent's own config at the same installed
+/// `transcripted-mcp` helper; the universal copy-prompt row covers everything
+/// else. Live-meeting sharing is a single toggle, and the long tail (folders,
+/// Codex inbox automation, config details) lives behind Advanced.
 struct AgentConnectionSettingsPage: View {
-    @StateObject private var viewModel = AgentConnectionViewModel(
-        context: AgentConnectionContext(meetingTitle: nil, meetingDate: nil, transcriptURL: nil)
-    )
+    private enum RowPhase: Equatable {
+        case idle
+        case connecting
+        case connected
+        case failed(String)
+    }
+
+    private let meetingsFolderURL = AgentConnectionGuide.meetingsFolder
+    private let dictationsFolderURL = AgentConnectionGuide.dictationsFolder
     private let meetingSession: MeetingSessionController?
-    @State private var claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
-    @State private var claudeDesktopInstallResult: ClaudeDesktopIntegrationInstallResult?
-    @State private var claudeDesktopInstallError: String?
-    @State private var isInstallingClaudeDesktop = false
-    @State private var copiedClaudeDesktopConfig = false
+
+    @State private var detectedAgents: Set<AgentMCPAgent> = []
+    @State private var connectedAgents: Set<AgentMCPAgent> = []
+    @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
+    @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
     @State private var copiedLocalAgentPrompt = false
-    @State private var copiedFolderPrompt = false
+    @State private var copiedClaudeDesktopConfig = false
     @State private var copiedFolderPaths = false
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
@@ -31,146 +42,123 @@ struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Install direct tools for Claude Desktop, or copy a prompt for local coding agents."
+                summary: "Give your AI tools access to your meetings and dictations."
             )
 
-            agentActionSection
+            agentListSection
+            liveMeetingSection
+            advancedSection
+        }
+        .onAppear(perform: refreshAgentStates)
+    }
 
-            if let claudeDesktopInstallResult {
-                ClaudeDesktopSelfTestResultView(result: claudeDesktopInstallResult)
+    // MARK: - Agent rows
+
+    private var agentListSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(AgentMCPAgent.allCases) { agent in
+                if detectedAgents.contains(agent) {
+                    agentRow(agent)
+                }
             }
 
-            if let claudeDesktopInstallError {
-                Label(claudeDesktopInstallError, systemImage: "exclamationmark.triangle.fill")
+            copyPromptRow
+
+            if !detectedAgents.contains(.claudeDesktop) {
+                SettingsInlineActionButton(
+                    title: "Get Claude Desktop",
+                    symbolName: "arrow.down.circle",
+                    tone: .accent,
+                    automationIdentifier: "transcripted.settings.agent.get-claude-desktop"
+                ) {
+                    openClaudeDesktopDownload()
+                }
+            }
+        }
+    }
+
+    private func agentRow(_ agent: AgentMCPAgent) -> some View {
+        let phase = rowPhases[agent] ?? .idle
+        let isConnected = connectedAgents.contains(agent)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: agentSymbol(agent))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agent.displayName)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(agentRowDetail(agent, isConnected: isConnected, phase: phase))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 12)
+
+                if isConnected, phase != .connecting {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                } else {
+                    SettingsInlineActionButton(
+                        title: phase == .connecting ? "Connecting..." : "Connect",
+                        symbolName: phase == .connecting ? "hourglass" : "link",
+                        tone: .accent,
+                        automationIdentifier: "transcripted.settings.agent.connect.\(agent.rawValue)"
+                    ) {
+                        connect(agent)
+                    }
+                    .disabled(phase == .connecting)
+                }
+            }
+
+            if case .failed(let message) = phase {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            SettingsSection(
-                title: "Details",
-                detail: "Advanced setup."
-            ) {
-                AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ClaudeDesktopStatusRow(status: claudeDesktopStatus)
-
-                        HStack(spacing: 10) {
-                            SettingsInlineActionButton(
-                                title: copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config",
-                                symbolName: "doc.on.doc"
-                            ) {
-                                ActivationTelemetry.trackAgentPromptAction(
-                                    promptKind: .claudeDesktopSetup,
-                                    actionKind: .copied,
-                                    agentTarget: .claudeDesktop,
-                                    surface: .agentSettings
-                                )
-                                copyText(
-                                    ClaudeDesktopIntegrationInstaller.configSnippet(),
-                                    showingCopiedFeedback: $copiedClaudeDesktopConfig
-                                )
-                            }
-
-                            SettingsInlineActionButton(title: "Show Config", symbolName: "folder") {
-                                revealClaudeDesktopConfig()
-                            }
-                            .disabled(!claudeDesktopStatus.configExists)
-                        }
-
-                        AgentFolderRow(
-                            name: "Meetings",
-                            detail: "Meeting Markdown files.",
-                            path: viewModel.context.meetingsFolderURL.path,
-                            isAvailable: viewModel.fileExists(viewModel.context.meetingsFolderURL)
-                        ) {
-                            viewModel.reveal(viewModel.context.meetingsFolderURL)
-                        }
-
-                        AgentFolderRow(
-                            name: "Dictation",
-                            detail: "Dictation Markdown files.",
-                            path: viewModel.context.dictationsFolderURL.path,
-                            isAvailable: viewModel.fileExists(viewModel.context.dictationsFolderURL)
-                        ) {
-                            viewModel.reveal(viewModel.context.dictationsFolderURL)
-                        }
-
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Web chats are fallback only", systemImage: "globe")
-                                .font(.subheadline.weight(.semibold))
-
-                            Text("Claude web, ChatGPT web, and mobile chats usually cannot see your Mac. Cowork needs the sidecar folder granted for live meetings.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            HStack(spacing: 10) {
-                                SettingsInlineActionButton(
-                                    title: copiedFolderPrompt ? "Copied" : "Copy Folder Prompt",
-                                    symbolName: "doc.on.doc"
-                                ) {
-                                    ActivationTelemetry.trackAgentPromptAction(
-                                        promptKind: .folderAccess,
-                                        actionKind: .copied,
-                                        agentTarget: .fallbackFolder,
-                                        surface: .agentSettings
-                                    )
-                                    copyText(
-                                        AgentConnectionGuide.folderAccessPrompt,
-                                        showingCopiedFeedback: $copiedFolderPrompt
-                                    )
-                                }
-
-                                SettingsInlineActionButton(
-                                    title: copiedFolderPaths ? "Copied" : "Copy Paths",
-                                    symbolName: "folder"
-                                ) {
-                                    ActivationTelemetry.trackAgentPromptAction(
-                                        promptKind: .folderPaths,
-                                        actionKind: .copied,
-                                        agentTarget: .fallbackFolder,
-                                        surface: .agentSettings
-                                    )
-                                    copyText(
-                                        AgentConnectionGuide.folderPathsText,
-                                        showingCopiedFeedback: $copiedFolderPaths
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            if agent == .claudeDesktop, let claudeDesktopSelfTest {
+                Text("\(claudeDesktopSelfTest.meetingFileCount) meetings, \(claudeDesktopSelfTest.dictationFileCount) dictation files visible.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .onAppear(perform: refreshClaudeDesktopStatus)
+        .modifier(AgentRowCard())
     }
 
-    private var agentActionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                AgentConnectActionButton(
-                    symbolName: claudeDesktopActionSymbol,
-                    title: claudeDesktopActionTitle,
-                    subtitle: "Claude Desktop",
-                    statusText: claudeDesktopStatusText,
-                    statusSymbolName: claudeDesktopStatusSymbol,
-                    tint: claudeDesktopStatusTint,
-                    isEnabled: claudeDesktopActionEnabled
-                ) {
-                    installClaudeDesktop()
+    private var copyPromptRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Something else")
+                        .font(.subheadline.weight(.semibold))
+
+                    Text("Windsurf, Zed, web chats — paste one prompt.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                AgentConnectActionButton(
-                    symbolName: copiedLocalAgentPrompt ? "checkmark" : "chevron.left.forwardslash.chevron.right",
-                    title: copiedLocalAgentPrompt ? "Copied" : "Copy for Agent",
-                    subtitle: "Codex, Claude Code, Cursor",
-                    statusText: "Local files",
-                    statusSymbolName: "folder",
-                    tint: Color(nsColor: .systemBlue),
-                    isEnabled: true
+                Spacer(minLength: 12)
+
+                SettingsInlineActionButton(
+                    title: copiedLocalAgentPrompt ? "Copied" : "Copy prompt",
+                    symbolName: copiedLocalAgentPrompt ? "checkmark" : "doc.on.doc",
+                    automationIdentifier: "transcripted.settings.agent.copy-prompt"
                 ) {
                     ActivationTelemetry.trackAgentSetupCTA(
                         setupKind: .localPrompt,
@@ -189,220 +177,317 @@ struct AgentConnectionSettingsPage: View {
                     )
                 }
             }
+        }
+        .modifier(AgentRowCard())
+    }
 
-            if let attentionMessage = claudeDesktopStatus.attentionMessage {
-                Label(attentionMessage, systemImage: claudeDesktopStatusSymbol)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(claudeDesktopStatusTint)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
+    private func agentSymbol(_ agent: AgentMCPAgent) -> String {
+        switch agent {
+        case .claudeDesktop: return "bubble.left.and.text.bubble.right"
+        case .claudeCode: return "terminal"
+        case .codex: return "chevron.left.forwardslash.chevron.right"
+        case .cursor: return "cursorarrow.rays"
+        }
+    }
+
+    private func agentRowDetail(_ agent: AgentMCPAgent, isConnected: Bool, phase: RowPhase) -> String {
+        if phase == .connected || (isConnected && phase == .idle) {
+            switch agent {
+            case .claudeDesktop:
+                return "Direct tools installed. Restart Claude Desktop after updates."
+            case .claudeCode, .codex, .cursor:
+                return "Direct tools registered. Restart \(agent.displayName) if it's running."
+            }
+        }
+        return agent.detail
+    }
+
+    // MARK: - Live meetings
+
+    private var liveMeetingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $liveMeetingCodexEnabled) {
+                Label("Live meetings", systemImage: "waveform")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .toggleStyle(.switch)
+            .onChange(of: liveMeetingCodexEnabled) { _, enabled in
+                if enabled {
+                    prepareLiveMeetingSidecarWorkspace()
+                } else {
+                    meetingSession?.stopLiveCodexSessionFromSettings()
+                    stopLiveMeetingSidecarPreview()
+                }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            Text("Let connected agents follow a meeting while it records, from a local live-transcript folder.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if liveMeetingCodexEnabled {
                 SettingsInlineActionButton(
-                    title: openedCodexInboxSetup ? "Opened Codex Setup" : "Set up Codex Inbox",
-                    symbolName: openedCodexInboxSetup ? "checkmark" : "tray.and.arrow.down",
+                    title: openedLiveMeetingPreview ? "Opened Live View" : "Open Live View",
+                    symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
+                    tone: .accent,
+                    automationIdentifier: "transcripted.settings.agent.open-live-view"
+                ) {
+                    openLiveMeetingPreview()
+                }
+            }
+
+            if let liveMeetingCodexSetupError {
+                Label(liveMeetingCodexSetupError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: - Advanced
+
+    private var advancedSection: some View {
+        SettingsSection(
+            title: "Advanced",
+            detail: "Folders, automations, and config details."
+        ) {
+            AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
+                VStack(alignment: .leading, spacing: 14) {
+                    folderDetails
+                    Divider()
+                    codexInboxDetails
+                    Divider()
+                    liveSidecarAgentDetails
+                    Divider()
+                    claudeDesktopConfigDetails
+                }
+            }
+        }
+    }
+
+    private var folderDetails: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            AgentFolderRow(
+                name: "Meetings",
+                detail: "Meeting Markdown files.",
+                path: meetingsFolderURL.path,
+                isAvailable: folderExists(meetingsFolderURL)
+            ) {
+                reveal(meetingsFolderURL)
+            }
+
+            AgentFolderRow(
+                name: "Dictation",
+                detail: "Dictation Markdown files.",
+                path: dictationsFolderURL.path,
+                isAvailable: folderExists(dictationsFolderURL)
+            ) {
+                reveal(dictationsFolderURL)
+            }
+
+            SettingsInlineActionButton(
+                title: copiedFolderPaths ? "Copied" : "Copy Paths",
+                symbolName: "folder",
+                automationIdentifier: "transcripted.settings.agent.copy-folder-paths"
+            ) {
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .folderPaths,
+                    actionKind: .copied,
+                    agentTarget: .fallbackFolder,
+                    surface: .agentSettings
+                )
+                copyText(
+                    AgentConnectionGuide.folderPathsText,
+                    showingCopiedFeedback: $copiedFolderPaths
+                )
+            }
+        }
+    }
+
+    private var codexInboxDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Codex meeting watcher", systemImage: "tray.and.arrow.down")
+                .font(.subheadline.weight(.semibold))
+
+            Text("A pinned Codex chat that checks for new meetings during work hours and posts a short after-action report.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            SettingsInlineActionButton(
+                title: openedCodexInboxSetup ? "Opened Codex Setup" : "Set up Codex Inbox",
+                symbolName: openedCodexInboxSetup ? "checkmark" : "tray.and.arrow.down",
+                tone: .accent,
+                automationIdentifier: "transcripted.settings.agent.codex-inbox"
+            ) {
+                setupCodexInbox()
+            }
+
+            if let codexInboxSetupError {
+                Label(codexInboxSetupError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var liveSidecarAgentDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Live meeting room in an agent", systemImage: "waveform")
+                .font(.subheadline.weight(.semibold))
+
+            Text("Set up a dedicated Codex thread or Claude Cowork session that watches the live-meeting folder.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                SettingsInlineActionButton(
+                    title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
+                    symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
                     tone: .accent
                 ) {
-                    setupCodexInbox()
+                    setupLiveMeetingCodex()
                 }
 
-                Text("Want a pinned Codex chat for Transcripted? This opens Codex with a setup prompt. Send it, then pin the chat in Codex.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let codexInboxSetupError {
-                    Label(codexInboxSetupError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                SettingsInlineActionButton(
+                    title: copiedLiveMeetingCoworkSetup ? "Copied Cowork" : "Copy for Cowork",
+                    symbolName: copiedLiveMeetingCoworkSetup ? "checkmark" : "doc.on.doc",
+                    tone: .accent
+                ) {
+                    copyLiveMeetingCoworkSetup()
                 }
             }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $liveMeetingCodexEnabled) {
-                    Label("Live meeting sidecar", systemImage: "waveform")
-                        .font(.subheadline.weight(.semibold))
+    private var claudeDesktopConfigDetails: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Claude Desktop config", systemImage: "gearshape.2")
+                .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 10) {
+                SettingsInlineActionButton(
+                    title: copiedClaudeDesktopConfig ? "Copied" : "Copy Claude Config",
+                    symbolName: "doc.on.doc"
+                ) {
+                    ActivationTelemetry.trackAgentPromptAction(
+                        promptKind: .claudeDesktopSetup,
+                        actionKind: .copied,
+                        agentTarget: .claudeDesktop,
+                        surface: .agentSettings
+                    )
+                    copyText(
+                        ClaudeDesktopIntegrationInstaller.configSnippet(),
+                        showingCopiedFeedback: $copiedClaudeDesktopConfig
+                    )
                 }
-                .toggleStyle(.switch)
-                .onChange(of: liveMeetingCodexEnabled) { _, enabled in
-                    if enabled {
-                        prepareLiveMeetingSidecarWorkspace()
-                    } else {
-                        meetingSession?.stopLiveCodexSessionFromSettings()
-                        stopLiveMeetingSidecarPreview()
+
+                SettingsInlineActionButton(title: "Show Config", symbolName: "folder") {
+                    revealClaudeDesktopConfig()
+                }
+                .disabled(!FileManager.default.fileExists(atPath: ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path))
+            }
+        }
+    }
+
+    // MARK: - State refresh
+
+    private func refreshAgentStates() {
+        Task {
+            let states = await Task.detached(priority: .userInitiated) { () -> (detected: Set<AgentMCPAgent>, connected: Set<AgentMCPAgent>) in
+                var detected: Set<AgentMCPAgent> = []
+                var connected: Set<AgentMCPAgent> = []
+                for agent in AgentMCPAgent.allCases {
+                    if AgentMCPConnector.isDetected(agent) {
+                        detected.insert(agent)
+                    }
+                    if AgentMCPConnector.isConnected(agent) {
+                        connected.insert(agent)
                     }
                 }
+                return (detected, connected)
+            }.value
 
-                HStack(spacing: 10) {
-                    SettingsInlineActionButton(
-                        title: openedLiveMeetingCodexSetup ? "Opened Codex" : "Open in Codex",
-                        symbolName: openedLiveMeetingCodexSetup ? "checkmark" : "bubble.left.and.text.bubble.right",
-                        tone: .accent
-                    ) {
-                        setupLiveMeetingCodex()
-                    }
-
-                    SettingsInlineActionButton(
-                        title: copiedLiveMeetingCoworkSetup ? "Copied Cowork" : "Copy for Cowork",
-                        symbolName: copiedLiveMeetingCoworkSetup ? "checkmark" : "doc.on.doc",
-                        tone: .accent
-                    ) {
-                        copyLiveMeetingCoworkSetup()
-                    }
-
-                    SettingsInlineActionButton(
-                        title: openedLiveMeetingPreview ? "Opened Preview" : "Open Preview",
-                        symbolName: openedLiveMeetingPreview ? "checkmark" : "doc.text",
-                        tone: .accent
-                    ) {
-                        openLiveMeetingPreview()
-                    }
-                }
-
-                Text("Use the same local sidecar from Codex or Claude Cowork. Codex can open the workspace directly; Cowork gets a copied setup prompt and folder path.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let liveMeetingCodexSetupError {
-                    Label(liveMeetingCodexSetupError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if !claudeDesktopStatus.claudeDesktopLikelyInstalled {
-                SettingsInlineActionButton(title: "Get Claude Desktop", symbolName: "arrow.down.circle", tone: .accent) {
-                    openClaudeDesktopDownload()
-                }
-            }
+            // Connected agents stay listed even if detection misses them —
+            // the user clearly has the agent if its config points at us.
+            detectedAgents = states.detected.union(states.connected)
+            connectedAgents = states.connected
+            // Fresh on-disk state supersedes stale per-row phases (e.g. an
+            // old failure message); only in-flight connects survive.
+            rowPhases = rowPhases.filter { $0.value == .connecting }
         }
     }
 
-    private var claudeDesktopActionTitle: String {
-        if isInstallingClaudeDesktop {
-            return "Installing..."
+    // MARK: - Connect
+
+    private func connect(_ agent: AgentMCPAgent) {
+        guard rowPhases[agent] != .connecting else { return }
+        rowPhases[agent] = .connecting
+        if agent == .claudeDesktop {
+            claudeDesktopSelfTest = nil
         }
-
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return "Install in Claude"
-        case .notInstalled:
-            return "Install in Claude"
-        case .needsRepair:
-            if claudeDesktopStatus.installedBinaryExists,
-               !claudeDesktopStatus.installedBinaryMatchesBundled {
-                return "Update Claude Helper"
-            }
-            return "Repair Claude Setup"
-        }
-    }
-
-    private var claudeDesktopActionSymbol: String {
-        if isInstallingClaudeDesktop {
-            return "hourglass"
-        }
-
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return "checkmark"
-        case .notInstalled:
-            return "sparkles"
-        case .needsRepair:
-            return "arrow.clockwise"
-        }
-    }
-
-    private var claudeDesktopActionEnabled: Bool {
-        !isInstallingClaudeDesktop
-            && claudeDesktopStatus.bundledBinaryExists
-    }
-
-    private var claudeDesktopStatusText: String {
-        if !claudeDesktopStatus.bundledBinaryExists {
-            return "Missing"
-        }
-
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return "Installed"
-        case .notInstalled:
-            return "Not installed"
-        case .needsRepair:
-            if claudeDesktopStatus.installedBinaryExists,
-               !claudeDesktopStatus.installedBinaryMatchesBundled {
-                return "Helper stale"
-            }
-            return "Repair"
-        }
-    }
-
-    private var claudeDesktopStatusSymbol: String {
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return "checkmark.circle.fill"
-        case .notInstalled:
-            return "arrow.right.circle"
-        case .needsRepair:
-            return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var claudeDesktopStatusTint: Color {
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return .green
-        case .notInstalled:
-            return Color(nsColor: .systemOrange)
-        case .needsRepair:
-            return .orange
-        }
-    }
-
-    private func refreshClaudeDesktopStatus() {
-        claudeDesktopStatus = ClaudeDesktopIntegrationInstaller.currentStatus()
-    }
-
-    private func installClaudeDesktop() {
-        guard !isInstallingClaudeDesktop else { return }
-        let priorStatus = claudeDesktopActivationPriorStatus
-        isInstallingClaudeDesktop = true
-        claudeDesktopInstallResult = nil
-        claudeDesktopInstallError = nil
+        let priorStatus: ActivationTelemetry.AgentSetupPriorStatus =
+            connectedAgents.contains(agent) ? .installed : .notInstalled
 
         Task {
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop()
+                let selfTest = try await Task.detached(priority: .userInitiated) { () -> TranscriptedMCPSelfTest? in
+                    if agent == .claudeDesktop {
+                        return try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop().selfTest
+                    }
+                    let helper = try AgentMCPConnector.ensureHelperInstalled()
+                    try AgentMCPConnector.connect(agent, helperCommandPath: helper.path)
+                    return nil
                 }.value
 
-                claudeDesktopInstallResult = result
-                refreshClaudeDesktopStatus()
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .claudeDesktop,
-                    agentTarget: .claudeDesktop,
-                    surface: .agentSettings,
-                    priorStatus: priorStatus,
-                    result: .success
-                )
+                rowPhases[agent] = .connected
+                connectedAgents.insert(agent)
+                if agent == .claudeDesktop {
+                    claudeDesktopSelfTest = selfTest
+                }
+                trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {
-                claudeDesktopInstallError = error.localizedDescription
-                refreshClaudeDesktopStatus()
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .claudeDesktop,
-                    agentTarget: .claudeDesktop,
-                    surface: .agentSettings,
-                    priorStatus: priorStatus,
-                    result: .failed
-                )
+                rowPhases[agent] = .failed(error.localizedDescription)
+                trackConnect(agent, priorStatus: priorStatus, result: .failed)
             }
-
-            isInstallingClaudeDesktop = false
         }
     }
+
+    private func trackConnect(
+        _ agent: AgentMCPAgent,
+        priorStatus: ActivationTelemetry.AgentSetupPriorStatus,
+        result: ActivationTelemetry.AgentSetupResult
+    ) {
+        let setupKind: ActivationTelemetry.AgentSetupKind
+        let agentTarget: ActivationTelemetry.AgentTarget
+        switch agent {
+        case .claudeDesktop:
+            setupKind = .claudeDesktop
+            agentTarget = .claudeDesktop
+        case .claudeCode:
+            setupKind = .claudeCode
+            agentTarget = .claudeCode
+        case .codex:
+            setupKind = .codexTools
+            agentTarget = .codex
+        case .cursor:
+            setupKind = .cursor
+            agentTarget = .cursor
+        }
+
+        ActivationTelemetry.trackAgentSetupCTA(
+            setupKind: setupKind,
+            agentTarget: agentTarget,
+            surface: .agentSettings,
+            priorStatus: priorStatus,
+            result: result
+        )
+    }
+
+    // MARK: - Codex inbox
 
     private func setupCodexInbox() {
         codexInboxSetupError = nil
@@ -441,11 +526,7 @@ struct AgentConnectionSettingsPage: View {
                     agentTarget: .codex,
                     surface: .agentSettings
                 )
-                openedCodexInboxSetup = true
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    openedCodexInboxSetup = false
-                }
+                showCopiedFeedback($openedCodexInboxSetup)
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
                 codexInboxSetupError = "Codex was not found. The setup prompt was copied and the inbox folder is open."
@@ -466,6 +547,8 @@ struct AgentConnectionSettingsPage: View {
             )
         }
     }
+
+    // MARK: - Live sidecar
 
     private func setupLiveMeetingCodex() {
         liveMeetingCodexSetupError = nil
@@ -506,11 +589,7 @@ struct AgentConnectionSettingsPage: View {
                     agentTarget: .codex,
                     surface: .agentSettings
                 )
-                openedLiveMeetingCodexSetup = true
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    openedLiveMeetingCodexSetup = false
-                }
+                showCopiedFeedback($openedLiveMeetingCodexSetup)
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 liveMeetingCodexSetupError = "Codex was not found. The setup prompt was copied and the live folder is open."
@@ -522,11 +601,8 @@ struct AgentConnectionSettingsPage: View {
                 )
             }
         } catch {
-            liveMeetingCodexEnabled = false
-            LiveMeetingCodexPreferences.setEnabled(false)
-            meetingSession?.stopLiveCodexSessionFromSettings()
-            stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            disableLiveMeetingSidecarAfterFailure()
+            liveMeetingCodexSetupError = "Could not set up Live Meetings: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .codex,
@@ -542,11 +618,8 @@ struct AgentConnectionSettingsPage: View {
         do {
             _ = try prepareLiveMeetingSidecarWorkspaceForUse()
         } catch {
-            liveMeetingCodexEnabled = false
-            LiveMeetingCodexPreferences.setEnabled(false)
-            meetingSession?.stopLiveCodexSessionFromSettings()
-            stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not prepare Live Sidecar: \(error.localizedDescription)"
+            disableLiveMeetingSidecarAfterFailure()
+            liveMeetingCodexSetupError = "Could not prepare Live Meetings: \(error.localizedDescription)"
         }
     }
 
@@ -569,18 +642,11 @@ struct AgentConnectionSettingsPage: View {
                 agentTarget: .cowork,
                 surface: .agentSettings
             )
-            copiedLiveMeetingCoworkSetup = true
             NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                copiedLiveMeetingCoworkSetup = false
-            }
+            showCopiedFeedback($copiedLiveMeetingCoworkSetup)
         } catch {
-            liveMeetingCodexEnabled = false
-            LiveMeetingCodexPreferences.setEnabled(false)
-            meetingSession?.stopLiveCodexSessionFromSettings()
-            stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not set up Live Sidecar: \(error.localizedDescription)"
+            disableLiveMeetingSidecarAfterFailure()
+            liveMeetingCodexSetupError = "Could not set up Live Meetings: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .cowork,
@@ -619,14 +685,10 @@ struct AgentConnectionSettingsPage: View {
                     agentTarget: .localAgent,
                     surface: .agentSettings
                 )
-                openedLiveMeetingPreview = true
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    openedLiveMeetingPreview = false
-                }
+                showCopiedFeedback($openedLiveMeetingPreview)
             } else {
                 NSWorkspace.shared.activateFileViewerSelecting([previewURL])
-                liveMeetingCodexSetupError = "The live preview is ready at \(previewURL.absoluteString)."
+                liveMeetingCodexSetupError = "The live view is ready at \(previewURL.absoluteString)."
                 ActivationTelemetry.trackAgentSetupCTA(
                     setupKind: .livePreview,
                     agentTarget: .localAgent,
@@ -635,11 +697,8 @@ struct AgentConnectionSettingsPage: View {
                 )
             }
         } catch {
-            liveMeetingCodexEnabled = false
-            LiveMeetingCodexPreferences.setEnabled(false)
-            meetingSession?.stopLiveCodexSessionFromSettings()
-            stopLiveMeetingSidecarPreview()
-            liveMeetingCodexSetupError = "Could not open Live Preview: \(error.localizedDescription)"
+            disableLiveMeetingSidecarAfterFailure()
+            liveMeetingCodexSetupError = "Could not open Live View: \(error.localizedDescription)"
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,
@@ -663,21 +722,34 @@ struct AgentConnectionSettingsPage: View {
         }
     }
 
+    private func disableLiveMeetingSidecarAfterFailure() {
+        liveMeetingCodexEnabled = false
+        LiveMeetingCodexPreferences.setEnabled(false)
+        meetingSession?.stopLiveCodexSessionFromSettings()
+        stopLiveMeetingSidecarPreview()
+    }
+
+    // MARK: - Small helpers
+
     private func copyText(_ text: String, showingCopiedFeedback copiedFlag: Binding<Bool>? = nil) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
 
         guard let copiedFlag else { return }
-        copiedFlag.wrappedValue = true
+        showCopiedFeedback(copiedFlag)
+    }
+
+    private func showCopiedFeedback(_ flag: Binding<Bool>) {
+        flag.wrappedValue = true
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            copiedFlag.wrappedValue = false
+            flag.wrappedValue = false
         }
     }
 
     private func revealClaudeDesktopConfig() {
-        NSWorkspace.shared.activateFileViewerSelecting([claudeDesktopStatus.configURL])
+        NSWorkspace.shared.activateFileViewerSelecting([ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL])
     }
 
     private func openClaudeDesktopDownload() {
@@ -686,88 +758,33 @@ struct AgentConnectionSettingsPage: View {
             setupKind: .claudeDesktop,
             agentTarget: .claudeDesktop,
             surface: .agentSettings,
-            priorStatus: claudeDesktopActivationPriorStatus
+            priorStatus: .notInstalled
         )
         NSWorkspace.shared.open(url)
     }
 
-    private var claudeDesktopActivationPriorStatus: ActivationTelemetry.AgentSetupPriorStatus {
-        switch claudeDesktopStatus.state {
-        case .installed:
-            return .installed
-        case .notInstalled:
-            return .notInstalled
-        case .needsRepair:
-            return .needsRepair
-        }
+    private func folderExists(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private func reveal(_ url: URL) {
+        let target = folderExists(url) ? url : url.deletingLastPathComponent()
+        NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 }
 
-private struct AgentConnectActionButton: View {
-    let symbolName: String
-    let title: String
-    let subtitle: String
-    let statusText: String
-    let statusSymbolName: String
-    let tint: Color
-    let isEnabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: symbolName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 42, height: 42)
-                    .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(tint.opacity(0.18), lineWidth: 1)
-                    )
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(title)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.88)
-
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
-
-                    Label(statusText, systemImage: statusSymbolName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(tint)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.88)
-                        .padding(.top, 2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(tint.opacity(isEnabled ? 0.95 : 0.45))
-                    .frame(width: 26, height: 26)
-                    .background(tint.opacity(isEnabled ? 0.11 : 0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: .accent,
-            cornerRadius: 8,
-            normalFill: Color(nsColor: .controlBackgroundColor).opacity(0.78),
-            normalStroke: tint.opacity(0.28),
-            hoverFill: Color(nsColor: .controlBackgroundColor).opacity(0.95),
-            pressedFill: Color(nsColor: .controlBackgroundColor).opacity(0.88),
-            hoverStroke: tint.opacity(0.56)
-        ))
-        .disabled(!isEnabled)
+private struct AgentRowCard: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
@@ -833,125 +850,6 @@ private struct AgentSetupDetailsDisclosure<Content: View>: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-    }
-}
-
-private struct ClaudeDesktopStatusRow: View {
-    let status: ClaudeDesktopIntegrationStatus
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbolName)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let configuredPath = status.configuredCommandPath,
-                   configuredPath != status.installedBinaryURL.path {
-                    Text(configuredPath)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-                }
-            }
-
-            Spacer(minLength: 12)
-        }
-    }
-
-    private var symbolName: String {
-        switch status.state {
-        case .installed:
-            return "checkmark.circle.fill"
-        case .notInstalled:
-            return "circle"
-        case .needsRepair:
-            return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch status.state {
-        case .installed:
-            return .green
-        case .notInstalled:
-            return .secondary
-        case .needsRepair:
-            return .orange
-        }
-    }
-
-    private var title: String {
-        switch status.state {
-        case .installed:
-            return "Installed"
-        case .notInstalled:
-            return "Not installed yet"
-        case .needsRepair:
-            return "Needs update"
-        }
-    }
-
-    private var detail: String {
-        if !status.bundledBinaryExists {
-            return "This app build does not include Transcripted direct tools yet."
-        }
-
-        if !status.configIsReadable {
-            return "Claude Desktop config is not readable JSON. Install will back it up and write a clean config."
-        }
-
-        if let attentionMessage = status.attentionMessage {
-            return attentionMessage
-        }
-
-        switch status.state {
-        case .installed:
-            return "Claude Desktop is configured. Restart Claude Desktop if you just installed it."
-        case .notInstalled:
-            return status.claudeDesktopLikelyInstalled
-                ? "Click Install in Claude, then restart Claude Desktop."
-                : "Claude Desktop was not found. You can still install now, then install Claude Desktop."
-        case .needsRepair:
-            return "Claude Desktop points at another Transcripted server. Install will update it."
-        }
-    }
-}
-
-private struct ClaudeDesktopSelfTestResultView: View {
-    let result: ClaudeDesktopIntegrationInstallResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(
-                "Ready. Restart Claude.",
-                systemImage: "checkmark.circle.fill"
-            )
-            .foregroundStyle(.green)
-
-            Text("\(result.selfTest.meetingFileCount) meetings, \(result.selfTest.dictationFileCount) dictation files found.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let backupURL = result.backupURL {
-                Text("Previous config backed up to \(backupURL.lastPathComponent).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.caption)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

@@ -687,6 +687,94 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — replaces a stale installed helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperRefreshTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, true, "stale installed helper should be refreshed at launch")
+        assertEqual(
+            (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
+            "#!/bin/sh\necho current\n",
+            "refresh should copy the bundled helper bytes over the stale install"
+        )
+        assertTrue(
+            FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
+            "refreshed helper should stay executable"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — leaves a current helper untouched") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperFreshTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho current\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, false, "matching helper should not be rewritten on every launch")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — never installs fresh") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperNoInstallTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, false, "refresh should not install a helper the user never set up")
+        assertFalse(
+            FileManager.default.fileExists(atPath: installedBinaryURL.path),
+            "refresh must not create a new install without user consent"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns when bundled helper is missing") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeMissingBundleTests-\(UUID().uuidString)", isDirectory: true)

@@ -20,13 +20,11 @@ enum ActivationTelemetry {
         case homePreview = "home_preview"
         case homeCurrentActivity = "home_current_activity"
         case agentSettings = "agent_settings"
-        case menubarAgent = "menubar_agent"
     }
 
     enum AgentPromptKind: String {
         case localAgentPrompt = "local_agent_prompt"
         case claudeDesktopSetup = "claude_desktop_setup"
-        case folderAccess = "folder_access"
         case folderPaths = "folder_paths"
         case codexInboxSetup = "codex_inbox_setup"
         case liveMeetingCodexSetup = "live_meeting_codex_setup"
@@ -38,8 +36,10 @@ enum ActivationTelemetry {
 
     enum AgentTarget: String {
         case claudeDesktop = "claude_desktop"
+        case claudeCode = "claude_code"
         case codex
         case cowork
+        case cursor
         case fallbackFolder = "fallback_folder"
         case localAgent = "local_agent"
     }
@@ -57,8 +57,10 @@ enum ActivationTelemetry {
 
     enum AgentSetupKind: String {
         case claudeDesktop = "claude_desktop"
+        case claudeCode = "claude_code"
         case codexInbox = "codex_inbox"
-        case folderAccess = "folder_access"
+        case codexTools = "codex_tools"
+        case cursor
         case livePreview = "live_preview"
         case liveSidecar = "live_sidecar"
         case localPrompt = "local_prompt"

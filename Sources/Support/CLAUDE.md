@@ -8,7 +8,8 @@
 
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
-- `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges Claude's config JSON, and runs the helper self-test
+- `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
+- `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
@@ -48,7 +49,8 @@
 - `SpeakerNameSelectionPolicy` keeps speaker search and "You" matching consistent across settings and review UI. Keep duplicate-name disambiguation here instead of in individual SwiftUI controls.
 - `PermissionsOnboardingPreferences` is the canonical completion flag for the guided first-run permissions flow. Keep onboarding state out of view-local storage so forced reruns and completion state stay consistent.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
-- `ClaudeDesktopIntegrationInstaller` owns the Claude Desktop config merge. Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
+- `ClaudeDesktopIntegrationInstaller` owns the `mcpServers` JSON config merge (Claude Desktop and Cursor). Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
+- `AgentMCPConnector` is the seam for connecting more agents. New agents should get a detect/isConnected/connect triple here instead of bespoke UI logic; never rewrite `~/.claude.json` directly — Claude Code's CLI owns that file.
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - `QuitConfirmationPreferences` should default on. Quitting during a live meeting stops capture, so the opt-out belongs in Settings instead of being hidden in the alert.
@@ -66,6 +68,7 @@ bash run-tests.sh
 
 Relevant direct coverage includes:
 
+- `Tests/AgentMCPConnectorTests.swift`
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`

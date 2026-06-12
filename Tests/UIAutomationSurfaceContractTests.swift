@@ -6,7 +6,6 @@ func testUIAutomationSurfaceContract() {
         let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
         let primarySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
         let utilitySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
-        let agentMenuSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuAgentConnectPageView.swift")
         let smokeScript = readUIAutomationContractFile("scripts/entrypoints/build.sh")
 
         assertTrue(
@@ -53,17 +52,6 @@ func testUIAutomationSurfaceContract() {
             )
         }
 
-        for identifier in [
-            "transcripted.menubar.agent.back",
-            "transcripted.menubar.agent.copy-claude-desktop-steps",
-            "transcripted.menubar.agent.copy-folder-paths",
-            "transcripted.menubar.agent.copy-local-agent-prompt",
-        ] {
-            assertTrue(
-                agentMenuSource.contains(identifier),
-                "\(identifier) should keep the menubar agent page clickable by automation"
-            )
-        }
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
@@ -152,11 +140,13 @@ func testUIAutomationSurfaceContract() {
         }
 
         for requiredAgentHook in [
-            "Install in Claude",
-            "Copy Folder Prompt",
+            "transcripted.settings.agent.connect.\\(agent.rawValue)",
+            "transcripted.settings.agent.copy-prompt",
+            "transcripted.settings.agent.copy-folder-paths",
+            "transcripted.settings.agent.codex-inbox",
+            "transcripted.settings.agent.open-live-view",
             "Copy Paths",
-            "Copy for Agent",
-            "Live meeting sidecar",
+            "Live meetings",
         ] {
             assertTrue(agentSettingsSource.contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
@@ -281,7 +271,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.calendar.meeting-reminders",
             "transcripted.onboarding.calendar.allow",
             "transcripted.onboarding.diagnostics.share",
-            "transcripted.onboarding.agent.copy-claude-desktop-steps",
+            "transcripted.onboarding.agent.connect-claude-desktop",
             "transcripted.onboarding.agent.copy-local-agent-prompt",
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")

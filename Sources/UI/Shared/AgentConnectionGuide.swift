@@ -25,49 +25,6 @@ enum AgentConnectionGuide {
         return formatter
     }()
 
-    static var localMCPBuildDirectory: URL? {
-        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
-        let buildDirectory = bundleURL.deletingLastPathComponent()
-        let repoRoot = buildDirectory.deletingLastPathComponent()
-        let toolsDirectory = repoRoot.appendingPathComponent("Tools/TranscriptedMCP", isDirectory: true)
-
-        guard FileManager.default.fileExists(atPath: toolsDirectory.path) else {
-            return nil
-        }
-
-        return toolsDirectory
-    }
-
-    static var localMCPBinary: URL? {
-        let fileManager = FileManager.default
-
-        if let bundledBinary = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(fileManager: fileManager) {
-            return bundledBinary
-        }
-
-        let installedBinary = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL
-        if fileManager.isExecutableFile(atPath: installedBinary.path) {
-            return installedBinary
-        }
-
-        guard let buildDirectory = localMCPBuildDirectory else { return nil }
-        let releaseBinary = buildDirectory
-            .appendingPathComponent(".build", isDirectory: true)
-            .appendingPathComponent("release", isDirectory: true)
-            .appendingPathComponent("transcripted-mcp", isDirectory: false)
-
-        if fileManager.isExecutableFile(atPath: releaseBinary.path) {
-            return releaseBinary
-        }
-
-        let debugBinary = buildDirectory
-            .appendingPathComponent(".build", isDirectory: true)
-            .appendingPathComponent("debug", isDirectory: true)
-            .appendingPathComponent("transcripted-mcp", isDirectory: false)
-
-        return fileManager.isExecutableFile(atPath: debugBinary.path) ? debugBinary : nil
-    }
-
     static var meetingsFolder: URL {
         MeetingStoragePaths.transcriptsFolder
     }
@@ -131,10 +88,6 @@ enum AgentConnectionGuide {
 
         return (Bundle.main.resourceURL ?? repoURL.deletingLastPathComponent())
             .appendingPathComponent("AgentSkills", isDirectory: true)
-    }
-
-    static var agentSkillsManifest: URL {
-        agentSkillsFolder.appendingPathComponent("manifest.json", isDirectory: false)
     }
 
     static let directToolNames = [
@@ -390,32 +343,6 @@ enum AgentConnectionGuide {
         """
     }
 
-    static var folderAccessPrompt: String {
-        """
-        I use Transcripted on my Mac.
-
-        This is fallback setup for a web chat or Cowork session that cannot use the live sidecar folder.
-
-        I may have granted you access to my Transcripted folders in this chat. Use those granted folders first.
-
-        Default folders:
-        - Meetings: \(meetingsFolder.path)
-        - Dictations: \(dictationsFolder.path)
-
-        Read the Markdown files directly. If you cannot access the folders, tell me exactly which folder is missing and ask me to grant it.
-        """
-    }
-
-    static var starterSkillPromptBlock: String {
-        var lines = ["- Manifest: \(agentSkillsManifest.path)"]
-
-        for skill in starterSkills {
-            lines.append("- \(skill.title) v\(skill.version): \(skillFileURL(for: skill).path)")
-        }
-
-        return lines.joined(separator: "\n")
-    }
-
     static func portableMeetingBundle(
         title: String,
         date: Date,
@@ -466,65 +393,6 @@ enum AgentConnectionGuide {
         \(transcriptBody)
         </meeting_transcript>
         """
-    }
-
-    static var mcpPromptBlock: String {
-        var lines = [
-            "Transcripted direct tools setup:",
-            "- Server name: transcripted",
-            "- Transport: local stdio",
-            "- Claude Desktop app flow: open Transcripted Settings > Agent, click Install in Claude, then restart Claude Desktop.",
-            "- Installed command path after setup: \(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)",
-            "- Claude Desktop config path: \(ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)",
-        ]
-
-        if let buildDirectory = localMCPBuildDirectory {
-            lines.append("")
-            lines.append("Developer source fallback:")
-            lines.append("- Build directory: \(buildDirectory.path)")
-            lines.append("- Build command: cd \(buildDirectory.path) && swift build -c release")
-        }
-
-        if let binary = localMCPBinary {
-            lines.append("- Current app helper path: \(binary.path)")
-        } else {
-            lines.append("- If the helper is missing, ask me to install or update Transcripted, then use the in-app installer.")
-        }
-
-        lines.append("")
-        lines.append("If connected, Transcripted MCP provides these read-only tools:")
-        lines.append("- recent_context")
-        lines.append("- search_context")
-        lines.append("- list_meetings")
-        lines.append("- read_meeting")
-        lines.append("- list_dictations")
-        lines.append("- read_dictation")
-        lines.append("- search")
-        lines.append("- who_is")
-        lines.append("- recap")
-
-        return lines.joined(separator: "\n")
-    }
-
-    static var mcpConfigExample: String {
-        mcpConfigExampleText(commandPath: ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)
-    }
-
-    static func mcpConfigExampleText(commandPath: String) -> String {
-        ClaudeDesktopIntegrationInstaller.configSnippet(commandPath: commandPath)
-    }
-
-    static var mcpSetupText: String {
-        [
-            "Claude Desktop setup:",
-            "1. Open Transcripted Settings.",
-            "2. Go to Agent.",
-            "3. Click Install in Claude.",
-            "4. Restart Claude Desktop.",
-            "",
-            "Installed command path after setup:",
-            "`\(ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path)`",
-        ].joined(separator: "\n")
     }
 
     static var folderPathsText: String {

@@ -77,7 +77,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .storage:
             return "Where your files live."
         case .connectAgent:
-            return "One prompt, plus direct paths."
+            return "Connect your AI tools."
         case .beta:
             return "Experimental local features."
         case .privacy:

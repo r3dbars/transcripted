@@ -88,6 +88,9 @@ class TranscriptedAppState: ObservableObject {
             startExistingInstallModelPrefetchIfNeeded()
         }
         startAudioStorageMaintenanceIfNeeded()
+        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+            startAgentHelperRefreshIfNeeded()
+        }
         if #available(macOS 14.0, *) {
             startLiveMeetingPreviewServerIfNeeded()
         }
@@ -184,6 +187,36 @@ class TranscriptedAppState: ObservableObject {
         }
         runtimeDiagnostics.setActiveWorkProvider(nil)
         runtimeDiagnostics.markCleanShutdown()
+    }
+
+    private func startAgentHelperRefreshIfNeeded() {
+        Task.detached(priority: .utility) {
+            let refreshed: Bool
+            do {
+                refreshed = try ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded()
+            } catch {
+                let message = error.localizedDescription
+                await MainActor.run {
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "app",
+                        event: "agent_helper_refresh_failed",
+                        message: message
+                    )
+                }
+                return
+            }
+
+            guard refreshed else { return }
+            await MainActor.run {
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "app",
+                    event: "agent_helper_refreshed",
+                    message: "Installed agent helper was updated to match this app build"
+                )
+            }
+        }
     }
 
     private func startRuntimeReadinessIfNeeded() {

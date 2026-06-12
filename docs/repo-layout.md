@@ -77,7 +77,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Speech/` — local STT engines, router, and audio recovery
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
-- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, and `Shared/`
+- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs

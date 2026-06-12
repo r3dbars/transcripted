@@ -36,7 +36,7 @@ Good activation work should improve at least one of these moments:
 | If the issue is about | Start here |
 | --- | --- |
 | first saved dictation or meeting is missing, hidden, or hard to open | `Sources/UI/Settings/HomeView.swift`, `Sources/UI/Shared/RecentCaptureScanners.swift`, `Sources/Dictation/`, `Sources/Meeting/` |
-| agent setup, first prompt, Claude Desktop install, or folder handoff | `Sources/UI/Shared/AgentConnectionGuide.swift`, `Sources/UI/Settings/AgentConnectionSettingsPage.swift`, `Sources/Support/ClaudeDesktopIntegrationInstaller.swift`, `docs/agent-connect.md` |
+| agent setup, first prompt, agent connect rows, or folder handoff | `Sources/UI/Shared/AgentConnectionGuide.swift`, `Sources/UI/Settings/AgentConnectionSettingsPage.swift`, `Sources/Support/ClaudeDesktopIntegrationInstaller.swift`, `Sources/Support/AgentMCPConnector.swift`, `docs/agent-connect.md` |
 | pasteback, copied text, Auto Enter, or clipboard restore | `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Accessibility/CLAUDE.md` |
 | Bluetooth or AirPods dictation reliability | `Sources/Speech/CLAUDE.md`, `docs/audio-reliability-daily-check.md` |
 | Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/CLAUDE.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |

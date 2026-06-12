@@ -103,7 +103,7 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
-| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, `Shared/` |
+| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
 | `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations |
