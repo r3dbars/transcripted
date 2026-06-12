@@ -26,7 +26,7 @@
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
-- `MicrophoneProcessingPreferences.swift` — persisted meeting-mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path
+- `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
@@ -55,7 +55,7 @@
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.
 - `QuitConfirmationPreferences` should default on. Quitting during a live meeting stops capture, so the opt-out belongs in Settings instead of being hidden in the alert.
-- `MicrophoneProcessingPreferences` is the canonical switch for meeting-mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording.
+- `MicrophoneProcessingPreferences` is the canonical switch for mic cleanup mode. Default behavior is software AGC without playback ducking; Apple voice processing stays opt-in because it can duck other apps during recording, and can be enabled from Settings or the in-meeting boost prompt.
 - `AudioStoragePreferences` only stores the retention choice. Destructive cleanup behavior belongs in `Sources/Meeting/MeetingAudioStorageManager.swift` and should stay conservative: the Settings UI should ask before switching into a destructive 7-day or 30-day cleanup window.
 
 ## Verification
