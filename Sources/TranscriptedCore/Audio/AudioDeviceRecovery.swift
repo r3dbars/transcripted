@@ -198,6 +198,7 @@ extension Audio {
             if let recoverySegmentURL, !shouldKeepRecoverySegment {
                 micAudioFileQueue.sync {
                     if micAudioFile?.url == recoverySegmentURL {
+                        micAudioFile?.close()
                         micAudioFile = nil
                     }
                 }
@@ -214,7 +215,12 @@ extension Audio {
 
         if sampleRateChanged {
             AppLogger.audioMic.warning("Sample rate changed, closing old file and creating new segment")
-            micAudioFileQueue.sync { micAudioFile = nil }
+            // Close explicitly so the retiring segment's WAV header is
+            // finalized before the merger can ever read it.
+            micAudioFileQueue.sync {
+                micAudioFile?.close()
+                micAudioFile = nil
+            }
 
             // Create new file segment as mono
             let captureDir = self.paths.audioCaptures

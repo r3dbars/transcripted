@@ -284,6 +284,7 @@ extension Audio {
                 interleaved: monoFormat.isInterleaved
             )
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+            recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         } catch {
             throw NSError(domain: "Audio", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create mic audio file: \(error.localizedDescription)"])
@@ -400,22 +401,36 @@ extension Audio {
         guard let primaryURL else { return segments.last?.url }
         guard segments.count > 1 else { return primaryURL }
 
+        let mergeStart = Date()
         do {
-            let mergedURL = try MicRecordingFileMerger.merge(primaryURL: primaryURL, segments: segments)
+            let outcome = try MicRecordingFileMerger.merge(primaryURL: primaryURL, segments: segments)
             let insertedSilenceSamples = segments
                 .dropFirst()
                 .reduce(0) { partialResult, segment in
                     partialResult + MicRecordingMergePlan.silenceSampleCount(before: segment, sampleRate: 16_000)
                 }
-            AppLogger.audioMic.info("Merged mic recovery segments", [
-                "segments": "\(segments.count)",
+            let context: [String: String] = [
+                "segments": "\(outcome.segmentCount)",
+                "appended": "\(outcome.appendedSegments)",
+                "skipped": "\(outcome.skippedSegments)",
+                "repaired": "\(outcome.repairedSegments)",
+                "padded": "\(outcome.paddedSegments)",
+                "durationSeconds": String(format: "%.2f", Date().timeIntervalSince(mergeStart)),
                 "insertedSilenceSeconds": String(format: "%.3f", Double(insertedSilenceSamples) / 16_000),
-                "file": mergedURL?.lastPathComponent ?? primaryURL.lastPathComponent
-            ])
-            return mergedURL
+                "file": outcome.url?.lastPathComponent ?? primaryURL.lastPathComponent
+            ]
+            if outcome.isFullFidelity {
+                AppLogger.audioMic.info("Merged mic recovery segments", context)
+            } else {
+                // Some recorded audio is missing from the merged file; the
+                // source segments stay on disk for recovery.
+                AppLogger.audioMic.error("Merged mic recovery segments with degraded fidelity", context)
+            }
+            return outcome.url
         } catch {
             AppLogger.audioMic.error("Failed to merge mic recovery segments", [
                 "segments": "\(segments.count)",
+                "durationSeconds": String(format: "%.2f", Date().timeIntervalSince(mergeStart)),
                 "error": error.localizedDescription
             ])
             return primaryURL
