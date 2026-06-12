@@ -50,8 +50,9 @@ settings-side agent connection flow.
   `Sources/UI/Shared/` for those ownership seams.
 - Local AI meeting summary actions must stay blocked during active dictation,
   active meeting recording, model prep, background meeting work, and speaker
-  review. Keep those gates in shared policy instead of duplicating state checks
-  across row actions.
+  review. The Beta page owns provider selection between Gemma MLX and Apple
+  on-device summaries. Keep those gates in shared policy instead of duplicating
+  state checks across row actions.
 
 ## Verification
 
