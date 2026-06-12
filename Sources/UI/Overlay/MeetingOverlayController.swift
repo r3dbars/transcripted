@@ -151,6 +151,7 @@ final class MeetingOverlayRootView: NSView {
     private let cancelButton = NSButton()
     private let closeButton = NSButton()
     private let chevronButton = NSButton()
+    private let liveViewButton = NSButton()
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
@@ -167,6 +168,7 @@ final class MeetingOverlayRootView: NSView {
     private var tooltipTask: Task<Void, Never>?
     private var tooltipTrackingAreas: [NSTrackingArea] = []
     private var isRecordingMinimized = false
+    private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
@@ -174,6 +176,7 @@ final class MeetingOverlayRootView: NSView {
     var onCancelAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
     var onToggleMinimized: (() -> Void)?
+    var onLiveViewAction: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -329,6 +332,23 @@ final class MeetingOverlayRootView: NSView {
         chevronButton.action = #selector(handleToggleMinimized)
         chevronButton.isHidden = true
         addSubview(chevronButton)
+
+        liveViewButton.imageScaling = .scaleProportionallyDown
+        liveViewButton.image = liveViewButtonImage()
+        liveViewButton.imagePosition = .imageOnly
+        liveViewButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        liveViewButton.isBordered = false
+        liveViewButton.wantsLayer = true
+        liveViewButton.layer?.cornerRadius = MeetingOverlayTokens.liveViewHeight / 2
+        liveViewButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        liveViewButton.layer?.borderWidth = 0.5
+        liveViewButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
+        liveViewButton.target = self
+        liveViewButton.action = #selector(handleLiveViewAction)
+        liveViewButton.toolTip = nil
+        liveViewButton.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)
+        liveViewButton.isHidden = true
+        addSubview(liveViewButton)
     }
 
     override func layout() {
@@ -490,8 +510,18 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.toggleHeight
         )
 
+        liveViewButton.frame = NSRect(
+            x: chevronButton.frame.minX - tokens.headerGap - tokens.liveViewHeight,
+            y: midY - tokens.liveViewHeight / 2,
+            width: tokens.liveViewHeight,
+            height: tokens.liveViewHeight
+        )
+
         let barsLeft = timerLabel.frame.maxX + tokens.headerGap
-        let barsRight = chevronButton.frame.minX - tokens.headerGap
+        let barsTrailingEdge = liveViewButton.isHidden
+            ? chevronButton.frame.minX
+            : liveViewButton.frame.minX
+        let barsRight = barsTrailingEdge - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
         let barsHeight: CGFloat = 22
@@ -556,6 +586,7 @@ final class MeetingOverlayRootView: NSView {
         micLabel.frame = .zero
         systemLabel.frame = .zero
         audioWaveform.frame = .zero
+        liveViewButton.frame = .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -675,9 +706,11 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        isRecordingMinimized: Bool
+        isRecordingMinimized: Bool,
+        liveView: MeetingLiveViewAffordancePolicy.Affordance?
     ) {
         currentState = state
+        currentLiveViewAffordance = liveView
         self.isRecordingMinimized = state == .recording && isRecordingMinimized
         layer?.cornerRadius = self.isRecordingMinimized
             ? MeetingOverlayTokens.minimizedCornerRadius
@@ -707,6 +740,11 @@ final class MeetingOverlayRootView: NSView {
         cancelButton.isHidden = state != .recording
         closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
         chevronButton.isHidden = state != .recording
+        liveViewButton.isHidden = liveView == nil
+        if let liveView {
+            liveViewButton.setAccessibilityLabel(liveView.accessibilityLabel)
+            liveViewButton.setAccessibilityHelp(liveView.accessibilityHelp)
+        }
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
@@ -854,6 +892,14 @@ final class MeetingOverlayRootView: NSView {
         chevronButton.layer?.backgroundColor = NSColor.clear.cgColor
         chevronButton.layer?.borderWidth = 0
         chevronButton.layer?.borderColor = nil
+        liveViewButton.image = liveViewButtonImage()
+        liveViewButton.imagePosition = .imageOnly
+        liveViewButton.contentTintColor = MeetingOverlayTokens.quietActionTint
+        liveViewButton.toolTip = nil
+        liveViewButton.layer?.cornerRadius = MeetingOverlayTokens.liveViewHeight / 2
+        liveViewButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
+        liveViewButton.layer?.borderWidth = 0.5
+        liveViewButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -909,6 +955,14 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
+    // Same symbol as Settings' "Open Live View" so the two entry points read
+    // as one feature.
+    private func liveViewButtonImage() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        return NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+    }
+
     private func refreshTooltipTrackingAreas() {
         for area in tooltipTrackingAreas {
             removeTrackingArea(area)
@@ -923,6 +977,9 @@ final class MeetingOverlayRootView: NSView {
             for: chevronButton,
             text: isRecordingMinimized ? expandTooltip : minimizeTooltip
         )
+        if let liveViewTooltip = currentLiveViewAffordance?.tooltip {
+            addTooltipTrackingArea(for: liveViewButton, text: liveViewTooltip)
+        }
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
@@ -1026,6 +1083,10 @@ final class MeetingOverlayRootView: NSView {
     @objc private func handleToggleMinimized() {
         onToggleMinimized?()
     }
+
+    @objc private func handleLiveViewAction() {
+        onLiveViewAction?()
+    }
 }
 
 // MARK: - Design tokens (local — keeps the meeting overlay visually distinct
@@ -1054,7 +1115,9 @@ enum MeetingOverlayTokens {
     static let finishActionForeground = NSColor.white.withAlphaComponent(0.92)
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = 292
+    // Wide enough for the full recording strip including the live-view
+    // button without squeezing the waveform below its dictation-parity size.
+    static let recordingPanelWidth: CGFloat = 324
     static let minimizedRecordingPanelWidth: CGFloat = 184
     static let panelHeight: CGFloat = 44
     static let minimizedRecordingPanelHeight: CGFloat = 36
@@ -1072,6 +1135,7 @@ enum MeetingOverlayTokens {
     static let timerFontSize: CGFloat = 13
     static let cancelHeight: CGFloat = 24
     static let toggleHeight: CGFloat = 22
+    static let liveViewHeight: CGFloat = 24
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
@@ -1185,6 +1249,7 @@ final class MeetingOverlayController {
         rootView.onCancelAction = { [weak self] in self?.handleCancelTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
+        rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -1607,6 +1672,65 @@ final class MeetingOverlayController {
         pushToView()
     }
 
+    /// Point-of-use Live View action. With the preference already on this
+    /// just opens the tokenized preview; with it off this is the one-click
+    /// enable: persist the preference, prepare the workspace, late-join the
+    /// sidecar to the in-flight recording, start the loopback preview
+    /// server, and open the browser. None of these steps can raise a TCC
+    /// prompt. Failure rolls the enable back, mirroring Settings'
+    /// disable-after-failure behavior.
+    private func handleLiveViewTapped() {
+        guard state == .recording else { return }
+
+        let wasEnabled = LiveMeetingCodexPreferences.isEnabled()
+        if !wasEnabled {
+            LiveMeetingCodexPreferences.setEnabled(true)
+        }
+
+        do {
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            meetingSession?.connectLiveSidecarToActiveRecording()
+            let previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            let opened = NSWorkspace.shared.open(previewURL)
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .livePreview,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: opened ? .success : .failed
+            )
+            if opened {
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .liveMeetingPreview,
+                    actionKind: .opened,
+                    agentTarget: .localAgent,
+                    surface: .meetingOverlay
+                )
+            }
+        } catch {
+            if !wasEnabled {
+                LiveMeetingCodexPreferences.setEnabled(false)
+                meetingSession?.stopLiveCodexSessionFromSettings()
+            }
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .livePreview,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: .failed
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_view_open_from_overlay_failed",
+                message: "Live View could not open from the meeting overlay",
+                context: ["error": error.localizedDescription]
+            )
+        }
+
+        // Refresh so the tooltip flips to the enabled wording after a
+        // one-click enable.
+        pushToView()
+    }
+
     private func dismissPrompt(notifyDetector: Bool) {
         promptCountdownTask?.cancel()
 
@@ -1783,7 +1907,12 @@ final class MeetingOverlayController {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
-            isRecordingMinimized: isRecordingMinimized
+            isRecordingMinimized: isRecordingMinimized,
+            liveView: MeetingLiveViewAffordancePolicy.affordance(
+                isRecording: state == .recording,
+                isRecordingMinimized: isRecordingMinimized,
+                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled()
+            )
         )
     }
 

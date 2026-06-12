@@ -151,6 +151,14 @@ func testUIAutomationSurfaceContract() {
             assertTrue(agentSettingsSource.contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
 
+        let meetingOverlaySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let liveViewPolicySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift")
+        assertTrue(
+            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view")
+                && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
+            "the meeting overlay live-view button should keep a stable automation identifier for point-of-use live meetings"
+        )
+
         assertTrue(
             deletePolicySource.contains("Delete this meeting?")
                 && deletePolicySource.contains("Delete Meeting")

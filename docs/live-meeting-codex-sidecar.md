@@ -39,6 +39,12 @@ The target flow is:
 The sidecar should feel calm, compact, and automatic. The user should not need
 to copy prompts, reload pages, or explain where the transcript lives.
 
+While a meeting is recording, the meeting overlay pill carries a Live View
+button so step 2 never requires Settings. If the sidecar is still off, that
+button enables it in the same click; live lines then start with the next
+recording because live ASR cannot attach to an already-running capture, but
+the current meeting's final transcript still links into the live page.
+
 ## Local Contract
 
 - Live data stays local.

@@ -1761,6 +1761,65 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    /// Late-join entry point for the meeting overlay's Live View affordance:
+    /// the user enabled live meetings while this recording was already in
+    /// flight. Live streaming ASR cannot attach mid-recording — the bridge's
+    /// live PCM preview handlers must be installed before capture starts and
+    /// never reassigned mid-session — so this starts the sidecar session
+    /// without provisional live text. The final transcript still attaches
+    /// automatically after the recording is saved, and the next recording
+    /// gets the full live pipeline from `startLiveCodexSessionIfNeeded`.
+    func connectLiveSidecarToActiveRecording() {
+        guard LiveMeetingCodexPreferences.isEnabled() else { return }
+        guard state == .recording else { return }
+        guard !liveCodexSessionIsActive, !liveCodexSessionAwaitingFinalTranscript else { return }
+
+        let backendStatus = "deferred_live_view_joined_mid_recording"
+        do {
+            try liveCodexSession.start(
+                title: activeRecordingSuggestedTitle,
+                startedAt: activeRecordingStartedAt ?? Date(),
+                streamingBackendStatus: backendStatus
+            )
+            liveCodexSessionIsActive = true
+            liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = true
+            liveCodexSessionOwnedByActiveRecording = true
+            liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveCodexAwaitedTranscriptionJobID = nil
+            // Leave liveCodexPreviewHandlersNeedClearingAfterActiveRecording
+            // untouched: a disable-then-re-enable during the same recording
+            // still owes a post-recording handler clear, and clearing the
+            // flag here would leak the installed handlers.
+            try? liveCodexSession.updateStreamingBackendStatus(
+                backendStatus,
+                note: "Live View joined after this recording started, so live transcript lines begin with your next meeting. The final transcript will still attach here when this recording is saved."
+            )
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "live_codex_session_joined_mid_recording",
+                message: "Live meeting sidecar joined an active recording without live ASR",
+                context: baseDiagnosticsContext(
+                    extra: ["live_backend_status": backendStatus]
+                )
+            )
+        } catch {
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
+            liveCodexSessionOwnedByActiveRecording = false
+            liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveCodexAwaitedTranscriptionJobID = nil
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_codex_session_join_failed",
+                message: "Live meeting sidecar could not join the active recording",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
     func stopLiveCodexSessionFromSettings() {
         guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
         let shouldDeferPreviewHandlerClear = liveCodexSessionOwnedByActiveRecording
