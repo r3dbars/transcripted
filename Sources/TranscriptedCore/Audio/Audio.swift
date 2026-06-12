@@ -167,7 +167,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micSegments.append(segment)
         let segments = _micSegments
         micSegmentsLock.unlock()
-        recordingJournal.recordSegments(segments)
+        recordingJournal.recordSegments(segments, session: journalSession)
+    }
+
+    // Journal ownership for the in-flight recording session. Issued by the
+    // store when the start path calls `begin()`; consumed (read-and-cleared)
+    // by `stop()` so only the stop that ends an active session can write the
+    // stopping/finalized journal states.
+    private var _journalSession: MeetingRecordingJournalSession?
+    private let journalSessionLock = NSLock()
+    var journalSession: MeetingRecordingJournalSession? {
+        get { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; return _journalSession }
+        set { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; _journalSession = newValue }
+    }
+    func takeJournalSession() -> MeetingRecordingJournalSession? {
+        journalSessionLock.lock()
+        defer { journalSessionLock.unlock() }
+        let session = _journalSession
+        _journalSession = nil
+        return session
     }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
@@ -869,6 +887,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         consecutiveSystemWriteErrors = 0
         systemAudioFailed = false
         micSegments = []
+        // Any leftover journal ownership belongs to a session that never
+        // stopped cleanly; the new session gets a fresh token at begin().
+        journalSession = nil
     }
 
     private func beginStartIntent() -> UUID {
@@ -1024,7 +1045,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard recordingSessionGeneration == sessionGeneration else { return }
 
         systemAudioFileURL = fileURL
-        recordingJournal.recordSystemAudio(fileURL)
+        recordingJournal.recordSystemAudio(fileURL, session: journalSession)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
@@ -1054,7 +1075,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let finalSystemURL = systemAudioFileURL
         let cueHandler = self.onCaptureLifecycleCue
 
-        recordingJournal.markStopping()
+        // Take (read-and-clear) journal ownership: only the stop that ends an
+        // active session may write the stopping/finalized states. With no
+        // active session — a double stop, or cleanup after a start that failed
+        // before the journal began — the token is nil and the journal store
+        // drops both writes, so a previous meeting's already-handed-off
+        // journal cannot be resurrected into the next launch's recovery scan.
+        let journalSession = takeJournalSession()
+        recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
@@ -1160,7 +1188,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
-                self.recordingJournal.markFinalized(finalMicURL: finalMicURL)
+                self.recordingJournal.markFinalized(finalMicURL: finalMicURL, session: journalSession)
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil

@@ -1,10 +1,15 @@
 import Foundation
 
+// Invariant under test: the mic-boost prompt flag is never true while nothing
+// is recording, and no prompt action may persist state for a dead recording.
+
 func testMeetingMicBoostPromptPolicy() {
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — presents only for fresh recordings with the preference off") {
         assertTrue(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .notShown
             ),
@@ -16,6 +21,8 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: true,
                 currentOutcome: .notShown
             ),
@@ -27,6 +34,8 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .shown
             ),
@@ -35,6 +44,8 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .accepted
             ),
@@ -43,6 +54,8 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .declined
             ),
@@ -54,10 +67,59 @@ func testMeetingMicBoostPromptPolicy() {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(
                 isRecording: false,
+                isFinishingRecording: false,
+                sessionStateIsRecording: false,
                 voiceProcessingPreferenceEnabled: false,
                 currentOutcome: .notShown
             ),
             "a late cue after stop should not surface a prompt"
+        )
+    }
+
+    runSuite("MeetingMicBoostPromptPolicy.shouldPresent — the prompt flag is never re-latched mid-stop") {
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldPresent(
+                isRecording: true,
+                isFinishingRecording: true,
+                sessionStateIsRecording: true,
+                voiceProcessingPreferenceEnabled: false,
+                currentOutcome: .notShown
+            ),
+            "a cue landing while stop/cancel/termination teardown awaits capture files must not re-latch the prompt the stop path already cleared"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldPresent(
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: false,
+                voiceProcessingPreferenceEnabled: false,
+                currentOutcome: .notShown
+            ),
+            "a cue landing after the session state machine left .recording must not surface a prompt even if the capture flag has not settled yet"
+        )
+    }
+
+    runSuite("MeetingMicBoostPromptPolicy.shouldApplyPromptAction — stale actions never persist for a dead recording") {
+        assertTrue(
+            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+                isPromptVisible: true,
+                isRecording: true
+            ),
+            "actioning a visible prompt during a live recording applies normally"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+                isPromptVisible: true,
+                isRecording: false
+            ),
+            "a stale accept after capture stopped must not flip the global VPIO preference or record an outcome"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+                isPromptVisible: false,
+                isRecording: true
+            ),
+            "an action with no visible prompt stays a no-op"
         )
     }
 

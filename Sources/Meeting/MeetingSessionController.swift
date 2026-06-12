@@ -827,6 +827,8 @@ final class MeetingSessionController: ObservableObject {
     private func handleMicAttenuationCue() {
         guard MeetingMicBoostPromptPolicy.shouldPresent(
             isRecording: isRecording,
+            isFinishingRecording: isFinishingRecording,
+            sessionStateIsRecording: state == .recording,
             voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
             currentOutcome: micBoostPromptOutcome
         ) else { return }
@@ -853,7 +855,15 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func acceptMicBoostPrompt() {
-        guard isMicBoostPromptVisible else { return }
+        guard MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: isMicBoostPromptVisible,
+            isRecording: isRecording
+        ) else {
+            // Stale accept: the recording died under the prompt. Dismiss only;
+            // never persist the global VPIO preference for a dead recording.
+            isMicBoostPromptVisible = false
+            return
+        }
         micBoostPromptOutcome = .accepted
         isMicBoostPromptVisible = false
         capture.armVoiceProcessingForActiveRecording()
@@ -879,7 +889,15 @@ final class MeetingSessionController: ObservableObject {
     }
 
     func declineMicBoostPrompt() {
-        guard isMicBoostPromptVisible else { return }
+        guard MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: isMicBoostPromptVisible,
+            isRecording: isRecording
+        ) else {
+            // Stale decline: dismiss without recording an outcome for a
+            // recording that already ended.
+            isMicBoostPromptVisible = false
+            return
+        }
         micBoostPromptOutcome = .declined
         isMicBoostPromptVisible = false
         DiagnosticsTrail.record(
@@ -975,10 +993,13 @@ final class MeetingSessionController: ObservableObject {
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         finishLiveCodexSessionForActiveRecording(status: .cancelled, shouldAwaitFinalTranscript: false)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
-        let cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+        var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
+        // Mirror stopRecording(): cancelled meetings carry the prompt outcome
+        // too, so diagnostics can correlate cancellations with the prompt.
+        cancelCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -1485,6 +1506,11 @@ final class MeetingSessionController: ObservableObject {
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
                     event = self.audioInactivityDetector.stopRecording()
+                    // Capture can stop underneath the controller (device
+                    // watchdog give-up, disk-full guard) without any app-side
+                    // stop path running. The boost prompt must never outlive
+                    // the recording it offered to fix.
+                    self.isMicBoostPromptVisible = false
                 }
                 self.applyAudioInactivityEvent(event)
             }
