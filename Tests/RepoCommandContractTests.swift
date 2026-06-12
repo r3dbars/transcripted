@@ -1839,7 +1839,7 @@ func testRepoCommandContract() {
         let reportBlock = sourceSlice(
             contents,
             from: "private func reportCaptureHealthIfNeeded(",
-            to: "private func savedTranscriptAnalyticsProperties()"
+            to: "private func trackSavedTranscriptAnalyticsInBackground("
         )
 
         assertTrue(

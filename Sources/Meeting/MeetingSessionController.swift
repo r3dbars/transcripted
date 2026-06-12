@@ -185,6 +185,7 @@ final class MeetingSessionController: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
+    private var savedTranscriptRestyleTask: Task<StyledMeetingTranscript, Never>?
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
@@ -1571,25 +1572,13 @@ final class MeetingSessionController: ObservableObject {
             .sink { [weak self] url in
                 guard let self else { return }
                 guard let url else {
+                    self.savedTranscriptRestyleTask = nil
                     self.lastSavedTranscriptURL = nil
                     self.lastSavedTitle = nil
                     return
                 }
 
-                let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
-                self.lastSavedTranscriptURL = styled.url
-                self.lastSavedTitle = styled.title
-                self.attachLiveCodexFinalTranscriptIfReady(url: styled.url, title: styled.title)
-                let transcriptURL = styled.url
-                Task.detached(priority: .utility) {
-                    await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
-                }
-                DiagnosticsTrail.record(
-                    engine: "meeting",
-                    event: "meeting_transcript_artifact_ready",
-                    message: "Meeting transcript artifact is ready",
-                    context: self.baseDiagnosticsContext()
-                )
+                self.restyleSavedTranscriptInBackground(at: url)
             }
             .store(in: &cancellables)
 
@@ -1613,6 +1602,37 @@ final class MeetingSessionController: ObservableObject {
 
         refreshFailedMeetings()
         refreshWarmupStatus()
+    }
+
+    /// Restyling reads and rewrites the whole saved transcript and can rename
+    /// the markdown + retained-audio artifacts, so it must stay off the main
+    /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
+    /// so two passes never touch the same artifacts concurrently.
+    private func restyleSavedTranscriptInBackground(at url: URL) {
+        let previousRestyle = savedTranscriptRestyleTask
+        let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
+            _ = await previousRestyle?.value
+            return MeetingTranscriptStyler.restyleTranscript(at: url)
+        }
+        savedTranscriptRestyleTask = restyle
+
+        Task { @MainActor [weak self] in
+            let styled = await restyle.value
+            let transcriptURL = styled.url
+            Task.detached(priority: .utility) {
+                await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
+            }
+            guard let self, self.savedTranscriptRestyleTask == restyle else { return }
+            self.lastSavedTranscriptURL = styled.url
+            self.lastSavedTitle = styled.title
+            self.attachLiveCodexFinalTranscriptIfReady(url: styled.url, title: styled.title)
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_transcript_artifact_ready",
+                message: "Meeting transcript artifact is ready",
+                context: self.baseDiagnosticsContext()
+            )
+        }
     }
 
     private func observeAudioActivity() {
@@ -2350,15 +2370,11 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            AnalyticsReporter.track(
-                "meeting_transcript_saved",
-                properties: savedTranscriptAnalyticsProperties().merging(
-                    [
+            trackSavedTranscriptAnalyticsInBackground(
+                baseProperties: [
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
                     "trigger": transcriptionTrigger.rawValue,
-                    ],
-                    uniquingKeysWith: { _, new in new }
-                )
+                ]
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
@@ -2617,10 +2633,35 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    private func savedTranscriptAnalyticsProperties() -> [String: String] {
-        guard let url = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL,
-              let raw = try? String(contentsOf: url, encoding: .utf8),
-              let values = TranscriptFrontmatter.values(in: raw) else {
+    /// The bucketed properties come from transcript frontmatter on disk, so the
+    /// read happens off the main actor and waits for any in-flight restyle to
+    /// finish renaming the saved artifact before reading it.
+    private func trackSavedTranscriptAnalyticsInBackground(baseProperties: [String: String]) {
+        let restyle = savedTranscriptRestyleTask
+        let fallbackTranscriptURL = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL
+        Task.detached(priority: .utility) {
+            let transcriptURL: URL?
+            if let restyle {
+                transcriptURL = await restyle.value.url
+            } else {
+                transcriptURL = fallbackTranscriptURL
+            }
+            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
+            await MainActor.run {
+                AnalyticsReporter.track(
+                    "meeting_transcript_saved",
+                    properties: transcriptProperties.merging(
+                        baseProperties,
+                        uniquingKeysWith: { _, new in new }
+                    )
+                )
+            }
+        }
+    }
+
+    nonisolated private static func savedTranscriptAnalyticsProperties(transcriptURL: URL?) -> [String: String] {
+        guard let transcriptURL,
+              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL) else {
             return [:]
         }
 
