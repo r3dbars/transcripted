@@ -148,9 +148,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         SpeakerClipPlayback.play(url)
     }
 
+    func isPlayingSample(for speakerId: UUID) -> Bool {
+        guard let url = clipURL(for: speakerId) else { return false }
+        return SpeakerClipPlayback.isPlaying(url)
+    }
+
     func playSample(for item: SpeakerPendingReviewItem) {
         guard let url = item.clipURL else { return }
         SpeakerClipPlayback.play(url)
+    }
+
+    func isPlayingSample(for item: SpeakerPendingReviewItem) -> Bool {
+        guard let url = item.clipURL else { return false }
+        return SpeakerClipPlayback.isPlaying(url)
     }
 
     func openTranscript(for item: SpeakerPendingReviewItem) {
@@ -610,72 +620,81 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @State private var playbackStateVersion = 0
 
     var body: some View {
-        let voiceGroups = model.pendingVoiceGroups
+        Group {
+            let voiceGroups = model.pendingVoiceGroups
 
-        if !voiceGroups.isEmpty {
+            if !voiceGroups.isEmpty {
+                SettingsSection(
+                    title: voicesToNameTitle(count: voiceGroups.count),
+                    detail: "Play a clip. If you recognize the voice, type their name — it updates every meeting they're in."
+                ) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
+                            SpeakerVoiceToNameRow(group: group, model: model)
+
+                            if index < voiceGroups.count - 1 {
+                                Divider()
+                                    .padding(.vertical, 12)
+                            }
+                        }
+                    }
+                }
+                .id(ScrollTarget.reviewQueue)
+                .accessibilityIdentifier("transcripted.speakers.inbox")
+            }
+
+            if !model.duplicateCandidates.isEmpty {
+                SettingsSection(
+                    title: "Possible duplicates",
+                    detail: duplicatesDetail
+                ) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(model.duplicateCandidates.enumerated()), id: \.element.id) { index, candidate in
+                            SpeakerDuplicateCandidateRow(candidate: candidate, model: model)
+
+                            if index < model.duplicateCandidates.count - 1 {
+                                Divider()
+                                    .padding(.vertical, 10)
+                            }
+                        }
+                    }
+                }
+            }
+
             SettingsSection(
-                title: voicesToNameTitle(count: voiceGroups.count),
-                detail: "Play a clip. If you recognize the voice, type their name — it updates every meeting they're in."
+                title: "All speakers",
+                detail: allSpeakersDetail
             ) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(voiceGroups.enumerated()), id: \.element.id) { index, group in
-                        SpeakerVoiceToNameRow(group: group, model: model)
-
-                        if index < voiceGroups.count - 1 {
-                            Divider()
-                                .padding(.vertical, 12)
-                        }
-                    }
+                if !model.profiles.isEmpty {
+                    SpeakerSearchRow(model: model)
                 }
-            }
-            .id(ScrollTarget.reviewQueue)
-            .accessibilityIdentifier("transcripted.speakers.inbox")
-        }
 
-        if !model.duplicateCandidates.isEmpty {
-            SettingsSection(
-                title: "Possible duplicates",
-                detail: duplicatesDetail
-            ) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(model.duplicateCandidates.enumerated()), id: \.element.id) { index, candidate in
-                        SpeakerDuplicateCandidateRow(candidate: candidate, model: model)
+                if model.filteredProfiles.isEmpty {
+                    Text(emptyPeopleMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let profiles = model.filteredProfiles
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
+                            SpeakerPersonRow(profile: profile, model: model)
 
-                        if index < model.duplicateCandidates.count - 1 {
-                            Divider()
-                                .padding(.vertical, 10)
+                            if index < profiles.count - 1 {
+                                Divider()
+                            }
                         }
                     }
                 }
             }
         }
-
-        SettingsSection(
-            title: "All speakers",
-            detail: allSpeakersDetail
-        ) {
-            if !model.profiles.isEmpty {
-                SpeakerSearchRow(model: model)
-            }
-
-            if model.filteredProfiles.isEmpty {
-                Text(emptyPeopleMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                let profiles = model.filteredProfiles
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
-                        SpeakerPersonRow(profile: profile, model: model)
-
-                        if index < profiles.count - 1 {
-                            Divider()
-                        }
-                    }
-                }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: SpeakerClipPlayback.stateDidChangeNotification)) { _ in
+            playbackStateVersion += 1
+        }
+        .onDisappear {
+            SpeakerClipPlayback.stop()
         }
     }
 
@@ -720,6 +739,7 @@ private struct SpeakerVoiceToNameRow: View {
             HStack(alignment: .top, spacing: 12) {
                 SpeakerPlayClipButton(
                     hasClip: group.representative.clipURL != nil,
+                    isPlaying: model.isPlayingSample(for: group.representative),
                     action: { model.playSample(for: group.representative) }
                 )
 
@@ -848,11 +868,12 @@ private struct SpeakerVoiceToNameRow: View {
 
 private struct SpeakerPlayClipButton: View {
     let hasClip: Bool
+    let isPlaying: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "play.fill")
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(hasClip ? Color.white : Color.secondary)
                 .frame(width: 36, height: 36)
@@ -860,8 +881,13 @@ private struct SpeakerPlayClipButton: View {
         }
         .buttonStyle(.plain)
         .disabled(!hasClip)
-        .help(hasClip ? "Play a short clip of this voice" : "No voice clip was saved for this speaker")
-        .accessibilityLabel("Play voice sample")
+        .help(helpText)
+        .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
+    }
+
+    private var helpText: String {
+        guard hasClip else { return "No voice clip was saved for this speaker" }
+        return isPlaying ? "Pause this voice sample" : "Play a short clip of this voice"
     }
 }
 
@@ -931,7 +957,7 @@ private struct SpeakerDuplicateNameChip: View {
             model.playSample(for: profile.id)
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: hasClip ? "play.circle.fill" : "person.crop.circle")
+                Image(systemName: iconName)
                     .font(.system(size: 11, weight: .semibold))
 
                 Text(chipTitle)
@@ -948,7 +974,7 @@ private struct SpeakerDuplicateNameChip: View {
             normalStroke: Color.primary.opacity(0.08)
         ))
         .disabled(!hasClip)
-        .help(hasClip ? "Play this voice" : "No voice clip saved")
+        .help(helpText)
     }
 
     private var chipTitle: String {
@@ -959,6 +985,20 @@ private struct SpeakerDuplicateNameChip: View {
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
+    }
+
+    private var isPlaying: Bool {
+        model.isPlayingSample(for: profile.id)
+    }
+
+    private var iconName: String {
+        guard hasClip else { return "person.crop.circle" }
+        return isPlaying ? "pause.circle.fill" : "play.circle.fill"
+    }
+
+    private var helpText: String {
+        guard hasClip else { return "No voice clip saved" }
+        return isPlaying ? "Pause this voice" : "Play this voice"
     }
 }
 
@@ -1029,14 +1069,14 @@ private struct SpeakerPersonRow: View {
                     Button {
                         model.playSample(for: profile.id)
                     } label: {
-                        Image(systemName: "play.circle.fill")
+                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.accentColor)
                             .padding(6)
                     }
                     .buttonStyle(SettingsHoverButtonStyle(tone: .accent, cornerRadius: 8))
-                    .help("Play this voice")
-                    .accessibilityLabel("Play voice sample")
+                    .help(isPlaying ? "Pause this voice" : "Play this voice")
+                    .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
                 }
 
                 rowMenu
@@ -1184,6 +1224,10 @@ private struct SpeakerPersonRow: View {
 
     private var hasClip: Bool {
         model.clipURL(for: profile.id) != nil
+    }
+
+    private var isPlaying: Bool {
+        model.isPlayingSample(for: profile.id)
     }
 
     private func mergeLabel(for target: SpeakerProfile) -> String {
