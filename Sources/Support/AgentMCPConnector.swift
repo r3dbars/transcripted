@@ -205,14 +205,20 @@ enum AgentMCPConnector {
         _ agent: AgentMCPAgent,
         helperCommandPath: String = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path,
         paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        cliTimeout: TimeInterval = defaultCLITimeout
     ) throws {
         switch agent {
         case .claudeDesktop:
             // Claude Desktop keeps its dedicated install + self-test flow.
             _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(fileManager: fileManager)
         case .claudeCode:
-            try connectClaudeCode(helperCommandPath: helperCommandPath, paths: paths, fileManager: fileManager)
+            try connectClaudeCode(
+                helperCommandPath: helperCommandPath,
+                paths: paths,
+                fileManager: fileManager,
+                cliTimeout: cliTimeout
+            )
         case .codex:
             try connectCodex(helperCommandPath: helperCommandPath, paths: paths, fileManager: fileManager)
         case .cursor:
@@ -239,7 +245,8 @@ enum AgentMCPConnector {
     private static func connectClaudeCode(
         helperCommandPath: String,
         paths: AgentMCPConnectorPaths,
-        fileManager: FileManager
+        fileManager: FileManager,
+        cliTimeout: TimeInterval
     ) throws {
         guard let binary = claudeCodeBinary(paths: paths, fileManager: fileManager) else {
             throw AgentMCPConnectorError.agentCLINotFound(.claudeCode)
@@ -247,11 +254,16 @@ enum AgentMCPConnector {
 
         // `mcp add` fails when the name already exists; remove first so
         // reconnect after an app move or helper path change stays one click.
-        _ = try? runCLI(binary, arguments: ["mcp", "remove", "--scope", "user", serverName])
+        _ = try? runCLI(
+            binary,
+            arguments: ["mcp", "remove", "--scope", "user", serverName],
+            timeout: cliTimeout
+        )
 
         let result = try runCLI(
             binary,
-            arguments: ["mcp", "add", "--scope", "user", serverName, helperCommandPath]
+            arguments: ["mcp", "add", "--scope", "user", serverName, helperCommandPath],
+            timeout: cliTimeout
         )
         guard result.status == 0 else {
             throw AgentMCPConnectorError.agentCLIFailed(.claudeCode, status: result.status, output: result.output)
@@ -425,12 +437,13 @@ enum AgentMCPConnector {
         return transcripted["command"] as? String
     }
 
-    static let cliTimeout: TimeInterval = 30
+    static let defaultCLITimeout: TimeInterval = 30
 
     private static func runCLI(
         _ executable: URL,
         arguments: [String],
-        agent: AgentMCPAgent = .claudeCode
+        agent: AgentMCPAgent = .claudeCode,
+        timeout: TimeInterval = defaultCLITimeout
     ) throws -> (status: Int32, output: String) {
         let process = Process()
         process.executableURL = executable
@@ -462,7 +475,7 @@ enum AgentMCPConnector {
             }
         }
 
-        if finished.wait(timeout: .now() + cliTimeout) == .timedOut {
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
             process.terminate()
             _ = finished.wait(timeout: .now() + 2)
             throw AgentMCPConnectorError.agentCLITimedOut(agent)

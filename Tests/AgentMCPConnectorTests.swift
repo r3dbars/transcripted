@@ -247,6 +247,75 @@ func testAgentMCPConnector() {
         }
     }
 
+    runSuite("AgentMCPConnector.connect(.claudeCode) — times out a hung CLI instead of waiting forever") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeHangTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(
+            homeDirectory: tempRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: []
+        )
+        let binaryURL = tempRoot.appendingPathComponent(".claude/local/claude", isDirectory: false)
+
+        try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nsleep 30\n".write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        let started = Date()
+        do {
+            try AgentMCPConnector.connect(
+                .claudeCode,
+                helperCommandPath: "/tmp/transcripted-mcp",
+                paths: paths,
+                cliTimeout: 0.4
+            )
+            assertTrue(false, "hung CLI should throw a timeout error")
+        } catch let error as AgentMCPConnectorError {
+            assertEqual(error, .agentCLITimedOut(.claudeCode), "hung CLI should raise agentCLITimedOut")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+
+        // Two CLI calls (remove + add) at 0.4s each plus termination grace.
+        assertTrue(
+            Date().timeIntervalSince(started) < 10,
+            "timeout should fire promptly instead of waiting out the full sleep"
+        )
+    }
+
+    runSuite("AgentMCPConnector.connect(.codex) — surfaces an unwritable config directory as an error") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCodexReadOnlyTests-\(UUID().uuidString)", isDirectory: true)
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [])
+        let codexDirectory = paths.codexConfigURL.deletingLastPathComponent()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: codexDirectory.path)
+            try? FileManager.default.removeItem(at: tempRoot)
+        }
+
+        try? FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        try? "model = \"o4\"\n".write(to: paths.codexConfigURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o555)], ofItemAtPath: codexDirectory.path)
+
+        do {
+            try AgentMCPConnector.connect(.codex, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+            assertTrue(false, "read-only ~/.codex should throw instead of silently failing")
+        } catch {
+            assertFalse(
+                error.localizedDescription.isEmpty,
+                "read-only config failure should carry a user-facing message"
+            )
+        }
+
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: codexDirectory.path)
+        assertEqual(
+            (try? String(contentsOf: paths.codexConfigURL, encoding: .utf8)) ?? "",
+            "model = \"o4\"\n",
+            "failed connect must leave the existing config untouched"
+        )
+    }
+
     runSuite("AgentMCPConnector.codexConfiguredCommandPath — tolerates CRLF configs") {
         let crlfConfig = "[mcp_servers.transcripted]\r\ncommand = \"/tmp/transcripted-mcp\"\r\n"
 
