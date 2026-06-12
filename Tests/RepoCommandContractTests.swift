@@ -2892,6 +2892,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
+        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let deleteBlock = sourceSlice(
             settingsContents,
@@ -2909,6 +2910,17 @@ func testRepoCommandContract() {
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
                 deleteBlock.contains("_ = try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+        assertTrue(
+            homeContents.contains("func removeVisibleMeeting(id: String)")
+                && deleteBlock.contains("homeViewModel.removeVisibleMeeting(id: item.id)")
+                && deleteBlock.contains("if homeMeetingPreview?.transcriptURL == item.transcriptURL"),
+            "confirmed Home delete should immediately close stale preview state and remove the visible meeting row before the filesystem refresh"
+        )
+        assertTrue(
+            deleteBlock.contains("} catch {\n                refreshRecentCaptures(force: true)")
+                && deleteBlock.contains("presentHomeDeleteFailure("),
+            "failed Home delete should force a reload so an optimistically hidden row is restored with a visible error"
         )
     }
 
