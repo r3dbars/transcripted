@@ -18,9 +18,18 @@ enum MeetingMicBoostPromptPolicy {
     /// the user already enabled Apple voice processing in Settings.
     static func shouldPresent(
         isRecording: Bool,
+        isStopping: Bool = false,
         voiceProcessingPreferenceEnabled: Bool,
         currentOutcome: MeetingMicBoostPromptOutcome
     ) -> Bool {
-        isRecording && !voiceProcessingPreferenceEnabled && currentOutcome == .notShown
+        isRecording && !isStopping && !voiceProcessingPreferenceEnabled && currentOutcome == .notShown
+    }
+
+    static func shouldApplyAction(
+        isPromptVisible: Bool,
+        isRecording: Bool,
+        isStopping: Bool
+    ) -> Bool {
+        isPromptVisible && isRecording && !isStopping
     }
 }

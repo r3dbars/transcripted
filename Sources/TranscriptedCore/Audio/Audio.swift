@@ -167,7 +167,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micSegments.append(segment)
         let segments = _micSegments
         micSegmentsLock.unlock()
-        recordingJournal.recordSegments(segments)
+        recordingJournal.recordSegments(segments, sessionID: recordingJournalSessionID)
     }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
@@ -336,6 +336,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
             recordingSessionGenerationLock.lock()
             defer { recordingSessionGenerationLock.unlock() }
             _recordingSessionGeneration = newValue
+        }
+    }
+    private var _recordingJournalSessionID: UInt64?
+    private let recordingJournalSessionIDLock = NSLock()
+    var recordingJournalSessionID: UInt64? {
+        get {
+            recordingJournalSessionIDLock.lock()
+            defer { recordingJournalSessionIDLock.unlock() }
+            return _recordingJournalSessionID
+        }
+        set {
+            recordingJournalSessionIDLock.lock()
+            defer { recordingJournalSessionIDLock.unlock() }
+            _recordingJournalSessionID = newValue
         }
     }
     let maxRecoveryAttempts = 5
@@ -852,6 +866,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         recordingSessionGeneration &+= 1
+        recordingJournalSessionID = recordingSessionGeneration
 
         // Reset capture artifacts so a previous session cannot make a new start
         // look ready before the fresh mic/system files exist.
@@ -1024,7 +1039,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard recordingSessionGeneration == sessionGeneration else { return }
 
         systemAudioFileURL = fileURL
-        recordingJournal.recordSystemAudio(fileURL)
+        recordingJournal.recordSystemAudio(fileURL, sessionID: sessionGeneration)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
@@ -1035,6 +1050,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         pendingStartIntentId = nil
+        let journalSessionID = recordingJournalSessionID
         recordingSessionGeneration &+= 1
         let stopGeneration = recordingSessionGeneration
 
@@ -1054,7 +1070,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let finalSystemURL = systemAudioFileURL
         let cueHandler = self.onCaptureLifecycleCue
 
-        recordingJournal.markStopping()
+        recordingJournal.markStopping(sessionID: journalSessionID)
 
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
@@ -1160,12 +1176,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
-                self.recordingJournal.markFinalized(finalMicURL: finalMicURL)
+                self.recordingJournal.markFinalized(finalMicURL: finalMicURL, sessionID: journalSessionID)
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil
                         self.micSegments = []
                         self.micAudioFileURL = finalMicURL
+                        self.recordingJournalSessionID = nil
                     } else {
                         AppLogger.audio.info("Recording completion belongs to stale stop; preserving current capture state", [
                             "stopGeneration": "\(stopGeneration)",

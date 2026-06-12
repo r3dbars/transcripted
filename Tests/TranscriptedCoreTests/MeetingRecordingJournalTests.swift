@@ -53,6 +53,63 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
+    func testSessionTokenIgnoresStaleMutationAfterNewBegin() throws {
+        let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        let oldMicURL = temporaryDirectory.appendingPathComponent("meeting_old_mic.wav")
+        let newMicURL = temporaryDirectory.appendingPathComponent("meeting_new_mic.wav")
+        let newJournalURL = temporaryDirectory.appendingPathComponent("meeting_new_mic.recording.json")
+
+        store.begin(primaryMicURL: oldMicURL, startedAt: Date(timeIntervalSince1970: 1_000), sessionID: 10)
+        store.flush()
+
+        store.begin(primaryMicURL: newMicURL, startedAt: Date(timeIntervalSince1970: 2_000), sessionID: 11)
+        store.recordSystemAudio(temporaryDirectory.appendingPathComponent("old_system.wav"), sessionID: 10)
+        store.recordSegments([
+            MicRecordingSegment(url: oldMicURL),
+            MicRecordingSegment(url: temporaryDirectory.appendingPathComponent("old_recovery.wav"), gapBeforeDuration: 2)
+        ], sessionID: 10)
+        store.markFinalized(
+            finalMicURL: temporaryDirectory.appendingPathComponent("old_mic_merged.wav"),
+            sessionID: 10
+        )
+        store.flush()
+
+        let journal = try XCTUnwrap(MeetingRecordingJournalStore.load(at: newJournalURL))
+        XCTAssertEqual(journal.state, .recording)
+        XCTAssertEqual(journal.sessionID, 11)
+        XCTAssertEqual(journal.primaryMicFilename, "meeting_new_mic.wav")
+        XCTAssertEqual(journal.micSegments.map(\.filename), ["meeting_new_mic.wav"])
+        XCTAssertNil(journal.systemAudioFilename)
+        XCTAssertNil(journal.finalMicFilename)
+    }
+
+    func testFinalizedJournalRetiresMemorySoLateCallbacksCannotResurrectFile() throws {
+        let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        let micURL = temporaryDirectory.appendingPathComponent("meeting_2026_mic.wav")
+        let journalURL = temporaryDirectory.appendingPathComponent("meeting_2026_mic.recording.json")
+
+        store.begin(primaryMicURL: micURL, startedAt: Date(timeIntervalSince1970: 1_000), sessionID: 42)
+        store.markFinalized(
+            finalMicURL: temporaryDirectory.appendingPathComponent("meeting_2026_mic_merged.wav"),
+            sessionID: 42
+        )
+        store.flush()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+
+        try FileManager.default.removeItem(at: journalURL)
+        store.recordSystemAudio(temporaryDirectory.appendingPathComponent("late_system.wav"), sessionID: 42)
+        store.recordSegments([
+            MicRecordingSegment(url: micURL),
+            MicRecordingSegment(url: temporaryDirectory.appendingPathComponent("late_recovery.wav"), gapBeforeDuration: 3)
+        ], sessionID: 42)
+        store.flush()
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: journalURL.path),
+            "late callbacks from a finalized session must not resurrect a deleted recovery journal"
+        )
+    }
+
     func testJournalURLsFindsOnlyJournalFiles() throws {
         FileManager.default.createFile(
             atPath: temporaryDirectory.appendingPathComponent("a.recording.json").path,

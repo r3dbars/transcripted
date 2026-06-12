@@ -61,6 +61,53 @@ func testMeetingMicBoostPromptPolicy() {
         )
     }
 
+    runSuite("MeetingMicBoostPromptPolicy.shouldPresent — blocked while stop is in flight") {
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldPresent(
+                isRecording: true,
+                isStopping: true,
+                voiceProcessingPreferenceEnabled: false,
+                currentOutcome: .notShown
+            ),
+            "a cue racing stop cleanup should not surface a stale prompt"
+        )
+    }
+
+    runSuite("MeetingMicBoostPromptPolicy.shouldApplyAction — action is live-recording only") {
+        assertTrue(
+            MeetingMicBoostPromptPolicy.shouldApplyAction(
+                isPromptVisible: true,
+                isRecording: true,
+                isStopping: false
+            ),
+            "visible prompts may apply while the recording is still active"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyAction(
+                isPromptVisible: false,
+                isRecording: true,
+                isStopping: false
+            ),
+            "hidden prompts should not act"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyAction(
+                isPromptVisible: true,
+                isRecording: false,
+                isStopping: false
+            ),
+            "stale UI actions after stop should not act"
+        )
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldApplyAction(
+                isPromptVisible: true,
+                isRecording: true,
+                isStopping: true
+            ),
+            "stale UI actions during stop cleanup should not act"
+        )
+    }
+
     runSuite("MeetingMicBoostPromptOutcome — rawValues are a persisted frontmatter contract") {
         assertEqual(
             MeetingMicBoostPromptOutcome.notShown.rawValue,

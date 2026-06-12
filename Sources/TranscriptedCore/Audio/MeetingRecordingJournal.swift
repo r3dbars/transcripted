@@ -26,6 +26,9 @@ struct MeetingRecordingJournal: Codable, Equatable {
     var state: State
     var startedAt: Date
     var updatedAt: Date
+    /// In-process session token used to ignore delayed callbacks from older
+    /// recordings. Optional so existing on-disk journals still decode.
+    var sessionID: UInt64? = nil
     /// Filenames are relative to the journal's own directory so records stay
     /// valid if Application Support is relocated.
     var primaryMicFilename: String?
@@ -40,6 +43,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     private let directory: URL
     private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
+    private var activeSessionID: UInt64?
     private var journalURL: URL?
     private var journal: MeetingRecordingJournal?
 
@@ -47,15 +51,17 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         self.directory = directory
     }
 
-    func begin(primaryMicURL: URL, startedAt: Date = Date()) {
-        queue.async {
+    func begin(primaryMicURL: URL, startedAt: Date = Date(), sessionID: UInt64? = nil) {
+        queue.sync {
             let name = primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
+            self.activeSessionID = sessionID
             self.journalURL = self.directory.appendingPathComponent(name)
             self.journal = MeetingRecordingJournal(
                 version: 1,
                 state: .recording,
                 startedAt: startedAt,
                 updatedAt: startedAt,
+                sessionID: sessionID,
                 primaryMicFilename: primaryMicURL.lastPathComponent,
                 micSegments: [MeetingRecordingJournal.SegmentRecord(
                     filename: primaryMicURL.lastPathComponent,
@@ -68,38 +74,40 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
-    func recordSystemAudio(_ url: URL) {
-        mutate { $0.systemAudioFilename = url.lastPathComponent }
+    func recordSystemAudio(_ url: URL, sessionID: UInt64? = nil) {
+        mutate(sessionID: sessionID) { $0.systemAudioFilename = url.lastPathComponent }
     }
 
-    func recordSegments(_ segments: [MicRecordingSegment]) {
+    func recordSegments(_ segments: [MicRecordingSegment], sessionID: UInt64? = nil) {
         let records = segments.map {
             MeetingRecordingJournal.SegmentRecord(
                 filename: $0.url.lastPathComponent,
                 gapBefore: $0.gapBeforeDuration
             )
         }
-        mutate { $0.micSegments = records }
+        mutate(sessionID: sessionID) { $0.micSegments = records }
     }
 
-    func markStopping() {
-        mutate { $0.state = .stopping }
+    func markStopping(sessionID: UInt64? = nil) {
+        mutate(sessionID: sessionID) { $0.state = .stopping }
     }
 
-    func markFinalized(finalMicURL: URL?) {
-        mutate {
+    func markFinalized(finalMicURL: URL?, sessionID: UInt64? = nil) {
+        mutate(sessionID: sessionID, retireAfterPersist: true) {
             $0.state = .finalized
             $0.finalMicFilename = finalMicURL?.lastPathComponent
         }
     }
 
     /// The meeting reached a durable state elsewhere; the journal's job is done.
-    func clear() {
+    func clear(sessionID: UInt64? = nil) {
         queue.async {
+            guard self.matchesActiveSessionLocked(sessionID) else { return }
             if let url = self.journalURL {
                 try? FileManager.default.removeItem(at: url)
             }
             self.journal = nil
+            self.activeSessionID = nil
             self.journalURL = nil
         }
     }
@@ -109,14 +117,28 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         queue.sync {}
     }
 
-    private func mutate(_ change: @escaping (inout MeetingRecordingJournal) -> Void) {
+    private func mutate(
+        sessionID: UInt64?,
+        retireAfterPersist: Bool = false,
+        _ change: @escaping (inout MeetingRecordingJournal) -> Void
+    ) {
         queue.async {
+            guard self.matchesActiveSessionLocked(sessionID) else { return }
             guard var journal = self.journal else { return }
             change(&journal)
             journal.updatedAt = Date()
             self.journal = journal
             self.persistLocked()
+            if retireAfterPersist {
+                self.journal = nil
+                self.activeSessionID = nil
+            }
         }
+    }
+
+    private func matchesActiveSessionLocked(_ sessionID: UInt64?) -> Bool {
+        guard let sessionID else { return true }
+        return activeSessionID == sessionID
     }
 
     private func persistLocked() {
