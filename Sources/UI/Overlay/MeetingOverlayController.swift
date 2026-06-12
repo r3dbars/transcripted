@@ -1673,6 +1673,10 @@ final class MeetingOverlayController: NSObject {
             state = .recording
             showPanel()
             pushToView()
+            // Transcript updates that arrived while the prompt was up were
+            // deferred (the drawer only renders in .recording); flush them
+            // now instead of waiting for the next ASR update.
+            flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
         } else {
             state = .idle
@@ -2287,6 +2291,10 @@ final class MeetingOverlayController: NSObject {
             state = .recording
             showPanel()
             pushToView()
+            // The silence that raised this prompt can hold it up for minutes;
+            // flush transcript updates deferred behind it instead of waiting
+            // for the next ASR update.
+            flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
             // A mic-boost prompt may have fired while the inactivity prompt
             // was up (suppressed by precedence) or been replaced by it. The
