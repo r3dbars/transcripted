@@ -1225,11 +1225,7 @@ struct TranscriptedSettingsView: View {
         if !item.audioURLs.isEmpty {
             trackSettingsAction("home_delete_failed_meeting_request", page: .home)
             let presentation = HomeDeleteConfirmationPolicy.failedMeeting
-            homeDeleteConfirmation = HomeDeleteConfirmation(
-                title: presentation.title,
-                message: presentation.message,
-                confirmTitle: presentation.confirmTitle
-            ) {
+            presentFailedMeetingDeleteConfirmation(presentation) {
                 trackSettingsAction("home_delete_failed_meeting_confirm", page: .home)
                 clearFailedMeeting(item)
             }
@@ -1238,6 +1234,27 @@ struct TranscriptedSettingsView: View {
 
         trackSettingsAction("home_dismiss_failed_meeting", page: .home)
         clearFailedMeeting(item)
+    }
+
+    private func presentFailedMeetingDeleteConfirmation(
+        _ presentation: HomeDeleteConfirmationPresentation,
+        onConfirm: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = presentation.title
+        alert.informativeText = presentation.message
+        alert.addButton(withTitle: presentation.confirmTitle)
+        alert.addButton(withTitle: "Cancel")
+
+        if let window = NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow {
+            alert.beginSheetModal(for: window) { response in
+                guard response == .alertFirstButtonReturn else { return }
+                onConfirm()
+            }
+        } else if alert.runModal() == .alertFirstButtonReturn {
+            onConfirm()
+        }
     }
 
     private func clearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {

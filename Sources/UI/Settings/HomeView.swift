@@ -2408,6 +2408,7 @@ private struct HomeFailedMeetingRow: View {
                     ) {
                         onClear()
                     }
+                    .frame(width: hasRetainedAudioFiles ? 78 : 82, height: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
