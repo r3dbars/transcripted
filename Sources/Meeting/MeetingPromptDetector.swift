@@ -25,6 +25,12 @@ final class MeetingPromptDetector {
 
     var onPromptRequest: ((Candidate) -> Bool)?
 
+    /// Returns true while Transcripted itself holds the mic (meeting recording or
+    /// dictation). Gates the mic-activity path so we never prompt to record our
+    /// own capture — belt-and-suspenders with `MicActivityMonitor`'s own-bundle
+    /// filter. Wired in `TranscriptedApp`.
+    var isOwnCaptureActive: (() -> Bool)?
+
     private let calendarReader = MeetingPromptCalendarReader()
     // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
@@ -37,6 +43,8 @@ final class MeetingPromptDetector {
     private var pendingUntil: [String: Date] = [:]
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
     private var runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
+    // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
+    private var micActiveBundleIDs: Set<String> = []
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -209,6 +217,7 @@ final class MeetingPromptDetector {
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         ))
+        candidates.append(contentsOf: micInputCandidates(now: now))
 
         guard let match = candidates.sorted(by: sortCandidates).first else { return }
 
@@ -311,6 +320,83 @@ final class MeetingPromptDetector {
                 score: presentation.score
             )
         }
+    }
+
+    // MARK: - Mic-activity candidates (ad-hoc call detection)
+
+    /// Pushed by `MicActivityMonitor` with the set of non-self bundle IDs holding
+    /// the mic input. Stores it, resets mic-suppression for any provider that just
+    /// left the call (the "inactive" edge, so the next call re-prompts), and
+    /// re-evaluates.
+    func updateMicInputUsers(_ bundleIDs: Set<String>) {
+        guard bundleIDs != micActiveBundleIDs else { return }
+        let departed = micProviders(for: micActiveBundleIDs).subtracting(micProviders(for: bundleIDs))
+        micActiveBundleIDs = bundleIDs
+        for provider in departed {
+            clearMicSuppression(for: provider)
+        }
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
+    private func micInputCandidates(now: Date) -> [ScoredCandidate] {
+        guard !micActiveBundleIDs.isEmpty else { return [] }
+        // Never prompt to record a call while we already hold the mic ourselves.
+        guard isOwnCaptureActive?() != true else { return [] }
+
+        var seenProviders: Set<MeetingPromptProvider> = []
+        var candidates: [ScoredCandidate] = []
+        for bundleID in micActiveBundleIDs.sorted() {
+            guard let provider = MeetingPromptProvider.micInputProvider(forBundleID: bundleID) else { continue }
+            guard seenProviders.insert(provider).inserted else { continue }
+            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now { continue }
+
+            // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
+            // Teams-web), so keep their title neutral instead of mislabeling them.
+            let isBrowserCall = provider == .googleMeet
+            let title = isBrowserCall
+                ? "Call detected in your browser"
+                : "\(displayName(for: provider)) call detected"
+            let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+
+            candidates.append(
+                ScoredCandidate(
+                    candidate: Candidate(
+                        id: micCandidateID(for: provider),
+                        title: presentation.title,
+                        detail: presentation.detail,
+                        provider: provider,
+                        reason: .micInput,
+                        source: .runtimeApp,
+                        startDate: now,
+                        endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+                        meetingURL: nil,
+                        suggestedTranscriptTitle: nil
+                    ),
+                    score: presentation.score
+                )
+            )
+        }
+        return candidates
+    }
+
+    private func micProviders(for bundleIDs: Set<String>) -> Set<MeetingPromptProvider> {
+        Set(bundleIDs.compactMap { MeetingPromptProvider.micInputProvider(forBundleID: $0) })
+    }
+
+    // Clears the mic-prompt backoff for a provider whose call just ended, so the
+    // next distinct call can prompt again. Within a single call, snooze/dismiss
+    // still suppress as usual.
+    private func clearMicSuppression(for provider: MeetingPromptProvider) {
+        runtimeSuppressedUntil[provider] = nil
+        let id = micCandidateID(for: provider)
+        snoozedUntil[id] = nil
+        pendingUntil[id] = nil
+    }
+
+    private func micCandidateID(for provider: MeetingPromptProvider) -> String {
+        "mic:\(provider.rawValue)"
     }
 
     private func sortCandidates(_ lhs: ScoredCandidate, _ rhs: ScoredCandidate) -> Bool {

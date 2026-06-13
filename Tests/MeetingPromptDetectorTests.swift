@@ -104,4 +104,54 @@ func testMeetingPromptDetector() async {
             "runtime-only prompts should not invent a transcript title"
         )
     }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNotNil(box.candidate, "a browser holding the mic should surface a prompt with no calendar event")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "a browser mic call should attribute to the browser-call provider")
+        assertEqual(box.candidate?.reason, .micInput, "mic prompts should record the distinct mic-input reason")
+        assertEqual(box.candidate?.source, .runtimeApp, "mic prompts should reuse the runtime source so backoff is unchanged")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, nil, "a browser call has no calendar title to suggest")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — never prompts while our own capture is active") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { true }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "we must never prompt to record a call while Transcripted itself holds the mic")
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class CandidateBox {
+    var candidate: MeetingPromptDetector.Candidate?
+}
+
+// updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a
+// few times so it can run before we assert.
+@MainActor
+private func waitForPromptEvaluation() async {
+    for _ in 0..<20 {
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
 }
