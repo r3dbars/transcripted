@@ -114,6 +114,93 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(ids.filter { $0 == 2 }.count, 2)
     }
 
+    func testConsolidateMergesOverSegmentedSameVoice() {
+        // One voice that VBx split into four near-identical large clusters.
+        let merged = EmbeddingClusterer.consolidateSameVoiceClusters(
+            segments: [
+                segment(speakerId: 1, startTime: 0, endTime: 40, embedding: [1.0, 0.0]),
+                segment(speakerId: 2, startTime: 40, endTime: 80, embedding: unitVector(cosineToXAxis: 0.99)),
+                segment(speakerId: 3, startTime: 80, endTime: 120, embedding: unitVector(cosineToXAxis: 0.97)),
+                segment(speakerId: 4, startTime: 120, endTime: 160, embedding: unitVector(cosineToXAxis: 0.95)),
+            ],
+            threshold: 0.88
+        )
+
+        XCTAssertEqual(Set(merged.map(\.speakerId)).count, 1)
+    }
+
+    func testConsolidatePreservesDistinctSpeakers() {
+        // Realistic distinct voices sit well under ~0.6 cosine, so none merge.
+        let kept = EmbeddingClusterer.consolidateSameVoiceClusters(
+            segments: [
+                segment(speakerId: 1, startTime: 0, endTime: 40, embedding: unitVector(degrees: 0)),
+                segment(speakerId: 2, startTime: 40, endTime: 80, embedding: unitVector(degrees: 66)),
+                segment(speakerId: 3, startTime: 80, endTime: 120, embedding: unitVector(degrees: 132)),
+            ],
+            threshold: 0.88
+        )
+
+        XCTAssertEqual(Set(kept.map(\.speakerId)).count, 3)
+    }
+
+    func testConsolidateDoesNotChainCollapseAcrossDissimilarEndpoints() {
+        // A≈B and B≈C, but A and C are far apart. Recomputed centroids must stop
+        // the transitive collapse that broke the broad pairwise merge.
+        let chained = EmbeddingClusterer.consolidateSameVoiceClusters(
+            segments: [
+                segment(speakerId: 1, startTime: 0, endTime: 40, embedding: unitVector(degrees: 0)),
+                segment(speakerId: 2, startTime: 40, endTime: 80, embedding: unitVector(degrees: 20)),
+                segment(speakerId: 3, startTime: 80, endTime: 120, embedding: unitVector(degrees: 40)),
+            ],
+            threshold: 0.88
+        )
+
+        XCTAssertEqual(
+            Set(chained.map(\.speakerId)).count,
+            2,
+            "Recomputed centroids stop A≈B, B≈C from chain-collapsing into one speaker"
+        )
+    }
+
+    func testPostProcessConsolidatesOneOnOneCallToSingleSpeaker() {
+        // The reported case: a single remote voice over-segmented into four large
+        // clusters that all survive small-cluster absorption.
+        let voices: [[Float]] = [
+            [1.0, 0.0],
+            unitVector(cosineToXAxis: 0.99),
+            unitVector(cosineToXAxis: 0.98),
+            unitVector(cosineToXAxis: 0.97),
+        ]
+        let segments = voices.enumerated().map { index, embedding in
+            segment(
+                speakerId: index + 1,
+                startTime: Double(index * 40),
+                endTime: Double(index * 40 + 40),
+                embedding: embedding
+            )
+        }
+
+        let processed = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: [],
+            pairwiseMergeThreshold: nil
+        )
+        XCTAssertEqual(
+            Set(processed.map(\.speakerId)).count,
+            1,
+            "An over-segmented single remote voice should collapse to one speaker to name"
+        )
+
+        // The pass is opt-out: passing nil leaves the over-segmentation in place.
+        let notConsolidated = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: [],
+            pairwiseMergeThreshold: nil,
+            consolidationThreshold: nil
+        )
+        XCTAssertEqual(Set(notConsolidated.map(\.speakerId)).count, 4)
+    }
+
     private func segment(
         speakerId: Int,
         startTime: Double,

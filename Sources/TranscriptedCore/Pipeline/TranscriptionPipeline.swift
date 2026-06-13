@@ -144,8 +144,9 @@ extension Transcription {
             let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
             // Post-process diarization segments, but skip the broad pairwise merge
-            // phase for PyAnnote/VBx output. Small-cluster absorption and DB-informed
-            // split still run for noise cleanup and known-speaker corrections.
+            // phase for PyAnnote/VBx output. Small-cluster absorption, same-voice
+            // consolidation (collapses one over-segmented voice so the user names
+            // each person once), and DB-informed split still run.
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
