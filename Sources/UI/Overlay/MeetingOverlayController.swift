@@ -871,10 +871,11 @@ final class MeetingOverlayRootView: NSView {
                 view.animator().alphaValue = fadeOut ? 0 : 1
             }
         }, completionHandler: { [weak self] in
-            guard let self, self.isCondensed == fadeOut else { return }
-            if fadeOut {
-                for view in fadeViews {
-                    view.isHidden = true
+            Task { @MainActor [weak self] in
+                guard let self, self.isCondensed == fadeOut else { return }
+                if fadeOut {
+                    self.audioWaveform.isHidden = true
+                    self.closeButton.isHidden = true
                 }
             }
         })
@@ -923,8 +924,10 @@ final class MeetingOverlayRootView: NSView {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 transcriptDrawer.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
-                guard let self, !self.isDrawerVisible else { return }
-                self.transcriptDrawer.isHidden = true
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isDrawerVisible else { return }
+                    self.transcriptDrawer.isHidden = true
+                }
             })
         }
     }
