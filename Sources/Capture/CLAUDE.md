@@ -13,6 +13,8 @@
 
 - `ContextCaptureEngine.swift` — accessibility-backed physical trigger detection,
   shortcut debounce, and routing into dictation, paste-last-dictation, or meeting handlers
+- `PhysicalShortcutMatcher.swift` — Foundation-pure binding-selection helpers for
+  exact/fallback shortcut precedence, release matching, and shared-modifier chord checks
 
 ## Current Hotkey Flow
 

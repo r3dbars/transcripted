@@ -88,6 +88,9 @@ Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/AudioDiagnosticsSnapshotTests.swift`
+- `Tests/TranscriptedCoreTests/AudioLevelMonitorSilenceTests.swift`
+- `Tests/TranscriptedCoreTests/AudioPipelineDiagnosticsSnapshotShapeTests.swift`
+- `Tests/TranscriptedCoreTests/AudioResamplerTests.swift`
 - `Tests/TranscriptedCoreTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
@@ -97,6 +100,7 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingRecordingJournalTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingRouteArtifactFixtureTests.swift`
+- `Tests/TranscriptedCoreTests/DiarizationSpeakerIdParsingTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
 - `Tests/TranscriptedCoreTests/QuietMicAttenuationDetectorTests.swift`
@@ -105,6 +109,7 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/RecordingHealthInfoOverrideTests.swift`
 - `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerEmbeddingMatcherTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
 - `Tests/SpeakerPeopleReviewPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`

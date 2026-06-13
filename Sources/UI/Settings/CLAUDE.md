@@ -21,6 +21,10 @@ settings-side agent connection flow.
 - `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
   per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
   the live-meetings toggle, and the Advanced disclosure.
+- `AutoEnterDisplayNameResolver.swift` - Foundation-pure fallback chain for
+  Auto Enter app display names.
+- `HomePresentation.swift` - Foundation-pure Home copy, day labels, stable
+  feedback ids, and speaker palette slot selection.
 - `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
   showing opt-in local AI meeting-summary titles, previews, badges, and menu
   actions.
@@ -35,6 +39,8 @@ settings-side agent connection flow.
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
+- `TypingTimeSavedFormatter.swift` - Foundation-pure formatter for Home's
+  typing-time-saved stat.
 
 ## Guardrails
 

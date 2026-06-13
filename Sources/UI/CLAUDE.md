@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (67 Swift files)
+## Files (72 Swift files)
 
 ### Overlay/
 
@@ -33,6 +33,8 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy + overflow menu, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
 - `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context/overflow menu titles, and drawer status copy, including the one-click enable copy when live meetings is off
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
+- `Overlay/LiveTranscriptPlainTextRenderer.swift` — Foundation-pure copy renderer for the live transcript drawer
+- `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
 - `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
 
 The overlay area holds both live transient recording surfaces: the compact
@@ -73,9 +75,11 @@ onboarding connect stage. Both keep one mental model:
 ### Settings/
 
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, the live-meetings toggle, and the Advanced disclosure (folders, Codex inbox, config details)
+- `Settings/AutoEnterDisplayNameResolver.swift` — Foundation-pure fallback chain for Auto Enter app display names
 - `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
+- `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
 - `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
@@ -96,6 +100,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
+- `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
 
 ### Shared/
 
@@ -186,16 +191,21 @@ Relevant direct coverage:
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
 - `Tests/HomeCanvasGreetingTests.swift`
+- `Tests/HomePresentationTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
 - `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingLiveViewAffordancePolicyTests.swift`
+- `Tests/MeetingDurationFormatterTests.swift`
+- `Tests/LiveTranscriptPlainTextRendererTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
+- `Tests/AutoEnterDisplayNameResolverTests.swift`
+- `Tests/TypingTimeSavedFormatterTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
