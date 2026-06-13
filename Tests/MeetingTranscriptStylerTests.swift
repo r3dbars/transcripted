@@ -20,7 +20,31 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreservesImportedRecordingDate()
         testMeetingTranscriptStylerFailsClosedOnUnparseableBody()
         testMeetingTranscriptStylerStillRewritesGenuinelyEmptyTranscript()
+        testMeetingTranscriptStylerUsesTimeOnlyFallbackTitle()
     }
+}
+
+private func testMeetingTranscriptStylerUsesTimeOnlyFallbackTitle() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleUnnamedMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+
+    assertTrue(
+        styled.title.hasPrefix("Meeting at "),
+        "Unnamed meetings should fall back to a time-only title with no date prefix"
+    )
+    assertFalse(
+        styled.title.contains("2026") || styled.title.contains("Apr"),
+        "The fallback title must not carry the meeting date"
+    )
+    assertTrue(
+        styled.url.lastPathComponent.hasPrefix("2026-04-07 Meeting at "),
+        "The filename should carry the YYYY-MM-dd date prefix even for fallback titles"
+    )
 }
 
 private func testMeetingTranscriptStylerFailsClosedOnUnparseableBody() {
@@ -101,10 +125,10 @@ private func testMeetingTranscriptStylerRenamesArtifacts() {
     let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
 
     assertEqual(styled.title, "Meeting with Alex", "Styler should promote named remote speakers into the title")
-    assertEqual(styled.url.lastPathComponent, "Meeting with Alex.md", "Styler should rename the markdown artifact to the final title")
+    assertEqual(styled.url.lastPathComponent, "2026-04-07 Meeting with Alex.md", "Styler should rename the markdown artifact to the date-prefixed final title")
     assertTrue(FileManager.default.fileExists(atPath: styled.url.path), "Renamed markdown should exist")
     assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "Original markdown should be replaced")
-    assertTrue(updatedMarkdown?.contains("# Meeting with Alex") == true, "Markdown body should be rewritten with the canonical title")
+    assertTrue(updatedMarkdown?.contains("# Meeting with Alex") == true, "Markdown body should be rewritten with the canonical title (no date prefix)")
 }
 
 private func testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts() {
@@ -121,7 +145,7 @@ private func testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts() {
     let jsonArtifacts = files.filter { $0.pathExtension == "json" }
 
     assertTrue(jsonArtifacts.isEmpty, "Styler should not create or depend on sibling JSON artifacts")
-    assertTrue(styled.url.lastPathComponent == "Meeting with Alex.md", "Markdown rename should still use the canonical title")
+    assertTrue(styled.url.lastPathComponent == "2026-04-07 Meeting with Alex.md", "Markdown rename should still use the date-prefixed canonical title")
 }
 
 private func testMeetingTranscriptStylerIsIdempotent() {
@@ -134,8 +158,9 @@ private func testMeetingTranscriptStylerIsIdempotent() {
     let firstPass = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
     let secondPass = MeetingTranscriptStyler.restyleTranscript(at: firstPass.url)
 
-    assertEqual(firstPass.url, secondPass.url, "Styler should not create duplicate files once the title is canonical")
-    assertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Meeting with Alex 2.md").path), "Styler should not append duplicate suffixes on repeated passes")
+    assertEqual(firstPass.url.lastPathComponent, "2026-04-07 Meeting with Alex.md", "First pass should land on the date-prefixed canonical name")
+    assertEqual(firstPass.url, secondPass.url, "Styler should not create duplicate files once the name is canonical")
+    assertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("2026-04-07 Meeting with Alex 2.md").path), "Styler should not append duplicate suffixes on repeated passes")
 }
 
 private func testMeetingTranscriptStylerPreservesExplicitTitle() {
@@ -149,7 +174,7 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
     let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
 
     assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
-    assertEqual(styled.url.lastPathComponent, "Customer Interview April.md", "Explicit titles should drive the final transcript filename")
+    assertEqual(styled.url.lastPathComponent, "2026-04-07 Customer Interview April.md", "Explicit titles should drive the date-prefixed final transcript filename")
     assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
 }
 
@@ -168,8 +193,8 @@ private func testMeetingTranscriptStylerPreservesImportedRecordingDate() {
 
     assertEqual(
         styled.url.lastPathComponent,
-        "Customer Interview April.md",
-        "Imported notes should still be renamed to their explicit title"
+        "2026-04-07 Customer Interview April.md",
+        "Imported notes should still be renamed to their date-prefixed explicit title"
     )
     assertTrue(
         updatedMarkdown.contains("date: \"2026-04-07\""),
@@ -337,9 +362,9 @@ private func testMeetingTranscriptStylerRenamesRetainedAudioDirectory() {
     try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
-    let styledAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex_audio", isDirectory: true)
+    let styledAudioDirectory = audioRoot.appendingPathComponent("2026-04-07 Meeting with Alex_audio", isDirectory: true)
 
-    assertEqual(styled.url.lastPathComponent, "Meeting with Alex.md", "Styler should still rename the transcript")
+    assertEqual(styled.url.lastPathComponent, "2026-04-07 Meeting with Alex.md", "Styler should still rename the transcript")
     assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.path), "Retained audio directory should follow the transcript rename")
     assertTrue(FileManager.default.fileExists(atPath: styledAudioDirectory.appendingPathComponent("microphone.wav").path), "Retained audio files should move with the directory")
     assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "Original retained audio directory should be replaced")
@@ -353,8 +378,8 @@ private func testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions() {
     let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
     let audioRoot = directory.appendingPathComponent("audio", isDirectory: true)
     let originalAudioDirectory = audioRoot.appendingPathComponent("\(originalStem)_audio", isDirectory: true)
-    let existingAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex_audio", isDirectory: true)
-    let movedAudioDirectory = audioRoot.appendingPathComponent("Meeting with Alex 2_audio", isDirectory: true)
+    let existingAudioDirectory = audioRoot.appendingPathComponent("2026-04-07 Meeting with Alex_audio", isDirectory: true)
+    let movedAudioDirectory = audioRoot.appendingPathComponent("2026-04-07 Meeting with Alex 2_audio", isDirectory: true)
     try? FileManager.default.createDirectory(at: originalAudioDirectory, withIntermediateDirectories: true)
     try? FileManager.default.createDirectory(at: existingAudioDirectory, withIntermediateDirectories: true)
     FileManager.default.createFile(
@@ -365,7 +390,7 @@ private func testMeetingTranscriptStylerAvoidsAudioDirectoryCollisions() {
 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
 
-    assertEqual(styled.url.lastPathComponent, "Meeting with Alex 2.md", "Styler should avoid transcript/audio collisions together")
+    assertEqual(styled.url.lastPathComponent, "2026-04-07 Meeting with Alex 2.md", "Styler should avoid transcript/audio collisions together")
     assertTrue(FileManager.default.fileExists(atPath: movedAudioDirectory.path), "Audio directory should keep the matching transcript stem")
     assertTrue(
         FileManager.default.fileExists(atPath: movedAudioDirectory.appendingPathComponent("microphone.wav").path),
@@ -489,6 +514,30 @@ private func sampleImportedTranscript() -> String {
 
     **[00:04] [System/Speaker 1]**
     Happy to help.
+    """
+}
+
+private func sampleUnnamedMeetingTranscript() -> String {
+    """
+    ---
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "2"
+    system_utterances: "3"
+    ---
+
+    ## Full Transcript
+
+    **[00:00] [Mic/You]**
+    Thanks for making time today.
+
+    **[00:04] [System/Speaker 1]**
+    Happy to help. Let's get started.
+
+    **[00:09] [System/Speaker 1]**
+    Where should we begin?
     """
 }
 
