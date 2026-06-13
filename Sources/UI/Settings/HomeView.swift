@@ -767,6 +767,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var items: [HomeRowMenuItem]
+        private var menuActionTargets: [MenuActionTarget] = []
 
         init(items: [HomeRowMenuItem]) {
             self.items = items
@@ -774,17 +775,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc func showMenu(_ sender: NSButton) {
             let menu = NSMenu()
+            menuActionTargets = []
             // Without this, AppKit auto-enables every item whose target responds
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
             for item in items {
+                let target = MenuActionTarget(item: item)
+                menuActionTargets.append(target)
                 let menuItem = NSMenuItem(
                     title: item.title,
-                    action: #selector(performMenuItem(_:)),
+                    action: #selector(MenuActionTarget.perform(_:)),
                     keyEquivalent: ""
                 )
-                menuItem.target = self
-                menuItem.representedObject = item.id
+                menuItem.target = target
                 menuItem.isEnabled = item.isEnabled
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
@@ -807,15 +810,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 in: sender
             )
         }
+    }
 
-        @objc private func performMenuItem(_ sender: NSMenuItem) {
-            guard let id = sender.representedObject as? UUID,
-                  let item = items.first(where: { $0.id == id }),
-                  item.isEnabled else {
-                return
-            }
+    final class MenuActionTarget: NSObject {
+        private let item: HomeRowMenuItem
+
+        init(item: HomeRowMenuItem) {
+            self.item = item
+        }
+
+        @objc func perform(_ sender: NSMenuItem) {
+            guard item.isEnabled else { return }
             DispatchQueue.main.async {
-                item.action()
+                self.item.action()
             }
         }
     }
