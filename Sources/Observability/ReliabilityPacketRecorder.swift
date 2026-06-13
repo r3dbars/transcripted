@@ -25,25 +25,16 @@ private actor ReliabilityPacketFileWriter {
     private var handle: FileHandle?
     private var isPrepared = false
     private var approximateSize: UInt64 = 0
-    private let encoder = JSONEncoder()
 
     init(fileURL: URL = ReliabilityPacketRecorder.defaultFileURL()) {
         self.fileURL = fileURL
     }
 
     func append(_ packet: ReliabilityPacket) {
-        let data: Data
-        do {
-            data = try encoder.encode(packet)
-        } catch {
-            fputs("⚠️ RELIABILITY | failed to encode packet '\(packet.event)': \(error.localizedDescription)\n", stderr)
-            return
-        }
+        guard let lineData = ReliabilityPacketRecorder.encodedLine(for: packet) else { return }
 
         guard prepareIfNeeded() else { return }
 
-        var lineData = data
-        lineData.append(0x0A)
         if let handle {
             LockedFileAppender.append(lineData, to: handle)
             approximateSize += UInt64(lineData.count)
@@ -59,33 +50,14 @@ private actor ReliabilityPacketFileWriter {
     private func prepareIfNeeded() -> Bool {
         guard !isPrepared else { return true }
 
-        let storageDir = fileURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createPrivateDirectory(at: storageDir)
-        } catch {
-            fputs("⚠️ RELIABILITY | failed to create reliability directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+        guard let opened = ReliabilityPacketRecorder.openPreparedHandle(at: fileURL) else {
             return false
         }
 
-        ObservabilityLogRotation.rotateIfNeeded(
-            at: fileURL,
-            threshold: TranscriptedConstants.jsonlLogRotationThreshold
-        )
-
-        if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
-        }
-        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
-
-        do {
-            handle = try FileHandle(forWritingTo: fileURL)
-            approximateSize = handle?.seekToEndOfFile() ?? 0
-            isPrepared = true
-            return true
-        } catch {
-            fputs("⚠️ RELIABILITY | failed to open reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
-            return false
-        }
+        handle = opened
+        approximateSize = opened.seekToEndOfFile()
+        isPrepared = true
+        return true
     }
 
     deinit {
@@ -109,6 +81,71 @@ enum ReliabilityPacketRecorder {
         Task.detached(priority: .utility) {
             await writer.append(packet)
         }
+    }
+
+    // MARK: - Shared append primitives
+
+    /// Encode a packet into the newline-terminated JSONL record that gets written to
+    /// disk, or `nil` if encoding fails. Shared by the production writer actor and the
+    /// synchronous test seam so the on-disk line framing stays identical.
+    static func encodedLine(for packet: ReliabilityPacket) -> Data? {
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(packet)
+        } catch {
+            fputs("⚠️ RELIABILITY | failed to encode packet '\(packet.event)': \(error.localizedDescription)\n", stderr)
+            return nil
+        }
+        var lineData = data
+        lineData.append(0x0A)
+        return lineData
+    }
+
+    /// Prepare the reliability log directory + file (tightened to owner-only) and return
+    /// an open write handle, or `nil` if preparation failed. Shared by the production
+    /// writer actor and the synchronous test seam so the create/rotate/restrict/open
+    /// sequence — including `restrictFileToOwnerOnly(at:)` before opening the handle —
+    /// stays identical.
+    static func openPreparedHandle(at fileURL: URL) -> FileHandle? {
+        let storageDir = fileURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createPrivateDirectory(at: storageDir)
+        } catch {
+            fputs("⚠️ RELIABILITY | failed to create reliability directory: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+            return nil
+        }
+
+        ObservabilityLogRotation.rotateIfNeeded(
+            at: fileURL,
+            threshold: TranscriptedConstants.jsonlLogRotationThreshold
+        )
+
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+        FileManager.default.restrictFileToOwnerOnly(at: fileURL)
+
+        do {
+            return try FileHandle(forWritingTo: fileURL)
+        } catch {
+            fputs("⚠️ RELIABILITY | failed to open reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+            return nil
+        }
+    }
+
+    /// Test seam: synchronously append a single packet to a caller-supplied file using
+    /// the exact same prepare/append logic as the production writer actor (the actor
+    /// keeps a persistent handle; this opens and closes one per call). Not used on the
+    /// production path. Returns `true` if the line was written.
+    @discardableResult
+    static func appendForTesting(_ packet: ReliabilityPacket, to fileURL: URL) -> Bool {
+        guard let lineData = encodedLine(for: packet),
+              let handle = openPreparedHandle(at: fileURL) else {
+            return false
+        }
+        defer { try? handle.close() }
+        LockedFileAppender.append(lineData, to: handle)
+        return true
     }
 
     static func recentPacketSummaries(limit: Int = defaultRecentLimit, fileURL: URL = defaultFileURL()) -> [String] {
