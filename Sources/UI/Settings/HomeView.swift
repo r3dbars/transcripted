@@ -814,7 +814,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                   item.isEnabled else {
                 return
             }
-            item.action()
+            DispatchQueue.main.async {
+                item.action()
+            }
         }
     }
 
