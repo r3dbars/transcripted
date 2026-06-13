@@ -46,16 +46,46 @@ func testObservabilityLogWriter() {
     }
 
     runSuite("Observability file writers tighten pre-existing logs before appending") {
+        // EventReporter.swift is not compiled into the fast runner, so keep its
+        // restrict-before-append guarantee as a source-read assertion.
         let eventReporter = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
-        let reliabilityRecorder = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
-
         assertTrue(
             eventReporter.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
             "events.jsonl should be chmodded even when it already exists"
         )
-        assertTrue(
-            reliabilityRecorder.contains("FileManager.default.restrictFileToOwnerOnly(at: fileURL)\n\n        do {"),
-            "reliability packets should be chmodded even when the JSONL already exists"
+
+        // ReliabilityPacketRecorder is compiled into the fast runner, so exercise the
+        // real append path: pre-create the JSONL world-readable (0o644), append a packet
+        // through the shared test seam, then confirm the file is tightened to owner-only.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("ReliabilityPacketPermissionsTests-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("reliability.jsonl", isDirectory: false)
+        defer { try? fm.removeItem(at: root) }
+
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        fm.createFile(atPath: logURL.path, contents: nil)
+        try? fm.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: logURL.path)
+
+        let packet = ReliabilityPacket(
+            timestamp: "2026-05-26T12:00:00.000Z",
+            feature: "dictation",
+            stage: "transcribe",
+            outcome: "success",
+            event: "transcription_complete",
+            appVersion: "1.2.3",
+            osMajor: "26",
+            context: ["feature": "dictation", "stage": "transcribe"]
+        )
+
+        let appended = ReliabilityPacketRecorder.appendForTesting(packet, to: logURL)
+        assertTrue(appended, "reliability test seam should append the packet to the caller-supplied file")
+
+        let attributes = try? fm.attributesOfItem(atPath: logURL.path)
+        let permissions = attributes?[.posixPermissions] as? NSNumber
+        assertEqual(
+            permissions,
+            NSNumber(value: 0o600),
+            "reliability packets should be chmodded to owner-only even when the JSONL already exists"
         )
     }
 
